@@ -24,7 +24,7 @@ export default function RelatedFilmsSection({
 
     if (!filmId) return undefined;
 
-    ApiGet<any[]>("/filmRelate", { id: filmId })
+    ApiGet<any[]>("/films/related", { id: filmId })
       .then((res) => {
         if (!cancelled) {
           setRelatedFilms(Array.isArray(res.data) ? res.data : []);

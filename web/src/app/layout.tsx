@@ -24,8 +24,8 @@ async function getSiteConfig(): Promise<SiteConfig | null> {
     if (response.code === 0 && response.data) {
       return response.data;
     }
-  } catch (error) {
-    console.error("fetch site config error:", error);
+  } catch {
+    // 后端未就绪时降级为空配置，不把可恢复错误打到 Console overlay
   }
 
   return null;

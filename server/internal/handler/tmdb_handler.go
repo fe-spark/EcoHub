@@ -4,10 +4,11 @@ import (
 	"strconv"
 	"strings"
 
+	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
-
+	"server/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,9 +16,18 @@ type TMDBHandler struct{}
 
 var TMDBHd = new(TMDBHandler)
 
-// GetConfig 获取 TMDB 配置
+// GetConfig 获取 TMDB 配置（非超级管理员清空 ApiKey 防止敏感密钥泄露）
 func (h *TMDBHandler) GetConfig(c *gin.Context) {
-	cfg := service.TMDBSvc.GetConfig()
+	cfg, err := service.TMDBSvc.GetConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	v, ok := c.Get(config.AuthUserClaims)
+	uc, isUser := v.(*utils.UserClaims)
+	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		cfg.ApiKey = ""
+	}
 	dto.Success(cfg, "获取 TMDB 配置成功", c)
 }
 
@@ -106,4 +116,24 @@ func (h *TMDBHandler) Prefill(c *gin.Context) {
 		return
 	}
 	dto.Success(data, "获取详情成功", c)
+}
+
+// Scrape 执行影片 TMDB 自动刮削（兼容单个与批量）
+func (h *TMDBHandler) Scrape(c *gin.Context) {
+	var req model.TMDBScrapeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数格式异常", c)
+		return
+	}
+	if len(req.Ids) == 0 {
+		dto.Failed("缺少影片 ID", c)
+		return
+	}
+
+	res, err := service.TMDBSvc.ScrapeFilms(c.Request.Context(), req.Ids)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(res, "刮削完成", c)
 }

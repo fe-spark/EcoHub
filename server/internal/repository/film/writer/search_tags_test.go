@@ -3,12 +3,14 @@ package writer
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	filmsnapshot "server/internal/repository/film/snapshot"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -22,7 +24,7 @@ func newWriterTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.SearchTagItem{}, &model.FilmIndex{}); err != nil {
+	if err := gdb.AutoMigrate(&model.SearchTagItem{}, &model.FilmIndex{}, &model.Category{}); err != nil {
 		t.Fatalf("迁移测试数据库失败: %v", err)
 	}
 
@@ -111,5 +113,77 @@ func TestUpsertDynamicSearchTagsPreservesExistingScores(t *testing.T) {
 	}
 	if scifiTag.Score != 1 {
 		t.Fatalf("新标签 Score 错误: 期望 1, 实际 %d", scifiTag.Score)
+	}
+}
+
+func TestUpsertSearchTagsByMidsKeepsExistingTags(t *testing.T) {
+	gdb := newWriterTestDB(t)
+	existing := model.SearchTagItem{Pid: 7, TagType: "Area", Name: "日本", Value: "日本", Score: 9}
+	if err := gdb.Create(&existing).Error; err != nil {
+		t.Fatalf("创建已有标签失败: %v", err)
+	}
+	film := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 42},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 7},
+		FilmIndexContent:  model.FilmIndexContent{Name: "已入库", ClassTag: "热血", Area: "中国大陆", Language: "普通话", Year: 2024},
+	}
+	if err := gdb.Create(&film).Error; err != nil {
+		t.Fatalf("创建影片失败: %v", err)
+	}
+	if err := UpsertSearchTagsByMids(42); err != nil {
+		t.Fatalf("增量写入搜索标签失败: %v", err)
+	}
+
+	var kept model.SearchTagItem
+	if err := gdb.Where("pid = ? AND tag_type = ? AND value = ?", 7, "Area", "日本").First(&kept).Error; err != nil {
+		t.Fatalf("已有地区标签被删掉: %v", err)
+	}
+	if kept.Score != 9 {
+		t.Fatalf("已有标签分值被改写: %d", kept.Score)
+	}
+	for _, want := range []struct{ tagType, value string }{
+		{"Plot", "热血"},
+		{"Area", "中国大陆"},
+		{"Language", "普通话"},
+		{"Year", "2024"},
+	} {
+		var row model.SearchTagItem
+		if err := gdb.Where("pid = ? AND tag_type = ? AND value = ?", 7, want.tagType, want.value).First(&row).Error; err != nil {
+			t.Fatalf("缺少 %s/%s: %v", want.tagType, want.value, err)
+		}
+	}
+}
+
+func TestFilterOptionsFollowCollectedFilms(t *testing.T) {
+	filledSearchTagPids = sync.Map{}
+	gdb := newWriterTestDB(t)
+	film := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 43},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 8},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片库已有", ClassTag: "热血", Area: "日本", Language: "日语", Year: 2023},
+	}
+	if err := gdb.Create(&film).Error; err != nil {
+		t.Fatalf("创建影片失败: %v", err)
+	}
+
+	res, err := filmsnapshot.GetFilterOptionSnapshot("v-test", 8)
+	if err != nil {
+		t.Fatalf("GetFilterOptionSnapshot: %v", err)
+	}
+	list, ok := res["sortList"].([]string)
+	if !ok {
+		t.Fatalf("sortList 类型错误: %T", res["sortList"])
+	}
+	for _, want := range []string{"Plot", "Area", "Language", "Year", "Sort"} {
+		found := false
+		for _, item := range list {
+			if item == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("筛选行缺少 %s，实际 %v", want, list)
+		}
 	}
 }

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"server/internal/config"
-	"server/internal/model"
 
 	"golang.org/x/time/rate"
 )
@@ -34,13 +33,13 @@ func Submit(ctx context.Context, job Job) error {
 }
 
 // FinishSource 标记站点已无新页提交，队列排空后自动回收。
-func FinishSource(grade model.SourceGrade, sourceID string) {
-	writes.finishSource(grade, sourceID)
+func FinishSource(sourceID string) {
+	writes.finishSource(sourceID)
 }
 
 // CancelSource 丢弃站点仍在排队的写入任务（在途写入不受影响）。
-func CancelSource(grade model.SourceGrade, sourceID string) {
-	writes.cancelSource(grade, sourceID)
+func CancelSource(sourceID string) {
+	writes.cancelSource(sourceID)
 }
 
 // Completion 单页写入的完成回调载荷。
@@ -56,7 +55,6 @@ type Completion struct {
 type Job struct {
 	SourceID   string
 	SourceName string
-	Grade      model.SourceGrade
 	Page       int
 	Write      func() (Mids, error)
 	Complete   func(Completion)
@@ -93,11 +91,11 @@ func (s *writeScheduler) submit(ctx context.Context, job Job) error {
 	return s.lane.submit(ctx, job)
 }
 
-func (s *writeScheduler) finishSource(_ model.SourceGrade, sourceID string) {
+func (s *writeScheduler) finishSource(sourceID string) {
 	s.lane.finishSource(sourceID)
 }
 
-func (s *writeScheduler) cancelSource(_ model.SourceGrade, sourceID string) {
+func (s *writeScheduler) cancelSource(sourceID string) {
 	s.lane.cancelSource(sourceID)
 }
 

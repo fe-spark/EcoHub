@@ -19,6 +19,13 @@
 
 </div>
 
+> [!WARNING]
+> ### ⚠️ v3.0 重大版本升级说明（必须从零部署）
+> **EcoHub v3.0 为全新重大架构重构版本，完全不向后兼容 v2.x 历史数据与数据库结构，不提供任何数据迁移通道。**
+> - **严禁直接挂载旧库升级**：请勿直接挂载 v2.x 历史数据库数据目录（如 `./data/mysql` 或对应 Docker 数据卷）升级运行，否则会导致数据库结构冲突并引发程序异常崩溃。
+> - **全新部署指引**：从旧版本升级至 v3.0 时，**必须使用全新目录重新部署**（或彻底清空旧版 MySQL/Redis 数据卷后从零部署），启动后重新在后台添加站点并执行全量采集。
+> - 详细变更说明请参阅 [版本说明](./docs/RELEASE.md)。
+
 > **使用须知**  
 > EcoHub 不提供、不存储任何影视文件。片源来自使用者自行配置的采集接口。请遵守所在地区的法律法规以及各源站的使用约定，由此产生的风险由使用者自行承担。本项目仅供学习与技术交流。
 
@@ -57,7 +64,7 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 | --- | --- | --- |
 | 良心云 | 低至 2 元/月 <br>新用户注册即获体验流量 | [前往注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
 | 赔钱机场 | 低至 1.5 元/月 <br>适合高流量与备用需求 | [前往注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| iKuuu | 老牌稳定机场 <br>新用户注册即获体验流量 | [前往注册](https://ikuuu.top/auth/register?code=Uubm) |
+| DOVE |  | [前往注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## 快速开始
 
@@ -68,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 cd ~/ecohub
 ```
 
-编辑 `.env`：将 `openssl rand -hex 32` 的输出写入 `JWT_SECRET`，并修改 MySQL / Redis 密码，然后启动：
+编辑 `.env`：将 `openssl rand -hex 32` 的输出写入 `JWT_SECRET`，按需修改超级管理员密码 `ECOHUB_ADMIN_PASSWORD` 与 MySQL / Redis 密码，然后启动：
 
 ```bash
 docker compose up -d
@@ -82,13 +89,11 @@ docker compose up -d
 | `http://<主机>:3000/api/provide/tvbox` | TVBox / 影视仓 订阅地址 |
 | `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
 
-默认账号：`admin` / `admin`。其它角色在账号管理中新建。对外部署前须立即修改默认密码。
+默认账号：`admin` / `admin`（如未在 `.env` 中配置 `ECOHUB_ADMIN_PASSWORD`）。其它角色在账号管理中新建。对外部署前须立即修改默认密码。
 
 > **安全与网络建议**：生产环境建议通过 Nginx / 1Panel 配置反向代理与 HTTPS（80/443）。如需**不对公网暴露裸端口**，请在 `compose.yml` 的 `ports` 中显式绑定 `127.0.0.1:`（如 `127.0.0.1:3000:3000`），避免 Docker 默认规则绕过系统防火墙直接暴露端口；若无播放器直连需求，可直接注释 `18080` 端口映射。
 
 安装完成后前台无数据，属预期行为。须在管理后台 **采集中心** 完成全量采集并发布后，前台才会展示影片。1Panel、外部数据库与反向代理见 [部署指南](./docs/README-Deploy.md)。
-
-Telegram 通知在管理后台 **系统设置 → 通知配置** 中填写。境内服务器访问 Telegram 时经常出现超时，可在 `.env` 中设置 `TG_PROXY=http://host.docker.internal:7890`。详见 [server/docs/notify.md](./server/docs/notify.md)。
 
 ## 本地开发
 

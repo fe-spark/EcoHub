@@ -32,10 +32,13 @@ download "${raw_base}/.env.example" ".env.example"
 
 if [ ! -f ".env" ]; then
   cp ".env.example" ".env"
-  echo "已创建 ${install_dir}/.env，请先修改 JWT_SECRET、MySQL 密码和 Redis 密码。"
+  echo "已创建 ${install_dir}/.env，首次部署建议按需修改 JWT_SECRET、管理员初始密码 (ECOHUB_ADMIN_PASSWORD) 与数据库密码。"
 else
   echo "检测到已有 ${install_dir}/.env，已保留原配置。"
 fi
 
-echo "已安装发布版 Docker Compose 文件：${install_dir}/docker-compose.yml"
+echo "已安装发布版 Docker Compose 编排：${install_dir}/docker-compose.yml"
+if ! command -v docker >/dev/null 2>&1; then
+  echo "提示：宿主机尚未检测到 Docker，请先安装 Docker 与 Compose 插件后再启动。"
+fi
 echo "启动命令：cd ${install_dir} && docker compose up -d"

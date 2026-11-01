@@ -21,10 +21,13 @@ import (
 const (
 	// pageCountRetryTimes 页数探测默认重试次数。
 	pageCountRetryTimes = 3
-	// filmDetailRetryTimes 分页拉取默认重试次数。
-	filmDetailRetryTimes = 3
-	// rateLimitRetryTimes 命中限流后的重试次数上限。
+	// filmDetailRetryTimes 分页拉取默认重试次数（1 次初试 + 1 次重试，超时或坏页快速登记入库，不卡死流水线）。
+	filmDetailRetryTimes = 2
+	// rateLimitRetryTimes 命中限流后的重试次数。
+	// 3 次只覆盖约 9 秒，源站此时仍返回 429。多留几次，等冷却拉到 30 秒后再记失败。
 	rateLimitRetryTimes = 6
+	// singlePageFetchTimeout 单页抓取最大超时，避免深分页慢查询长期卡死 worker。
+	singlePageFetchTimeout = 15 * time.Second
 )
 
 // Deps 采集编排层注入的外部能力；全部为必需项，缺项会在调用处 panic。
@@ -43,14 +46,14 @@ type Deps struct {
 	SavePageFailure func(s *model.FilmSource, h, page int, stage string, err error)
 	// SkipPublishOnError 该站该采集窗口出错时是否跳过发布。
 	SkipPublishOnError func(s model.FilmSource, h int) bool
-	// NoteSourceError 记录单源失败原因，供批次摘要使用。
-	NoteSourceError func(sourceID, reason string)
-	// NotifySourceFailed 单源失败即时通知。
-	NotifySourceFailed func(sourceID, sourceName, reason string)
-	// BatchSummaryEnabled 批次摘要事件是否开启（决定失败是否单独通知）。
-	BatchSummaryEnabled func() bool
-	// ResolveSourceProxy 查询站点是否启用代理并获取代理地址。
-	ResolveSourceProxy func(sourceID string) (bool, string)
+	// ResolveSpiderProxy 获取全局爬虫通道代理配置（纯内存读取，避免逐页查库）。
+	ResolveSpiderProxy func() (bool, string, error)
+	// ResolveSourceProxy 查询站点是否启用代理。配置读取失败必须返回错误。
+	ResolveSourceProxy func(sourceID string) (bool, string, error)
+	// OnSourceFailed 单站连续失败达到上限终止采集时的通知回调（可选）。
+	OnSourceFailed func(sourceID, sourceName, reason string)
+	// SourceConcurrencyScale 返回当前站点因限流等状态计算的并发缩放系数 (0.1 ~ 1.0)。
+	SourceConcurrencyScale func(sourceID string) float64
 }
 
 var deps Deps
@@ -108,12 +111,18 @@ func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		default:
 		}
 
-		r.Ctx = ctx
+		// 等令牌沿用采集任务上下文。限流冷却最长 30 秒，不能套进单页 15 秒超时。
 		release, err := deps.WaitTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, err
 		}
+		reqCtx, reqCancel := context.WithTimeout(ctx, singlePageFetchTimeout)
+		r.Ctx = reqCtx
 		list, err := deps.GetFilmDetail(s, r)
+		reqCancel()
 		if err == nil && len(list) > 0 {
 			release(nil)
 			return list, nil
@@ -158,7 +167,7 @@ func waitRetryBackoff(ctx context.Context, attempt int) error {
 	}
 }
 
-func GetSourcePageConcurrency(_ *model.FilmSource) int {
+func GetSourcePageConcurrency(s *model.FilmSource) int {
 	base := config.CollectPageWorkers
 	if base <= 0 {
 		base = config.DefaultCollectPageWorkers
@@ -170,31 +179,89 @@ func GetSourcePageConcurrency(_ *model.FilmSource) int {
 	if solo < base {
 		solo = base
 	}
-	if deps.LiveTaskCount() <= 1 {
-		if solo <= 0 {
-			return 1
+	live := 1
+	if deps.LiveTaskCount != nil {
+		if n := deps.LiveTaskCount(); n > 1 {
+			live = n
 		}
-		return solo
 	}
-	if base <= 0 {
-		return 1
+	perSource := base
+	if live <= 1 {
+		perSource = solo
+	} else {
+		budget := config.CollectFetchInFlight
+		if budget <= 0 {
+			budget = base * 2
+		}
+		perSource = budget / live
+		if perSource < 2 {
+			perSource = 2
+		}
+		if perSource > base {
+			perSource = base
+		}
 	}
-	return base
+	if s != nil && deps.SourceConcurrencyScale != nil {
+		scale := deps.SourceConcurrencyScale(s.Id)
+		if scale < 1.0 {
+			scaled := int(float64(perSource) * scale)
+			if scaled < 1 {
+				scaled = 1
+			}
+			return scaled
+		}
+	}
+	return perSource
 }
 
-func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+// GetSourcePageConcurrencyMax 获取单站允许的最大并发协程上限（用于弹性 worker 协程池容量）。
+func GetSourcePageConcurrencyMax(_ *model.FilmSource) int {
+	solo := config.CollectPageWorkersSolo
+	if solo <= 0 {
+		solo = config.DefaultCollectPageWorkersSolo
+	}
+	base := config.CollectPageWorkers
+	if base <= 0 {
+		base = config.DefaultCollectPageWorkers
+	}
+	if solo < base {
+		solo = base
+	}
+	return solo
+}
+
+func buildPageRequest(s *model.FilmSource, h, pg int) (utils.RequestInfo, error) {
+	if s == nil {
+		return utils.RequestInfo{}, errors.New("采集站为空")
+	}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, SkipTLSVerify: s.SkipTLSVerify}
 	r.Params.Set("pg", fmt.Sprint(pg))
 	if h > 0 {
 		r.Params.Set("h", fmt.Sprint(h))
 	}
-	if s != nil && s.ResolveFormat() == model.SourceFormatXML {
+	if s.ResolveFormat() == model.SourceFormatXML {
 		r.Params.Set("ac", "videolist")
 	}
-	if s != nil && deps.ResolveSourceProxy != nil {
-		if ok, proxy := deps.ResolveSourceProxy(s.Id); ok {
+	if s.ProxyCollect {
+		if deps.ResolveSpiderProxy != nil {
+			ok, proxy, err := deps.ResolveSpiderProxy()
+			if err != nil {
+				return r, err
+			}
+			if ok {
+				r.ProxyURL = proxy
+			}
+		}
+		return r, nil
+	}
+	if s.Id != "" && deps.ResolveSourceProxy != nil {
+		ok, proxy, err := deps.ResolveSourceProxy(s.Id)
+		if err != nil {
+			return r, err
+		}
+		if ok {
 			r.ProxyURL = proxy
 		}
 	}
-	return r
+	return r, nil
 }

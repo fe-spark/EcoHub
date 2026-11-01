@@ -11,9 +11,15 @@ import (
 	"server/internal/repository"
 	"server/internal/utils"
 
+	"fmt"
+	"time"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func init() {
@@ -33,6 +39,18 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	db.Rdb = rdb
 	defer func() { db.Rdb = prevRdb }()
 
+	dsn := fmt.Sprintf("file:router_%d?mode=memory&cache=shared&_busy_timeout=5000", time.Now().UnixNano())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	_ = gdb.AutoMigrate(&model.User{})
+	prevMdb := db.Mdb
+	db.Mdb = gdb
+	defer func() { db.Mdb = prevMdb }()
+
 	adminUserID := uint(config.UserIdInitialVal)
 	adminToken, err := utils.GenToken(adminUserID, "admin", model.UserRoleAdmin)
 	if err != nil {
@@ -50,6 +68,9 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if err := repository.SaveUserToken(normalToken, normalUserID); err != nil {
 		t.Fatalf("save normal token: %v", err)
 	}
+
+	gdb.Create(&model.User{Model: gorm.Model{ID: adminUserID}, Role: model.UserRoleAdmin, Status: 0})
+	gdb.Create(&model.User{Model: gorm.Model{ID: normalUserID}, Role: model.UserRoleNormal, Status: 0})
 
 	r := SetupRouter()
 
@@ -78,21 +99,20 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("POST /api/manage/spider/clear should forbid normal user, got %d", wNormalClear.Code)
 	}
 
-	// 3. /api/manage/spider/clear/progress MUST forbid non-admin
+	// 3. Reset progress stream is admin-only
 	wNormalProg := performReq(http.MethodGet, "/api/manage/spider/clear/progress", normalToken)
 	if wNormalProg.Code != http.StatusForbidden {
-		t.Errorf("GET /api/manage/spider/clear/progress should forbid normal user, got %d", wNormalProg.Code)
+		t.Errorf("GET /api/manage/spider/clear/progress should forbid non-admin, got %d", wNormalProg.Code)
+	}
+	wAdminProg := performReq(http.MethodGet, "/api/manage/spider/clear/progress", adminToken)
+	if wAdminProg.Code == http.StatusForbidden {
+		t.Errorf("GET /api/manage/spider/clear/progress should allow admin, got %d", wAdminProg.Code)
 	}
 
-	// 4. Admin user should be allowed through to all admin endpoints
+	// 4. Admin user should be allowed through to the stats endpoint
 	wAdminClearStats := performReq(http.MethodGet, "/api/manage/spider/clear/stats", adminToken)
 	if wAdminClearStats.Code == http.StatusForbidden {
 		t.Errorf("GET /api/manage/spider/clear/stats should allow admin, got %d", wAdminClearStats.Code)
-	}
-
-	wAdminProgress := performReq(http.MethodGet, "/api/manage/spider/clear/progress", adminToken)
-	if wAdminProgress.Code == http.StatusForbidden {
-		t.Errorf("GET /api/manage/spider/clear/progress should allow admin, got %d", wAdminProgress.Code)
 	}
 
 	// 5. /api/manage/access/status allows any authenticated manage user (non-admin)
@@ -101,23 +121,17 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/access/status should allow normal manage user, got %d", wNormalAccessStatus.Code)
 	}
 
-	// 6. Access stats and clean MUST forbid non-admin
-	wNormalAccessStats := performReq(http.MethodGet, "/api/manage/access/stats", normalToken)
-	if wNormalAccessStats.Code != http.StatusForbidden {
-		t.Errorf("GET /api/manage/access/stats should forbid normal user, got %d", wNormalAccessStats.Code)
-	}
-
+	// 5. Access clean MUST forbid non-admin, but overview allows normal user
 	wNormalAccessClean := performReq(http.MethodPost, "/api/manage/access/clean", normalToken)
 	if wNormalAccessClean.Code != http.StatusForbidden {
 		t.Errorf("POST /api/manage/access/clean should forbid normal user, got %d", wNormalAccessClean.Code)
 	}
 
 	wNormalAccessOverview := performReq(http.MethodGet, "/api/manage/access/overview", normalToken)
-	if wNormalAccessOverview.Code != http.StatusForbidden {
-		t.Errorf("GET /api/manage/access/overview should forbid normal user, got %d", wNormalAccessOverview.Code)
+	if wNormalAccessOverview.Code == http.StatusForbidden || wNormalAccessOverview.Code == http.StatusUnauthorized {
+		t.Errorf("GET /api/manage/access/overview should allow normal user, got %d", wNormalAccessOverview.Code)
 	}
-
-	// 7. Admin user should be allowed through to access admin endpoints
+	// 6. Admin user should be allowed through to access admin endpoints
 	wAdminAccessStatus := performReq(http.MethodGet, "/api/manage/access/status", adminToken)
 	if wAdminAccessStatus.Code == http.StatusForbidden {
 		t.Errorf("GET /api/manage/access/status should allow admin, got %d", wAdminAccessStatus.Code)
@@ -128,35 +142,72 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/access/stats should allow admin, got %d", wAdminAccessStats.Code)
 	}
 
-	// 8. System settings routes: Notify and system logs MUST forbid non-admin
-	wNormalNotify := performReq(http.MethodGet, "/api/manage/config/notify", normalToken)
-	if wNormalNotify.Code != http.StatusForbidden {
-		t.Errorf("GET /api/manage/config/notify should forbid normal user, got %d", wNormalNotify.Code)
-	}
-
-	wNormalNotifyUpdate := performReq(http.MethodPost, "/api/manage/config/notify/update", normalToken)
-	if wNormalNotifyUpdate.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/config/notify/update should forbid normal user, got %d", wNormalNotifyUpdate.Code)
-	}
-
-	wNormalNotifyTest := performReq(http.MethodPost, "/api/manage/config/notify/test", normalToken)
-	if wNormalNotifyTest.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/config/notify/test should forbid normal user, got %d", wNormalNotifyTest.Code)
-	}
-
+	// 7. System settings routes: system logs MUST forbid non-admin
 	wNormalLogsDelta := performReq(http.MethodGet, "/api/manage/system/logs/delta", normalToken)
 	if wNormalLogsDelta.Code != http.StatusForbidden {
 		t.Errorf("GET /api/manage/system/logs/delta should forbid normal user, got %d", wNormalLogsDelta.Code)
 	}
-
-	// 9. Admin user allowed through to notify and system logs
-	wAdminNotify := performReq(http.MethodGet, "/api/manage/config/notify", adminToken)
-	if wAdminNotify.Code == http.StatusForbidden {
-		t.Errorf("GET /api/manage/config/notify should allow admin, got %d", wAdminNotify.Code)
+	wNormalLogsStream := performReq(http.MethodGet, "/api/manage/system/logs/stream", normalToken)
+	if wNormalLogsStream.Code != http.StatusForbidden {
+		t.Errorf("GET /api/manage/system/logs/stream should forbid normal user, got %d", wNormalLogsStream.Code)
 	}
 
+	// 8. Admin user allowed through to system logs
 	wAdminLogsDelta := performReq(http.MethodGet, "/api/manage/system/logs/delta", adminToken)
 	if wAdminLogsDelta.Code == http.StatusForbidden {
 		t.Errorf("GET /api/manage/system/logs/delta should allow admin, got %d", wAdminLogsDelta.Code)
 	}
+
+	// 9. Notify routes: GET config allows normal manage user, POST update/test forbids non-admin
+	wNormalNotifyGet := performReq(http.MethodGet, "/api/manage/notify/config", normalToken)
+	if wNormalNotifyGet.Code == http.StatusForbidden || wNormalNotifyGet.Code == http.StatusUnauthorized {
+		t.Errorf("GET /api/manage/notify/config should allow normal manage user, got %d", wNormalNotifyGet.Code)
+	}
+	wNormalNotifyUpdate := performReq(http.MethodPost, "/api/manage/notify/config", normalToken)
+	if wNormalNotifyUpdate.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/notify/config should forbid normal user, got %d", wNormalNotifyUpdate.Code)
+	}
+	wNormalNotifyTest := performReq(http.MethodPost, "/api/manage/notify/config/test", normalToken)
+	if wNormalNotifyTest.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/notify/config/test should forbid normal user, got %d", wNormalNotifyTest.Code)
+	}
+
+	// 10. Operational routes: normal user CAN operate film/collect/tmdb/banner, but system config is admin-only
+	wNormalBasicConfig := performReq(http.MethodPost, "/api/manage/config/basic", normalToken)
+	if wNormalBasicConfig.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/config/basic should forbid normal user, got %d", wNormalBasicConfig.Code)
+	}
+	wNormalFilmDelete := performReq(http.MethodPost, "/api/manage/film/delete", normalToken)
+	if wNormalFilmDelete.Code == http.StatusForbidden {
+		t.Errorf("POST /api/manage/film/delete should allow normal user, got %d", wNormalFilmDelete.Code)
+	}
+	wNormalCollectSave := performReq(http.MethodPost, "/api/manage/collect/save", normalToken)
+	if wNormalCollectSave.Code == http.StatusForbidden {
+		t.Errorf("POST /api/manage/collect/save should allow normal user, got %d", wNormalCollectSave.Code)
+	}
+	wNormalTMDBScrape := performReq(http.MethodPost, "/api/manage/tmdb/scrape", normalToken)
+	if wNormalTMDBScrape.Code == http.StatusForbidden {
+		t.Errorf("POST /api/manage/tmdb/scrape should allow normal user, got %d", wNormalTMDBScrape.Code)
+	}
+	// 11. Profile endpoint allows normal authenticated user (not 403)
+	wNormalUserProfile := performReq(http.MethodPost, "/api/manage/user/profile", normalToken)
+	if wNormalUserProfile.Code == http.StatusForbidden || wNormalUserProfile.Code == http.StatusUnauthorized {
+		t.Errorf("POST /api/manage/user/profile should allow normal user, got %d", wNormalUserProfile.Code)
+	}
+
+	// 12. Visitor (read-only) MUST be forbidden on all mutating routes
+	visitorUserID := uint(20003)
+	visitorToken, _ := utils.GenToken(visitorUserID, "guest", model.UserRoleVisitor)
+	_ = repository.SaveUserToken(visitorToken, visitorUserID)
+	gdb.Create(&model.User{Model: gorm.Model{ID: visitorUserID}, Role: model.UserRoleVisitor, Status: 0})
+
+	wVisitorFilmSave := performReq(http.MethodPost, "/api/manage/film/save", visitorToken)
+	if wVisitorFilmSave.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/film/save should forbid visitor, got %d", wVisitorFilmSave.Code)
+	}
+	wVisitorTMDBScrape := performReq(http.MethodPost, "/api/manage/tmdb/scrape", visitorToken)
+	if wVisitorTMDBScrape.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/tmdb/scrape should forbid visitor, got %d", wVisitorTMDBScrape.Code)
+	}
 }
+

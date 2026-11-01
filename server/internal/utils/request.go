@@ -31,11 +31,15 @@ var sharedTransport = &http.Transport{
 	MaxIdleConns:        200,
 	MaxIdleConnsPerHost: 30,
 	IdleConnTimeout:     90 * time.Second,
-	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 }
 
 // 代理 Transport 缓存池 (proxyURL -> *http.Transport)，避免高并发下频繁建连
-var proxyTransports sync.Map
+var (
+	proxyTransportsMu sync.RWMutex
+	proxyTransports   = map[string]*http.Transport{}
+)
+
+const maxProxyTransports = 16
 
 // GetOrCreateProxyTransport 根据代理地址复用或创建长连接池。
 // http/https 走 CONNECT；socks5/socks5h 走 SOCKS5 拨号。地址无效时请求失败，避免静默改回直连。
@@ -44,11 +48,13 @@ func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
 	if proxyStr == "" {
 		return sharedTransport
 	}
-	if val, ok := proxyTransports.Load(proxyStr); ok {
-		if t, ok := val.(*http.Transport); ok {
-			return t
-		}
+	proxyTransportsMu.RLock()
+	if t, ok := proxyTransports[proxyStr]; ok {
+		proxyTransportsMu.RUnlock()
+		return t
 	}
+	proxyTransportsMu.RUnlock()
+
 	t, err := newProxyTransport(proxyStr)
 	if err != nil {
 		log.Printf("创建代理传输失败: %v", err)
@@ -58,8 +64,24 @@ func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
 			},
 		}
 	}
-	actual, _ := proxyTransports.LoadOrStore(proxyStr, t)
-	return actual.(*http.Transport)
+
+	proxyTransportsMu.Lock()
+	defer proxyTransportsMu.Unlock()
+	if existing, ok := proxyTransports[proxyStr]; ok {
+		if t != existing {
+			t.CloseIdleConnections()
+		}
+		return existing
+	}
+	if len(proxyTransports) >= maxProxyTransports {
+		for k, old := range proxyTransports {
+			old.CloseIdleConnections()
+			delete(proxyTransports, k)
+			break
+		}
+	}
+	proxyTransports[proxyStr] = t
+	return t
 }
 
 func normalizeProxyURL(proxyStr string) string {
@@ -82,7 +104,6 @@ func newProxyTransport(proxyStr string) (*http.Transport, error) {
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
@@ -124,13 +145,14 @@ var Client = CreateClient()
 
 // RequestInfo 请求参数结构体
 type RequestInfo struct {
-	Uri      string          `json:"uri"`                // 请求url地址
-	Params   url.Values      `json:"param"`              // 请求参数
-	Header   http.Header     `json:"header"`             // 请求头数据
-	Resp     []byte          `json:"resp"`               // 响应结果数据
-	Err      string          `json:"err"`                // 错误信息
-	Ctx      context.Context `json:"-"`                  // 可选，停止采集时取消在途 HTTP
-	ProxyURL string          `json:"proxyUrl,omitempty"` // 可选，网络代理地址
+	Uri           string          `json:"uri"`                // 请求url地址
+	Params        url.Values      `json:"param"`              // 请求参数
+	Header        http.Header     `json:"header"`             // 请求头数据
+	Resp          []byte          `json:"resp"`               // 响应结果数据
+	Err           string          `json:"err"`                // 错误信息
+	Ctx           context.Context `json:"-"`                  // 可选，停止采集时取消在途 HTTP
+	ProxyURL      string          `json:"proxyUrl,omitempty"` // 可选，网络代理地址
+	SkipTLSVerify bool            `json:"-"`                  // 仅自签名源站跳过证书校验
 }
 
 // userAgents 现代主流浏览器 UA 池（Chrome / Firefox / Edge）
@@ -218,6 +240,46 @@ func decompressBody(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+var (
+	sharedInsecureTransport   = insecureTransport(sharedTransport)
+	proxyInsecureTransportsMu sync.RWMutex
+	proxyInsecureTransports   = map[string]*http.Transport{}
+)
+
+func insecureTransport(base *http.Transport) *http.Transport {
+	cloned := base.Clone()
+	cloned.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	return cloned
+}
+
+func getOrCreateInsecureTransport(base *http.Transport, proxyURL string) *http.Transport {
+	proxyURL = normalizeProxyURL(proxyURL)
+	if proxyURL == "" {
+		return sharedInsecureTransport
+	}
+	proxyInsecureTransportsMu.RLock()
+	if t, ok := proxyInsecureTransports[proxyURL]; ok {
+		proxyInsecureTransportsMu.RUnlock()
+		return t
+	}
+	proxyInsecureTransportsMu.RUnlock()
+
+	proxyInsecureTransportsMu.Lock()
+	defer proxyInsecureTransportsMu.Unlock()
+	if existing, ok := proxyInsecureTransports[proxyURL]; ok {
+		return existing
+	}
+	if len(proxyInsecureTransports) >= maxProxyTransports {
+		for k, old := range proxyInsecureTransports {
+			old.CloseIdleConnections()
+			delete(proxyInsecureTransports, k)
+			break
+		}
+	}
+	t := insecureTransport(base)
+	proxyInsecureTransports[proxyURL] = t
+	return t
+}
 // ApiGet 高性能原生 HTTP GET 请求（自动解压 Gzip/Deflate）
 func ApiGet(r *RequestInfo) {
 	targetUrl := buildUrl(r.Uri, r.Params)
@@ -237,6 +299,9 @@ func ApiGet(r *RequestInfo) {
 	transport := sharedTransport
 	if r != nil && strings.TrimSpace(r.ProxyURL) != "" {
 		transport = GetOrCreateProxyTransport(r.ProxyURL)
+	}
+	if r != nil && r.SkipTLSVerify {
+		transport = getOrCreateInsecureTransport(transport, r.ProxyURL)
 	}
 
 	timeout := 20 * time.Second

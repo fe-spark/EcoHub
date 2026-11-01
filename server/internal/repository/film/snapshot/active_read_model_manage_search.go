@@ -1,15 +1,19 @@
 package snapshot
 
 import (
-	"gorm.io/gorm"
+	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
-	"server/internal/infra/db"
+	"gorm.io/gorm"
+
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
@@ -27,227 +31,253 @@ func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 	switch sortField {
 	case "hits":
-		return "hits DESC, id DESC"
+		return "hits DESC, mid DESC"
 	case "latest":
-		return "update_stamp DESC, id DESC"
+		return "update_stamp DESC, mid DESC"
 	case "year":
-		return "year DESC, id DESC"
+		return "year DESC, mid DESC"
 	case "score":
-		return "score DESC, id DESC"
+		return "score DESC, mid DESC"
 	default:
 		if keywordSearch {
-			return "hits DESC, year DESC, update_stamp DESC, id DESC"
+			return "hits DESC, year DESC, update_stamp DESC, mid DESC"
 		}
-		return "update_stamp DESC, id DESC"
+		return "update_stamp DESC, mid DESC"
 	}
 }
 
-func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
+func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 	startedAt := time.Now()
 	page := shared.EnsurePage(s.Paging)
-	name := strings.TrimSpace(s.Name)
-	version := strings.TrimSpace(GetActiveSnapshotVersion())
-	if version == "" {
-		if m := GetActiveFilmReadModel(); m != nil && m.Version != "" {
-			version = m.Version
+	idx, err := loadCurrentSearchIndex()
+	if err != nil {
+		return nil, err
+	}
+	matched, total, err := pageManageMetas(idx, s, page)
+	if err != nil {
+		return nil, err
+	}
+	page.Total = total
+	page.PageCount = (total + page.PageSize - 1) / page.PageSize
+	if page.PageCount <= 0 {
+		page.PageCount = 1
+	}
+	if len(matched) == 0 {
+		log.Printf("[ManageFilmSearch] 内存检索完成 name=%q total=%d page=%d cost=%s", strings.TrimSpace(s.Name), page.Total, page.Current, time.Since(startedAt))
+		return []model.FilmIndex{}, nil
+	}
+	mids := make([]int64, 0, len(matched))
+	for _, meta := range matched {
+		if meta.Mid > 0 {
+			mids = append(mids, meta.Mid)
 		}
 	}
+	snaps, err := GetProjectedSnapshotsByMidsOrdered(idx.Version, mids)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), s.Pid, s.Cid, page.Total, page.Current, len(snaps), time.Since(startedAt))
+	return convertSnapshotsToFilmIndexes(snaps), nil
+}
 
-	// 1. 优先尝试走快照表只读模型
-	if version != "" && db.Mdb != nil {
-		hasComplexFilter := strings.TrimSpace(s.Plot) != "" || strings.TrimSpace(s.Area) != "" || strings.TrimSpace(s.Language) != ""
-		// 模式 A: 纯片名模糊打分搜索（无剧情/地区/语言等复杂关系型过滤），优先复用内存元数据打分索引
-		if name != "" && !hasComplexFilter {
-			if res, ok := searchManageFilmsByMetaIndex(version, s, page, startedAt); ok {
-				return res
+// pageManageMetas 无关键词时只拷贝当前页；有关键词时先打分再切页。
+func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page) ([]FilmSearchMeta, int, error) {
+	if idx == nil {
+		return nil, 0, ErrSearchIndexMissing
+	}
+	if len(idx.ByUpdate) != len(idx.Items) {
+		return nil, 0, fmt.Errorf("检索索引损坏")
+	}
+	filterCtx, ok := newManageFilterContext(s)
+	if !ok {
+		return nil, 0, nil
+	}
+	name := strings.TrimSpace(s.Name)
+	if name != "" {
+		hits, err := filterManageMetas(idx, s, filterCtx)
+		if err != nil {
+			return nil, 0, err
+		}
+		total := len(hits)
+		offset := shared.PageOffset(page)
+		if offset >= total {
+			return nil, total, nil
+		}
+		end := offset + page.PageSize
+		if end > total {
+			end = total
+		}
+		window := make([]FilmSearchMeta, 0, end-offset)
+		for _, hit := range hits[offset:end] {
+			window = append(window, idx.Items[hit])
+		}
+		return window, total, nil
+	}
+	offset := shared.PageOffset(page)
+	end := offset + page.PageSize
+	window := make([]FilmSearchMeta, 0, page.PageSize)
+	total := 0
+	for _, i := range idx.ByUpdate {
+		if i < 0 || i >= len(idx.Items) {
+			return nil, 0, fmt.Errorf("检索索引损坏")
+		}
+		meta := &idx.Items[i]
+		if !filterCtx.pass(meta) {
+			continue
+		}
+		if total >= offset && total < end {
+			window = append(window, *meta)
+		}
+		total++
+	}
+	return window, total, nil
+}
+
+type manageFilterContext struct {
+	sourceID          string
+	categoryCheckMode int // 0: none, 1: local cid, 2: local pid, 3: source type key set
+	cid               int64
+	pid               int64
+	validCategoryKeys map[string]struct{}
+	year              int64
+	beginTime         int64
+	endTime           int64
+	area              string
+	language          string
+	plot              string
+}
+
+func newManageFilterContext(s model.SearchVo) (*manageFilterContext, bool) {
+	ctx := &manageFilterContext{
+		sourceID:  strings.TrimSpace(s.SourceId),
+		cid:       s.Cid,
+		pid:       s.Pid,
+		year:      s.Year,
+		beginTime: s.BeginTime,
+		endTime:   s.EndTime,
+		area:      strings.TrimSpace(s.Area),
+		language:  strings.TrimSpace(s.Language),
+		plot:      strings.TrimSpace(s.Plot),
+	}
+	if s.Cid > 0 || s.Pid > 0 {
+		if ctx.sourceID != "" {
+			field := "pid"
+			typeID := s.Pid
+			if s.Cid > 0 {
+				field = "cid"
+				typeID = s.Cid
+			}
+			typeIDs := repository.PublicSourceTypeIDs(ctx.sourceID, field, typeID)
+			if len(typeIDs) == 0 {
+				return nil, false
+			}
+			ctx.categoryCheckMode = 3
+			ctx.validCategoryKeys = make(map[string]struct{}, len(typeIDs))
+			for _, id := range typeIDs {
+				key := support.BuildSourceCategoryKey(ctx.sourceID, id)
+				if key != "" {
+					ctx.validCategoryKeys[key] = struct{}{}
+				}
+			}
+		} else {
+			if s.Cid > 0 {
+				ctx.categoryCheckMode = 1
+			} else {
+				ctx.categoryCheckMode = 2
 			}
 		}
-
-		// 模式 B: 多维结构化快照筛选（分类、年份、时间范围、复杂标签或无条件全量浏览）
-		return queryManageFilmsBySnapshotDB(version, s, page, name, startedAt)
 	}
-
-	// 2. 兜底降级：快照未初始化时查询底层 FilmIndex
-	return queryManageFilmsFallback(s, page, name, startedAt)
+	return ctx, true
 }
 
-// searchManageFilmsByMetaIndex 专职处理管理后台纯片名模糊检索（复用前台内存打分索引）
-func searchManageFilmsByMetaIndex(version string, s model.SearchVo, page *dto.Page, startedAt time.Time) ([]model.FilmIndex, bool) {
-	idx := loadFilmSearchMetaIndex(version)
+func (f *manageFilterContext) pass(meta *FilmSearchMeta) bool {
+	if meta == nil {
+		return false
+	}
+	if f.sourceID != "" && !meta.HasPlaySource(f.sourceID) {
+		return false
+	}
+	switch f.categoryCheckMode {
+	case 1:
+		if meta.Cid != f.cid {
+			return false
+		}
+	case 2:
+		if meta.Pid != f.pid {
+			return false
+		}
+	case 3:
+		if _, ok := f.validCategoryKeys[meta.CategoryKey]; !ok {
+			return false
+		}
+	}
+	if f.year > 0 && meta.Item.Year != f.year {
+		return false
+	}
+	if f.beginTime > 0 && meta.Item.UpdateStamp < f.beginTime {
+		return false
+	}
+	if f.endTime > 0 && meta.Item.UpdateStamp > f.endTime {
+		return false
+	}
+	if f.area != "" && meta.Area != f.area {
+		return false
+	}
+	if f.language != "" && meta.Language != f.language {
+		return false
+	}
+	if f.plot != "" && !strings.Contains(meta.ClassTag, f.plot) {
+		return false
+	}
+	return true
+}
+
+func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, filterCtx *manageFilterContext) ([]int, error) {
 	if idx == nil || len(idx.Items) == 0 {
-		return nil, false
+		return nil, nil
 	}
-	hits := searchFilmMetas(idx, s.Name, "latest", s.Pid, s.Cid)
-	filteredHits := make([]scoredMetaHit, 0, len(hits))
-	for _, h := range hits {
-		if s.Year > 0 && h.year != s.Year {
+	name := strings.TrimSpace(s.Name)
+	q := utils.BuildQueryContext(name)
+	type scored struct {
+		index int
+		score int
+	}
+	hits := make([]scored, 0)
+	for _, i := range idx.ByUpdate {
+		if i < 0 || i >= len(idx.Items) {
+			return nil, fmt.Errorf("检索索引损坏")
+		}
+		meta := &idx.Items[i]
+		if !filterCtx.pass(meta) {
 			continue
 		}
-		if s.BeginTime > 0 && h.updateStamp < s.BeginTime {
+		score := utils.ScoreFilmMatch(meta.Item, q)
+		if score <= 0 {
 			continue
 		}
-		if s.EndTime > 0 && h.updateStamp > s.EndTime {
-			continue
+		hits = append(hits, scored{index: i, score: score})
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		a, b := &idx.Items[hits[i].index], &idx.Items[hits[j].index]
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
 		}
-		filteredHits = append(filteredHits, h)
-	}
-	pageMids := pageMidsFromMetaHits(filteredHits, page)
-	var snapshots []model.FilmListSnapshot
-	if len(pageMids) > 0 {
-		snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
-	}
-	log.Printf(
-		"[ManageFilmSearch] 内存检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
-		s.Name,
-		s.Pid,
-		s.Cid,
-		page.Total,
-		page.Current,
-		len(snapshots),
-		time.Since(startedAt),
-	)
-	return convertSnapshotsToFilmIndexes(snapshots), true
-}
-
-// queryManageFilmsBySnapshotDB 专职处理管理后台多维结构化快照筛选与无条件全量分页
-func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Page, name string, startedAt time.Time) []model.FilmIndex {
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
-	if name != "" {
-		query = applyNameLikeFilter(query, name)
-	}
-	if s.Pid > 0 {
-		query = query.Where("pid = ?", s.Pid)
-	}
-	if s.Cid > 0 {
-		query = query.Where("cid = ?", s.Cid)
-	}
-	if plot := strings.TrimSpace(s.Plot); plot != "" {
-		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
-	}
-	if area := strings.TrimSpace(s.Area); area != "" {
-		query = query.Where("area = ?", area)
-	}
-	if lang := strings.TrimSpace(s.Language); lang != "" {
-		query = query.Where("language = ?", lang)
-	}
-	if s.Year > 0 {
-		query = query.Where("year = ?", s.Year)
-	}
-	if s.BeginTime > 0 {
-		query = query.Where("update_stamp >= ?", s.BeginTime)
-	}
-	if s.EndTime > 0 {
-		query = query.Where("update_stamp <= ?", s.EndTime)
-	}
-
-	noFilter := name == "" && s.Pid == 0 && s.Cid == 0 &&
-		strings.TrimSpace(s.Plot) == "" && strings.TrimSpace(s.Area) == "" && strings.TrimSpace(s.Language) == "" &&
-		s.Year == 0 && s.BeginTime == 0 && s.EndTime == 0
-
-	var total int64
-	if noFilter {
-		if idx := loadFilmSearchMetaIndex(version); idx != nil && len(idx.Items) > 0 {
-			total = int64(len(idx.Items))
+		if a.Item.Hits != b.Item.Hits {
+			return a.Item.Hits > b.Item.Hits
 		}
-	}
-	if total == 0 {
-		if err := query.Count(&total).Error; err != nil {
-			return []model.FilmIndex{}
+		if a.Item.Year != b.Item.Year {
+			return a.Item.Year > b.Item.Year
 		}
-	}
-	page.Total = int(total)
-	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
-	if page.PageCount <= 0 {
-		page.PageCount = 1
-	}
-
-	offset := shared.PageOffset(page)
-	var ids []uint
-	if err := query.Select("id").Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
-		return []model.FilmIndex{}
-	}
-
-	var snapshots []model.FilmListSnapshot
-	if len(ids) > 0 {
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order("update_stamp DESC, id DESC").Find(&snapshots).Error; err != nil {
-			return []model.FilmIndex{}
+		if a.Item.UpdateStamp != b.Item.UpdateStamp {
+			return a.Item.UpdateStamp > b.Item.UpdateStamp
 		}
+		return a.Mid > b.Mid
+	})
+	out := make([]int, len(hits))
+	for i, hit := range hits {
+		out[i] = hit.index
 	}
-
-	log.Printf(
-		"[ManageFilmSearch] 快照检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
-		s.Name,
-		s.Pid,
-		s.Cid,
-		page.Total,
-		page.Current,
-		page.PageSize,
-		time.Since(startedAt),
-	)
-	return convertSnapshotsToFilmIndexes(snapshots)
-}
-
-// queryManageFilmsFallback 专职处理快照尚未生成时的底层数据库降级查询
-func queryManageFilmsFallback(s model.SearchVo, page *dto.Page, name string, startedAt time.Time) []model.FilmIndex {
-	if db.Mdb == nil {
-		return []model.FilmIndex{}
-	}
-	query := db.Mdb.Model(&model.FilmIndex{}).Where("deleted_at IS NULL")
-	if name != "" {
-		query = applyNameLikeFilter(query, name)
-	}
-	if s.Pid > 0 {
-		query = query.Where("pid = ?", s.Pid)
-	}
-	if s.Cid > 0 {
-		query = query.Where("cid = ?", s.Cid)
-	}
-	if plot := strings.TrimSpace(s.Plot); plot != "" {
-		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
-	}
-	if area := strings.TrimSpace(s.Area); area != "" {
-		query = query.Where("area = ?", area)
-	}
-	if lang := strings.TrimSpace(s.Language); lang != "" {
-		query = query.Where("language = ?", lang)
-	}
-	if s.Year > 0 {
-		query = query.Where("year = ?", s.Year)
-	}
-	if s.BeginTime > 0 {
-		query = query.Where("update_stamp >= ?", s.BeginTime)
-	}
-	if s.EndTime > 0 {
-		query = query.Where("update_stamp <= ?", s.EndTime)
-	}
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return []model.FilmIndex{}
-	}
-	page.Total = int(total)
-	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
-	if page.PageCount <= 0 {
-		page.PageCount = 1
-	}
-
-	var indexes []model.FilmIndex
-	offset := shared.PageOffset(page)
-	if err := query.Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Find(&indexes).Error; err != nil {
-		return []model.FilmIndex{}
-	}
-
-	log.Printf(
-		"[ManageFilmSearch] 降级检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
-		s.Name,
-		s.Pid,
-		s.Cid,
-		page.Total,
-		page.Current,
-		page.PageSize,
-		time.Since(startedAt),
-	)
-	return indexes
+	return out, nil
 }
 
 func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.FilmIndex {
@@ -257,16 +287,11 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 	result := make([]model.FilmIndex, len(snapshots))
 	for i, snap := range snapshots {
 		result[i] = model.FilmIndex{
-			Model: gorm.Model{
-				ID:        snap.ID,
-				CreatedAt: snap.CreatedAt,
-				UpdatedAt: snap.UpdatedAt,
-			},
+			CreatedAt: snap.CreatedAt,
+			UpdatedAt: snap.UpdatedAt,
 			FilmIndexIdentity: model.FilmIndexIdentity{
-				Mid:        snap.Mid,
-				ContentKey: snap.ContentKey,
-				SourceId:   snap.SourceId,
-				DbId:       snap.DbId,
+				Mid:  snap.Mid,
+				DbId: snap.DbId,
 			},
 			FilmIndexCategory: model.FilmIndexCategory{
 				Cid:              snap.Cid,
@@ -297,7 +322,10 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 				IsCustomPicture:    snap.IsCustomPicture,
 				Actor:              snap.Actor,
 				Director:           snap.Director,
+				Writer:             snap.Writer,
 				Blurb:              snap.Blurb,
+				Content:            snap.Content,
+				ReleaseDate:        snap.ReleaseDate,
 			},
 			FilmIndexVersion: model.FilmIndexVersion{
 				CollectStamp:    snap.CollectStamp,
@@ -307,6 +335,8 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 			FilmIndexDerived: model.FilmIndexDerived{
 				PlayFromSummary: snap.PlayFromSummary,
 			},
+			IsScraped: snap.IsScraped,
+			TmdbID:    snap.TmdbID,
 		}
 	}
 	return result

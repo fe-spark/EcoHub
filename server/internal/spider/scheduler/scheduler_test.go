@@ -7,8 +7,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"server/internal/model"
 )
 
 func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
@@ -24,7 +22,6 @@ func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
 		if err := lane.submit(context.Background(), Job{
 			SourceID:   "A",
 			SourceName: "A",
-			Grade:      model.SlaveCollect,
 			Page:       p,
 			Write:      func() (Mids, error) { return Mids{}, nil },
 			Complete:   func(Completion) {},
@@ -37,7 +34,6 @@ func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
 		if err := lane.submit(context.Background(), Job{
 			SourceID:   "B",
 			SourceName: "B",
-			Grade:      model.SlaveCollect,
 			Page:       p,
 			Write:      func() (Mids, error) { return Mids{}, nil },
 			Complete:   func(Completion) {},

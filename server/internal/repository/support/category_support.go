@@ -35,28 +35,23 @@ func GetCategoryStableKeyByID(id int64) string {
 	if id <= 0 {
 		return ""
 	}
-	var category model.Category
-	if err := db.Mdb.Select("stable_key").Where("id = ?", id).First(&category).Error; err != nil {
+	if k, ok := GetCategoryStableKeyFromCache(id); ok {
+		return k
+	}
+	if catInitialized || db.Mdb == nil {
 		return ""
 	}
+	var category model.Category
+	if err := db.Mdb.Select("stable_key").Where("id = ?", id).First(&category).Error; err != nil {
+		SetCategoryStableKeyCache(id, "")
+		return ""
+	}
+	SetCategoryStableKeyCache(id, category.StableKey)
 	return category.StableKey
 }
 
 func ResolveCategoryID(id int64) int64 {
-	if id <= 0 {
-		return id
-	}
-	var category model.Category
-	if err := db.Mdb.Where("id = ?", id).First(&category).Error; err != nil {
-		return id
-	}
-	if category.StableKey != "" {
-		var current model.Category
-		if err := db.Mdb.Where("stable_key = ?", category.StableKey).First(&current).Error; err == nil {
-			return current.Id
-		}
-	}
-	return category.Id
+	return id
 }
 
 func TouchCategoryVersion() {
@@ -98,7 +93,15 @@ func ClearIndexPageCache() {
 	for iter.Next(db.Cxt) {
 		db.Rdb.Del(db.Cxt, iter.Val())
 	}
-	db.Rdb.Del(db.Cxt, config.IndexDailyUpdatesCacheKey)
+	db.Rdb.Del(db.Cxt, config.DailyUpdatesCatCacheKey)
+	dailyIter := db.Rdb.Scan(db.Cxt, 0, config.DailyUpdatesCatCacheKey+"*", config.MaxScanCount).Iterator()
+	for dailyIter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, dailyIter.Val())
+	}
+	pageIter := db.Rdb.Scan(db.Cxt, 0, config.DailyUpdatesCachePrefix+"*", config.MaxScanCount).Iterator()
+	for pageIter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, pageIter.Val())
+	}
 }
 
 func RefreshCategoryCache() {
@@ -109,15 +112,21 @@ func RefreshCategoryCache() {
 	db.Mdb.Find(&all)
 
 	newPidMap := make(map[int64]int64)
+	newShowMap := make(map[int64]bool)
 	ResetCategoryNameCache()
+	ResetCategoryStableKeyCache()
 	for _, c := range all {
 		item := c
 		newPidMap[item.Id] = item.Pid
+		newShowMap[item.Id] = item.Show
 		SetCategoryNameCache(item.Id, item.Name)
+		SetCategoryStableKeyCache(item.Id, item.StableKey)
 	}
 
 	catMu.Lock()
 	idToPid = newPidMap
+	categoryShowMap = newShowMap
+	catInitialized = true
 	catMu.Unlock()
 
 	ClearRootCategoryCNameCache()
@@ -129,7 +138,7 @@ func GetRootId(id int64) int64 {
 	}
 
 	catMu.RLock()
-	if len(idToPid) == 0 {
+	if !catInitialized {
 		catMu.RUnlock()
 		RefreshCategoryCache()
 		catMu.RLock()
@@ -153,7 +162,7 @@ func IsRootCategory(id int64) bool {
 	}
 
 	catMu.RLock()
-	if len(idToPid) == 0 {
+	if !catInitialized {
 		catMu.RUnlock()
 		RefreshCategoryCache()
 		catMu.RLock()
@@ -170,7 +179,7 @@ func GetParentId(id int64) int64 {
 	}
 
 	catMu.RLock()
-	if len(idToPid) == 0 {
+	if !catInitialized {
 		catMu.RUnlock()
 		RefreshCategoryCache()
 		catMu.RLock()
@@ -180,10 +189,88 @@ func GetParentId(id int64) int64 {
 	return idToPid[id]
 }
 
+// isCategoryVisibleLocked 判断分类是否可用，调用方必须持有 catMu 锁
+func isCategoryVisibleLocked(cid, pid int64) bool {
+	if len(categoryShowMap) == 0 {
+		return true
+	}
+
+	checkID := func(id int64) bool {
+		if id <= 0 {
+			return true
+		}
+		curr := id
+		for range [5]int{} {
+			if show, exists := categoryShowMap[curr]; exists && !show {
+				return false
+			}
+			p, ok := idToPid[curr]
+			if !ok || p == 0 {
+				break
+			}
+			curr = p
+		}
+		return true
+	}
+
+	if cid > 0 && !checkID(cid) {
+		return false
+	}
+	if pid > 0 && !checkID(pid) {
+		return false
+	}
+	return true
+}
+
+// IsCategoryVisible 判断分类是否处于全站可用状态（自身及所有父级大类均 Show = true）
+func IsCategoryVisible(cid, pid int64) bool {
+	catMu.RLock()
+	if !catInitialized {
+		catMu.RUnlock()
+		RefreshCategoryCache()
+		catMu.RLock()
+	}
+	defer catMu.RUnlock()
+
+	return isCategoryVisibleLocked(cid, pid)
+}
+
+// GetDisabledCategoryIDs 返回所有当前不可见（自身或父级停用）的分类 ID 集合
+func GetDisabledCategoryIDs() []int64 {
+	catMu.RLock()
+	if !catInitialized {
+		catMu.RUnlock()
+		RefreshCategoryCache()
+		catMu.RLock()
+	}
+	defer catMu.RUnlock()
+
+	if len(categoryShowMap) == 0 {
+		return nil
+	}
+	var disabled []int64
+	for id := range categoryShowMap {
+		if !isCategoryVisibleLocked(id, 0) {
+			disabled = append(disabled, id)
+		}
+	}
+	return disabled
+}
+
+// SetCategoryShowForTest 供单元测试注入分类可见性映射
+func SetCategoryShowForTest(showMap map[int64]bool) {
+	catMu.Lock()
+	categoryShowMap = showMap
+	catInitialized = true
+	catMu.Unlock()
+}
+
 // SetCategoryTreeForTest 供单元测试快速注入内存模拟分类树
 func SetCategoryTreeForTest(pidMap map[int64]int64, nameMap map[int64]string) {
 	catMu.Lock()
 	idToPid = pidMap
+	categoryShowMap = make(map[int64]bool)
+	catInitialized = true
 	catMu.Unlock()
 	ResetCategoryNameCache()
 	for id, name := range nameMap {
@@ -242,4 +329,27 @@ func ResolveRootCategoryIDByCName(cName string) int64 {
 	// 内存遍历未命中即代表库内无此正规分类，不进行盲猜，直接记录 0
 	rootCategoryCNameCache.Store(cName, rootId)
 	return rootId
+}
+
+// PickPrimarySourceForCategory 选取当前基准源站点（首位即基准原则）。
+// 仅从已启用的站点中按顺序选取首位；全部站点停用或无站点时返回 nil。
+func PickPrimarySourceForCategory() *model.FilmSource {
+	if db.Mdb == nil {
+		return nil
+	}
+	var primary model.FilmSource
+	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
+		return &primary
+	}
+	return nil
+}
+
+// IsBaselineCollectSource 判断指定采集站是否为当前首位基准源。
+func IsBaselineCollectSource(sourceID string) bool {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return false
+	}
+	primary := PickPrimarySourceForCategory()
+	return primary != nil && strings.TrimSpace(primary.Id) == sourceID
 }

@@ -1,7 +1,7 @@
 package access
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -11,7 +11,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/repository/film/snapshot"
+
+	"gorm.io/gorm"
 )
 
 type filmMetaCacheItem struct {
@@ -29,26 +30,10 @@ var (
 
 const filmMetaCacheTTL = 1 * time.Minute
 
-type filmSimpleRow struct {
-	Mid     int64  `gorm:"column:mid"`
-	Name    string `gorm:"column:name"`
-	CName   string `gorm:"column:c_name"`
-	Picture string `gorm:"column:picture"`
-	Year    int64  `gorm:"column:year"`
-}
-
-func parseYearInt(s string) int64 {
-	if len(s) >= 4 {
-		s = s[:4]
-	}
-	v, _ := strconv.ParseInt(s, 10, 64)
-	return v
-}
-
-// resolveFilmMetas 批量反查影片片名、分类与海报（优先从活跃只读快照与详情反查最新海报，带内存短缓存）
-func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
+// resolveFilmMetas 按 mid 查 film_index。查询失败返回错误，不写占位标题。
+func resolveFilmMetas(filmIDs []int64) (map[int64]filmMetaCacheItem, error) {
 	if len(filmIDs) == 0 {
-		return map[int64]filmMetaCacheItem{}
+		return map[int64]filmMetaCacheItem{}, nil
 	}
 
 	result := make(map[int64]filmMetaCacheItem, len(filmIDs))
@@ -65,83 +50,28 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	}
 	filmMetaCacheMu.RUnlock()
 
-	if len(missing) == 0 || db.Mdb == nil {
-		return result
+	if len(missing) == 0 {
+		return result, nil
+	}
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
 	}
 
-	foundMap := make(map[int64]filmMetaCacheItem, len(missing))
-	unresolved := make([]int64, 0, len(missing))
-
-	// 1. 优先从当前活跃快照表 FilmListSnapshot 中查询（包含自定义封面和最新海报源封面）
-	activeVersion := filmsnapshot.GetActiveSnapshotVersion()
-	if activeVersion != "" {
-		var snapshots []model.FilmListSnapshot
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-			Select("mid, name, c_name, picture, year").
-			Where("snapshot_version = ? AND mid IN ?", activeVersion, missing).
-			Find(&snapshots).Error; err == nil {
-			for _, s := range snapshots {
-				foundMap[s.Mid] = filmMetaCacheItem{
-					Title:    s.Name,
-					Category: s.CName,
-					Poster:   s.Picture,
-					Year:     s.Year,
-					CachedAt: now,
-				}
-			}
-		}
+	var rows []model.FilmIndex
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("mid, name, c_name, picture, year").
+		Where("mid IN ?", missing).
+		Find(&rows).Error; err != nil {
+		return nil, err
 	}
-
-	for _, id := range missing {
-		if _, ok := foundMap[id]; !ok {
-			unresolved = append(unresolved, id)
-		}
-	}
-
-	// 2. 若快照中未找到，从 movie_detail_info 中查（用户自定义主表）
-	if len(unresolved) > 0 {
-		var detailInfos []model.MovieDetailInfo
-		if err := db.Mdb.Model(&model.MovieDetailInfo{}).
-			Where("mid IN ?", unresolved).
-			Find(&detailInfos).Error; err == nil {
-			for _, info := range detailInfos {
-				var d model.MovieDetail
-				if err := json.Unmarshal([]byte(info.Content), &d); err == nil {
-					foundMap[info.Mid] = filmMetaCacheItem{
-						Title:    d.Name,
-						Category: d.CName,
-						Poster:   d.DisplayPicture(),
-						Year:     parseYearInt(d.Year),
-						CachedAt: now,
-					}
-				}
-			}
-		}
-	}
-
-	stillMissing := make([]int64, 0, len(unresolved))
-	for _, id := range unresolved {
-		if _, ok := foundMap[id]; !ok {
-			stillMissing = append(stillMissing, id)
-		}
-	}
-
-	// 3. 最终兜底从原始采集表 film_index 中查
-	if len(stillMissing) > 0 {
-		var rows []filmSimpleRow
-		if err := db.Mdb.Table(model.TableFilmIndex).
-			Select("mid, name, c_name, picture, year").
-			Where("mid IN ?", stillMissing).
-			Find(&rows).Error; err == nil {
-			for _, r := range rows {
-				foundMap[r.Mid] = filmMetaCacheItem{
-					Title:    r.Name,
-					Category: r.CName,
-					Poster:   r.Picture,
-					Year:     r.Year,
-					CachedAt: now,
-				}
-			}
+	foundMap := make(map[int64]filmMetaCacheItem, len(rows))
+	for _, row := range rows {
+		foundMap[row.Mid] = filmMetaCacheItem{
+			Title:    row.Name,
+			Category: row.CName,
+			Poster:   row.Picture,
+			Year:     row.Year,
+			CachedAt: now,
 		}
 	}
 
@@ -149,21 +79,12 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	defer filmMetaCacheMu.Unlock()
 
 	for _, id := range missing {
-		if item, ok := foundMap[id]; ok {
-			filmMetaCache[id] = item
-			result[id] = item
-		} else {
-			// 未在库中找到（可能已被删除），缓存占位
-			item := filmMetaCacheItem{
-				Title:    fmt.Sprintf("影片 #%d", id),
-				Category: "未知",
-				Poster:   "",
-				Year:     0,
-				CachedAt: now,
-			}
-			filmMetaCache[id] = item
-			result[id] = item
+		item, ok := foundMap[id]
+		if !ok {
+			continue
 		}
+		filmMetaCache[id] = item
+		result[id] = item
 	}
 
 	// 限制缓存总容量防泄漏
@@ -180,11 +101,11 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 // enrichPlayTopItems 为热播榜填补真实片名、海报与分类，并过滤非合法数字 ID 的脏数据
-func enrichPlayTopItems(items []TopItem) []TopItem {
+func enrichPlayTopItems(items []TopItem) ([]TopItem, error) {
 	ids := make([]int64, 0, len(items))
 	for _, it := range items {
 		// 若已有非占位片名（如历史归档数据），保留快照无需反查
@@ -196,7 +117,10 @@ func enrichPlayTopItems(items []TopItem) []TopItem {
 		}
 	}
 
-	metaMap := resolveFilmMetas(ids)
+	metaMap, err := resolveFilmMetas(ids)
+	if err != nil {
+		return nil, err
+	}
 	validItems := make([]TopItem, 0, len(items))
 	for _, it := range items {
 		id, ok := parseFilmID(it.Key)
@@ -213,11 +137,11 @@ func enrichPlayTopItems(items []TopItem) []TopItem {
 			}
 		}
 		if it.Title == "" {
-			it.Title = fmt.Sprintf("影片 #%d", id)
+			continue
 		}
 		validItems = append(validItems, it)
 	}
-	return validItems
+	return validItems, nil
 }
 
 func playTopFetchCount(limit int) int {
@@ -238,8 +162,12 @@ func limitTopItems(items []TopItem, limit int) []TopItem {
 	return items[:limit]
 }
 
-func takePlayTops(items []TopItem, limit int) []TopItem {
-	return limitTopItems(enrichPlayTopItems(items), limit)
+func takePlayTops(items []TopItem, limit int) ([]TopItem, error) {
+	enriched, err := enrichPlayTopItems(items)
+	if err != nil {
+		return nil, err
+	}
+	return limitTopItems(enriched, limit), nil
 }
 
 var (
@@ -249,41 +177,45 @@ var (
 	catNameCacheAt   time.Time
 )
 
-func resolveCategoryIDByName(name string) (int64, bool) {
+func resolveCategoryIDByName(name string) (int64, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return 0, false
+		return 0, false, nil
 	}
 	catNameCacheMu.RLock()
 	if time.Since(catNameCacheAt) < 5*time.Minute {
 		if id, ok := catIdByNameCache[name]; ok && id > 0 {
 			catNameCacheMu.RUnlock()
-			return id, true
+			return id, true, nil
 		}
 	}
 	catNameCacheMu.RUnlock()
 
 	if db.Mdb == nil {
-		return 0, false
+		return 0, false, nil
 	}
 
 	var cat model.Category
-	if err := db.Mdb.Model(&model.Category{}).
+	err := db.Mdb.Model(&model.Category{}).
 		Select("id, name").
 		Where("name = ?", name).
-		First(&cat).Error; err == nil && cat.Id > 0 {
-		catNameCacheMu.Lock()
-		catNameCache[cat.Id] = cat.Name
-		catIdByNameCache[cat.Name] = cat.Id
-		catNameCacheMu.Unlock()
-		return cat.Id, true
+		First(&cat).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && cat.Id <= 0) {
+		return 0, false, nil
 	}
-	return 0, false
+	if err != nil {
+		return 0, false, err
+	}
+	catNameCacheMu.Lock()
+	catNameCache[cat.Id] = cat.Name
+	catIdByNameCache[cat.Name] = cat.Id
+	catNameCacheMu.Unlock()
+	return cat.Id, true, nil
 }
 
-func resolveCategoryNames(ids []int64) map[int64]string {
+func resolveCategoryNames(ids []int64) (map[int64]string, error) {
 	if len(ids) == 0 {
-		return map[int64]string{}
+		return map[int64]string{}, nil
 	}
 	result := make(map[int64]string, len(ids))
 	missing := make([]int64, 0, len(ids))
@@ -303,14 +235,17 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 	catNameCacheMu.RUnlock()
 
 	if len(missing) == 0 || db.Mdb == nil {
-		return result
+		return result, nil
 	}
 
 	var cats []model.Category
 	if err := db.Mdb.Model(&model.Category{}).
 		Select("id, name").
 		Where("id IN ?", missing).
-		Find(&cats).Error; err == nil {
+		Find(&cats).Error; err != nil {
+		return nil, err
+	}
+	{
 		catNameCacheMu.Lock()
 		if time.Since(catNameCacheAt) >= 5*time.Minute {
 			catNameCache = map[int64]string{}
@@ -333,11 +268,11 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 		catNameCacheMu.Unlock()
 	}
 
-	return result
+	return result, nil
 }
 
 // enrichClassifyTopItems 为分类榜填补真实分类名称，并过滤噪声数据，同时兼容纯数字 ID 与真实分类名称
-func enrichClassifyTopItems(items []TopItem) []TopItem {
+func enrichClassifyTopItems(items []TopItem) ([]TopItem, error) {
 	ids := make([]int64, 0, len(items))
 	for _, it := range items {
 		if it.Category != "" && !strings.HasPrefix(it.Category, "分类 #") {
@@ -348,7 +283,10 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 		}
 	}
 
-	catMap := resolveCategoryNames(ids)
+	catMap, err := resolveCategoryNames(ids)
+	if err != nil {
+		return nil, err
+	}
 	validItems := make([]TopItem, 0, len(items))
 	for _, it := range items {
 		trimmedKey := strings.TrimSpace(it.Key)
@@ -375,7 +313,11 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 		} else {
 			// 非数字 member（例如分类名 "伦理片"、"电影"）
 			// 尝试反查其分类 ID（若在 Category 表中存在则标准化绑定）
-			if catId, found := resolveCategoryIDByName(trimmedKey); found {
+			catId, found, err := resolveCategoryIDByName(trimmedKey)
+			if err != nil {
+				return nil, err
+			}
+			if found {
 				it.Key = strconv.FormatInt(catId, 10)
 				it.Category = trimmedKey
 				it.Title = trimmedKey
@@ -392,7 +334,7 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 		}
 		validItems = append(validItems, it)
 	}
-	return validItems
+	return validItems, nil
 }
 
 func mergeClassifyItems(items []TopItem) []TopItem {
@@ -419,6 +361,18 @@ func mergeClassifyItems(items []TopItem) []TopItem {
 	return merged
 }
 
-func takeClassifyTops(items []TopItem, limit int) []TopItem {
-	return limitTopItems(mergeClassifyItems(enrichClassifyTopItems(items)), limit)
+func takeClassifyTops(items []TopItem, limit int) ([]TopItem, error) {
+	enriched, err := enrichClassifyTopItems(items)
+	if err != nil {
+		return nil, err
+	}
+	return limitTopItems(mergeClassifyItems(enriched), limit), nil
+}
+
+func appendClassifyTopRows(tops []model.AccessDailyTop, day, kind string, items []TopItem, limit int) ([]model.AccessDailyTop, error) {
+	classified, err := takeClassifyTops(items, limit)
+	if err != nil {
+		return nil, err
+	}
+	return append(tops, topItemsToRows(day, kind, classified)...), nil
 }

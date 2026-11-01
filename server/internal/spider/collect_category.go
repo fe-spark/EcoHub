@@ -3,66 +3,81 @@ package spider
 import (
 	"errors"
 	"fmt"
-	"log"
-	"net/url"
 
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/utils"
 )
 
-// ensureMasterCategoriesReady 在主站影片采集前确保本地分类与映射可用。
-// 仅在分类表为空时触发，避免覆盖用户已调整的业务分类属性。
+// ensureMasterCategoriesReady 采集前确认该站已经有自己的分类副本。
+// 分类在添加或编辑采集站时拉取。采集过程中不再临时请求分类。
 func ensureMasterCategoriesReady(s *model.FilmSource) error {
-	if s == nil || s.Grade != model.MasterCollect {
+	if s == nil {
 		return nil
 	}
-	if repository.ExistsCategoryTree() {
+	if repository.SourceHasCategoryMapping(s.Id) {
 		return nil
 	}
-	log.Printf("[Spider] 分类为空，采集前自动同步主站分类: name=%s id=%s uri=%s", s.Name, s.Id, s.Uri)
-	if err := CollectCategory(s); err != nil {
-		return fmt.Errorf("采集前同步主站分类失败: %w", err)
-	}
-	log.Printf("[Spider] 采集前主站分类同步完成: name=%s id=%s", s.Name, s.Id)
-	return nil
+	return fmt.Errorf("采集站 %s 还没有分类，请在采集中心重新保存该站后再采集", s.Name)
 }
 
 // CollectCategory 影视分类采集
-func CollectCategory(s *model.FilmSource) error {
-	return collectCategoryWithMode(s, true)
-}
-
-// ResetCategory 重置主站分类并清除业务属性
-func ResetCategory(s *model.FilmSource) error {
-	return collectCategoryWithMode(s, false)
-}
-
-func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) error {
+func CollectCategory(s *model.FilmSource) (int, error) {
 	if s == nil {
-		return errors.New("采集站信息不存在")
+		return 0, errors.New("采集站信息不存在")
 	}
-	// 硬约束：分类树只能来自主站，禁止附属站写入分类树
-	if s.Grade != model.MasterCollect {
-		return fmt.Errorf("分类树只能从主采集站同步，当前站 grade=%d name=%s", s.Grade, s.Name)
+	pageCount := 0
+	err := WithSourceExclusive(s.Id, func() error {
+		if s.Id != "" && repository.FindCollectSourceById(s.Id) == nil {
+			return errors.New("采集站信息不存在")
+		}
+		tree, count, err := FetchCategoryTree(s)
+		if err != nil {
+			return err
+		}
+		pageCount = count
+		if err := repository.SaveCategoryTree(s.Id, tree); err != nil {
+			return fmt.Errorf("保存采集站分类失败: %w", err)
+		}
+		return nil
+	})
+	return pageCount, err
+}
+
+// FetchCategoryTree 发起网络请求获取采集源分类树与全站总页，并同步更新采集站全站总页
+func FetchCategoryTree(s *model.FilmSource) (*model.CategoryTree, int, error) {
+	if s == nil {
+		return nil, 0, errors.New("采集站信息不存在")
 	}
-	// 获取分类树形数据
-	req := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
-	if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
-		req.ProxyURL = proxy
-	}
-	categoryTree, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
+	req, err := requestForSource(s)
 	if err != nil {
-		return fmt.Errorf("获取主站分类树失败: %w", err)
+		return nil, 0, err
 	}
-	// 保存 tree 到 MySQL
-	if preserveBusinessFields {
-		err = repository.SaveCategoryTree(s.Id, categoryTree)
-	} else {
-		err = repository.ResetCategoryTree(s.Id, categoryTree)
-	}
+	categoryTree, pageCount, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
 	if err != nil {
-		return fmt.Errorf("保存主站分类树失败: %w", err)
+		return nil, 0, fmt.Errorf("获取采集站分类树失败: %w", err)
 	}
-	return nil
+	if s.Id != "" && pageCount > 0 {
+		_ = repository.UpdateSitePageTotal(s.Id, pageCount)
+	}
+	return categoryTree, pageCount, nil
+}
+
+// ApplySourceCategory 在互斥锁内将分类树写入库，并根据选项清空数据
+func ApplySourceCategory(s *model.FilmSource, tree *model.CategoryTree, clearData bool) (repository.CategoryApplyResult, error) {
+	if s == nil {
+		return repository.CategoryApplyResult{}, errors.New("采集站信息不存在")
+	}
+	var res repository.CategoryApplyResult
+	err := WithSourceExclusive(s.Id, func() error {
+		if s.Id != "" && repository.FindCollectSourceById(s.Id) == nil {
+			return errors.New("采集站信息不存在")
+		}
+		applyRes, applyErr := repository.ApplyCategoryTree(s.Id, tree, clearData)
+		if applyErr != nil {
+			return fmt.Errorf("保存采集站分类失败: %w", applyErr)
+		}
+		res = applyRes
+		return nil
+	})
+	return res, err
 }

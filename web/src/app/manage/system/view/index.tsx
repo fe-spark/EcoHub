@@ -1,39 +1,54 @@
 "use client";
 
-import { Suspense, useCallback, useEffect } from "react";
+import React, { Suspense, useCallback, useEffect } from "react";
 
 import {
-  BellOutlined,
   SafetyCertificateOutlined,
   FileTextOutlined,
   CompassOutlined,
   ApiOutlined,
+  BellOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import NotifyConfigPageView from "@/app/manage/system/notify/view";
 import ProxyConfigPageView from "@/app/manage/system/proxy/view";
 import DataSecurityPageView from "@/app/manage/system/security/view";
 import SystemLogsPageView from "@/app/manage/system/logs/view";
 import TMDBConfigPageView from "@/app/manage/system/tmdb/view";
+import NotifyConfigPageView from "@/app/manage/system/notify/view";
 import styles from "./index.module.less";
 
-type MainTab = "notify" | "proxy" | "tmdb" | "security" | "logs";
+type MainTab = "proxy" | "tmdb" | "notify" | "security" | "logs";
 
-const MAIN_TABS: { key: MainTab; label: string; icon: React.ReactNode }[] = [
-  { key: "notify", label: "通知配置", icon: <BellOutlined /> },
-  { key: "proxy", label: "网络代理", icon: <ApiOutlined /> },
-  { key: "tmdb", label: "刮削配置", icon: <CompassOutlined /> },
-  { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
-  { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
+interface TabGroup {
+  name: string;
+  tabs: { key: MainTab; label: string; icon: React.ReactNode }[];
+}
+
+const TAB_GROUPS: TabGroup[] = [
+  {
+    name: "服务集成",
+    tabs: [
+      { key: "tmdb", label: "刮削配置", icon: <CompassOutlined /> },
+      { key: "notify", label: "通知推送", icon: <BellOutlined /> },
+    ],
+  },
+  {
+    name: "基础底座",
+    tabs: [
+      { key: "proxy", label: "网络代理", icon: <ApiOutlined /> },
+      { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
+      { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
+    ],
+  },
 ];
 
 function normalizeMainTab(raw: string | null): MainTab {
-  if (raw === "proxy") return "proxy";
   if (raw === "tmdb") return "tmdb";
+  if (raw === "notify") return "notify";
   if (raw === "security") return "security";
   if (raw === "logs") return "logs";
-  return "notify";
+  return "proxy";
 }
 
 function SystemSettingsBody() {
@@ -73,6 +88,12 @@ function SystemSettingsBody() {
             <TMDBConfigPageView embedded />
           </div>
         );
+      case "notify":
+        return (
+          <div className={styles.tabPaneScrollable}>
+            <NotifyConfigPageView embedded />
+          </div>
+        );
       case "security":
         return (
           <div className={styles.tabPaneScrollable}>
@@ -81,11 +102,10 @@ function SystemSettingsBody() {
         );
       case "logs":
         return <SystemLogsPageView embedded />;
-      case "notify":
       default:
         return (
           <div className={styles.tabPaneScrollable}>
-            <NotifyConfigPageView embedded />
+            <ProxyConfigPageView embedded />
           </div>
         );
     }
@@ -96,25 +116,35 @@ function SystemSettingsBody() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="系统设置"
-        description="通知配置、网络代理、刮削配置、数据安全与运行日志。"
+        description="第三方服务集成（刮削、通知）与系统运行基础底座（网络代理、数据安全、日志）。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
-        {MAIN_TABS.map((tab) => {
-          const active = mainTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className={`${styles.tabItem} ${active ? styles.tabItemActive : ""}`}
-              onClick={() => replaceQuery(tab.key)}
-            >
-              <span className={styles.tabIcon}>{tab.icon}</span>
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
+        {TAB_GROUPS.map((group, groupIdx) => (
+          <React.Fragment key={group.name}>
+            {groupIdx > 0 && <div className={styles.groupDivider} />}
+            <div className={styles.tabGroupWrapper}>
+              <span className={styles.groupBadge}>{group.name}</span>
+              <div className={styles.groupTabs}>
+                {group.tabs.map((tab) => {
+                  const active = mainTab === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={`${styles.tabItem} ${active ? styles.tabItemActive : ""}`}
+                      onClick={() => replaceQuery(tab.key)}
+                    >
+                      <span className={styles.tabIcon}>{tab.icon}</span>
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </React.Fragment>
+        ))}
       </div>
       <div className={styles.tabContent} role="tabpanel">
         {renderPane()}

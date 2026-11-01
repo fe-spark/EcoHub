@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
 
 ENV GO111MODULE=on \
     CGO_ENABLED=0 \
@@ -23,7 +23,9 @@ LABEL maintainer="spark" \
       org.opencontainers.image.description="EcoHub Go API server for collection, aggregation, cache, authentication, and open interfaces." \
       org.opencontainers.image.source="https://github.com/fe-spark/EcoHub"
 
-ENV TZ=Asia/Shanghai
+ENV TZ=Asia/Shanghai \
+    GIN_MODE=release \
+    PORT=8080
 
 RUN apk add --no-cache ca-certificates tzdata wget
 

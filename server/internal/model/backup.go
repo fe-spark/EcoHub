@@ -9,11 +9,15 @@ type ConfigBackup struct {
 	ExportedAt   string              `json:"exportedAt"`
 	AppVersion   string              `json:"appVersion,omitempty"`
 	Site         *BasicConfig        `json:"site,omitempty"`
-	FilmSources  []FilmSource        `json:"filmSources,omitempty"`
-	CronTasks    []FilmCollectTask   `json:"cronTasks,omitempty"`
-	Banners      Banners             `json:"banners,omitempty"`
+	FilmSources  []FilmSource        `json:"filmSources"`
+	CronTasks    []FilmCollectTask   `json:"cronTasks"`
+	Banners      Banners             `json:"banners"`
+	BannerConfig *BannerConfig       `json:"bannerConfig,omitempty"`
+	MappingRules []MappingRuleExport `json:"mappingRules"`
+	Proxy        *ProxyConfig        `json:"proxy,omitempty"`
+	TMDB         *TMDBConfig         `json:"tmdb,omitempty"`
+	Analytics    *AnalyticsConfig    `json:"analytics,omitempty"`
 	Notify       *NotifyConfig       `json:"notify,omitempty"`
-	MappingRules []MappingRuleExport `json:"mappingRules,omitempty"`
 }
 
 // MappingRuleExport 映射规则导出结构（不带数据库 ID）
@@ -31,8 +35,16 @@ type ConfigBackupModules struct {
 	FilmSources  bool `json:"filmSources"`
 	CronTasks    bool `json:"cronTasks"`
 	Banners      bool `json:"banners"`
-	Notify       bool `json:"notify"`
 	MappingRules bool `json:"mappingRules"`
+	Proxy        bool `json:"proxy"`
+	TMDB         bool `json:"tmdb"`
+	Analytics    bool `json:"analytics"`
+	Notify       bool `json:"notify"`
+}
+
+// ConfigBackupExportRequest 配置备份导出请求
+type ConfigBackupExportRequest struct {
+	Password string `json:"password"`
 }
 
 // ConfigBackupImportRequest 配置备份导入请求
@@ -44,5 +56,5 @@ type ConfigBackupImportRequest struct {
 
 // Any 是否至少勾选一个模块
 func (m ConfigBackupModules) Any() bool {
-	return m.Site || m.FilmSources || m.CronTasks || m.Banners || m.Notify || m.MappingRules
+	return m.Site || m.FilmSources || m.CronTasks || m.Banners || m.MappingRules || m.Proxy || m.TMDB || m.Notify || m.Analytics
 }

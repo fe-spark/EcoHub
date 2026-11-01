@@ -17,7 +17,7 @@ func seedDetailFilm(t *testing.T, version string, mid int64, sourceID string, ru
 		Id:                 sourceID,
 		Name:               "主站测试源",
 		Uri:                "http://test-source.com/api",
-		Grade:              model.MasterCollect,
+		Sort:               100,
 		State:              true,
 		DomainReplaceRules: rules,
 	})
@@ -30,12 +30,32 @@ func seedDetailFilm(t *testing.T, version string, mid int64, sourceID string, ru
 		Cid:             10,
 	})
 
-	raw, err := json.Marshal(detail)
-	if err != nil {
-		t.Fatalf("序列化详情失败: %v", err)
+	for idx, group := range detail.PlayList {
+		if len(group) == 0 {
+			continue
+		}
+		rawUrls, _ := json.Marshal(group)
+		gdb.Create(&model.FilmSourcePlaylist{
+			Mid:          mid,
+			SourceId:     sourceID,
+			LineKind:     "play",
+			GroupIndex:   idx,
+			GroupName:    "默认主源",
+			EpisodeCount: len(group),
+			Content:      string(rawUrls),
+		})
 	}
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: mid, Content: string(raw)}).Error; err != nil {
-		t.Fatalf("写入详情失败: %v", err)
+	for idx, group := range detail.DownloadList {
+		rawUrls, _ := json.Marshal(group)
+		gdb.Create(&model.FilmSourcePlaylist{
+			Mid:          mid,
+			SourceId:     sourceID,
+			LineKind:     "download",
+			GroupIndex:   idx,
+			GroupName:    "下载线路",
+			EpisodeCount: len(group),
+			Content:      string(rawUrls),
+		})
 	}
 
 	activateVersion(t, version)
@@ -165,13 +185,10 @@ func TestGetFilmDetail_EmptyFirstGroup_NoIndexMisalignment(t *testing.T) {
 		t.Errorf("有效分组链接应替换为 https://new.com/play/1.m3u8，实际 %s", got)
 	}
 
-	if len(res.PlayList) != 2 {
-		t.Fatalf("res.PlayList 应保持原始长度 2，实际 %d", len(res.PlayList))
+	if len(res.PlayList) != 1 {
+		t.Fatalf("res.PlayList 应包含有效分组 1，实际 %d", len(res.PlayList))
 	}
-	if len(res.PlayList[0]) != 0 {
-		t.Errorf("res.PlayList[0] 应保持为空，实际 %+v", res.PlayList[0])
-	}
-	if len(res.PlayList[1]) != 1 || res.PlayList[1][0].Link != "https://new.com/play/1.m3u8" {
-		t.Errorf("res.PlayList[1][0] 应为 https://new.com/play/1.m3u8，实际 %+v", res.PlayList[1])
+	if len(res.PlayList[0]) != 1 || res.PlayList[0][0].Link != "https://new.com/play/1.m3u8" {
+		t.Errorf("res.PlayList[0][0] 应为 https://new.com/play/1.m3u8，实际 %+v", res.PlayList[0])
 	}
 }

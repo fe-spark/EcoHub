@@ -1,18 +1,12 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
-	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
-	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -28,6 +22,12 @@ func resolveProvideBaseURL(c *gin.Context) (string, error) {
 		scheme = "https"
 	}
 	if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
+		if i := strings.Index(forwardedProto, ","); i >= 0 {
+			forwardedProto = strings.TrimSpace(forwardedProto[:i])
+		}
+		if forwardedProto != "http" && forwardedProto != "https" {
+			return "", errors.New("无法解析当前请求协议")
+		}
 		scheme = forwardedProto
 	}
 
@@ -92,156 +92,105 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	plot := c.Query("plot")
 	sort := c.Query("sort")
 
-	// 选中采集站时，优先直连该采集站返回原始数据
-	if sourceId != "" {
-		directYear, _ := strconv.Atoi(year)
-		raw, err := service.ProvideSvc.GetVodDirectBySource(sourceId, ac, t, pg, wd, h_param, ids, directYear, area, lang, plot, sort)
-		if err != nil {
-			c.JSON(200, gin.H{"code": 0, "msg": "采集站直连失败: " + err.Error()})
-			return
-		}
-		c.Data(200, "application/json; charset=utf-8", raw)
+	classList, filters, classErr := service.ProvideSvc.GetClassList(sourceId)
+	if classErr != nil {
+		c.JSON(200, gin.H{"code": 0, "msg": classErr.Error()})
 		return
 	}
-
-	classList, filters := service.ProvideSvc.GetClassList()
 	if classList == nil {
 		classList = []model.FilmClass{}
 	}
-	if t <= 0 && wd == "" && ids == "" && len(classList) > 0 {
-		t = int(classList[0].ID)
+
+	baseURL, err := resolveProvideBaseURL(c)
+	if err != nil {
+		c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+		return
 	}
 
-	baseURL, _ := resolveProvideBaseURL(c)
-
-	normalizeVodListPic := func(list []model.FilmList) []model.FilmList {
-		if len(list) == 0 {
-			return list
+	writeProvide := func(page, pagecount, total int, list any, withRecord bool) {
+		body := gin.H{
+			"code":      1,
+			"msg":       "数据列表",
+			"page":      page,
+			"pagecount": pagecount,
+			"limit":     strconv.Itoa(limit),
+			"total":     total,
+			"list":      list,
+			"class":     classList,
+			"filters":   filters,
 		}
-		cloned := make([]model.FilmList, len(list))
-		copy(cloned, list)
-		if baseURL == "" {
-			return cloned
+		if withRecord {
+			body["recordcount"] = total
 		}
-		for i := range cloned {
-			cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
-		}
-		return cloned
-	}
-
-	normalizeDetailListPic := func(list []model.FilmDetail) []model.FilmDetail {
-		if len(list) == 0 {
-			return list
-		}
-		cloned := make([]model.FilmDetail, len(list))
-		copy(cloned, list)
-		if baseURL == "" {
-			return cloned
-		}
-		for i := range cloned {
-			cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
-		}
-		return cloned
+		c.JSON(200, body)
 	}
 
 	switch ac {
-	case "list":
-		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
-		if err != nil {
-			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
-			return
-		}
-		if vodList == nil {
-			vodList = []model.FilmList{}
-		}
-		c.JSON(200, gin.H{
-			"code":        1,
-			"msg":         "数据列表",
-			"page":        page,
-			"pagecount":   pagecount,
-			"limit":       limit,
-			"total":       total,
-			"recordcount": total,
-			"list":        normalizeVodListPic(vodList),
-			"class":       classList,
-			"filters":     filters,
-		})
 	case "videolist", "detail":
-		var idsArr []string
 		if ids != "" {
-			idsArr = strings.Split(ids, ",")
-			vodList := service.ProvideSvc.GetVodDetail(idsArr)
-			if vodList == nil {
-				vodList = []model.FilmDetail{}
-			}
-			c.JSON(200, gin.H{
-				"code":      1,
-				"msg":       "数据列表",
-				"page":      1,
-				"pagecount": 1,
-				"limit":     "20",
-				"total":     len(vodList),
-				"list":      normalizeDetailListPic(vodList),
-				"class":     classList,
-				"filters":   filters,
-			})
-		} else {
-			page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+			vodList, err := service.ProvideSvc.GetVodDetail(strings.Split(ids, ","), sourceId)
 			if err != nil {
 				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 				return
 			}
-			var _idsArr []string
-			for _, v := range vodListSimple {
-				_idsArr = append(_idsArr, strconv.FormatInt(v.VodID, 10))
-			}
-			detailList := service.ProvideSvc.GetVodDetail(_idsArr)
-			if detailList == nil {
-				detailList = []model.FilmDetail{}
-			}
-			c.JSON(200, gin.H{
-				"code":        1,
-				"msg":         "数据列表",
-				"page":        page,
-				"pagecount":   pagecount,
-				"limit":       limit,
-				"total":       total,
-				"recordcount": total,
-				"list":        normalizeDetailListPic(detailList),
-				"class":       classList,
-				"filters":     filters,
-			})
+			writeProvide(1, 1, len(vodList), prefixDetailPics(vodList, baseURL), false)
+			return
 		}
-
-	default:
-		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
-		if vodList == nil {
-			vodList = []model.FilmList{}
+		idList := make([]string, 0, len(vodListSimple))
+		for _, v := range vodListSimple {
+			idList = append(idList, strconv.FormatInt(v.VodID, 10))
 		}
-		c.JSON(200, gin.H{
-			"code":        1,
-			"msg":         "数据列表",
-			"page":        page,
-			"pagecount":   pagecount,
-			"limit":       limit,
-			"total":       total,
-			"recordcount": total,
-			"list":        normalizeVodListPic(vodList),
-			"class":       classList,
-			"filters":     filters,
-		})
+		detailList, err := service.ProvideSvc.GetVodDetail(idList, sourceId)
+		if err != nil {
+			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+			return
+		}
+		writeProvide(page, pagecount, total, prefixDetailPics(detailList, baseURL), true)
+	default:
+		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		if err != nil {
+			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+			return
+		}
+		writeProvide(page, pagecount, total, prefixListPics(vodList, baseURL), true)
 	}
 }
 
+func prefixListPics(list []model.FilmList, baseURL string) []model.FilmList {
+	if list == nil {
+		return []model.FilmList{}
+	}
+	if baseURL == "" || len(list) == 0 {
+		return list
+	}
+	cloned := append([]model.FilmList(nil), list...)
+	for i := range cloned {
+		cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
+	}
+	return cloned
+}
+
+func prefixDetailPics(list []model.FilmDetail, baseURL string) []model.FilmDetail {
+	if list == nil {
+		return []model.FilmDetail{}
+	}
+	if baseURL == "" || len(list) == 0 {
+		return list
+	}
+	cloned := append([]model.FilmDetail(nil), list...)
+	for i := range cloned {
+		cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
+	}
+	return cloned
+}
+
 // HandleProvideConfig 提供给 TVBox/影视仓 的一键网络配置 (config.json)。
-// 对应路由：
-//   - GET /api/provide/tvbox (推荐：语义明确的标准端点)
-//   - GET /api/provide/config (Deprecated: 早期路径别名，后续主版本计划移除)
-//
+// 对应端点：GET /api/provide/tvbox
 // 注意：EcoHub 官方原生客户端（OHOS / Android）请走专属软件源端点 HandleProvideApp (/api/provide/app)。
 func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 	baseURL, err := resolveProvideBaseURL(c)
@@ -250,70 +199,12 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		return
 	}
 	key := strings.TrimSpace(c.Query("key"))
-	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
-	if key != "" {
-		cacheKey += ":" + url.QueryEscape(key)
+	cfg, err := service.ProvideSvc.GetTVBoxConfig(baseURL, key)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
+		return
 	}
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var cached gin.H
-			if json.Unmarshal([]byte(data), &cached) == nil {
-				c.JSON(200, cached)
-				return
-			}
-		}
-	}
-
-	apiPath := baseURL + "/api/provide/vod"
-	baseVodApi := apiPath
-	if key != "" {
-		baseVodApi = apiPath + "?key=" + url.QueryEscape(key)
-	}
-
-	sites := []gin.H{
-		{
-			"key":         "EcoHub",
-			"name":        "🌟 EcoHub 私人影视库全量",
-			"type":        1,
-			"api":         baseVodApi,
-			"searchable":  1,
-			"quickSearch": 1,
-			"filterable":  1,
-		},
-	}
-
-	for _, source := range repository.GetCollectSourceList() {
-		if !source.State {
-			continue
-		}
-		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
-		if key != "" {
-			sourceApi += "&key=" + url.QueryEscape(key)
-		}
-		sites = append(sites, gin.H{
-			"key":         "source_" + source.Id,
-			"name":        "📡 " + source.Name,
-			"type":        1,
-			"api":         sourceApi,
-			"searchable":  1,
-			"quickSearch": 1,
-			"filterable":  1,
-		})
-	}
-
-	configJson := gin.H{
-		"spider":    "",
-		"wallpaper": "",
-		"logo":      "",
-		"sites":     sites,
-	}
-	if db.Rdb != nil {
-		if data, err := json.Marshal(configJson); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
-		}
-	}
-
-	c.JSON(200, configJson)
+	c.JSON(200, cfg)
 }
 
 // HandleProvideApp 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置
@@ -323,23 +214,10 @@ func (h *ProvideHandler) HandleProvideApp(c *gin.Context) {
 		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
 		return
 	}
-	basic := repository.GetSiteBasic()
-	siteName := strings.TrimSpace(basic.SiteName)
-	if siteName == "" {
-		siteName = "EcoHub"
+	res, err := service.ProvideSvc.GetAppSourceConfig(baseURL)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
+		return
 	}
-
-	c.JSON(200, gin.H{
-		"code": 1,
-		"msg":  "EcoHub 客户端软件源在线",
-		"data": gin.H{
-			"site_name":      siteName,
-			"site_url":       baseURL,
-			"api_base":       baseURL + "/api",
-			"version":        config.Version,
-			"private_access": basic.PrivateAccess,
-			"status":         "online",
-		},
-	})
+	c.JSON(200, res)
 }
-

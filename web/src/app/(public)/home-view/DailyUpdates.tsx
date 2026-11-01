@@ -7,68 +7,33 @@ import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { playDailyIonSwap } from "./dailyIon";
 import { bindPixelHover } from "./pixelHover";
+import {
+  DailyFilm,
+  PAGE_SIZE,
+  REFRESH_MS,
+  filmId,
+  filmTags,
+  filmTitle,
+} from "./dailyTypes";
 import styles from "./DailyUpdates.module.less";
 
-const REFRESH_MS = 15 * 1000;
-const PAGE_SIZE = 6;
-
-interface DailyFilm {
-  id: string;
-  mid?: string;
-  name: string;
-  picture: string;
-  year: string;
-  cName: string;
-  area: string;
-  language?: string;
-  classTag?: string;
-  remarks: string;
-  blurb?: string;
-}
-
-function filmId(item: DailyFilm) {
-  return String(item.id ?? item.mid ?? "").trim();
-}
-
-function filmTitle(name?: string) {
-  return (name ?? "").split("[")[0].trim();
-}
-
-function normalizeMeta(value?: string | number | null) {
-  const text = String(value ?? "").trim();
-  if (!text || text === "0") {
-    return "";
-  }
-  return text;
-}
-
-function filmTags(item: DailyFilm) {
-  const year = normalizeMeta(item.year?.slice(0, 4));
-  const category = normalizeMeta(item.cName);
-  const area = normalizeMeta(item.area?.split(",")[0]);
-  const tags = [year, category];
-  if (area && !category.includes(area)) {
-    tags.push(area);
-  }
-  return tags.filter(Boolean);
-}
-
 async function fetchDailyUpdates(exclude: string): Promise<DailyFilm[]> {
-  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  const params = new URLSearchParams({
+    pageSize: String(PAGE_SIZE),
+    random: "1",
+  });
   if (exclude) {
     params.set("exclude", exclude);
   }
-  // 注意：/api/index/dailyUpdates 属于服务端兼容早期版本的旧接口，计划在未来大版本中废弃。
-  // 建议后续迁移使用新版带分类与标准分页的 /api/dailyUpdates。
-  const res = await fetch(`/api/index/dailyUpdates?${params.toString()}`, { cache: "no-store" });
+  const res = await fetch(`/api/daily-updates?${params.toString()}`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(String(res.status));
   }
-  const json = (await res.json()) as { code: number; data?: DailyFilm[] };
+  const json = (await res.json()) as { code: number; data?: { list?: DailyFilm[] } };
   if (json.code !== 0) {
     throw new Error(String(json.code));
   }
-  return Array.isArray(json.data) ? json.data : [];
+  return Array.isArray(json.data?.list) ? json.data.list : [];
 }
 
 function Poster({
@@ -438,6 +403,11 @@ export default function DailyUpdates() {
             >
               <Poster src={lead.picture} alt={leadName} className={styles.posterImg} />
               {lead.remarks ? <span className={styles.leadRemark}>{lead.remarks}</span> : null}
+              <div className={styles.leadTagGroup}>
+                {filmTags(lead).slice(0, 3).map((tag, idx) => (
+                  <span key={idx} className={styles.leadTagItem}>{tag}</span>
+                ))}
+              </div>
               <span className={styles.cardShade} />
               <span className={styles.cardMeta}>
                 <span className={styles.cardName}>{leadName}</span>
@@ -465,6 +435,7 @@ export default function DailyUpdates() {
                 <div className={styles.rail} aria-label="本批其他更新">
                   {rail.map((item, index) => {
                     const name = filmTitle(item.name);
+                    const itemTags = filmTags(item);
                     return (
                       <button
                         key={index}
@@ -478,8 +449,16 @@ export default function DailyUpdates() {
                         <Poster src={item.picture} alt={name} className={styles.cardImg} />
                         <span className={styles.cardShade} />
                         {item.remarks ? <span className={styles.cardTip}>{item.remarks}</span> : null}
+                        <div className={styles.cardTagGroup}>
+                          {itemTags.slice(0, 2).map((tag, idx) => (
+                            <span key={idx} className={styles.cardTagItem}>{tag}</span>
+                          ))}
+                        </div>
                         <span className={styles.cardMeta}>
                           <span className={styles.cardName}>{name}</span>
+                          <span className={styles.cardTags}>
+                            {itemTags.join(" · ")}
+                          </span>
                         </span>
                       </button>
                     );

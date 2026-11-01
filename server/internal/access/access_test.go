@@ -10,10 +10,41 @@ import (
 	"unicode/utf8"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
+
+func useAccessFilmDB(t *testing.T, films ...model.FilmIndex) {
+	t.Helper()
+	filmMetaCacheMu.Lock()
+	filmMetaCache = map[int64]filmMetaCacheItem{}
+	filmMetaCacheMu.Unlock()
+	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmIndex{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(films) > 0 {
+		if err := gdb.Create(&films).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() {
+		db.Mdb = prev
+		filmMetaCacheMu.Lock()
+		filmMetaCache = map[int64]filmMetaCacheItem{}
+		filmMetaCacheMu.Unlock()
+	})
+}
 
 func TestShouldSkip(t *testing.T) {
 	cases := []struct {
@@ -21,7 +52,7 @@ func TestShouldSkip(t *testing.T) {
 		status       int
 		skip         bool
 	}{
-		{"OPTIONS", "/api/index", 204, true},
+		{"OPTIONS", "/api/home", 204, true},
 		{"GET", "/api/config/basic", 200, true},
 		{"GET", "/api/config/basic", 500, false},
 		{"GET", "/api/health", 200, true},
@@ -30,14 +61,14 @@ func TestShouldSkip(t *testing.T) {
 		{"GET", "/api/upload/pic/poster/a.jpg", 200, true},
 		// 业务管理与前台接口均不应被跳过（必须正常打印日志）
 		{"GET", "/api/manage", 200, false},
-		// 运行日志增量接口自轮询，需跳过以免刷屏
+		// 运行日志推送会把自己的访问记录再写进日志流，需跳过
 		{"GET", "/api/manage/system/logs/delta", 200, true},
+		{"GET", "/api/manage/system/logs/stream", 200, true},
 		{"GET", "/api/manage/collect/list", 200, false},
-		{"POST", "/api/manage/film/add", 200, false},
-		{"GET", "/api/dailyUpdates", 200, false},
-		{"GET", "/api/index/dailyUpdates", 200, false},
-		{"POST", "/api/stat/view", 200, false},
-		{"GET", "/api/index", 200, false},
+		{"POST", "/api/manage/film/save", 200, false},
+		{"GET", "/api/daily-updates", 200, false},
+		{"POST", "/api/stats/view", 200, false},
+		{"GET", "/api/home", 200, false},
 		{"GET", "/api/provide/vod", 200, false},
 	}
 	for _, c := range cases {
@@ -49,11 +80,11 @@ func TestShouldSkip(t *testing.T) {
 }
 
 func TestHTTPKindAndClient(t *testing.T) {
-	if httpKind("/api/index") != "http" {
-		t.Fatal("index is http not browse")
+	if httpKind("/api/home") != "http" {
+		t.Fatal("home is http not browse")
 	}
-	if httpKind("/api/searchFilm") != "http" {
-		t.Fatal("searchFilm is http not search")
+	if httpKind("/api/films/search") != "http" {
+		t.Fatal("search is http not search")
 	}
 	if httpKind("/api/provide/vod") != "provide" {
 		t.Fatal("provide")
@@ -61,7 +92,7 @@ func TestHTTPKindAndClient(t *testing.T) {
 	if httpKind("/api/manage/film/search/list") != "manage" {
 		t.Fatal("manage")
 	}
-	if ClassifyHTTPClient("/api/index", "EcoHub-OHOS/1.1.0") != "app" {
+	if ClassifyHTTPClient("/api/home", "EcoHub-OHOS/1.1.0") != "app" {
 		t.Fatal("ohos app")
 	}
 	if clientFromUA("EcoHub-OHOS/1.1.0") != "app" {
@@ -76,7 +107,7 @@ func TestHTTPKindAndClient(t *testing.T) {
 	if ClassifyHTTPClient("/api/provide/vod", "Mozilla/5.0") != "tvbox" {
 		t.Fatal("tvbox by path")
 	}
-	if ClassifyHTTPClient("/api/index", "curl/8.0") != "crawler" {
+	if ClassifyHTTPClient("/api/home", "curl/8.0") != "crawler" {
 		t.Fatal("curl crawler")
 	}
 	if isCrawlerUA("EcoHub-SSR") {
@@ -85,7 +116,7 @@ func TestHTTPKindAndClient(t *testing.T) {
 }
 
 func TestSanitizeAndNormalize(t *testing.T) {
-	if SanitizePath("/api/searchFilm?keyword=a\nb") != "/api/searchFilm" {
+	if SanitizePath("/api/films/search?keyword=a\nb") != "/api/films/search" {
 		t.Fatal("strip query and newline")
 	}
 	long := "/" + string(make([]byte, 300))
@@ -98,8 +129,8 @@ func TestSanitizeAndNormalize(t *testing.T) {
 }
 
 func TestHTTPResource(t *testing.T) {
-	if httpResource("/api/filmPlayInfo", url.Values{"id": {"12345"}}) != "12345" {
-		t.Fatal("filmPlayInfo id")
+	if httpResource("/api/films/play-info", url.Values{"id": {"12345"}}) != "12345" {
+		t.Fatal("films play-info id")
 	}
 	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}}) != "" {
 		t.Fatal("provide ac list without t should be empty")
@@ -149,7 +180,7 @@ func TestHTTPResource(t *testing.T) {
 	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "wd": {"2024"}}) != "2024" {
 		t.Fatal("provide list wd takes priority over ac")
 	}
-	if httpResource("/api/searchFilm", url.Values{"keyword": {"斗罗"}}) != "斗罗" {
+	if httpResource("/api/films/search", url.Values{"keyword": {"斗罗"}}) != "斗罗" {
 		t.Fatal("searchFilm keyword")
 	}
 }
@@ -192,10 +223,10 @@ func TestPlayRankMember(t *testing.T) {
 		{"/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"1,2"}}, ""},
 		{"/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"id 77"}}, "77"},
 		{"/api/provide/vod", url.Values{"ac": {"list"}}, ""},
-		{"/api/filmPlayInfo", url.Values{"id": {"99"}}, "99"},
-		{"/api/filmPlayInfo", url.Values{"id": {"id 88"}}, "88"},
-		{"/api/filmPlayInfo", url.Values{"id": {"0"}}, ""},
-		{"/api/searchFilm", url.Values{"keyword": {"2024"}}, ""},
+		{"/api/films/play-info", url.Values{"id": {"99"}}, "99"},
+		{"/api/films/play-info", url.Values{"id": {"id 88"}}, "88"},
+		{"/api/films/play-info", url.Values{"id": {"0"}}, ""},
+		{"/api/films/search", url.Values{"keyword": {"2024"}}, ""},
 	}
 	for _, tc := range cases {
 		if got := playRankMember(tc.path, tc.query); got != tc.want {
@@ -225,15 +256,9 @@ func TestEnrichPlayTopItems_FilterDirtyKeys(t *testing.T) {
 		{Key: "class", Count: 26},
 		{Key: "999999", Count: 10},
 	}
-	res := enrichPlayTopItems(input)
-	if len(res) != 1 {
-		t.Fatalf("enrichPlayTopItems should filter invalid non-numeric keys, got len=%d", len(res))
-	}
-	if res[0].Key != "999999" || res[0].Count != 10 {
-		t.Fatalf("unexpected res[0]: %+v", res[0])
-	}
-	if res[0].Title != "影片 #999999" {
-		t.Fatalf("expected Title to be placeholder '影片 #999999', got %s", res[0].Title)
+	_, err := enrichPlayTopItems(input)
+	if err == nil {
+		t.Fatal("没有数据库时不能发明片名")
 	}
 }
 
@@ -244,7 +269,10 @@ func TestEnrichClassifyTopItems_FilterDirtyKeys(t *testing.T) {
 		{Key: "19", Count: 53},
 		{Key: "34", Count: 11},
 	}
-	res := enrichClassifyTopItems(input)
+	res, err := enrichClassifyTopItems(input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 2 {
 		t.Fatalf("enrichClassifyTopItems should filter invalid non-numeric keys like 'list', got len=%d", len(res))
 	}
@@ -259,7 +287,10 @@ func TestEnrichClassifyTopItems_FilterDirtyKeys(t *testing.T) {
 		t.Fatalf("expected Title placeholder '分类 #19', got %s", res[0].Title)
 	}
 	// 测试截断与过滤结合
-	top1 := takeClassifyTops(input, 1)
+	top1, err := takeClassifyTops(input, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(top1) != 1 || top1[0].Key != "19" {
 		t.Fatalf("takeClassifyTops limit=1 failed: %+v", top1)
 	}
@@ -271,7 +302,10 @@ func TestEnrichClassifyTopItems_PreservesValidCategoryNames(t *testing.T) {
 		{Key: "伦理片", Count: 6},
 		{Key: "24", Count: 5},
 	}
-	res := enrichClassifyTopItems(input)
+	res, err := enrichClassifyTopItems(input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 2 {
 		t.Fatalf("expected 2 valid items (list filtered out), got len=%d", len(res))
 	}
@@ -322,7 +356,7 @@ func TestIPPreviewAndHash(t *testing.T) {
 }
 
 func TestRecordRecent(t *testing.T) {
-	web := &AccessEvent{Method: "GET", Path: "/api/index", Action: "http", Status: 200}
+	web := &AccessEvent{Method: "GET", Path: "/api/home", Action: "http", Status: 200}
 	if RecordRecent(web) {
 		t.Fatal("public http 2xx should NOT be in recent")
 	}
@@ -346,7 +380,7 @@ func TestRecordRecent(t *testing.T) {
 		t.Fatal("provide error handled in errorKey, not recent")
 	}
 	ssr := &AccessEvent{
-		Method: "GET", Path: "/api/index", Action: "http", Status: 200,
+		Method: "GET", Path: "/api/home", Action: "http", Status: 200,
 		Internal: "ssr", UAFamily: "ecohub-ssr",
 	}
 	if RecordRecent(ssr) {
@@ -356,7 +390,7 @@ func TestRecordRecent(t *testing.T) {
 		t.Fatal("ssr still in health hist")
 	}
 	ssrErr := &AccessEvent{
-		Method: "GET", Path: "/api/index", Action: "http", Status: 502,
+		Method: "GET", Path: "/api/home", Action: "http", Status: 502,
 		Internal: "ssr", UAFamily: "ecohub-ssr",
 	}
 	if RecordRecent(ssrErr) {
@@ -378,13 +412,13 @@ func TestEstimateP95(t *testing.T) {
 }
 
 func TestUAFamily(t *testing.T) {
-	if uaFamily("/api/index", "Mozilla/5.0 Chrome/120.0") != "chrome" {
+	if uaFamily("/api/home", "Mozilla/5.0 Chrome/120.0") != "chrome" {
 		t.Fatal("chrome")
 	}
 	if uaFamily("/api/provide/vod", "okhttp") != "tvbox" {
 		t.Fatal("tvbox ua")
 	}
-	if uaFamily("/api/index", "EcoHub-SSR") != "ecohub-ssr" {
+	if uaFamily("/api/home", "EcoHub-SSR") != "ecohub-ssr" {
 		t.Fatal("ssr ua")
 	}
 }
@@ -393,7 +427,7 @@ func testPageCtx(ua, ip string) *gin.Context {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodPost, "/api/stat/view", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/stats/view", nil)
 	req.Header.Set("User-Agent", ua)
 	req.RemoteAddr = ip + ":1234"
 	c.Request = req
@@ -401,9 +435,16 @@ func testPageCtx(ua, ip string) *gin.Context {
 }
 
 func resetPageHit() {
-	pageHitMu.Lock()
-	pageHitLast = map[string]time.Time{}
-	pageHitMu.Unlock()
+	resetPageHits()
+}
+
+func buildPageEvent(c *gin.Context, action, resource, source, path string) *AccessEvent {
+	return buildPageEventPayload(c, TrackViewPayload{
+		Action:   action,
+		Resource: resource,
+		Source:   source,
+		Path:     path,
+	})
 }
 
 func TestBuildPageEvent(t *testing.T) {
@@ -459,7 +500,7 @@ func TestFromContextSSR(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodGet, "/api/index", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/home", nil)
 	req.Header.Set("User-Agent", "EcoHub-SSR")
 	c.Request = req
 	if evt := FromContext(c, time.Millisecond); evt != nil {
@@ -476,16 +517,23 @@ func TestFromContextSSR(t *testing.T) {
 }
 
 func TestEnrichPlayTopItems(t *testing.T) {
+	useAccessFilmDB(t,
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1024}, FilmIndexContent: model.FilmIndexContent{Name: "影片1024"}},
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2048}, FilmIndexContent: model.FilmIndexContent{Name: "影片2048"}},
+	)
 	items := []TopItem{
 		{Key: "1024", Count: 10},
 		{Key: "id 2048", Count: 5},
 		{Key: "custom_keyword", Count: 3},
 	}
-	enriched := enrichPlayTopItems(items)
+	enriched, err := enrichPlayTopItems(items)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(enriched) != 2 {
 		t.Fatalf("want 2 valid film items (custom_keyword filtered), got %d", len(enriched))
 	}
-	if enriched[0].Title != "影片 #1024" || enriched[1].Title != "影片 #2048" {
+	if enriched[0].Title != "影片1024" || enriched[1].Title != "影片2048" {
 		t.Fatalf("enrich items %+v", enriched)
 	}
 	if enriched[1].Key != "2048" {
@@ -494,6 +542,11 @@ func TestEnrichPlayTopItems(t *testing.T) {
 }
 
 func TestTakePlayTopsOverFetch(t *testing.T) {
+	useAccessFilmDB(t,
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1}, FilmIndexContent: model.FilmIndexContent{Name: "一"}},
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2}, FilmIndexContent: model.FilmIndexContent{Name: "二"}},
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3}, FilmIndexContent: model.FilmIndexContent{Name: "三"}},
+	)
 	items := []TopItem{
 		{Key: "search", Count: 497},
 		{Key: "class", Count: 26},
@@ -501,7 +554,10 @@ func TestTakePlayTopsOverFetch(t *testing.T) {
 		{Key: "2", Count: 9},
 		{Key: "3", Count: 8},
 	}
-	got := takePlayTops(items, 2)
+	got, err := takePlayTops(items, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("want 2 after filter+limit, got %d", len(got))
 	}
@@ -528,13 +584,13 @@ func TestFromContextPlayMember(t *testing.T) {
 	if detail == nil || detail.playMember != "1024" {
 		t.Fatalf("detail ids should rank as play: %+v", detail)
 	}
-	if info := mk("/api/filmPlayInfo?id=88"); info != nil {
-		t.Fatalf("filmPlayInfo HTTP must not enter collector, got %+v", info)
+	if info := mk("/api/films/play-info?id=88"); info != nil {
+		t.Fatalf("films play-info HTTP must not enter collector, got %+v", info)
 	}
-	if keyword := mk("/api/searchFilm?keyword=2024"); keyword != nil {
+	if keyword := mk("/api/films/search?keyword=2024"); keyword != nil {
 		t.Fatalf("searchFilm HTTP must not enter collector, got %+v", keyword)
 	}
-	if idx := mk("/api/index"); idx != nil {
+	if idx := mk("/api/home"); idx != nil {
 		t.Fatalf("public HTTP must not enter collector, got %+v", idx)
 	}
 
@@ -594,7 +650,7 @@ func TestQueryLogsMatchStatus(t *testing.T) {
 
 func TestQueryLogsMatchQuery(t *testing.T) {
 	evt := &AccessEvent{
-		Path:      "/api/filmPlayInfo",
+		Path:      "/api/films/play-info",
 		IPPreview: "192.168.1.x",
 		Resource:  "1024",
 	}
@@ -608,10 +664,10 @@ func TestQueryLogsMatchQuery(t *testing.T) {
 	if !matchQuery("1.x", evt) {
 		t.Fatal("should match IP preview suffix")
 	}
-	if !matchQuery("filmplay", evt) {
+	if !matchQuery("play-info", evt) {
 		t.Fatal("should match path case-insensitively")
 	}
-	if !matchQuery("FILMPLAY", evt) {
+	if !matchQuery("PLAY-INFO", evt) {
 		t.Fatal("should match path with uppercase query")
 	}
 	if !matchQuery("  1024  ", evt) {
@@ -678,7 +734,7 @@ func TestResolveDeviceID(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/index", nil)
+	c.Request = httptest.NewRequest("GET", "/api/home", nil)
 	c.Request.Header.Set("X-Device-Id", "web-device-1")
 	if got := ResolveDeviceID(c, "web", "1.1.1.1", "Mozilla"); got != "web-device-1" {
 		t.Fatalf("header device id, got %q", got)
@@ -849,7 +905,7 @@ func TestBuildPageEventPayload_Platforms(t *testing.T) {
 		Source:   "web",
 		Action:   "classify",
 		Resource: "19",
-		Path:     "/filmClassify?Pid=19",
+		Path:     "/category?pid=19",
 	}
 	evtWebClassify := buildPageEventPayload(ctx, pWebClassify)
 	if evtWebClassify == nil || evtWebClassify.Action != ActionClassify || evtWebClassify.Resource != "19" || evtWebClassify.ClientType != "web" {
@@ -934,7 +990,10 @@ func TestOverviewFromDailyScope_TVBoxSeries(t *testing.T) {
 		SeriesJSON: seriesJSON,
 	}
 
-	ov := overviewFromDailyScope(row, "tvbox", "")
+	ov, err := overviewFromDailyScope(row, "tvbox", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ov.PV != 25 || ov.UV != 15 {
 		t.Fatalf("expected TVBox PV=25, UV=15, got PV=%d, UV=%d", ov.PV, ov.UV)
 	}
@@ -942,7 +1001,10 @@ func TestOverviewFromDailyScope_TVBoxSeries(t *testing.T) {
 		t.Fatalf("expected TVBox Series[0].PV=25, got %+v", ov.Series)
 	}
 
-	globalOv := overviewFromDailyScope(row, "", "")
+	globalOv, err := overviewFromDailyScope(row, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if globalOv.PV != 125 || globalOv.UV != 80 {
 		t.Fatalf("expected Global PV=125, UV=80, got PV=%d, UV=%d", globalOv.PV, globalOv.UV)
 	}
@@ -1002,7 +1064,7 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 		ProvidePV:      50,
 		ProvideUV:      35,
 		SeriesJSON:     seriesJSON,
-		VersionJSON:    `{"1.0.0":10,"1.0.1":10}`,
+		VersionJSON:    `{"android":{"1.0.0":10,"1.0.1":10}}`,
 		PlatformJSON:   `{"android":15,"ios":5}`,
 		PlatformUVJSON: `{"android":8,"ios":3}`,
 		BrowserJSON:    `{"chrome":25}`,
@@ -1011,7 +1073,10 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 	}
 
 	// Web 端验证
-	webOv := overviewFromDailyScope(row, "web", "")
+	webOv, err := overviewFromDailyScope(row, "web", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if webOv.PV != 30 || webOv.UV != 20 {
 		t.Fatalf("expected Web PV=30, UV=20, got PV=%d, UV=%d", webOv.PV, webOv.UV)
 	}
@@ -1020,7 +1085,10 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 	}
 
 	// App 端验证
-	appOv := overviewFromDailyScope(row, "app", "")
+	appOv, err := overviewFromDailyScope(row, "app", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if appOv.PV != 20 || appOv.UV != 15 {
 		t.Fatalf("expected App PV=20, UV=15, got PV=%d, UV=%d", appOv.PV, appOv.UV)
 	}
@@ -1038,7 +1106,10 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 	}
 
 	// App 端分平台下钻验证（Issue 2）
-	androidOv := overviewFromDailyScope(row, "app", "android")
+	androidOv, err := overviewFromDailyScope(row, "app", "android")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if androidOv.PV != 15 {
 		t.Fatalf("expected Android platform PV=15, got %d", androidOv.PV)
 	}
@@ -1051,11 +1122,17 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 
 	nestedRow := row
 	nestedRow.VersionJSON = `{"android":{"2.5.4":7},"ios":{"2.5.4":2}}`
-	androidVer := overviewFromDailyScope(nestedRow, "app", "android")
+	androidVer, err := overviewFromDailyScope(nestedRow, "app", "android")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if androidVer.Versions["2.5.4"] != 7 {
 		t.Fatalf("expected android versions 2.5.4=7, got %+v", androidVer.Versions)
 	}
-	allVer := overviewFromDailyScope(nestedRow, "app", "")
+	allVer, err := overviewFromDailyScope(nestedRow, "app", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if allVer.Versions["2.5.4"] != 9 {
 		t.Fatalf("expected merged versions 2.5.4=9, got %+v", allVer.Versions)
 	}
@@ -1092,6 +1169,7 @@ func TestModuleIsolationKeys(t *testing.T) {
 }
 
 func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
+	useAccessFilmDB(t)
 	events := []AccessEvent{
 		{
 			Action:         ActionPlay,
@@ -1112,7 +1190,10 @@ func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
 		},
 	}
 
-	res := enrichLogEvents(events)
+	res, err := enrichLogEvents(events)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 3 {
 		t.Fatalf("expected 3 events, got %d", len(res))
 	}
@@ -1128,9 +1209,8 @@ func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
 		t.Fatalf("expected ResourceCat to be preserved as '科幻', got %q", res[0].ResourceCat)
 	}
 
-	// 验证未固化快照的事件仍会兜底处理
-	if res[1].ResourceTitle == "" {
-		t.Fatalf("expected res[1] to have fallback title, got empty")
+	if res[1].ResourceTitle != "" {
+		t.Fatalf("库里没有这部片时标题应为空，got %q", res[1].ResourceTitle)
 	}
 
 	// 验证分类快照保留
@@ -1140,6 +1220,7 @@ func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
 }
 
 func TestEnrichPlayTopItems_PreservesHistoricalTitle(t *testing.T) {
+	useAccessFilmDB(t)
 	items := []TopItem{
 		{
 			Key:      "1024",
@@ -1155,14 +1236,14 @@ func TestEnrichPlayTopItems_PreservesHistoricalTitle(t *testing.T) {
 		},
 	}
 
-	res := enrichPlayTopItems(items)
-	if len(res) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(res))
+	res, err := enrichPlayTopItems(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(res))
 	}
 	if res[0].Title != "历史归档-阿凡达" {
 		t.Fatalf("expected Title to be preserved as '历史归档-阿凡达', got %q", res[0].Title)
-	}
-	if res[1].Title != "影片 #2048" {
-		t.Fatalf("expected Title fallback '影片 #2048', got %q", res[1].Title)
 	}
 }

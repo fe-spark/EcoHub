@@ -28,7 +28,7 @@ func InitRedisConn() error {
 		DB:              config.RedisDBNo,
 		PoolSize:        64,
 		MinIdleConns:    10,
-		MaxRetries:      3,
+		MaxRetries:      -1, // 0 会被 go-redis 当成默认 3 次，INCR 会整段重放
 		DialTimeout:     time.Second * 10,
 		ReadTimeout:     time.Second * 5,
 		WriteTimeout:    time.Second * 5,
@@ -45,8 +45,12 @@ func InitRedisConn() error {
 
 	old := Rdb
 	Rdb = client
-	if old != nil {
-		_ = old.Close()
+	if old != nil && old != client {
+		// 正在执行的命令还拿着旧客户端。立刻 Close 会打断 SCAN/SET。
+		go func(prev *redis.Client) {
+			time.Sleep(30 * time.Second)
+			_ = prev.Close()
+		}(old)
 	}
 
 	return nil

@@ -1,24 +1,23 @@
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { CATEGORY_GROUPS, normalizeRuleRecord, normalizeTree, parseRuleList, type FilmClassNode } from "./types";
 
-export async function getFilmClassTree() {
-  const resp = await ApiGet("/manage/film/class/tree");
+export async function getFilmClassTree(sourceId = "") {
+  const resp = await ApiGet("/manage/film/class/tree", {
+    scoped: 1,
+    sourceId,
+  });
+  const sources = Array.isArray(resp.data?.sources) ? resp.data.sources : [];
   return {
     resp,
     tree: normalizeTree((resp.data?.children || []) as FilmClassNode[]),
+    sources: sources as { id: string; name: string; state?: boolean }[],
+    defaultSourceId: String(resp.data?.defaultSourceId || ""),
+    currentSourceId: String(resp.data?.currentSourceId || sourceId || ""),
   };
 }
 
-export async function resetFilmClassTree() {
-  return ApiPost("/manage/film/class/collect", {});
-}
-
-export async function saveFilmClassTree(children: FilmClassNode[]) {
-  return ApiPost("/manage/film/class/tree/save", { children });
-}
-
-export async function updateFilmClassShow(id: number, show: boolean) {
-  return ApiPost("/manage/film/class/update", { id, show });
+export async function saveFilmClassTree(children: FilmClassNode[], sourceId: string) {
+  return ApiPost("/manage/film/class/tree", { children, sourceId });
 }
 
 export async function getCategoryRules(page: number, pageSize: number, keyword: string, group: string) {
@@ -68,9 +67,9 @@ export async function saveCategoryRule(payload: {
   matchType: string;
   remarks: string;
 }) {
-  return ApiPost(payload.id ? "/manage/mapping/rule/update" : "/manage/mapping/rule/add", payload);
+  return ApiPost("/manage/mapping/rule/save", payload);
 }
 
 export async function deleteCategoryRule(id: number) {
-  return ApiPost("/manage/mapping/rule/del", { id });
+  return ApiPost("/manage/mapping/rule/delete", { ids: [id] });
 }

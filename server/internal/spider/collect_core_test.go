@@ -1,16 +1,20 @@
 package spider
 
 import (
-	"context"
-	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/spider/progress"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestFilterEnabledSources(t *testing.T) {
@@ -34,7 +38,6 @@ func TestFilterEnabledSources(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeAffectedMIDs(t *testing.T) {
 	input := []int64{10, -1, 5, 0, 10, 20, 5, 3}
 	expected := []int64{3, 5, 10, 20}
@@ -54,22 +57,12 @@ func TestNormalizeAffectedMIDs(t *testing.T) {
 }
 
 func TestShouldSkipCollectPublishOnError(t *testing.T) {
-	masterSource := model.FilmSource{Grade: model.MasterCollect}
-	slaveSource := model.FilmSource{Grade: model.SlaveCollect}
-
-	// 主站全量采集 (h < 0) -> 跳过发布
-	if !shouldSkipCollectPublishOnError(masterSource, -1) {
-		t.Error("expected true for MasterCollect with h < 0")
+	src := model.FilmSource{Sort: 0}
+	if shouldSkipCollectPublishOnError(src, -1) {
+		t.Error("流式可见下全量失败页不再跳过已刷快照")
 	}
-
-	// 主站增量采集 (h > 0) -> 不跳过
-	if shouldSkipCollectPublishOnError(masterSource, 3) {
-		t.Error("expected false for MasterCollect with h > 0")
-	}
-
-	// 附属站全量采集 (h < 0) -> 不跳过
-	if shouldSkipCollectPublishOnError(slaveSource, -1) {
-		t.Error("expected false for SlaveCollect with h < 0")
+	if shouldSkipCollectPublishOnError(src, 3) {
+		t.Error("expected false for h > 0")
 	}
 }
 
@@ -102,7 +95,10 @@ func TestOccupyAndMarkCollectSources_RetryIsNewQueue(t *testing.T) {
 	wrap := model.FilmSource{Id: "retry-queue-wrap", Name: "默认"}
 	defer releaseCollectSources([]model.FilmSource{ik, wrap})
 
-	batch := occupyAndMarkCollectSources([]model.FilmSource{ik, wrap}, "Batch-Collect")
+	batch, err := occupyAndMarkCollectSources([]model.FilmSource{ik, wrap}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(batch) != 2 {
 		t.Fatalf("batch occupy got %d, want 2", len(batch))
 	}
@@ -121,7 +117,10 @@ func TestOccupyAndMarkCollectSources_RetryIsNewQueue(t *testing.T) {
 		p.Status = progress.StatusFailed
 	})
 
-	retry := occupyAndMarkCollectSources([]model.FilmSource{ik}, "Single-Collect")
+	retry, err := occupyAndMarkCollectSources([]model.FilmSource{ik}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(retry) != 1 {
 		t.Fatalf("retry occupy got %d, want 1", len(retry))
 	}
@@ -144,7 +143,11 @@ func TestOccupyAndMarkCollectSources_RetryIsNewQueue(t *testing.T) {
 func TestBatchCollectErrorReleasesOccupyForRetry(t *testing.T) {
 	id := "batch-fail-release-occupy"
 	source := model.FilmSource{Id: id, Name: "HD(IK)"}
-	if len(occupyAndMarkCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
+	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(occupied) != 1 {
 		t.Fatal("occupy failed")
 	}
 	defer releaseCollectSourceIDs(id)
@@ -164,7 +167,11 @@ func TestBatchCollectErrorReleasesOccupyForRetry(t *testing.T) {
 		t.Fatal("failed leftover must not block retry")
 	}
 
-	if len(occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")) != 1 {
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retried) != 1 {
 		t.Fatal("retry should occupy after failed batch source released")
 	}
 }
@@ -178,7 +185,7 @@ func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
 	}
 	defer releaseCollectSources([]model.FilmSource{ik, wrap})
 
-	batch := newCollectBatchContext(model.NotifyTriggerManual, "Batch-Collect", claimed, nil, time.Now())
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
 	abortUnstartedCollect(ik.Id, batch)
 
 	if len(occupyCollectSources([]model.FilmSource{ik}, "Single-Collect")) != 1 {
@@ -193,8 +200,136 @@ func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
 	}
 }
 
+func TestStopTaskDropsQueuedOccupySoRetryCanStart(t *testing.T) {
+	src := model.FilmSource{Id: "stop-queued-retry", Name: "111"}
+	claimed := occupyCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if len(claimed) != 1 {
+		t.Fatal("batch occupy failed")
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
+	defer batch.close()
+
+	StopTask(src.Id)
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("stopping a queued source must leave the old queue")
+	}
+	if progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("stopped queued source must not block a new collect")
+	}
+
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retried) != 1 {
+		t.Fatal("retry should occupy after the source left the old queue")
+	}
+	defer releaseCollectSourceIDs(src.Id)
+	before, ok := progress.Snapshot(src.Id)
+	if !ok || before.Status != progress.StatusStarting || before.QueueId == "" {
+		t.Fatalf("retry progress = ok:%v status:%q queue:%q", ok, before.Status, before.QueueId)
+	}
+
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, 0, batch)
+	after, ok := progress.Snapshot(src.Id)
+	if !ok || after.Status != progress.StatusStarting || after.QueueId != before.QueueId {
+		t.Fatalf("old queue must not overwrite retry, ok=%v status=%q queue=%q want %q", ok, after.Status, after.QueueId, before.QueueId)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("old queue must not drop the retry occupy")
+	}
+}
+
+func TestStopTaskDetachesRunningSourceAndKeepsStoppingUntilExit(t *testing.T) {
+	src := model.FilmSource{Id: "stop-running-detach", Name: "111"}
+	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(occupied) != 1 {
+		t.Fatal("occupy failed")
+	}
+	ctx, err := progress.TryRegisterTask(src.Id, "req-running", nil)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	runCtx := progress.WithRunEpoch(ctx, progress.Epoch(src.Id))
+
+	StopTask(src.Id)
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("running source must leave the old queue on stop")
+	}
+	if !progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("stopping source must stay busy until the run exits")
+	}
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusStopping {
+		t.Fatalf("status must stay stopping until the run exits, ok=%v status=%q", ok, snap.Status)
+	}
+	blocked, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocked) != 0 {
+		t.Fatal("retry must wait until the run really exits")
+	}
+
+	progress.FinishRun(runCtx, src.Id, nil)
+	done, ok := progress.Snapshot(src.Id)
+	if !ok || done.Status != progress.StatusStopped {
+		t.Fatalf("true exit must become stopped, ok=%v status=%q", ok, done.Status)
+	}
+	if progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("exited source must accept a new collect")
+	}
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retried) != 1 {
+		t.Fatal("retry should occupy after the run exits")
+	}
+	defer releaseCollectSourceIDs(src.Id)
+
+	progress.FinishRun(runCtx, src.Id, nil)
+	progress.UpdateRun(runCtx, src.Id, func(cur *model.CollectProgress) {
+		cur.Status = progress.StatusRunning
+		cur.Current = 9
+	})
+	after, ok := progress.Snapshot(src.Id)
+	if !ok || after.Status != progress.StatusStarting || after.Current != 0 {
+		t.Fatalf("old exit must not overwrite retry, ok=%v status=%q current=%d", ok, after.Status, after.Current)
+	}
+}
+
+func TestFinishRunMarksStoppedWhenNoRetry(t *testing.T) {
+	src := model.FilmSource{Id: "stop-running-finish", Name: "111"}
+	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(occupied) != 1 {
+		t.Fatal("occupy failed")
+	}
+	defer releaseCollectSourceIDs(src.Id)
+	ctx, err := progress.TryRegisterTask(src.Id, "req-finish", nil)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	runCtx := progress.WithRunEpoch(ctx, progress.Epoch(src.Id))
+	StopTask(src.Id)
+	progress.FinishRun(runCtx, src.Id, nil)
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusStopped {
+		t.Fatalf("true exit must become stopped, ok=%v status=%q", ok, snap.Status)
+	}
+	if progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("stopped source must accept a new collect")
+	}
+}
+
 func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
-	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Grade: 1}
+	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Sort: 1}
 	if len(occupyCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
 		t.Fatal("occupy failed")
 	}
@@ -206,6 +341,42 @@ func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
 	runSourcesGroupWithLimit([]model.FilmSource{source}, 24, "Batch-Collect", 0, 0, nil)
 	if isOccupiedCollectSource(source.Id) {
 		t.Fatal("stopped queued source must release occupy so retry can start")
+	}
+}
+
+func TestHandlePreparedCollect_ProbeFailureReleasesOccupy(t *testing.T) {
+	prev := db.Mdb
+	gdb, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "probe-fail-occupy", Name: "站", Uri: "http://example.test", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(occupyCollectSources([]model.FilmSource{src}, "prepared")) != 1 {
+		t.Fatal("occupy failed")
+	}
+	defer releaseCollectSourceIDs(src.Id)
+	progress.MarkSourcesCollectStarting([]model.FilmSource{src}, "q-probe")
+
+	if err := HandlePreparedCollect(src.Id, 0); err == nil {
+		t.Fatal("expected probe error")
+	}
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("probe failure must release occupy")
+	}
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusFailed {
+		t.Fatalf("probe failure must end as failed, ok=%v status=%q", ok, snap.Status)
 	}
 }
 
@@ -230,7 +401,7 @@ func TestStandaloneCloseDoesNotLeaveOccupyForSecondRelease(t *testing.T) {
 	if len(occupyCollectSources([]model.FilmSource{source}, "first")) != 1 {
 		t.Fatal("first occupy failed")
 	}
-	batch := newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{source}, nil, time.Now(), true)
+	batch := newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{source}, time.Now(), true)
 	batch.close()
 	if isOccupiedCollectSource(source.Id) {
 		t.Fatal("close should release occupy")
@@ -305,12 +476,20 @@ func TestOccupyCollectSources_ConcurrentSameSourceOnlyOneWins(t *testing.T) {
 }
 
 func TestCollectBatchContext_Isolation(t *testing.T) {
-	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
-	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Grade: model.SlaveCollect}
-	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Grade: model.SlaveCollect}
+	resetStreamPublishBufferForTest()
+	origPub := publishStreamWindowFn
+	publishStreamWindowFn = func(mids []int64) error { return nil }
+	t.Cleanup(func() {
+		resetStreamPublishBufferForTest()
+		publishStreamWindowFn = origPub
+	})
 
-	batchA := newCollectBatchContext(model.NotifyTriggerManual, "全量", []model.FilmSource{sourceA}, nil, time.Now(), true)
-	batchB := newCollectBatchContext(model.NotifyTriggerCron, "定时", []model.FilmSource{sourceB}, nil, time.Now(), false)
+	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
+	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}
+	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Sort: 1}
+
+	batchA := newCollectBatchContext(model.CollectTriggerManual, "全量", []model.FilmSource{sourceA}, time.Now(), true)
+	batchB := newCollectBatchContext(model.CollectTriggerCron, "定时", []model.FilmSource{sourceB}, time.Now(), false)
 
 	if !batchA.isStandalone {
 		t.Errorf("expected batch A isStandalone=true")
@@ -325,18 +504,18 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	// Batch B 产生 MIDs: 300, 400
 	batchB.addAffectedMIDs(&sourceB, 24, []int64{300, 400})
 
-	// 验证两批次各自独立持有自身 MIDs，互不泄露
+	// 验证两批次各自独立持有自身标签刷新 MIDs，互不泄露
 	batchA.mu.Lock()
-	midsA := make([]int64, 0, len(batchA.affectedMIDs))
-	for mid := range batchA.affectedMIDs {
+	midsA := make([]int64, 0, len(batchA.masterAffectedMIDs))
+	for mid := range batchA.masterAffectedMIDs {
 		midsA = append(midsA, mid)
 	}
 	sort.Slice(midsA, func(i, j int) bool { return midsA[i] < midsA[j] })
 	batchA.mu.Unlock()
 
 	batchB.mu.Lock()
-	midsB := make([]int64, 0, len(batchB.affectedMIDs))
-	for mid := range batchB.affectedMIDs {
+	midsB := make([]int64, 0, len(batchB.masterAffectedMIDs))
+	for mid := range batchB.masterAffectedMIDs {
 		midsB = append(midsB, mid)
 	}
 	sort.Slice(midsB, func(i, j int) bool { return midsB[i] < midsB[j] })
@@ -350,58 +529,5 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	}
 	if !reflect.DeepEqual(midsB, expectedB) {
 		t.Errorf("batch B MIDs = %v; want %v", midsB, expectedB)
-	}
-}
-
-func TestAdaptiveRateLimiting_SmoothBackoff(t *testing.T) {
-	const sourceID = "test_source_rl"
-	ClearLimiter(sourceID)
-	defer ClearLimiter(sourceID)
-
-	source := &model.FilmSource{
-		Id:       sourceID,
-		Name:     "Test RL",
-		Interval: 50,
-	}
-
-	// 1) 首次请求放行，并模拟上游返回 429 限流错误
-	release1, err := waitSourceRequestTurn(context.Background(), source, "test-turn-1")
-	if err != nil {
-		t.Fatalf("unexpected wait turn error: %v", err)
-	}
-	release1(errors.New("HTTP 429 Too Many Requests"))
-
-	gate := getSourceRequestGate(sourceID)
-	gate.mu.Lock()
-	hits := gate.rateLimitHits
-	nextAllowed := gate.nextAllowedAt
-	gate.mu.Unlock()
-
-	if hits != 1 {
-		t.Fatalf("expected rateLimitHits=1 after 429, got %d", hits)
-	}
-	if !nextAllowed.After(time.Now()) {
-		t.Fatalf("expected nextAllowedAt to be in the future after 429 backoff")
-	}
-
-	// 2) 再次请求放行（模拟冷却后），并模拟请求成功，hits 应递减
-	gate.mu.Lock()
-	gate.nextAllowedAt = time.Now().Add(-100 * time.Millisecond) // 模拟冷却结束
-	gate.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	release2, err := waitSourceRequestTurn(ctx, source, "test-turn-2")
-	if err != nil {
-		t.Fatalf("unexpected wait turn error: %v", err)
-	}
-	release2(nil) // 成功放行释放
-
-	gate.mu.Lock()
-	hitsAfterSuccess := gate.rateLimitHits
-	gate.mu.Unlock()
-
-	if hitsAfterSuccess != 0 {
-		t.Fatalf("expected rateLimitHits=0 after success, got %d", hitsAfterSuccess)
 	}
 }

@@ -1,17 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
 import type { MenuProps } from "antd";
 import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import GlobalOverviewBar from "./global-overview-bar";
 import WebAnalyticsView from "./web-view";
 import AppAnalyticsView from "./app-view";
 import TvboxAnalyticsView from "./tvbox-view";
+import SourceCalls from "./source-calls";
 import styles from "./index.module.less";
 
 function disabledAccessDay(d: Dayjs) {
@@ -47,25 +46,10 @@ const MODULE_OPTIONS: { key: "web" | "app" | "tvbox"; label: string; icon: React
 ];
 
 export default function AccessPageView() {
-  const router = useRouter();
   const [activeModule, setActiveModule] = useState<"web" | "app" | "tvbox">("web");
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(true);
-
-  useEffect(() => {
-    ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
-      .then((res) => {
-        if (res.code === 0 && res.data) {
-          if (!res.data.enabled) {
-            router.replace("/manage");
-          }
-        }
-      })
-      .catch(() => {
-        router.replace("/manage");
-      });
-  }, [router]);
 
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     if (typeof window !== "undefined") {
@@ -179,6 +163,7 @@ export default function AccessPageView() {
         title="数据分析"
         actions={
           <Space size={12} align="center">
+
             {/* 日期选择：默认当天 */}
             <DatePicker
               allowClear={false}
@@ -190,27 +175,30 @@ export default function AccessPageView() {
 
             {/* 刷新与自动轮询组合 */}
             {isToday ? (
-              <Dropdown.Button
-                icon={<DownOutlined />}
-                onClick={handleManualRefresh}
-                menu={{
-                  items: refreshMenuItems,
-                  selectable: true,
-                  selectedKeys: autoRefresh ? [String(refreshInterval)] : [],
-                  onClick: handleMenuClick,
-                }}
-              >
-                <Space size={6} align="center">
-                  <ReloadOutlined spin={isRefreshing} />
-                  <span>刷新</span>
-                  {autoRefresh && (
-                    <span style={{ fontSize: 12, color: "var(--ant-color-text-tertiary)" }}>
-                      {refreshInterval}s
-                    </span>
-                  )}
-                  <Badge status={autoRefresh ? "processing" : "default"} />
-                </Space>
-              </Dropdown.Button>
+              <Space.Compact>
+                <Button onClick={handleManualRefresh}>
+                  <Space size={6} align="center">
+                    <ReloadOutlined spin={isRefreshing} />
+                    <span>刷新</span>
+                    {autoRefresh && (
+                      <span style={{ fontSize: 12, color: "var(--ant-color-text-tertiary)" }}>
+                        {refreshInterval}s
+                      </span>
+                    )}
+                    <Badge status={autoRefresh ? "processing" : "default"} />
+                  </Space>
+                </Button>
+                <Dropdown
+                  menu={{
+                    items: refreshMenuItems,
+                    selectable: true,
+                    selectedKeys: autoRefresh ? [String(refreshInterval)] : [],
+                    onClick: handleMenuClick,
+                  }}
+                >
+                  <Button icon={<DownOutlined />} />
+                </Dropdown>
+              </Space.Compact>
             ) : (
               <Button icon={<ReloadOutlined spin={isRefreshing} />} onClick={handleManualRefresh}>
                 刷新
@@ -225,6 +213,8 @@ export default function AccessPageView() {
         dayStr={dayStr}
         refreshKey={refreshKey}
       />
+
+      <SourceCalls dayStr={dayStr} refreshKey={refreshKey} />
 
       <div className={styles.moduleNavWrapper} role="tablist" aria-label="数据分析客户端分类">
         {MODULE_OPTIONS.map((item) => {

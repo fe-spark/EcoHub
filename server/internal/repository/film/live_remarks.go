@@ -7,7 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/film/snapshot"
+	filmshared "server/internal/repository/film/shared"
 )
 
 type liveProgress struct {
@@ -67,6 +67,8 @@ type LiveBannerSnapshot struct {
 	CustomPicture      string
 	CustomPictureSlide string
 	IsCustomPicture    bool
+	IsScraped          bool
+	TmdbID             int64
 }
 
 func (s LiveBannerSnapshot) DisplayPicture() string {
@@ -90,13 +92,12 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		return out
 	}
 
-	version := snapshot.GetActiveSnapshotVersion()
-	if version == "" {
-		return out
-	}
-
 	type row struct {
 		Mid                int64
+		FirstSourceId      string
+		DbId               int64
+		Name               string
+		Pid                int64
 		Remarks            string
 		Area               string
 		ClassTag           string
@@ -112,16 +113,16 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		IsCustomPicture    bool
 	}
 	var rows []row
-	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-		Select("mid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
-		Where("snapshot_version = ? AND mid IN ?", version, mids).
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("mid, first_source_id, db_id, name, pid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
+		Where("mid IN ?", mids).
 		Scan(&rows).Error; err != nil {
 		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
 		return out
 	}
 
 	for _, r := range rows {
-		out[r.Mid] = LiveBannerSnapshot{
+		snap := LiveBannerSnapshot{
 			Mid:                r.Mid,
 			Remarks:            strings.TrimSpace(r.Remarks),
 			Area:               strings.TrimSpace(r.Area),
@@ -137,6 +138,33 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 			CustomPictureSlide: strings.TrimSpace(r.CustomPictureSlide),
 			IsCustomPicture:    r.IsCustomPicture,
 		}
+		out[r.Mid] = snap
+	}
+	posters := make([]model.FilmListSnapshot, 0, len(rows))
+	for _, r := range rows {
+		current := out[r.Mid]
+		posters = append(posters, model.FilmListSnapshot{
+			Mid:             r.Mid,
+			SourceId:        r.FirstSourceId,
+			DbId:            r.DbId,
+			Name:            r.Name,
+			Pid:             r.Pid,
+			Picture:         current.Picture,
+			PictureSlide:    current.PictureSlide,
+			IsCustomPicture: current.IsCustomPicture,
+		})
+	}
+	for _, snap := range filmshared.ApplyPosterSourcePictures(posters) {
+		current := out[snap.Mid]
+		if current.Picture == snap.Picture && current.PictureSlide == snap.PictureSlide && current.IsCustomPicture == snap.IsCustomPicture {
+			continue
+		}
+		current.Picture = snap.Picture
+		current.PictureSlide = snap.PictureSlide
+		current.CustomPicture = snap.CustomPicture
+		current.CustomPictureSlide = snap.CustomPictureSlide
+		current.IsCustomPicture = snap.IsCustomPicture
+		out[snap.Mid] = current
 	}
 	return out
 }

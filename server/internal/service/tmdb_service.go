@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/utils"
 )
 
 type TMDBService struct{}
@@ -22,8 +22,11 @@ type TMDBService struct{}
 var TMDBSvc = new(TMDBService)
 
 const (
+	httpTimeout = 8 * time.Second
+)
+
+var (
 	tmdbAPIBaseURL = "https://api.themoviedb.org/3"
-	httpTimeout    = 15 * time.Second
 )
 
 var (
@@ -31,14 +34,17 @@ var (
 	noiseRegexes = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\[.*?\]`),
 		regexp.MustCompile(`(?i)【.*?】`),
-		regexp.MustCompile(`(?i)[（(]?\b(4k|1080p|720p|2160p|hd|bd|tc|ts|dvd|web-dl|bluray)\b[）)]?`),
+		regexp.MustCompile(`(?i)[（(]?\b(4k|1080p|720p|2160p|hd|bd|tc|ts|dvd|web-dl|bluray|uhd|remux|h264|h265|x264|x265|hevc|aac)\b[）)]?`),
 		regexp.MustCompile(`(?i)[0-9]+(帧|fps)`),
-		regexp.MustCompile(`(?i)[-_—·\s]*(普通话版|普通话|国粤双语|国语版|国语|粤语版|粤语|原声版|中配版|中配|配音版|译制版|重制版|重置版|真人版|剧场版|电影版|特别篇)`),
-		regexp.MustCompile(`(?i)[-_—·\s]*(动态漫画|动态漫|有声漫|短剧|微短剧|竖屏剧)`),
-		regexp.MustCompile(`(?i)(中文字幕|中英双字|双语字幕|抢先版|修复版|加长版|无删减|未删减)`),
-		regexp.MustCompile(`(?i)(第[0-9一二三四五六七八九十]+[集期话]|更新至[0-9]+[集期话]|全[0-9]+[集期话]|完结|连载中)`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]*(预告片|预告|先导片|先导预告|片花|花絮|特辑|彩蛋|幕后|采访|纯享版|精编版|精华版|速看版|解说版|正片)`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]+(trailer|teaser|pv|preview|sp)\b`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]*(普通话版|普通话|国粤双语|国语版|国语|粤语版|粤语|英语版|原声版|中配版|中配|配音版|译制版|重制版|重置版|真人版|剧场版|电影版|特别篇)`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]*(动态漫画|动态漫|有声漫|短剧|微短剧|竖屏剧)`),
+		regexp.MustCompile(`(?i)(中文字幕|中英双字|双语字幕|抢先版|枪版|高清版|超清版|蓝光版|完整版|未删减版|无删减版|未删减|无删减|修复版|加长版|导演剪辑版|公映版)`),
+		regexp.MustCompile(`(?i)(第[0-9一二三四五六七八九十]+[集期话]|更新至[0-9]+[集期话]|全[0-9]+[集期话]|完结|连载中|(Episode|EP)[0-9]+)`),
 	}
 	yearRegex          = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
+	bracketYearRegex   = regexp.MustCompile(`[（(]\s*(19\d{2}|20\d{2})\s*[）)]`)
 	emptyBracketsRegex = regexp.MustCompile(`[（(]\s*[）)]|[【\[]\s*[】\]]`)
 )
 
@@ -58,55 +64,53 @@ func CleanKeywordForSearch(raw string) (cleaned string, extractedYear string) {
 	// 清理残留的空括号
 	s = emptyBracketsRegex.ReplaceAllString(s, " ")
 
-	// 清洗标点与多余空格
-	s = strings.Trim(s, " -_·—:：")
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	// 清洗标点与多余空格（包括半角和全角中文空格）
+	s = strings.Trim(s, " \t\r\n\u3000-_·—:：.~～〜!！?？")
+	s = regexp.MustCompile(`[\s\x{3000}]+`).ReplaceAllString(s, " ")
 	return s, extractedYear
 }
 
-func getHTTPClient(proxyStr string) *http.Client {
-	var transport *http.Transport
-	if t, ok := http.DefaultTransport.(*http.Transport); ok {
-		transport = t.Clone()
-	} else {
-		transport = &http.Transport{}
+func getHTTPClient() (*http.Client, error) {
+	ok, proxyURL, err := repository.ResolveTMDBProxy()
+	if err != nil {
+		return nil, err
 	}
-
-	proxyStr = strings.TrimSpace(proxyStr)
-	if proxyStr != "" {
-		if !strings.HasPrefix(proxyStr, "http://") && !strings.HasPrefix(proxyStr, "https://") && !strings.HasPrefix(proxyStr, "socks5://") {
-			proxyStr = "http://" + proxyStr
-		}
-		if u, err := url.Parse(proxyStr); err == nil {
-			transport.Proxy = http.ProxyURL(u)
-		}
+	var transport *http.Transport
+	if ok && proxyURL != "" {
+		transport = utils.GetOrCreateProxyTransport(proxyURL)
 	} else {
-		transport.Proxy = http.ProxyFromEnvironment
+		transport = utils.GetOrCreateProxyTransport("")
 	}
 	return &http.Client{
 		Transport: transport,
 		Timeout:   httpTimeout,
-	}
+	}, nil
 }
 
 // GetConfig 获取脱敏配置
-func (s *TMDBService) GetConfig() model.TMDBConfig {
-	return repository.PublicTMDBConfig(repository.GetTMDBConfig())
+func (s *TMDBService) GetConfig() (model.TMDBConfig, error) {
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return model.TMDBConfig{}, err
+	}
+	return repository.PublicTMDBConfig(cfg), nil
+}
+
+func tmdbScrapeReady(cfg model.TMDBConfig) bool {
+	return cfg.Enabled && strings.TrimSpace(cfg.ApiKey) != ""
 }
 
 // UpdateConfig 更新 TMDB 配置
 func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
-	existing := repository.GetTMDBConfig()
+	existing, err := repository.GetTMDBConfig()
+	if err != nil {
+		return err
+	}
 	if repository.IsMaskedTMDBApiKey(cfg.ApiKey) {
 		cfg.ApiKey = existing.ApiKey
 	}
 	if err := repository.SaveTMDBConfig(cfg); err != nil {
 		return err
-	}
-
-	// 级联处理：关闭 TMDB 或清空 API Key 时仅暂停在线刮削，不强制切换手动模式，保留当前排片
-	if !cfg.Enabled || strings.TrimSpace(cfg.ApiKey) == "" {
-		BannerAutoSvc.HandleTMDBDisabled()
 	}
 
 	return nil
@@ -116,13 +120,20 @@ func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 	apiKey := strings.TrimSpace(cfg.ApiKey)
 	if repository.IsMaskedTMDBApiKey(apiKey) {
-		apiKey = repository.GetTMDBConfig().ApiKey
+		stored, err := repository.GetTMDBConfig()
+		if err != nil {
+			return err
+		}
+		apiKey = stored.ApiKey
 	}
 	if apiKey == "" {
 		return errors.New("API Key 不能为空")
 	}
 
-	client := getHTTPClient(strings.TrimSpace(cfg.Proxy))
+	client, err := getHTTPClient()
+	if err != nil {
+		return err
+	}
 	testURL := fmt.Sprintf("%s/configuration?api_key=%s", tmdbAPIBaseURL, url.QueryEscape(apiKey))
 
 	req, err := http.NewRequest(http.MethodGet, testURL, nil)
@@ -145,114 +156,112 @@ func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 	return nil
 }
 
-// rawTMDBItem TMDB API 原始条目
-type rawTMDBItem struct {
-	ID            int64   `json:"id"`
-	MediaType     string  `json:"media_type"`
-	Title         string  `json:"title"`
-	Name          string  `json:"name"`
-	OriginalTitle string  `json:"original_title"`
-	OriginalName  string  `json:"original_name"`
-	ReleaseDate   string  `json:"release_date"`
-	FirstAirDate  string  `json:"first_air_date"`
-	PosterPath    string  `json:"poster_path"`
-	BackdropPath  string  `json:"backdrop_path"`
-	VoteAverage   float64 `json:"vote_average"`
-	Overview      string  `json:"overview"`
-}
-
-// SearchRaw 原样使用传入 query 检索 TMDB（不执行内部去噪清洗）
+// SearchRaw 已无调用方。弹窗检索请用 Search。
 func (s *TMDBService) SearchRaw(query, year, mediaType string) ([]model.TMDBCandidate, error) {
-	return s.searchInternal(query, year, mediaType, false)
+	return s.Search(query, year, mediaType)
 }
 
-// Search 检索 TMDB 候选条目（默认进行片名去噪清洗）
+// prepareManualSearch 只去掉采集噪音。片名正文里的数字保留，仅提取括号中的年份。
+func prepareManualSearch(query, year string) (string, string) {
+	rawQuery := strings.TrimSpace(query)
+	searchQuery := rawQuery
+	detectedYear := ""
+	if match := bracketYearRegex.FindStringSubmatch(searchQuery); len(match) > 1 {
+		detectedYear = match[1]
+		searchQuery = bracketYearRegex.ReplaceAllString(searchQuery, " ")
+	}
+	for _, reg := range noiseRegexes {
+		searchQuery = reg.ReplaceAllString(searchQuery, " ")
+	}
+	searchQuery = emptyBracketsRegex.ReplaceAllString(searchQuery, " ")
+	searchQuery = strings.Trim(searchQuery, " \t\r\n\u3000-_·—:：.~～〜!！?？")
+	searchQuery = regexp.MustCompile(`[\s\x{3000}]+`).ReplaceAllString(searchQuery, " ")
+	if searchQuery == "" {
+		searchQuery = rawQuery
+	}
+	year = strings.TrimSpace(year)
+	if year == "" {
+		year = detectedYear
+	}
+	return searchQuery, year
+}
+
+// Search 供刮削弹窗检索。只去噪，并严格使用调用方传入的年份，只请求一次。
 func (s *TMDBService) Search(query, year, mediaType string) ([]model.TMDBCandidate, error) {
-	return s.searchInternal(query, year, mediaType, true)
-}
-
-func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise bool) ([]model.TMDBCandidate, error) {
-	cfg := repository.GetTMDBConfig()
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled || cfg.ApiKey == "" {
 		return nil, errors.New("尚未配置或未启用 TMDB 刮削功能，请前往「系统设置 → 刮削配置」完成设置")
 	}
+	searchQuery, year := prepareManualSearch(query, year)
+	return s.fetchTMDBCandidates(cfg, searchQuery, year, mediaType)
+}
 
-	searchQuery := strings.TrimSpace(query)
-	var detectedYear string
-	if cleanNoise {
-		searchQuery, detectedYear = CleanKeywordForSearch(query)
-		if searchQuery == "" {
-			searchQuery = strings.TrimSpace(query)
-		}
+func (s *TMDBService) fetchTMDBCandidates(cfg model.TMDBConfig, kw, year, mediaType string) ([]model.TMDBCandidate, error) {
+	kw = strings.TrimSpace(kw)
+	if kw == "" {
+		return nil, nil
 	}
 	year = strings.TrimSpace(year)
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 
-	client := getHTTPClient(cfg.Proxy)
-	var endpoint string
 	qVals := url.Values{}
 	qVals.Set("api_key", cfg.ApiKey)
 	qVals.Set("language", cfg.Language)
-	qVals.Set("query", searchQuery)
+	qVals.Set("query", kw)
 	qVals.Set("page", "1")
 	qVals.Set("include_adult", "false")
 
-	doFetch := func(targetEndpoint string, targetQVals url.Values) ([]rawTMDBItem, error) {
-		reqURL := fmt.Sprintf("%s%s?%s", tmdbAPIBaseURL, targetEndpoint, targetQVals.Encode())
-		req, err := http.NewRequest(http.MethodGet, reqURL, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("请求 TMDB 失败: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return nil, fmt.Errorf("TMDB 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
-		}
-
-		var searchResp struct {
-			Results []rawTMDBItem `json:"results"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-			return nil, fmt.Errorf("解析 TMDB 数据失败: %w", err)
-		}
-		return searchResp.Results, nil
-	}
-
-	var (
-		results []rawTMDBItem
-		err     error
-	)
-
-	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	var endpoint string
 	switch mediaType {
 	case "movie":
 		endpoint = "/search/movie"
 		if year != "" {
 			qVals.Set("year", year)
 		}
-		results, err = doFetch(endpoint, qVals)
 	case "tv":
 		endpoint = "/search/tv"
 		if year != "" {
 			qVals.Set("first_air_date_year", year)
 		}
-		results, err = doFetch(endpoint, qVals)
 	default:
 		endpoint = "/search/multi"
-		results, err = doFetch(endpoint, qVals)
 	}
 
+	reqURL := fmt.Sprintf("%s%s?%s", tmdbAPIBaseURL, endpoint, qVals.Encode())
+	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
+	client, err := getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求 TMDB 失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("TMDB 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var searchResp struct {
+		Results []model.RawTMDBItem `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, fmt.Errorf("解析 TMDB 数据失败: %w", err)
+	}
+	return parseCandidates(searchResp.Results, mediaType, year, cfg.ImageDomain), nil
+}
+
+func parseCandidates(results []model.RawTMDBItem, mediaType, filterYear, imagePrefix string) []model.TMDBCandidate {
 	candidates := make([]model.TMDBCandidate, 0, len(results))
-	imagePrefix := cfg.ImageDomain
 	for _, item := range results {
 		mType := item.MediaType
 		if mType == "" {
@@ -279,16 +288,15 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 			y = relDate[:4]
 		}
 
-		// 用户显式指定了年份过滤条件时，容差 ±1 年（采集站年份与 TMDB 首播年份常有 1 年偏差）
-		if year != "" && y != "" {
+		if filterYear != "" && y != "" {
 			candY, err1 := strconv.Atoi(y)
-			filterY, err2 := strconv.Atoi(year)
+			filterY, err2 := strconv.Atoi(filterYear)
 			if err1 == nil && err2 == nil {
 				diff := candY - filterY
 				if diff < -1 || diff > 1 {
 					continue
 				}
-			} else if y != year {
+			} else if y != filterYear {
 				continue
 			}
 		}
@@ -314,44 +322,15 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 			Overview:      item.Overview,
 		})
 	}
-
-	// 当未显式指定年份，但搜索片名中包含检测出的年份时，优先将匹配该年份的候选条目排在前面
-	if year == "" && detectedYear != "" && len(candidates) > 1 {
-		sort.SliceStable(candidates, func(i, j int) bool {
-			matchI := candidates[i].Year == detectedYear
-			matchJ := candidates[j].Year == detectedYear
-			if matchI && !matchJ {
-				return true
-			}
-			return false
-		})
-	}
-
-	return candidates, nil
-}
-
-type tmdbCreditPerson struct {
-	Name string `json:"name"`
-	Job  string `json:"job"`
-}
-
-type tmdbDetailRaw struct {
-	rawTMDBItem
-	Tagline string `json:"tagline"`
-	Genres  []struct {
-		Name string `json:"name"`
-	} `json:"genres"`
-	Credits struct {
-		Cast []struct {
-			Name string `json:"name"`
-		} `json:"cast"`
-		Crew []tmdbCreditPerson `json:"crew"`
-	} `json:"credits"`
+	return candidates
 }
 
 // FetchDetail 拉取影片/剧集详情与演职员表
 func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDetail, error) {
-	cfg := repository.GetTMDBConfig()
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled || cfg.ApiKey == "" {
 		return nil, errors.New("TMDB 刮削尚未启用或配置")
 	}
@@ -361,7 +340,10 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		mediaType = "movie"
 	}
 
-	client := getHTTPClient(cfg.Proxy)
+	client, err := getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
 	qVals := url.Values{}
 	qVals.Set("api_key", cfg.ApiKey)
 	qVals.Set("language", cfg.Language)
@@ -383,7 +365,7 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		return nil, fmt.Errorf("TMDB 详情返回错误 (HTTP %d)", resp.StatusCode)
 	}
 
-	var raw tmdbDetailRaw
+	var raw model.TMDBDetailRaw
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
@@ -423,11 +405,35 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 	}
 
 	directors := make([]string, 0, 3)
+	writers := make([]string, 0, 3)
 	for _, c := range raw.Credits.Crew {
-		if strings.EqualFold(c.Job, "Director") {
-			if name := strings.TrimSpace(c.Name); name != "" {
-				directors = append(directors, name)
-			}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			continue
+		}
+		job := strings.ToLower(strings.TrimSpace(c.Job))
+		if job == "director" && len(directors) < 3 {
+			directors = append(directors, name)
+		} else if (job == "writer" || job == "screenplay" || job == "author") && len(writers) < 3 {
+			writers = append(writers, name)
+		}
+	}
+
+	area := ""
+	for _, pc := range raw.ProductionCountries {
+		if n := strings.TrimSpace(pc.Name); n != "" {
+			area = n
+			break
+		}
+	}
+	if area == "" && len(raw.OriginCountry) > 0 {
+		area = strings.TrimSpace(raw.OriginCountry[0])
+	}
+	language := ""
+	for _, sl := range raw.SpokenLanguages {
+		if n := strings.TrimSpace(sl.Name); n != "" {
+			language = n
+			break
 		}
 	}
 
@@ -460,6 +466,8 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		Genres:        genres,
 		Directors:     directors,
 		Actors:        actors,
+		Writers:       writers,
+		Area:          area,
+		Language:      language,
 	}, nil
 }
-

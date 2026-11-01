@@ -1,94 +1,58 @@
 package handler
 
 import (
-	"fmt"
-	"net/http"
-
-	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/notify"
-	"server/internal/utils"
+	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
+// NotifyHandler Telegram 消息通知协议处理层
 type NotifyHandler struct{}
 
+// NotifyHd 通知 Handler 全局单例
 var NotifyHd = new(NotifyHandler)
 
-// GetNotifyConfig 获取通知配置（Token 脱敏，仅超级管理员）。
-func (h *NotifyHandler) GetNotifyConfig(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可查看通知配置", c)
-		return
-	}
-	cfg := notify.PublicConfig(notify.GetConfig())
-	dto.Success(cfg, "通知配置获取成功", c)
-}
-
-// UpdateNotifyConfig 更新通知配置（仅超级管理员）。
-func (h *NotifyHandler) UpdateNotifyConfig(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可修改通知配置", c)
-		return
-	}
-	var incoming model.NotifyConfig
-	if err := c.ShouldBindJSON(&incoming); err != nil {
-		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
-		return
-	}
-	old := notify.GetConfig()
-	merged, err := notify.ValidateAndMergeUpdate(old, incoming)
+// GetConfig 获取脱敏后的 Telegram 通知配置
+func (h *NotifyHandler) GetConfig(c *gin.Context) {
+	cfg, err := service.NotifySvc.PublicConfig()
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if err := notify.SaveConfig(merged); err != nil {
-		dto.Failed(fmt.Sprint("通知配置保存失败: ", err), c)
-		return
-	}
-	dto.Success(notify.PublicConfig(merged), "通知配置已保存", c)
+	dto.Success(cfg, "获取通知配置成功", c)
 }
 
-// notifyTestReq 测试发送可选草稿（不落库）。空字段沿用已保存配置。
-type notifyTestReq struct {
-	BotToken string   `json:"botToken"`
-	ChatIDs  []string `json:"chatIds"`
-}
-
-// TestNotify 发送测试消息（仅超级管理员）。可带表单草稿 Token/Chat，无需先保存。
-func (h *NotifyHandler) TestNotify(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+// UpdateConfig 更新 Telegram 通知配置（仅超级管理员）
+func (h *NotifyHandler) UpdateConfig(c *gin.Context) {
+	var incoming model.NotifyConfig
+	if err := c.ShouldBindJSON(&incoming); err != nil {
+		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可测试发送通知", c)
-		return
-	}
-	var req notifyTestReq
-	_ = c.ShouldBindJSON(&req)
-
-	result, err := notify.SendTestWith(req.BotToken, req.ChatIDs)
+	updated, err := service.NotifySvc.UpdateConfig(incoming)
 	if err != nil {
-		// 附带各 Chat 失败明细，便于前端展示具体 Telegram 原因（如 chat not found）。
-		dto.FailedWithData(result, err.Error(), c)
+		dto.Failed("保存失败: "+err.Error(), c)
 		return
 	}
-	dto.Success(result, "测试消息已发送", c)
+	dto.Success(updated, "通知配置已保存", c)
+}
+
+// TestNotify 发送测试通知（仅超级管理员，支持草稿参数）
+func (h *NotifyHandler) TestNotify(c *gin.Context) {
+	var req model.NotifyTestReq
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			dto.Failed("请求参数格式异常", c)
+			return
+		}
+	}
+
+	res, err := service.NotifySvc.SendTest(req)
+	if err != nil {
+		dto.FailedWithData(res, err.Error(), c)
+		return
+	}
+	dto.Success(res, "测试消息已发送", c)
 }

@@ -2,11 +2,23 @@ package snapshot
 
 import (
 	"fmt"
+	"sync"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/repository/film/cache"
 	"server/internal/repository/support"
+)
+
+const snapshotCacheDebounce = 5 * time.Second
+
+var (
+	cacheDebounceMu    sync.Mutex
+	cacheDebounceTimer *time.Timer
+	cacheDebounceMids  = make(map[int64]struct{})
+	cacheDebounceVer   string
 )
 
 func RefreshAccessDataCaches() {
@@ -17,25 +29,25 @@ func RefreshAccessDataCaches() {
 			config.CategoryTreeKey,
 			config.TVBoxConfigCacheKey,
 			config.BannersKey,
-			config.IndexDailyUpdatesCacheKey,
-			config.DailyUpdatesV2CatCacheKey,
+			config.DailyUpdatesCatCacheKey,
 		)
 	}
 	cache.BumpSearchTagsVersion()
 	cache.ClearPatterns(
 		fmt.Sprintf("%s*", config.IndexPageCacheKey),
+		fmt.Sprintf("%s*", config.DailyUpdatesCatCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxConfigCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
 		fmt.Sprintf("%s:*", config.FilmSearchTagsKey),
 		fmt.Sprintf("%s:*", config.FilmFilterOptionKey),
-		fmt.Sprintf("%s:*", config.DailyUpdatesV2CachePrefix),
+		fmt.Sprintf("%s:*", config.DailyUpdatesCachePrefix),
 	)
 }
 
-// filmListDerivedCachePatterns 快照派生的列表类缓存。增量发布不换快照版本，
-// key 里的 v{version} 不会变，必须在写库后主动删掉，否则列表上的播放源摘要/备注会脏到 TTL。
+// filmListDerivedCachePatterns 快照派生的列表、分类首页和首页缓存。增量发布不换快照版本，
+// key 里的版本不会变，必须在写库后主动删掉，否则影片和热播会脏到 TTL。
 func filmListDerivedCachePatterns() []string {
 	return []string{
 		config.FilmCategoryCachePrefix + ":*",
@@ -45,7 +57,14 @@ func filmListDerivedCachePatterns() []string {
 		config.FilmSortCachePrefix + ":*",
 		config.FilmHotKeywordsKey + ":*",
 		config.FilmRelatePrefix + ":*",
+		config.FilmClassifyCacheKey + ":*",
+		config.IndexPageCacheKey + "*",
 	}
+}
+
+// ClearDerivedFilmListCaches 清掉带影片内容的列表、分类首页和首页缓存。
+func ClearDerivedFilmListCaches() {
+	cache.ClearPatterns(filmListDerivedCachePatterns()...)
 }
 
 // ClearSearchCache 清除所有前台搜索缓存
@@ -55,31 +74,108 @@ func ClearSearchCache() {
 
 func invalidateDeletedSnapshotCaches(version string, mids []int64) {
 	invalidateSnapshotDataCaches(version, mids)
+	RefreshAccessDataCaches()
+}
+
+func scheduleSnapshotCacheInvalidation(version string, mids []int64) {
+	BumpSearchCacheVersion()
+	deletePlayInfoCacheKeys(mids)
+	cacheDebounceMu.Lock()
+	defer cacheDebounceMu.Unlock()
+	cacheDebounceVer = version
+	for _, mid := range mids {
+		if mid > 0 {
+			cacheDebounceMids[mid] = struct{}{}
+		}
+	}
+	if cacheDebounceTimer == nil {
+		cacheDebounceTimer = time.AfterFunc(snapshotCacheDebounce, fireDebouncedSnapshotCacheInvalidation)
+		return
+	}
+	cacheDebounceTimer.Reset(snapshotCacheDebounce)
+}
+
+func FlushSnapshotCacheInvalidation() {
+	cacheDebounceMu.Lock()
+	version := cacheDebounceVer
+	mids := drainCacheDebounceMidsLocked()
+	if cacheDebounceTimer != nil {
+		cacheDebounceTimer.Stop()
+		cacheDebounceTimer = nil
+	}
+	cacheDebounceVer = ""
+	cacheDebounceMu.Unlock()
+	if version == "" && len(mids) == 0 {
+		RefreshAccessDataCaches()
+		return
+	}
+	applyBroadSnapshotCacheInvalidation(version, mids)
+}
+
+func fireDebouncedSnapshotCacheInvalidation() {
+	cacheDebounceMu.Lock()
+	mids := drainCacheDebounceMidsLocked()
+	cacheDebounceTimer = nil
+	cacheDebounceVer = ""
+	cacheDebounceMu.Unlock()
+	cache.ClearProvideListCache()
+	BumpSearchCacheVersion()
+	cache.ClearPatterns(filmListDerivedCachePatterns()...)
+	deletePlayInfoCacheKeys(mids)
+}
+
+func drainCacheDebounceMidsLocked() []int64 {
+	if len(cacheDebounceMids) == 0 {
+		return nil
+	}
+	mids := make([]int64, 0, len(cacheDebounceMids))
+	for mid := range cacheDebounceMids {
+		mids = append(mids, mid)
+	}
+	cacheDebounceMids = make(map[int64]struct{})
+	return mids
 }
 
 func invalidateSnapshotDataCaches(version string, mids []int64) {
+	applyBroadSnapshotCacheInvalidation(version, mids)
+}
+
+func applyBroadSnapshotCacheInvalidation(version string, mids []int64) {
 	support.ClearIndexPageCache()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+		if err := db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey).Err(); err != nil {
+			syslog.Errorf("[Snapshot] 清理分类树缓存失败: %v", err)
+		}
 	}
 	cache.ClearProvideListCache()
 	BumpSearchCacheVersion()
 	cache.ClearPatterns(filmListDerivedCachePatterns()...)
-	if db.Rdb != nil && len(mids) > 0 {
-		const pipeBatchSize = 1000
-		for i := 0; i < len(mids); i += pipeBatchSize {
-			end := i + pipeBatchSize
-			if end > len(mids) {
-				end = len(mids)
-			}
-			pipe := db.Rdb.Pipeline()
-			for _, mid := range mids[i:end] {
-				pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
-			}
-			_, _ = pipe.Exec(db.Cxt)
-		}
-		BumpPlayInfoGeneration()
+	if err := deletePlayInfoCacheKeys(mids); err != nil {
+		syslog.Errorf("[Snapshot] 清理播放详情缓存失败: %v", err)
 	}
+	RefreshAccessDataCaches()
+}
+
+func deletePlayInfoCacheKeys(mids []int64) error {
+	if db.Rdb == nil || len(mids) == 0 {
+		return nil
+	}
+	const pipeBatchSize = 1000
+	for i := 0; i < len(mids); i += pipeBatchSize {
+		end := i + pipeBatchSize
+		if end > len(mids) {
+			end = len(mids)
+		}
+		pipe := db.Rdb.Pipeline()
+		for _, mid := range mids[i:end] {
+			pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
+		}
+		if _, err := pipe.Exec(db.Cxt); err != nil {
+			return err
+		}
+	}
+	BumpPlayInfoGeneration()
+	return nil
 }
 
 func ClearAllSnapshotDynamicCaches() {

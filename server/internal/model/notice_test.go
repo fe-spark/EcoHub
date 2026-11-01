@@ -10,8 +10,8 @@ func TestNormalizeNoticeConfig(t *testing.T) {
 	if n.Title != DefaultNoticeTitle {
 		t.Errorf("expected default title %s, got %s", DefaultNoticeTitle, n.Title)
 	}
-	if n.AppVersion != "" || n.Version != "" {
-		t.Errorf("expected default version empty, got appVersion=%s, version=%s", n.AppVersion, n.Version)
+	if n.AppVersion != "" {
+		t.Errorf("expected default version empty, got appVersion=%s", n.AppVersion)
 	}
 
 	// 测试自定义赋值（支持多版本逗号分隔，并自动同步 AppVersion 与 Version）
@@ -33,8 +33,8 @@ func TestNormalizeNoticeConfig(t *testing.T) {
 	if !norm.ShowInWeb || norm.ShowInApp {
 		t.Errorf("unexpected platforms: web=%v, app=%v", norm.ShowInWeb, norm.ShowInApp)
 	}
-	if norm.AppVersion != "1.0.2, 1.0.3" || norm.Version != "1.0.2, 1.0.3" {
-		t.Errorf("unexpected version: appVersion=%s, version=%s", norm.AppVersion, norm.Version)
+	if norm.AppVersion != "1.0.2, 1.0.3" {
+		t.Errorf("unexpected version: appVersion=%s", norm.AppVersion)
 	}
 }
 
@@ -47,27 +47,30 @@ func TestEncodeDecodeNoticeJSON(t *testing.T) {
 		ShowInApp:  true,
 		AppVersion: "1.0.2, 1.0.3",
 	}
-	encoded := EncodeNoticeJSON(origin)
+	encoded, err := EncodeNoticeJSON(origin)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if encoded == "" {
 		t.Fatal("encoded JSON should not be empty")
 	}
 
-	decoded := DecodeNoticeJSON(encoded)
+	decoded, err := DecodeNoticeJSON(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !decoded.Enabled || decoded.Title != origin.Title || decoded.Content != origin.Content ||
-		!decoded.ShowInWeb || !decoded.ShowInApp || decoded.AppVersion != origin.AppVersion || decoded.Version != origin.AppVersion {
+		!decoded.ShowInWeb || !decoded.ShowInApp || decoded.AppVersion != origin.AppVersion {
 		t.Fatalf("decoded notice mismatch: %+v", decoded)
 	}
 
-	// 兼容旧格式（无 showInWeb / showInApp，使用 version 字段）
+	// 旧格式缺展示开关，或仍使用 version 字段，必须返回错误，不能默认成 true。
 	legacyJSON := `{"enabled":true,"title":"旧版公告","content":"旧版内容","version":"1.0.0"}`
-	legacyDecoded := DecodeNoticeJSON(legacyJSON)
-	if !legacyDecoded.Enabled || legacyDecoded.Title != "旧版公告" || legacyDecoded.Content != "旧版内容" {
-		t.Fatalf("legacy decoded basic info mismatch: %+v", legacyDecoded)
+	if _, err := DecodeNoticeJSON(legacyJSON); err == nil {
+		t.Fatal("legacy notice without show switches should fail")
 	}
-	if !legacyDecoded.ShowInWeb || !legacyDecoded.ShowInApp {
-		t.Fatalf("legacy decoded should default platforms to true: %+v", legacyDecoded)
-	}
-	if legacyDecoded.AppVersion != "1.0.0" || legacyDecoded.Version != "1.0.0" {
-		t.Fatalf("legacy decoded version mismatch: appVersion=%s, version=%s", legacyDecoded.AppVersion, legacyDecoded.Version)
+	missingWeb := `{"enabled":true,"title":"公告","content":"内容","showInApp":true,"version":"1.0.0"}`
+	if _, err := DecodeNoticeJSON(missingWeb); err == nil {
+		t.Fatal("notice missing showInWeb should fail")
 	}
 }

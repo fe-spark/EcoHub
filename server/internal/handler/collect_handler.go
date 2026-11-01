@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -21,7 +22,12 @@ type CollectHandler struct{}
 var CollectHd = new(CollectHandler)
 
 func (h *CollectHandler) FilmSourceList(c *gin.Context) {
-	dto.Success(service.CollectSvc.GetFilmSourceList(), "影视源站点信息获取成功", c)
+	list, err := service.CollectSvc.GetFilmSourceList()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(list, "影视源站点信息获取成功", c)
 }
 
 func (h *CollectHandler) FindFilmSource(c *gin.Context) {
@@ -38,38 +44,8 @@ func (h *CollectHandler) FindFilmSource(c *gin.Context) {
 	dto.Success(fs, "原站点详情信息查找成功", c)
 }
 
-func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
-	body, err := bindFilmSourceBody(c)
-	if err != nil {
-		dto.Failed("请求参数异常", c)
-		return
-	}
-	if err := validFilmSource(body.FilmSource); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	if err := testFilmSourceAPI(body.FilmSource, body.UseProxy); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	if err := service.CollectSvc.SaveFilmSource(body.FilmSource); err != nil {
-		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
-		return
-	}
-	if body.UseProxy != nil && *body.UseProxy {
-		id := body.Id
-		if id == "" {
-			id = utils.GenerateHashKey(body.Uri)
-		}
-		if err := service.ProxySvc.RememberCustomProxySource(id); err != nil {
-			dto.Failed(fmt.Sprint("资源站已添加，但加入代理名单失败: ", err.Error()), c)
-			return
-		}
-	}
-	dto.SuccessOnlyMsg("添加成功", c)
-}
-
-func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
+// FilmSourceSave 保存采集源（支持新增或编辑更新）
+func (h *CollectHandler) FilmSourceSave(c *gin.Context) {
 	body, err := bindFilmSourceBody(c)
 	if err != nil {
 		dto.Failed("请求参数异常", c)
@@ -80,67 +56,58 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if s.Id == "" {
-		dto.Failed("参数异常, 资源站标识不能为空", c)
-		return
-	}
-	fs := service.CollectSvc.GetFilmSource(s.Id)
-	if fs == nil {
-		dto.Failed("数据异常,资源站信息不存在", c)
-		return
-	}
-	if !fs.CreatedAt.IsZero() && s.CreatedAt.IsZero() {
-		s.CreatedAt = fs.CreatedAt
-	}
-	if spider.IsTaskRunning(s.Id) {
-		dto.Failed("站点正在采集, 请先停止采集后再尝试编辑操作", c)
-		return
-	}
-	isUriChanged := fs.Uri != s.Uri
-	isFormatChanged := fs.ResolveFormat() != s.ResolveFormat()
-	if isUriChanged || isFormatChanged {
-		if err := testFilmSourceAPI(s, body.UseProxy); err != nil {
-			dto.Failed(err.Error(), c)
+
+	// 若传了非空 Id，判断是否为已有站点更新
+	if strings.TrimSpace(s.Id) != "" {
+		fs := service.CollectSvc.GetFilmSource(s.Id)
+		if fs != nil {
+			if !fs.CreatedAt.IsZero() && s.CreatedAt.IsZero() {
+				s.CreatedAt = fs.CreatedAt
+			}
+			if spider.IsTaskRunning(s.Id) {
+				dto.Failed("站点正在采集, 请先停止采集后再尝试编辑操作", c)
+				return
+			}
+			isUriChanged := fs.Uri != s.Uri
+			isFormatChanged := fs.ResolveFormat() != s.ResolveFormat()
+			if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
+				dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
+				return
+			}
+			if isUriChanged || isFormatChanged {
+				service.SpiderSvc.SyncSourceCategoriesAsync(s.Id)
+			}
+			dto.Success(gin.H{"id": s.Id}, "更新成功", c)
 			return
 		}
 	}
-	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
-		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
+
+	// 否则作为新增处理
+	if err := service.CollectSvc.SaveFilmSource(s); err != nil {
+		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
 		return
 	}
-	if body.UseProxy != nil && *body.UseProxy {
-		if err := service.ProxySvc.RememberCustomProxySource(s.Id); err != nil {
-			dto.Failed(fmt.Sprint("资源站已更新，但加入代理名单失败: ", err.Error()), c)
-			return
-		}
+	id := s.Id
+	if id == "" {
+		id = utils.GenerateHashKey(s.Uri)
 	}
-	dto.SuccessOnlyMsg("更新成功", c)
+	service.SpiderSvc.SyncSourceCategoriesAsync(id)
+	dto.Success(gin.H{"id": id}, "添加成功", c)
 }
 
-func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
+func (h *CollectHandler) FilmSourceSort(c *gin.Context) {
+	var req struct {
+		Ids []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	if s.Id == "" {
-		dto.Failed("参数异常, 资源站标识不能为空", c)
+	if err := service.CollectSvc.SortFilmSources(req.Ids); err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
-	fs := service.CollectSvc.GetFilmSource(s.Id)
-	if fs == nil {
-		dto.Failed("数据异常,资源站信息不存在", c)
-		return
-	}
-	if s.State != fs.State {
-		upds := *fs
-		upds.State = s.State
-		if err := service.CollectSvc.UpdateFilmSource(upds); err != nil {
-			dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
-			return
-		}
-	}
-	dto.SuccessOnlyMsg("更新成功", c)
+	dto.SuccessOnlyMsg("排序保存成功", c)
 }
 
 func (h *CollectHandler) FilmSourceBatchChange(c *gin.Context) {
@@ -170,31 +137,7 @@ func (h *CollectHandler) FilmSourceBatchChange(c *gin.Context) {
 		dto.Failed(fmt.Sprint("资源站批量更新失败: ", err.Error()), c)
 		return
 	}
-	dto.SuccessOnlyMsg("批量更新成功", c)
-}
-
-func (h *CollectHandler) FilmSourceDel(c *gin.Context) {
-	var req struct {
-		Id string `json:"id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常", c)
-		return
-	}
-	id := strings.TrimSpace(req.Id)
-	if len(id) <= 0 {
-		dto.Failed("资源站ID信息不能为空", c)
-		return
-	}
-	if spider.IsTaskRunning(id) {
-		dto.Failed("站点正在采集, 请先停止采集后再尝试删除操作", c)
-		return
-	}
-	if err := service.CollectSvc.DelFilmSource(id); err != nil {
-		dto.Failed("删除资源站失败", c)
-		return
-	}
-	dto.SuccessOnlyMsg("删除成功", c)
+	dto.SuccessOnlyMsg("更新成功", c)
 }
 
 // ------------------------------------------------------ 失效源检测与清理 ------------------------------------------------------
@@ -202,9 +145,15 @@ func (h *CollectHandler) FilmSourceDel(c *gin.Context) {
 // FilmSourceCheckAll 批量对每个采集站执行接口测试，返回无法正常采集的站点列表。
 // 正在采集中的站点与主站不参与测试，会以 skipped 形式返回并附原因。
 func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
-	sources := service.CollectSvc.GetFilmSourceList()
+	sources, err := service.CollectSvc.GetFilmSourceList()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 
 	const concurrency = 10
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	failed := make([]model.SourceHealthItem, 0)
@@ -224,7 +173,7 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 				Id:    src.Id,
 				Name:  src.Name,
 				Uri:   src.Uri,
-				Grade: src.Grade,
+				Sort:  src.Sort,
 				State: src.State,
 			}
 			if spider.IsTaskRunning(src.Id) {
@@ -234,14 +183,7 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 				mu.Unlock()
 				return
 			}
-			if src.Grade == model.MasterCollect {
-				item.Reason = "主站无法直接删除，请先降级为附属站"
-				mu.Lock()
-				skipped = append(skipped, item)
-				mu.Unlock()
-				return
-			}
-			if err := spider.CollectApiTest(src.FilmSource); err != nil {
+			if err := spider.CollectApiTestCtx(ctx, src.FilmSource); err != nil {
 				item.Reason = err.Error()
 				mu.Lock()
 				failed = append(failed, item)
@@ -256,14 +198,15 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 	wg.Wait()
 
 	dto.Success(gin.H{
-		"checked": len(sources),
-		"ok":      okCount,
-		"failed":  failed,
-		"skipped": skipped,
+		"checked":  len(sources),
+		"ok":       okCount,
+		"failed":   failed,
+		"skipped":  skipped,
+		"timedOut": ctx.Err() != nil,
 	}, "站点连通性检测完成", c)
 }
 
-// FilmSourceDelBatch 批量删除采集站，返回实际删除与跳过（含原因）的站点。
+// FilmSourceDelBatch 批量删除采集站：触发即返回，通过 SSE 广播 deleting 与 deleted 状态
 func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 	req := model.FilmSourceDelBatchRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -288,32 +231,12 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 		return
 	}
 
-	type deleteResult struct {
-		Id     string `json:"id"`
-		Name   string `json:"name"`
-		Reason string `json:"reason"`
-	}
-	deleted := make([]string, 0, len(ids))
-	skipped := make([]deleteResult, 0)
-
-	for _, id := range ids {
-		src := service.CollectSvc.GetFilmSource(id)
-		if src == nil {
-			skipped = append(skipped, deleteResult{Id: id, Reason: "采集站不存在，可能已被删除"})
-			continue
-		}
-		if spider.IsTaskRunning(id) {
-			skipped = append(skipped, deleteResult{Id: id, Name: src.Name, Reason: "站点正在采集，请先停止后再删除"})
-			continue
-		}
-		if err := service.CollectSvc.DelFilmSource(id); err != nil {
-			skipped = append(skipped, deleteResult{Id: id, Name: src.Name, Reason: err.Error()})
-			continue
-		}
-		deleted = append(deleted, id)
+	if err := service.CollectSvc.TriggerDelFilmSourceBatch(ids); err != nil {
+		dto.Failed(err.Error(), c)
+		return
 	}
 
-	dto.Success(gin.H{"deleted": deleted, "skipped": skipped}, "批量删除完成", c)
+	dto.SuccessOnlyMsg("已提交批量删除", c)
 }
 
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
@@ -342,11 +265,39 @@ func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
 	dto.SuccessOnlyMsg("测试成功!!!", c)
 }
 
+func (h *CollectHandler) RefreshSitePageTotal(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	req.Id = strings.TrimSpace(req.Id)
+	if req.Id == "" {
+		dto.Failed("采集站标识不能为空", c)
+		return
+	}
+	total, err := service.CollectSvc.RefreshSitePageTotal(req.Id)
+	if err != nil {
+		dto.Failed(fmt.Sprint("获取采集站总页失败: ", err.Error()), c)
+		return
+	}
+	dto.Success(gin.H{"pageTotal": total}, fmt.Sprintf("最新总页：%d 页", total), c)
+}
+
 func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
-	sources := service.CollectSvc.GetEnabledFilmSources()
 	includeDisabled := c.Query("all") == "1"
+	var sources []model.FilmSource
+	var err error
 	if includeDisabled {
-		sources = service.CollectSvc.GetAllFilmSources()
+		sources, err = service.CollectSvc.GetAllFilmSources()
+	} else {
+		sources, err = service.CollectSvc.GetEnabledFilmSources()
+	}
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
 	}
 	l := make([]model.FilmTaskOptions, 0, len(sources))
 	for _, v := range sources {
@@ -406,44 +357,91 @@ func (h *CollectHandler) FailureRecordList(c *gin.Context) {
 	}
 
 	params.Paging = dto.GetPageParams(c)
+	params = service.CollectSvc.PrepareRecordQuery(params)
 
-	options := service.CollectSvc.GetRecordOptions()
-	list := service.CollectSvc.GetRecordList(params)
+	options, err := service.CollectSvc.GetRecordOptions()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	list, err := service.CollectSvc.GetRecordList(params)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{"params": params, "list": list, "options": options}, "影片分页信息获取成功", c)
 }
 
+// CollectRecover 统一异常采集记录重试接口（支持传 ids 批量/单条重试，或 all: true 全部重试）
 func (h *CollectHandler) CollectRecover(c *gin.Context) {
 	var req struct {
-		Id int `json:"id"`
+		Ids []int `json:"ids"`
+		All bool  `json:"all"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	id := req.Id
-	if id <= 0 {
+	if req.All {
+		out, err := service.CollectSvc.RecoverAll()
+		if err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		dto.Success(gin.H{
+			"queued":   out.Queued,
+			"already":  out.Already,
+			"skipped":  out.Skipped,
+			"busy":     out.Busy,
+			"disabled": out.Disabled,
+			"notFound": out.NotFound,
+			"indexing": out.Indexing,
+		}, out.Message(), c)
+		return
+	}
+
+	cleanIds := make([]int, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id > 0 {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
 		dto.Failed("采集重试开启失败, 采集记录ID参数异常", c)
 		return
 	}
-	err := service.CollectSvc.CollectRecover(id)
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
+	for _, id := range cleanIds {
+		if err := service.CollectSvc.CollectRecover(id); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
 	}
 	dto.SuccessOnlyMsg("采集重试已开启, 请勿重复操作", c)
 }
 
-func (h *CollectHandler) CollectRecoverAll(c *gin.Context) {
-	service.CollectSvc.RecoverAll()
-	dto.SuccessOnlyMsg("恢复任务已成功开启!!!", c)
-}
-
-func (h *CollectHandler) ClearRetriedRecords(c *gin.Context) {
-	service.CollectSvc.ClearRetriedRecords()
-	dto.SuccessOnlyMsg("已有重试结果的记录已删除", c)
-}
-
-func (h *CollectHandler) ClearAllRecord(c *gin.Context) {
-	service.CollectSvc.ClearAllRecord()
-	dto.SuccessOnlyMsg("采集异常记录信息已清空!!!", c)
+// ClearRecords 统一异常记录清理接口（支持 scope="retried" 清理已出结果记录，scope="all" 清理全部）
+func (h *CollectHandler) ClearRecords(c *gin.Context) {
+	var req struct {
+		Scope string `json:"scope"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	switch req.Scope {
+	case "retried":
+		if err := service.CollectSvc.ClearRetriedRecords(); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		dto.SuccessOnlyMsg("已有重试结果的记录已删除", c)
+	case "all":
+		if err := service.CollectSvc.ClearAllRecord(); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		dto.SuccessOnlyMsg("采集异常记录信息已清空!!!", c)
+	default:
+		dto.Failed("清理范围参数异常", c)
+	}
 }

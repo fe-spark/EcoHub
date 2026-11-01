@@ -456,7 +456,7 @@
 .sideList {
   width: 280px;
   flex: none;
-  padding: 18px 16px 16px;
+  padding: 16px 8px 12px;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   background: var(--public-surface-1);
@@ -469,6 +469,7 @@
     font-size: 16px;
     font-weight: 800;
     margin-bottom: 12px;
+    padding: 0 8px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -489,6 +490,7 @@
   align-items: center;
   gap: 12px;
   min-height: 44px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--public-border-1);
   border-radius: 6px;
   cursor: pointer;
@@ -500,9 +502,9 @@
 
   &:hover {
     background: var(--public-surface-hover);
+    border-bottom-color: transparent;
 
     .name {
-      color: var(--primary-color);
       transform: translateX(4px);
     }
 

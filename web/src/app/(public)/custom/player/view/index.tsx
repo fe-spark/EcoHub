@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Input, Button, message } from "antd";
+import { Input, Button } from "antd";
 import { PlayCircleOutlined, SearchOutlined } from "@ant-design/icons";
+import { useAppMessage } from "@/lib/useAppMessage";
 import videojs from "video.js";
 import "video.js/dist/video-js.css";
 import styles from "./index.module.less";
@@ -10,6 +11,7 @@ import styles from "./index.module.less";
 export default function CustomPlayPageView() {
   const [url, setUrl] = useState("");
   const [currentUrl, setCurrentUrl] = useState("");
+  const { message } = useAppMessage();
   const videoRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<any>(null);
 

@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -116,22 +117,22 @@ func NormalizeTipConfig(tip TipConfig) TipConfig {
 }
 
 // EncodeTipJSON 将赞赏配置编码为持久化 JSON。
-func EncodeTipJSON(tip TipConfig) string {
+func EncodeTipJSON(tip TipConfig) (string, error) {
 	raw, err := json.Marshal(NormalizeTipConfig(tip))
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return string(raw)
+	return string(raw), nil
 }
 
-// DecodeTipJSON 解析赞赏配置 JSON，非法或空值回退默认。
-func DecodeTipJSON(raw string) TipConfig {
+// DecodeTipJSON 解析赞赏配置。空字符串是未配置。JSON 非法返回错误。
+func DecodeTipJSON(raw string) (TipConfig, error) {
 	if strings.TrimSpace(raw) == "" {
-		return DefaultTipConfig()
+		return DefaultTipConfig(), nil
 	}
 	var tip TipConfig
 	if err := json.Unmarshal([]byte(raw), &tip); err != nil {
-		return DefaultTipConfig()
+		return TipConfig{}, fmt.Errorf("赞赏配置无法解析: %w", err)
 	}
-	return NormalizeTipConfig(tip)
+	return NormalizeTipConfig(tip), nil
 }

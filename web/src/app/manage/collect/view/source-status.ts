@@ -1,16 +1,24 @@
 import {
-  isPartialCollectFailure,
   resolveCollectProgressStatusText,
   type FilmSource,
 } from "./types";
 
-export type StatusTone = "running" | "enabled" | "disabled" | "stopping" | "failed";
+export type StatusTone = "running" | "enabled" | "disabled" | "stopping" | "failed" | "deleting";
 
 export function resolveSourceStatus(
   record: FilmSource,
   active: boolean,
+  deleting = false,
 ): { label: string; tone: StatusTone } {
+  if (deleting || record.deleting) {
+    return { label: "删除中", tone: "deleting" };
+  }
+
   const phase = record.progress?.status;
+
+  if (phase === "stopping") {
+    return { label: "停止中", tone: "stopping" };
+  }
 
   if (active) {
     if (!record.state) {
@@ -18,18 +26,6 @@ export function resolveSourceStatus(
     }
     if (phase === "starting") {
       return { label: "排队中", tone: "running" };
-    }
-    if (phase === "page_done" || phase === "waiting_publish") {
-      if (isPartialCollectFailure(record.progress)) {
-        return { label: "部分失败，等待收尾", tone: "stopping" };
-      }
-      return { label: "等待收尾", tone: "running" };
-    }
-    if (phase === "finalizing") {
-      if (isPartialCollectFailure(record.progress)) {
-        return { label: "部分失败，收尾发布中", tone: "stopping" };
-      }
-      return { label: "收尾发布中", tone: "running" };
     }
     return { label: "采集中", tone: "running" };
   }

@@ -19,11 +19,11 @@ func containsHan(s string) bool {
 
 // TraditionalToSimplified 将繁体字符串转换为简体
 func TraditionalToSimplified(s string) string {
-	if s == "" || t2s == nil || !containsHan(s) {
+	if s == "" || t2s == nil || !containsHan(s) || !containsTraditionalRune(s) {
 		return s
 	}
 	out, err := t2s.Convert(s)
-	if err != nil {
+	if err != nil || out == s {
 		return s
 	}
 	return out

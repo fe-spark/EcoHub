@@ -1,6 +1,10 @@
 package model
 
 import (
+	"encoding/json"
+	"strconv"
+	"strings"
+
 	"server/internal/config"
 
 	"gorm.io/gorm"
@@ -92,6 +96,9 @@ func CheckUserUpdate(operatorID uint, operatorRole int, targetID uint, targetNam
 		if *nextStatus == 1 && operatorID == targetID {
 			return "不能禁用当前登录账号"
 		}
+		if IsBuiltinAccount(targetID, targetName) && *nextStatus == 1 {
+			return "默认超级管理员不可被禁用"
+		}
 	}
 	return ""
 }
@@ -134,14 +141,46 @@ func (User) TableName() string {
 }
 
 type UserUpdatePayload struct {
-	ID       uint    `json:"id"`
-	Password *string `json:"password"`
-	Email    *string `json:"email"`
-	Gender   *int    `json:"gender"`
-	NickName *string `json:"nickName"`
-	Avatar   *string `json:"avatar"`
-	Status   *int    `json:"status"`
-	Role     *int    `json:"role"`
+	ID          uint    `json:"id"`
+	Password    *string `json:"password"`
+	OldPassword *string `json:"oldPassword,omitempty"`
+	Email       *string `json:"email"`
+	Gender      *int    `json:"gender"`
+	NickName    *string `json:"nickName"`
+	Avatar      *string `json:"avatar"`
+	Status      *int    `json:"status"`
+	Role        *int    `json:"role"`
+}
+
+func (p *UserUpdatePayload) UnmarshalJSON(data []byte) error {
+	type Alias UserUpdatePayload
+	aux := struct {
+		*Alias
+		RawID  any `json:"id"`
+		RawCap any `json:"ID"`
+	}{
+		Alias: (*Alias)(p),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	rawVal := aux.RawID
+	if rawVal == nil {
+		rawVal = aux.RawCap
+	}
+	switch v := rawVal.(type) {
+	case float64:
+		p.ID = uint(v)
+	case int:
+		p.ID = uint(v)
+	case int64:
+		p.ID = uint(v)
+	case string:
+		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+			p.ID = uint(n)
+		}
+	}
+	return nil
 }
 
 // UserInfoVo 用户信息返回对象

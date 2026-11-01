@@ -27,7 +27,7 @@ func TestClearFilmIndexCachesKeepsFrontKeys(t *testing.T) {
 
 	treeKey := config.ActiveCategoryTreeKey
 	indexKey := config.IndexPageCacheKey + ":vkeep"
-	dailyKey := config.IndexDailyUpdatesCacheKey
+	dailyKey := config.DailyUpdatesCatCacheKey
 	if err := mr.Set(treeKey, `{"id":0}`); err != nil {
 		t.Fatalf("seed tree: %v", err)
 	}
@@ -38,8 +38,6 @@ func TestClearFilmIndexCachesKeepsFrontKeys(t *testing.T) {
 		t.Fatalf("seed daily: %v", err)
 	}
 
-	clearDetailCaches(1)
-	clearDetailCaches(0)
 	ClearFilmIndexCachesByPidSet(map[int64]struct{}{
 		1:  {},
 		0:  {},

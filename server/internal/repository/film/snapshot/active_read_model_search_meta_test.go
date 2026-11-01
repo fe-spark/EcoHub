@@ -1,7 +1,12 @@
 package snapshot
 
 import (
+	"sort"
 	"testing"
+
+	"server/internal/model"
+	"server/internal/repository/support"
+	"server/internal/utils"
 )
 
 // 空快照索引必须被缓存，二次载入直接复用同一对象，不得因 len(Items)==0 反复穿透查库。
@@ -18,7 +23,10 @@ func TestLoadFilmSearchMetaIndex_EmptySnapshotCached(t *testing.T) {
 
 	activeFilmSearchMetas.Store(nil)
 
-	idx1 := loadFilmSearchMetaIndex(testVer)
+	idx1, err := loadFilmSearchMetaIndex(testVer)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if idx1 == nil {
 		t.Fatal("空快照应返回非 nil 索引")
 	}
@@ -26,8 +34,166 @@ func TestLoadFilmSearchMetaIndex_EmptySnapshotCached(t *testing.T) {
 		t.Fatalf("期望 version=%s 且 items=0，实际 version=%s items=%d", testVer, idx1.Version, len(idx1.Items))
 	}
 
-	idx2 := loadFilmSearchMetaIndex(testVer)
+	idx2, err := loadFilmSearchMetaIndex(testVer)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if idx2 != idx1 {
 		t.Fatalf("二次载入应复用缓存对象（%p != %p）", idx1, idx2)
+	}
+}
+
+func TestSealSearchMetaIndexCopiesPlaySources(t *testing.T) {
+	shared := []string{"src-a", "src-b"}
+	idx := sealSearchMetaIndex("v", []FilmSearchMeta{{
+		Mid:           1,
+		PlaySources:   shared,
+		FirstSourceId: "src-a",
+	}})
+	if len(idx.Items) != 1 || len(idx.Items[0].PlaySources) != 2 {
+		t.Fatalf("封口播放源 = %#v", idx.Items)
+	}
+	if &idx.Items[0].PlaySources[0] == &shared[0] {
+		t.Fatal("封口后的播放源仍和原切片共享底层数组")
+	}
+	if shared[0] != "src-a" || shared[1] != "src-b" {
+		t.Fatalf("原播放源被改写: %#v", shared)
+	}
+}
+
+func TestSealSearchMetaIndexSharesSinglePlaySource(t *testing.T) {
+	idx := sealSearchMetaIndex("v", []FilmSearchMeta{
+		{Mid: 1, PlaySources: []string{"src-a"}},
+		{Mid: 2, PlaySources: []string{"src-a"}},
+		{Mid: 3, PlaySources: []string{"src-b"}},
+		{Mid: 4, PlaySources: []string{"src-a", "src-b"}},
+		{Mid: 5, PlaySources: []string{"src-a", "src-b"}},
+	})
+	a := idx.Items[0].PlaySources
+	b := idx.Items[1].PlaySources
+	if len(a) != 1 || len(b) != 1 || &a[0] != &b[0] {
+		t.Fatalf("同一单源应共用切片: %#v %#v", a, b)
+	}
+	if &idx.Items[2].PlaySources[0] == &a[0] {
+		t.Fatal("不同单源不应共用切片")
+	}
+	left := idx.Items[3].PlaySources
+	right := idx.Items[4].PlaySources
+	if len(left) != 2 || &left[0] == &a[0] || &left[0] == &right[0] {
+		t.Fatalf("多源应各自分配: %#v %#v", left, right)
+	}
+
+	again := append([]FilmSearchMeta(nil), idx.Items...)
+	idx2 := sealSearchMetaIndex("v", again)
+	if idx.Items[0].PlaySources[0] != "src-a" || &idx2.Items[0].PlaySources[0] == &a[0] {
+		t.Fatal("再次封口改写了已发布切片")
+	}
+	if &idx2.Items[0].PlaySources[0] != &idx2.Items[1].PlaySources[0] {
+		t.Fatal("再次封口后同一单源应共用切片")
+	}
+}
+
+func TestSealSearchMetaIndex_MultiSourceCounts(t *testing.T) {
+	idx := sealSearchMetaIndex("v", []FilmSearchMeta{
+		{Mid: 1, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
+		{Mid: 2, FirstSourceId: "src-b", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
+		{Mid: 3, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "独家影片"}},
+		{Mid: 4, FirstSourceId: "src-a", PlaySources: []string{"src-a", "src-c"}, Item: utils.FilmSearchItem{CleanName: "多线路影片"}},
+	})
+	if idx.MultiSourceBySource["src-a"] != 2 {
+		t.Fatalf("src-a multiSource=%d, want 2", idx.MultiSourceBySource["src-a"])
+	}
+	if idx.MultiSourceBySource["src-b"] != 1 {
+		t.Fatalf("src-b multiSource=%d, want 1", idx.MultiSourceBySource["src-b"])
+	}
+}
+
+func TestLoadFilmSearchMetaIndex_DedupesPlayLines(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	createTestFilm(t, gdb, 7, "慶餘年", 10, "")
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 7, SourceId: "source_master", LineKind: "play", GroupIndex: 1, Content: "[]",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 7, SourceId: "source_b", LineKind: "play", GroupIndex: 0, Content: "[]",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 7, SourceId: "source_down", LineKind: "download", GroupIndex: 0, Content: "[]",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	activeFilmSearchMetas.Store(nil)
+	idx, err := loadFilmSearchMetaIndex("v_dedupe_play")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("items=%v", idx)
+	}
+	item := idx.Items[0]
+	if item.Item.CleanName != "庆余年" {
+		t.Fatalf("CleanName=%q", item.Item.CleanName)
+	}
+	got := append([]string(nil), item.PlaySources...)
+	sort.Strings(got)
+	want := []string{"source_b", "source_master"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("PlaySources=%v", got)
+	}
+}
+
+func TestSearchFilmMetas_DisabledCategoryHidden(t *testing.T) {
+	support.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
+	support.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
+	t.Cleanup(func() {
+		support.SetCategoryShowForTest(nil)
+		support.SetCategoryTreeForTest(nil, nil)
+	})
+
+	item1 := utils.FilmSearchItem{Mid: 101, Name: "复仇者联盟"}
+	utils.FillSearchDerivedFields(&item1)
+	item2 := utils.FilmSearchItem{Mid: 102, Name: "复仇者电视剧"}
+	utils.FillSearchDerivedFields(&item2)
+
+	items := []FilmSearchMeta{
+		{Mid: 101, Pid: 1, Cid: 1, Item: item1}, // 电影（可见）
+		{Mid: 102, Pid: 2, Cid: 2, Item: item2}, // 电视剧（已停用）
+	}
+	idx := sealSearchMetaIndex("v_test_hidden", items)
+
+	hits := searchFilmMetas(idx, "复仇者", "relate", 0, 0)
+	if len(hits) != 1 {
+		t.Fatalf("expected 1 hit, got %d hits", len(hits))
+	}
+	if hits[0].mid != 101 {
+		t.Fatalf("expected mid 101, got %d", hits[0].mid)
+	}
+}
+func TestTagMetaMatch_DisabledCategoryHidden(t *testing.T) {
+	support.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
+	support.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
+	t.Cleanup(func() {
+		support.SetCategoryShowForTest(nil)
+		support.SetCategoryTreeForTest(nil, nil)
+	})
+
+	matcher, err := tagMetaMatch("v_test", model.SearchTagsVO{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	visibleMeta := &FilmSearchMeta{Mid: 101, Pid: 1, Cid: 1}
+	disabledMeta := &FilmSearchMeta{Mid: 102, Pid: 2, Cid: 2}
+
+	if !matcher(visibleMeta) {
+		t.Fatal("expected visibleMeta to match")
+	}
+	if matcher(disabledMeta) {
+		t.Fatal("expected disabledMeta to be filtered out")
 	}
 }

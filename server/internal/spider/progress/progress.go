@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"context"
 	"log"
 	"strings"
 	"sync"
@@ -8,20 +9,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/repository/film/writer"
 )
-
-// staleNotifier 由采集编排层注入，用于在进度超时被判定失败时广播通知。
-// 未注入时仅落日志，不影响状态机行为。
-var staleNotifier = func(sourceID, sourceName, oldStatus string, age time.Duration) {}
-
-// SetStaleNotifier 注册进度超时通知回调。
-func SetStaleNotifier(fn func(sourceID, sourceName, oldStatus string, age time.Duration)) {
-	if fn == nil {
-		return
-	}
-	staleNotifier = fn
-}
 
 // occupyChecker 由编排层注入：排队占用中的 starting 不是僵尸。
 var occupyChecker func(string) bool
@@ -44,6 +32,10 @@ type progressState struct {
 	mu      sync.RWMutex
 	data    model.CollectProgress
 	updated time.Time
+	// probed 总页已写入。新开一轮采集时清掉。
+	probed bool
+	// epoch 每次新开采集加一。旧运行的进度写入对不上就丢弃。
+	epoch uint64
 }
 
 // Ensure 初始化站点进度条目：已存在则刷新名称与时间，不存在则按 starting 创建。
@@ -69,6 +61,59 @@ func ensure(sourceID string, name string) *progressState {
 	return actual.(*progressState)
 }
 
+// SetPageTotal 写入探测结果。只接受仍在排队的站，并在同一次锁里标成已探测。0 页直接标完成。
+func SetPageTotal(sourceID string, pageCount int) {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return
+	}
+	state := val.(*progressState)
+	state.mu.Lock()
+	accepted := state.data.Status == StatusStarting
+	if accepted {
+		state.data.Total = pageCount
+		state.data.Current = 0
+		state.data.Success = 0
+		state.data.Failed = 0
+		if pageCount <= 0 {
+			state.data.Status = StatusDone
+		}
+		state.probed = true
+		state.updated = time.Now()
+	}
+	state.mu.Unlock()
+	if accepted {
+		NotifyChange()
+	}
+}
+
+// PageTotal 返回已探到的总页。尚未探测返回 -1。
+func PageTotal(sourceID string) int {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return -1
+	}
+	state := val.(*progressState)
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	if !state.probed {
+		return -1
+	}
+	return state.data.Total
+}
+
+// PageSuccess 返回指定站点的成功页数。没有进度返回 0。
+func PageSuccess(sourceID string) int {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return 0
+	}
+	state := val.(*progressState)
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state.data.Success
+}
+
 func Update(sourceID string, update func(*model.CollectProgress)) {
 	if val, ok := store.Load(sourceID); ok {
 		state := val.(*progressState)
@@ -76,6 +121,81 @@ func Update(sourceID string, update func(*model.CollectProgress)) {
 		update(&state.data)
 		state.updated = time.Now()
 		state.mu.Unlock()
+		NotifyChange()
+	}
+}
+
+type runEpochKey struct{}
+
+// WithRunEpoch 把本次运行的代次放进采集上下文。
+func WithRunEpoch(ctx context.Context, epoch uint64) context.Context {
+	return context.WithValue(ctx, runEpochKey{}, epoch)
+}
+
+// Epoch 当前进度代次。尚未建进度时为 0。
+func Epoch(sourceID string) uint64 {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return 0
+	}
+	state := val.(*progressState)
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state.epoch
+}
+
+// UpdateRun 只改本代、且仍在采集中的进度。停止中和终态保持原样，避免收尾把界面改回去。
+func UpdateRun(ctx context.Context, sourceID string, update func(*model.CollectProgress)) bool {
+	epoch, ok := ctx.Value(runEpochKey{}).(uint64)
+	if !ok {
+		Update(sourceID, update)
+		return true
+	}
+	val, exists := store.Load(sourceID)
+	if !exists {
+		return false
+	}
+	state := val.(*progressState)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.epoch != epoch || state.data.Status == StatusStopping || IsTerminalStatus(state.data.Status) {
+		return false
+	}
+	update(&state.data)
+	state.updated = time.Now()
+	NotifyChange()
+	return true
+}
+
+// FinishRun 本代运行真正退出。停止中改为已停止；出错且尚未终态则改为失败。代次不符说明已有新采集。
+func FinishRun(ctx context.Context, sourceID string, retErr error) {
+	epoch, ok := ctx.Value(runEpochKey{}).(uint64)
+	if !ok {
+		return
+	}
+	val, exists := store.Load(sourceID)
+	if !exists {
+		return
+	}
+	state := val.(*progressState)
+	state.mu.Lock()
+	changed := false
+	if state.epoch == epoch {
+		switch {
+		case state.data.Status == StatusStopping:
+			state.data.Status = StatusStopped
+			changed = true
+		case retErr != nil && !IsTerminalStatus(state.data.Status):
+			state.data.Status = StatusFailed
+			changed = true
+		}
+	}
+	if changed {
+		state.updated = time.Now()
+	}
+	state.mu.Unlock()
+	if changed {
+		NotifyChange()
 	}
 }
 
@@ -92,27 +212,28 @@ func Snapshot(sourceID string) (model.CollectProgress, bool) {
 
 // 采集进度状态机（SourceJob）：
 //
-//	starting → running → page_done → waiting_publish → finalizing → done
-//	                ↘ stopped / failed
+//	starting → running → done / stopped / failed
 const (
-	StatusStarting       = "starting"
-	StatusRunning        = "running"
-	StatusPageDone       = "page_done"
-	StatusWaitingPublish = "waiting_publish"
-	StatusFinalizing     = "finalizing"
-	StatusDone           = "done"
-	StatusFailed         = "failed"
-	StatusStopped        = "stopped"
+	StatusStarting = "starting"
+	StatusRunning  = "running"
+	StatusStopping = "stopping"
+	StatusDone     = "done"
+	StatusFailed   = "failed"
+	StatusStopped  = "stopped"
 )
 
 func isActiveStatus(status string) bool {
 	switch status {
-	case StatusStarting, StatusRunning, StatusPageDone,
-		StatusWaitingPublish, StatusFinalizing:
+	case StatusStarting, StatusRunning:
 		return true
 	default:
 		return false
 	}
+}
+
+// isInFlightStatus 含停止后的收尾。收尾期间仍算这次运行未结束。删除会先等到它退出。
+func isInFlightStatus(status string) bool {
+	return isActiveStatus(status) || status == StatusStopping
 }
 
 func IsTerminalStatus(status string) bool {
@@ -124,20 +245,8 @@ func IsTerminalStatus(status string) bool {
 	}
 }
 
-func isPostFetchStatus(status string) bool {
-	switch status {
-	case StatusPageDone, StatusWaitingPublish, StatusFinalizing:
-		return true
-	default:
-		return false
-	}
-}
-
 func shouldMarkStale(sourceID, status string, live bool, age, staleAfter time.Duration) bool {
 	if age < staleAfter {
-		return false
-	}
-	if isPostFetchStatus(status) {
 		return false
 	}
 	// 占用中的 starting = 排队等并发槽；无占用且无 live 才是遗弃进度。
@@ -150,20 +259,16 @@ func shouldMarkStale(sourceID, status string, live bool, age, staleAfter time.Du
 	return status == StatusRunning
 }
 
-// canEnterFinalizing 不含 stopped：用户停止后仍可 flush，但终态保持「已停止」，避免单站收尾写成采集完成。
-func canEnterFinalizing(status string) bool {
-	switch status {
-	case StatusStarting, StatusRunning, StatusPageDone,
-		StatusWaitingPublish, StatusDone:
-		return true
-	default:
-		return false
-	}
-}
-
 func IsStopped(sourceID string) bool {
 	if progress, ok := Snapshot(sourceID); ok {
 		return progress.Status == StatusStopped
+	}
+	return false
+}
+
+func IsStopping(sourceID string) bool {
+	if progress, ok := Snapshot(sourceID); ok {
+		return progress.Status == StatusStopping
 	}
 	return false
 }
@@ -177,6 +282,10 @@ func IsStarting(sourceID string) bool {
 
 func IsAlreadyQueuedOrRunning(sourceID string) bool {
 	if _, ok := tasks.Load(sourceID); ok {
+		return true
+	}
+	// 停止中的收尾还没退出。这段时间和按钮上的 loading 对齐，退出后才能再开。
+	if snap, ok := Snapshot(sourceID); ok && snap.Status == StatusStopping {
 		return true
 	}
 	if refreshAndIsBlockingProgress(sourceID) {
@@ -201,51 +310,50 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	}
 	_, live := tasks.Load(sourceID)
 	age := now.Sub(state.updated)
-	if isPostFetchStatus(state.data.Status) {
-		state.mu.Unlock()
-		return true
-	}
 	if live && (state.data.Status == StatusRunning || state.data.Status == StatusStarting) {
 		state.mu.Unlock()
 		return true
 	}
 	if shouldMarkStale(sourceID, state.data.Status, live, age, staleAfter) {
 		old := state.data.Status
-		name := state.data.Name
 		state.data.Status = StatusFailed
 		state.updated = now
 		state.mu.Unlock()
 		log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed",
 			sourceID, old, age.Round(time.Second))
-		staleNotifier(sourceID, name, old, age)
 		return false
 	}
 	state.mu.Unlock()
 	return true
 }
 
-func MarkSourcePagesFinished(sourceID string, flushAtEnd bool) {
+func MarkSourceDone(sourceID string) {
 	Update(sourceID, func(progress *model.CollectProgress) {
-		if progress.Status != StatusRunning && progress.Status != StatusStarting {
-			return
+		if progress.Status == StatusRunning || progress.Status == StatusStarting {
+			progress.Status = StatusDone
 		}
-		if flushAtEnd {
-			progress.Status = StatusPageDone
-			return
-		}
-		progress.Status = StatusWaitingPublish
 	})
+	FlushHotpathSideEffects(sourceID)
+}
+
+// MarkSourceDoneIfRun 本代正常跑完才标完成。停止中留给 FinishRun 收成已停止。
+func MarkSourceDoneIfRun(ctx context.Context, sourceID string) {
+	if !UpdateRun(ctx, sourceID, func(progress *model.CollectProgress) {
+		if progress.Status == StatusRunning || progress.Status == StatusStarting {
+			progress.Status = StatusDone
+		}
+	}) {
+		return
+	}
 	FlushHotpathSideEffects(sourceID)
 }
 
 func FlushHotpathSideEffects(sourceIDs ...string) {
 	if len(sourceIDs) == 0 {
 		repository.FlushCollectSourceStats()
-		writer.FlushCollectCacheInvalidations()
 		return
 	}
 	repository.FlushCollectSourceStats(sourceIDs...)
-	writer.FlushCollectCacheInvalidations()
 }
 
 func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
@@ -257,11 +365,14 @@ func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
 		state.data.Current = 0
 		state.data.Success = 0
 		state.data.Failed = 0
+		state.probed = false
 		state.data.Status = StatusStarting
 		state.data.QueueId = queueID
+		state.epoch++
 		state.updated = time.Now()
 		state.mu.Unlock()
 	}
+	NotifyChange()
 }
 
 func MarkStopped(sourceID string) {
@@ -272,48 +383,16 @@ func MarkStopped(sourceID string) {
 	})
 }
 
-// StampPageRunning 记录正在抓取的页码。终态和收尾态不可被 worker 写回 running。
+// StampPageRunning 记录正在抓取的页码。终态不可被 worker 写回 running。
 func StampPageRunning(progress *model.CollectProgress, page int) {
-	if IsTerminalStatus(progress.Status) || isPostFetchStatus(progress.Status) {
+	if IsTerminalStatus(progress.Status) || progress.Status == StatusStopping {
 		return
 	}
 	if page > progress.Current {
 		progress.Current = page
 	}
 	progress.Status = StatusRunning
-}
-
-func MarkSourcesFinalizing(sources map[string]model.FilmSource) {
-	ids := make([]string, 0, len(sources))
-	for _, source := range sources {
-		ids = append(ids, source.Id)
-		Update(source.Id, func(progress *model.CollectProgress) {
-			if canEnterFinalizing(progress.Status) {
-				progress.Status = StatusFinalizing
-			}
-		})
-	}
-	FlushHotpathSideEffects(ids...)
-}
-
-func MarkSourcesPublished(sources map[string]model.FilmSource) {
-	for _, source := range sources {
-		Update(source.Id, func(progress *model.CollectProgress) {
-			if progress.Status == StatusFinalizing {
-				progress.Status = StatusDone
-			}
-		})
-	}
-}
-
-func MarkSourcesFinalizeFailed(sources map[string]model.FilmSource) {
-	for _, source := range sources {
-		Update(source.Id, func(progress *model.CollectProgress) {
-			if progress.Status == StatusFinalizing {
-				progress.Status = StatusFailed
-			}
-		})
-	}
+	NotifyChange()
 }
 
 func GetActiveTaskProgress() []model.CollectProgress {
@@ -344,17 +423,21 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		progress := state.data
 		age := now.Sub(state.updated)
 
+		if progress.Status == StatusStopping {
+			state.mu.Unlock()
+			list = append(list, progress)
+			return true
+		}
+
 		if isActiveStatus(progress.Status) {
 			_, live := tasks.Load(id)
 			if shouldMarkStale(id, progress.Status, live, age, staleAfter) {
 				old := progress.Status
-				name := progress.Name
 				progress.Status = StatusFailed
 				state.data.Status = StatusFailed
 				state.updated = now
 				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed", id, old, age.Round(time.Second))
 				state.mu.Unlock()
-				staleNotifier(id, name, old, age)
 				list = append(list, progress)
 				return true
 			}
@@ -394,7 +477,7 @@ func IsTaskRunning(id string) bool {
 		return true
 	}
 	if progress, ok := Snapshot(id); ok {
-		return isActiveStatus(progress.Status)
+		return isInFlightStatus(progress.Status)
 	}
 	return false
 }
@@ -412,7 +495,7 @@ func IsAnyTaskRunning() bool {
 	store.Range(func(key, value any) bool {
 		state := value.(*progressState)
 		state.mu.RLock()
-		active := isActiveStatus(state.data.Status)
+		active := isInFlightStatus(state.data.Status)
 		state.mu.RUnlock()
 		if active {
 			hasActive = true

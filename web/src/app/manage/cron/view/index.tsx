@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { Table, Tag, Switch, Button, Modal, Form, Tooltip, Space, Popconfirm, Card } from "antd";
+import { Table, Tag, Switch, Button, Form, Tooltip, Space, Popconfirm, Card } from "antd";
 import { EditOutlined, ThunderboltOutlined, StopOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -9,7 +9,7 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
-import EditScheduleForm from "./components/edit-schedule-form";
+import CronDrawer from "./components/cron-drawer";
 import {
   getTaskDescription,
   getTaskScheduleText,
@@ -60,7 +60,7 @@ export default function CronManagePageView() {
   }, [hasRunningTask, getTaskList]);
 
   const changeTaskState = async (id: string, state: boolean) => {
-    const resp = await ApiPost("/manage/cron/change", { id, state });
+    const resp = await ApiPost("/manage/cron/state", { ids: [id], state });
     if (resp.code === 0) {
       message.success(resp.msg);
       getTaskList();
@@ -72,7 +72,7 @@ export default function CronManagePageView() {
   const runTaskOnce = async (id: string) => {
     setRunningId(id);
     try {
-      const resp = await ApiPost("/manage/cron/run", { id });
+      const resp = await ApiPost("/manage/cron/run", { ids: [id] });
       if (resp.code === 0) {
         message.success(resp.msg);
         getTaskList();
@@ -85,7 +85,7 @@ export default function CronManagePageView() {
   };
 
   const terminateTask = async (id: string) => {
-    const resp = await ApiPost("/manage/cron/change", { id, state: false });
+    const resp = await ApiPost("/manage/cron/state", { ids: [id], state: false });
     if (resp.code === 0) {
       message.success("已终止调度，当前执行将继续完成");
       getTaskList();
@@ -109,7 +109,7 @@ export default function CronManagePageView() {
   };
 
   const onEditFinish = async (values: any) => {
-    const resp = await ApiPost("/manage/cron/update", {
+    const resp = await ApiPost("/manage/cron/save", {
       id: values.id,
       spec: buildCronSpec(values),
       remark: buildTaskDescription(values),
@@ -207,7 +207,6 @@ export default function CronManagePageView() {
           return (
             <Popconfirm
               title="终止调度？"
-              description="将停止未来定时调度，当前正在执行的任务会继续跑完。"
               onConfirm={() => terminateTask(record.id)}
               disabled={!record.state}
               okText="终止"
@@ -226,19 +225,14 @@ export default function CronManagePageView() {
           );
         }
         const isRunning = runningId === record.id;
-        const runDisabled = !record.state || isRunning || !!record.disabledReason;
-        const runTooltip = record.disabledReason
-          ? record.disabledReason
-          : record.state
-          ? "立即执行一次"
-          : "请先启用任务";
+        const runDisabled = isRunning || !!record.disabledReason;
+        const runTooltip = record.disabledReason || "立即执行一次";
         return (
           <Space size={8}>
             <Tooltip title={runTooltip}>
               <span>
                 <Popconfirm
-                  title="立即执行该定时任务？"
-                  description="将立即触发一次执行，结果请查看运行日志。"
+                  title="立即执行？"
                   onConfirm={() => runTaskOnce(record.id)}
                   disabled={runDisabled}
                   okText="执行"
@@ -274,11 +268,10 @@ export default function CronManagePageView() {
     <div className={styles.pageStack}>
       <ManagePageHeader
         title="计划任务"
-        description="统一维护后台自动更新、采集重试和清理类计划任务。"
+        description="管理系统后台定时调度任务。支持调整执行周期、启用/禁用自动调度，或随时手动触发单次执行。"
       />
 
       <Table
-        bordered
         columns={columns}
         dataSource={taskList}
         rowKey="id"
@@ -294,18 +287,16 @@ export default function CronManagePageView() {
         )}
       />
 
-      <Modal
-        title="修改运行时间"
+      <CronDrawer
         open={editOpen}
-        onCancel={() => setEditOpen(false)}
-        okButtonProps={{ disabled: !canWrite }}
-        onOk={() => form.validateFields().then(onEditFinish)}
-        width={560}
-      >
-        <Form form={form} layout="vertical">
-          <EditScheduleForm editModel={Number(editModel)} />
-        </Form>
-      </Modal>
+        canWrite={canWrite}
+        form={form}
+        editModel={Number(editModel)}
+        onClose={() => setEditOpen(false)}
+        onSubmit={() => {
+          form.validateFields().then(onEditFinish);
+        }}
+      />
     </div>
   );
 }

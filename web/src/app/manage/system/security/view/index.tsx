@@ -20,7 +20,6 @@ import {
   CloudSyncOutlined,
 } from "@ant-design/icons";
 import type { UploadProps } from "antd";
-import Link from "next/link";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -36,6 +35,9 @@ interface ConfigBackupModules {
   banners: boolean;
   notify: boolean;
   mappingRules: boolean;
+  proxy: boolean;
+  tmdb: boolean;
+  analytics: boolean;
 }
 
 interface ConfigBackup {
@@ -46,8 +48,12 @@ interface ConfigBackup {
   filmSources?: unknown[];
   cronTasks?: unknown[];
   banners?: unknown[];
+  bannerConfig?: unknown;
   notify?: unknown;
   mappingRules?: unknown[];
+  proxy?: unknown;
+  analytics?: unknown;
+  tmdb?: unknown;
 }
 
 const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
@@ -57,6 +63,9 @@ const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
   { key: "banners", label: "首页轮播" },
   { key: "notify", label: "通知配置" },
   { key: "mappingRules", label: "映射规则" },
+  { key: "proxy", label: "网络代理" },
+  { key: "tmdb", label: "TMDB刮削" },
+  { key: "analytics", label: "数据分析" },
 ];
 
 const ALL_MODULES: ConfigBackupModules = {
@@ -66,6 +75,9 @@ const ALL_MODULES: ConfigBackupModules = {
   banners: true,
   notify: true,
   mappingRules: true,
+  proxy: true,
+  tmdb: true,
+  analytics: true,
 };
 
 function downloadJson(filename: string, data: unknown) {
@@ -92,6 +104,9 @@ function summarizeBackup(backup: ConfigBackup | null): string {
     parts.push(`版本 ${backup.appVersion}`);
   }
   parts.push(`格式 v${backup.version ?? "?"}`);
+  if (backup.site) {
+    parts.push("网站配置");
+  }
   if (Array.isArray(backup.filmSources)) {
     parts.push(`采集站 ${backup.filmSources.length}`);
   }
@@ -101,8 +116,23 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   if (Array.isArray(backup.banners)) {
     parts.push(`封面 ${backup.banners.length}`);
   }
+  if (backup.bannerConfig) {
+    parts.push("轮播排片");
+  }
   if (Array.isArray(backup.mappingRules)) {
     parts.push(`映射规则 ${backup.mappingRules.length}`);
+  }
+  if (backup.proxy) {
+    parts.push("网络代理");
+  }
+  if (backup.tmdb) {
+    parts.push("TMDB刮削");
+  }
+  if (backup.notify) {
+    parts.push("通知配置");
+  }
+  if (backup.analytics) {
+    parts.push("数据分析");
   }
   return parts.join(" · ");
 }
@@ -116,7 +146,9 @@ interface DataSecurityPageViewProps {
 export default function DataSecurityPageView({ embedded = false }: DataSecurityPageViewProps) {
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
+  const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportPassword, setExportPassword] = useState("");
 
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -127,10 +159,27 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
 
   const backupSummary = useMemo(() => summarizeBackup(backup), [backup]);
 
-  const handleExport = async () => {
+  const openExport = () => {
+    setExportOpen(true);
+    setExportPassword("");
+  };
+
+  const closeExport = () => {
+    if (exporting) return;
+    setExportOpen(false);
+    setExportPassword("");
+  };
+
+  const confirmExport = async () => {
+    if (!exportPassword.trim()) {
+      message.error("请输入管理密码");
+      return;
+    }
     setExporting(true);
     try {
-      const resp = await ApiGet<ConfigBackup>("/manage/config/backup/export");
+      const resp = await ApiPost<ConfigBackup>("/manage/config/backup/export", {
+        password: exportPassword,
+      });
       if (resp.code !== 0 || !resp.data) {
         message.error(resp.msg || "导出失败");
         return;
@@ -138,11 +187,12 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       downloadJson(`ecohub-config-backup-${stamp}.json`, resp.data);
       message.success("配置备份已下载");
+      setExportOpen(false);
+      setExportPassword("");
     } finally {
       setExporting(false);
     }
   };
-
   const beforeUpload: UploadProps["beforeUpload"] = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -202,6 +252,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         message.success(resp.msg || "配置导入成功");
         setImportOpen(false);
         setPassword("");
+        window.dispatchEvent(new CustomEvent("ecohub:access-config-changed"));
         return;
       }
       message.error(resp.msg || "导入失败");
@@ -216,31 +267,6 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         <ManagePageHeader
           title="数据安全"
           description="管理站点配置备份导入与导出，数据分析积累数据清理，以及影视库存与采集派生数据重置。"
-        />
-      )}
-
-      {embedded ? null : (
-        <Alert
-          type="info"
-          showIcon
-          title="配置备份与数据重置"
-          description={
-            <>
-              导出/导入仅包含站点配置（网站、采集站、计划任务、封面、通知、映射规则），不含影视库存与账号密码。
-              当前影视体量可在{" "}
-              <Link href="/manage">工作台</Link>
-              {" "}查看；清空影视与采集派生数据请使用下方「数据重置」。
-            </>
-          }
-        />
-      )}
-
-      {!isAdmin && (
-        <Alert
-          type="warning"
-          showIcon
-          title="权限受限"
-          description="数据安全相关操作（配置备份/恢复、数据分析数据清理、影视数据重置）包含高危与敏感配置，仅超级管理员可操作。"
         />
       )}
 
@@ -269,9 +295,8 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              loading={exporting}
               disabled={!canWrite || !isAdmin}
-              onClick={() => void handleExport()}
+              onClick={openExport}
             >
               导出配置
             </Button>
@@ -355,6 +380,31 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             placeholder="请输入管理密码"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+        </Flex>
+      </Modal>
+
+      <Modal
+        title="导出配置备份"
+        open={exportOpen}
+        onCancel={closeExport}
+        onOk={() => void confirmExport()}
+        okText="确认导出"
+        confirmLoading={exporting}
+        destroyOnHidden
+        width={460}
+      >
+        <Flex vertical gap={14}>
+          <Alert
+            type="info"
+            showIcon
+            title="备份包含站点订阅密钥、弹幕与第三方集成凭据，导出需验证管理密码并请妥善保管"
+          />
+          <Input.Password
+            placeholder="请输入管理密码"
+            value={exportPassword}
+            onChange={(e) => setExportPassword(e.target.value)}
             autoComplete="current-password"
           />
         </Flex>

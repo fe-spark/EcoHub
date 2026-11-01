@@ -16,7 +16,7 @@ import (
 
 func QueryLogsScope(day, source, status, client, q, module, platform string, limit int) ([]AccessEvent, error) {
 	if db.Rdb == nil {
-		if !config.AccessLogEnabled {
+		if !IsEnabled() {
 			return []AccessEvent{}, nil
 		}
 		return nil, fmt.Errorf("redis unavailable")
@@ -112,7 +112,7 @@ func QueryLogsScope(day, source, status, client, q, module, platform string, lim
 			break
 		}
 	}
-	return enrichLogEvents(out), nil
+	return enrichLogEvents(out)
 }
 
 func recentKeysForModule(module, dayKey string) []string {

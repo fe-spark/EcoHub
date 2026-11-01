@@ -9,16 +9,16 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"server/internal/config"
 	"server/internal/infra/db"
-	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/model/dto"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
@@ -60,9 +60,16 @@ func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
 	return gdb, mr
 }
 
+func seedLiveSnaps(t *testing.T, snaps ...model.FilmListSnapshot) {
+	t.Helper()
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(snaps); err != nil {
+		t.Fatalf("seed live films: %v", err)
+	}
+}
+
 // 方案 1 测试：hotKeywords 性能加固
 func TestPlan1_HotKeywords_Hardening(t *testing.T) {
-	gdb, mr := setupTestDBAndRedis(t)
+	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan1"
 
 	snaps := []model.FilmListSnapshot{
@@ -73,18 +80,17 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 		{SnapshotVersion: version, Mid: 5, Name: "泰坦尼克号", Hits: 100, Pid: 1},
 		{SnapshotVersion: version, Mid: 6, Name: "无效分类影片", Hits: 999, Pid: 0}, // pid=0 应被过滤
 	}
-	for _, s := range snaps {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
-	}
+	seedLiveSnaps(t, snaps...)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	// 1. 请求 limit = 3
-	kw := IndexSvc.GetHotSearchKeywords(3)
+	kw, err := IndexSvc.GetHotSearchKeywords(3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(kw) != 3 {
 		t.Fatalf("want 3 keywords, got %d: %v", len(kw), kw)
 	}
@@ -105,7 +111,10 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 
 	// 3. 验证内存切片隔离性：修改返回切片不影响缓存与后续调用
 	kw[0] = "篡改片名"
-	kw2 := IndexSvc.GetHotSearchKeywords(3)
+	kw2, err := IndexSvc.GetHotSearchKeywords(3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if kw2[0] != "复仇者联盟" {
 		t.Fatalf("cache was mutated by caller modification: got %s", kw2[0])
 	}
@@ -116,7 +125,11 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 		wg.Add(1)
 		go func(limit int) {
 			defer wg.Done()
-			res := IndexSvc.GetHotSearchKeywords(limit)
+			res, err := IndexSvc.GetHotSearchKeywords(limit)
+			if err != nil {
+				t.Errorf("GetHotSearchKeywords: %v", err)
+				return
+			}
 			if len(res) == 0 {
 				t.Errorf("concurrent GetHotSearchKeywords returned empty")
 			}
@@ -165,18 +178,24 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 		Pid:             1,
 		Cid:             10,
 	}
-	if err := gdb.Create(&snap).Error; err != nil {
-		t.Fatalf("create snapshot: %v", err)
-	}
+	seedLiveSnaps(t, snap)
 	detail := model.MovieDetail{
 		Id:       validMid,
 		Name:     "盗梦空间",
 		PlayList: [][]model.MovieUrlInfo{{{Episode: "正片", Link: "https://test.com/play.m3u8"}}},
 		PlayFrom: []string{"默认主源"},
 	}
-	rawDetail, _ := json.Marshal(detail)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: validMid, Content: string(rawDetail)}).Error; err != nil {
-		t.Fatalf("create detail: %v", err)
+	urlsJSON, _ := json.Marshal(detail.PlayList[0])
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          validMid,
+		SourceId:     "src_1",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail.PlayList[0]),
+		Content:      string(urlsJSON),
+	}).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
@@ -242,9 +261,7 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 			Cid:             10,
 			Hits:            mid * 10,
 		}
-		if err := gdb.Create(&snap).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
+		seedLiveSnaps(t, snap)
 
 		d := model.MovieDetail{
 			Id:       mid,
@@ -252,9 +269,17 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 			PlayList: [][]model.MovieUrlInfo{{{Episode: "HD", Link: fmt.Sprintf("http://video/%d.m3u8", mid)}}},
 			PlayFrom: []string{"默认主源"},
 		}
-		raw, _ := json.Marshal(d)
-		if err := gdb.Create(&model.MovieDetailInfo{Mid: mid, Content: string(raw)}).Error; err != nil {
-			t.Fatalf("create detail: %v", err)
+		urlsJSON, _ := json.Marshal(d.PlayList[0])
+		if err := gdb.Create(&model.FilmSourcePlaylist{
+			Mid:          mid,
+			SourceId:     "src_1",
+			LineKind:     "play",
+			GroupIndex:   0,
+			GroupName:    "默认主源",
+			EpisodeCount: len(d.PlayList[0]),
+			Content:      string(urlsJSON),
+		}).Error; err != nil {
+			t.Fatalf("create playlist: %v", err)
 		}
 	}
 
@@ -277,7 +302,10 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 
 	// 请求批量详情：包含命中的 201、未命中的 202 和 203、哨兵 9999、完全不存在的 8888
 	ids := []string{"201", "202", "203", "9999", "8888"}
-	details := ProvideSvc.GetVodDetail(ids)
+	details, err := ProvideSvc.GetVodDetail(ids, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(details) != 3 {
 		t.Fatalf("want 3 valid film details, got %d", len(details))
@@ -297,21 +325,17 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 
 // 方案 4 测试：filmClassify 剔除 COUNT 并实现 3 路并行
 func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
-	gdb, mr := setupTestDBAndRedis(t)
+	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan4"
 
 	const pid = int64(1)
 	// 插入几条数据，分别赋予不同 hits, year, update_stamp
 	items := []model.FilmListSnapshot{
-		{SnapshotVersion: version, Mid: 301, Pid: pid, Name: "影片A", Hits: 100, Year: 2021, UpdateStamp: 1000},
-		{SnapshotVersion: version, Mid: 302, Pid: pid, Name: "影片B", Hits: 900, Year: 2020, UpdateStamp: 2000},
-		{SnapshotVersion: version, Mid: 303, Pid: pid, Name: "影片C", Hits: 500, Year: 2023, UpdateStamp: 500},
+		{SnapshotVersion: version, Mid: 301, Pid: pid, Name: "影片A", Hits: 100, Year: 2021, UpdateStamp: 1000, ClassTag: "科幻", Area: "香港", Score: 7.5, Actor: "刘德华", Blurb: "精彩科幻"},
+		{SnapshotVersion: version, Mid: 302, Pid: pid, Name: "影片B", Hits: 900, Year: 2020, UpdateStamp: 2000, ClassTag: "悬疑", Area: "大陆", Score: 8.0, Actor: "葛优", Blurb: "悬疑大案"},
+		{SnapshotVersion: version, Mid: 303, Pid: pid, Name: "影片C", Hits: 500, Year: 2023, UpdateStamp: 500, ClassTag: "动作", Area: "大陆", Score: 9.1, Actor: "吴京", Blurb: "火爆动作"},
 	}
-	for _, it := range items {
-		if err := gdb.Create(&it).Error; err != nil {
-			t.Fatalf("create item: %v", err)
-		}
-	}
+	seedLiveSnaps(t, items...)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -319,26 +343,38 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 
 	// 测试 GetSnapshotTopMoviesBySortFast:
 	// sortType 0 (news: year DESC, update_stamp DESC) -> 应最先是 303 (2023)
-	news := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 0, pid, 10)
+	news, err := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 0, pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(news) != 3 || news[0].Id != 303 {
 		t.Fatalf("sortType 0 unexpected top: %+v", news)
 	}
 
 	// sortType 1 (top: hits DESC) -> 应最先是 302 (hits 900)
-	top := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 1, pid, 10)
+	top, err := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 1, pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(top) != 3 || top[0].Id != 302 {
 		t.Fatalf("sortType 1 unexpected top: %+v", top)
 	}
 
 	// sortType 2 (recent: update_stamp DESC) -> 应最先是 302 (update_stamp 2000)
-	recent := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 2, pid, 10)
+	recent, err := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 2, pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(recent) != 3 || recent[0].Id != 302 {
 		t.Fatalf("sortType 2 unexpected top: %+v", recent)
 	}
 
 	// 测试 IndexSvc.GetFilmClassify 并发组装
 	page := &dto.Page{PageSize: 10}
-	res := IndexSvc.GetFilmClassify(pid, page)
+	res, err := IndexSvc.GetFilmClassify(pid, page)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res == nil {
 		t.Fatal("expected non-nil classify response")
 	}
@@ -351,6 +387,10 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	if _, ok := res["recent"]; !ok {
 		t.Fatal("missing 'recent' in classify response")
 	}
+	newsList := res["news"].([]model.MovieBasicInfo)
+	if len(newsList) == 0 || newsList[0].ClassTag != "动作" || newsList[0].Score != 9.1 || newsList[0].Actor != "吴京" || newsList[0].Blurb != "火爆动作" {
+		t.Fatalf("classify news item missing fields: %+v", newsList[0])
+	}
 
 	// 确认顶层分类缓存已生成
 	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
@@ -361,7 +401,7 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 
 // 方案 5 测试：filmClassifySearch 深分页截断与 SingleFlight 并发安全返回
 func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
+	setupTestDBAndRedis(t)
 	const version = "v_plan5"
 
 	// 1. 验证 normalizeIndexPage 边界截断
@@ -390,9 +430,7 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 			Name:            fmt.Sprintf("测试片%d", i),
 			Hits:            i * 10,
 		}
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create test film: %v", err)
-		}
+		seedLiveSnaps(t, s)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
@@ -415,7 +453,12 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, pages[idx])
+			rows, err := filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, pages[idx])
+			if err != nil {
+				t.Errorf("worker %d: %v", idx, err)
+				return
+			}
+			results[idx] = rows
 		}(i)
 	}
 	wg.Wait()
@@ -435,7 +478,7 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 
 // 方案 6 测试：filmRelate 缓存前置与空值哨兵
 func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
-	gdb, mr := setupTestDBAndRedis(t)
+	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan6"
 
 	// 1. 插入存在影片与相关候选集
@@ -455,18 +498,7 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 		Pid:             1,
 		Cid:             10,
 	}
-	if err := gdb.Create(&s1).Error; err != nil {
-		t.Fatalf("create s1: %v", err)
-	}
-	if err := gdb.Create(&s2).Error; err != nil {
-		t.Fatalf("create s2: %v", err)
-	}
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: validMid, Content: `{"id":501,"name":"流浪地球1"}`}).Error; err != nil {
-		t.Fatalf("create d1: %v", err)
-	}
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: relMid, Content: `{"id":502,"name":"流浪地球2"}`}).Error; err != nil {
-		t.Fatalf("create d2: %v", err)
-	}
+	seedLiveSnaps(t, s1, s2)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -476,7 +508,10 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 
 	// 2. 不存在影片的推荐请求 -> 返回空并写入 "[]" 哨兵（60s）
 	const nonExistentMid = int64(77777)
-	resEmpty := IndexSvc.RelateMovie(nonExistentMid, page)
+	resEmpty, relateErr := IndexSvc.RelateMovie(nonExistentMid, page)
+	if relateErr != nil {
+		t.Fatalf("relate: %v", relateErr)
+	}
 	if len(resEmpty) != 0 {
 		t.Fatalf("expected empty relate for non-existent film, got %d", len(resEmpty))
 	}
@@ -492,13 +527,19 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 	}
 
 	// 再次请求该不存在的影片，验证直接命中 "[]" 哨兵
-	resEmpty2 := IndexSvc.RelateMovie(nonExistentMid, page)
+	resEmpty2, relateErr := IndexSvc.RelateMovie(nonExistentMid, page)
+	if relateErr != nil {
+		t.Fatalf("relate sentinel: %v", relateErr)
+	}
 	if len(resEmpty2) != 0 {
 		t.Fatalf("expected empty relate from sentinel")
 	}
 
 	// 3. 请求相关推荐
-	relList := IndexSvc.RelateMovie(validMid, page)
+	relList, relateErr := IndexSvc.RelateMovie(validMid, page)
+	if relateErr != nil {
+		t.Fatalf("relate list: %v", relateErr)
+	}
 	relCacheKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, validMid, 1, 10)
 	cachedVal, err := mr.Get(relCacheKey)
 	if err != nil || cachedVal == "" {
@@ -539,27 +580,16 @@ func TestPlan2_ClearAllSnapshotDynamicCaches_Invalidation(t *testing.T) {
 	}
 }
 
-// 方案 1 边缘测试：验证 RunAutoMigrations 执行正常且幂等
-func TestPlan1_EnsureSnapshotPerformanceIndexes(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
-
-	// 首次调用执行迁移
-	if err := migration.RunAutoMigrations(gdb); err != nil {
-		t.Fatalf("first RunAutoMigrations failed: %v", err)
-	}
-	// 二次调用验证幂等性
-	if err := migration.RunAutoMigrations(gdb); err != nil {
-		t.Fatalf("second RunAutoMigrations failed: %v", err)
-	}
-}
-
 // 方案 1 边缘测试：无数据时写入 60s 空值缓存防穿透
 func TestPlan1_EmptyHotKeywords_Sentinel(t *testing.T) {
 	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan1_empty"
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
-	kw := IndexSvc.GetHotSearchKeywords(10)
+	kw, err := IndexSvc.GetHotSearchKeywords(10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(kw) != 0 {
 		t.Fatalf("expected 0 keywords, got %d", len(kw))
 	}
@@ -589,13 +619,19 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 		Pid:             1,
 		Cid:             10,
 	}
-	if err := gdb.Create(&s).Error; err != nil {
-		t.Fatalf("create snap: %v", err)
-	}
+	seedLiveSnaps(t, s)
 	d := model.MovieDetail{Id: mid, Name: "降级测试影片", PlayList: [][]model.MovieUrlInfo{{{Episode: "1", Link: "url"}}}}
-	raw, _ := json.Marshal(d)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: mid, Content: string(raw)}).Error; err != nil {
-		t.Fatalf("create detail: %v", err)
+	urlsJSON, _ := json.Marshal(d.PlayList[0])
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          mid,
+		SourceId:     "src_1",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(d.PlayList[0]),
+		Content:      string(urlsJSON),
+	}).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
@@ -605,7 +641,10 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		manyIDs[i] = fmt.Sprintf("%d", 601+i)
 	}
-	res := ProvideSvc.GetVodDetail(manyIDs)
+	res, err := ProvideSvc.GetVodDetail(manyIDs, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 1 || res[0].VodID != 601 {
 		t.Fatalf("expected exactly 1 found detail, got %d", len(res))
 	}
@@ -615,7 +654,10 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	db.Rdb = nil
 	defer func() { db.Rdb = origRdb }()
 
-	resNilRedis := ProvideSvc.GetVodDetail([]string{"601"})
+	resNilRedis, err := ProvideSvc.GetVodDetail([]string{"601"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(resNilRedis) != 1 || resNilRedis[0].VodID != 601 {
 		t.Fatalf("expected 1 detail on nil redis, got %d", len(resNilRedis))
 	}
@@ -623,7 +665,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 
 // 方案 4 边缘测试：read model version 为空时自动回退 active snapshot version
 func TestPlan4_EmptyReadModelFallback(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
+	setupTestDBAndRedis(t)
 	const version = "v_plan4_fallback"
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
@@ -636,17 +678,30 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 		Year:            2025,
 		UpdateStamp:     100,
 	}
-	if err := gdb.Create(&s).Error; err != nil {
-		t.Fatalf("create s: %v", err)
-	}
+	seedLiveSnaps(t, s)
 
-	res := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
+	res, err := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res == nil {
 		t.Fatal("expected non-nil classify")
 	}
 	news, ok := res["news"].([]model.MovieBasicInfo)
 	if !ok || len(news) != 1 || news[0].Id != 701 {
 		t.Fatalf("expected 1 news item from fallback version, got: %+v", news)
+	}
+
+	// 验证停用分类拦截
+	support.SetCategoryShowForTest(map[int64]bool{1: false})
+	resDisabled, err := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
+	support.SetCategoryShowForTest(map[int64]bool{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newsDisabled := resDisabled["news"].([]model.MovieBasicInfo)
+	if len(newsDisabled) != 0 {
+		t.Fatalf("expected 0 news item when category disabled, got: %+v", newsDisabled)
 	}
 }
 
@@ -658,7 +713,10 @@ func TestPlan5_EmptyTagsSearch_Sentinel(t *testing.T) {
 
 	st := model.SearchTagsVO{Pid: 999, Cid: 888}
 	page := &dto.Page{Current: 1, PageSize: 10}
-	snaps := filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, page)
+	snaps, err := filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, page)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(snaps) != 0 {
 		t.Fatalf("expected 0 snapshots, got %d", len(snaps))
 	}
@@ -677,26 +735,29 @@ func TestPlan5_EmptyTagsSearch_Sentinel(t *testing.T) {
 
 // 方案 6 边缘测试：相关推荐切片返回隔离性验证
 func TestPlan6_RelateMovie_SliceIsolation(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
+	setupTestDBAndRedis(t)
 	const version = "v_plan6_iso"
 
 	s1 := model.FilmListSnapshot{SnapshotVersion: version, Mid: 801, Name: "电影A", Pid: 1, Cid: 10}
 	s2 := model.FilmListSnapshot{SnapshotVersion: version, Mid: 802, Name: "电影B", Pid: 1, Cid: 10}
-	_ = gdb.Create(&s1)
-	_ = gdb.Create(&s2)
-	_ = gdb.Create(&model.MovieDetailInfo{Mid: 801, Content: `{"id":801,"name":"电影A"}`})
-	_ = gdb.Create(&model.MovieDetailInfo{Mid: 802, Content: `{"id":802,"name":"电影B"}`})
+	seedLiveSnaps(t, s1, s2)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	page := &dto.Page{Current: 1, PageSize: 10}
-	list1 := IndexSvc.RelateMovie(801, page)
+	list1, relateErr := IndexSvc.RelateMovie(801, page)
+	if relateErr != nil {
+		t.Fatalf("relate list1: %v", relateErr)
+	}
 	if len(list1) > 0 {
 		origName := list1[0].Name
 		list1[0].Name = "篡改推荐片名"
-		list2 := IndexSvc.RelateMovie(801, page)
+		list2, relateErr := IndexSvc.RelateMovie(801, page)
+		if relateErr != nil {
+			t.Fatalf("relate list2: %v", relateErr)
+		}
 		if list2[0].Name != origName {
 			t.Fatalf("relateMovie slice isolation failed: mutated to %s", list2[0].Name)
 		}

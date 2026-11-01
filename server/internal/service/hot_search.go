@@ -2,16 +2,15 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"golang.org/x/sync/singleflight"
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"server/internal/config"
 	"server/internal/infra/db"
-	"server/internal/model"
-	"server/internal/model/dto"
-	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -46,45 +45,43 @@ func sliceHotKeywords(keywords []string, limit int) []string {
 	return res
 }
 
-// SearchFilmInfo 获取关键字匹配的影片信息（默认相关度优先）
-func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) []model.MovieBasicInfo {
-	return i.SearchFilmInfoWithSort(key, "", page)
-}
-
-// SearchFilmInfoWithSort 获取关键字匹配的影片信息（支持相关度/热度/最新/评分排序）
-func (i *IndexService) SearchFilmInfoWithSort(key string, sortField string, page *dto.Page) []model.MovieBasicInfo {
-	trimmed := strings.TrimSpace(key)
-	if page == nil {
-		page = &dto.Page{Current: 1, PageSize: 12}
-	}
-	version := filmsnapshot.GetActiveReadModelVersion()
-	sl := filmsnapshot.SearchSnapshotsByKeywordAndSortFast(version, trimmed, sortField, page)
-	return filmshared.BuildMovieBasicInfosFromSnapshots(sl...)
-}
-
-// GetHotSearchKeywords 全站热门推荐：按当前快照播放热度取片名，与个人搜索历史无关。
-func (i *IndexService) GetHotSearchKeywords(limit int) []string {
+// GetHotSearchKeywords 全站热门推荐：按当前首选站播放热度取片名，与个人搜索历史无关。
+func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) ([]string, error) {
 	limit = clampHotSearchLimit(limit)
+
+	var sourceID string
+	if len(sourceIdOpt) > 0 {
+		sourceID = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceID == "" {
+		sourceID = i.BaselineSourceID()
+	}
 
 	version := filmsnapshot.GetActiveReadModelVersion()
 	if version == "" {
 		version = filmsnapshot.GetActiveSnapshotVersion()
 	}
 	if version == "" {
-		return []string{}
+		return nil, filmsnapshot.ErrSearchIndexMissing
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
+	var cacheKey string
+	if sourceID != "" {
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s", config.FilmHotKeywordsKey, version, sourceID)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []string
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				return sliceHotKeywords(cached, limit)
+				return sliceHotKeywords(cached, limit), nil
 			}
 		}
 	}
 
-	val, err, _ := hotKeywordsSfGroup.Do(cacheKey, func() (any, error) {
+	sfKey := cacheKey
+	val, err, _ := hotKeywordsSfGroup.Do(sfKey, func() (any, error) {
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 				var cached []string
@@ -94,24 +91,15 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 			}
 		}
 
-		if db.Mdb == nil {
-			return []string{}, nil
-		}
-
-		var snapshots []model.FilmListSnapshot
-		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-			Select("name").
-			Where("snapshot_version = ? AND pid > 0", version).
-			Order("hits DESC").
-			Limit(hotSearchMaxLimit * 3)
-		if err := query.Find(&snapshots).Error; err != nil {
-			return []string{}, err
+		names, err := filmsnapshot.TopSourceFilmNames(sourceID, hotSearchMaxLimit*3)
+		if err != nil {
+			return nil, err
 		}
 
 		topKeywords := make([]string, 0, hotSearchMaxLimit)
 		seen := make(map[string]struct{}, hotSearchMaxLimit)
-		for _, snap := range snapshots {
-			name := strings.TrimSpace(snap.Name)
+		for _, rawName := range names {
+			name := strings.TrimSpace(rawName)
 			if name == "" {
 				continue
 			}
@@ -137,12 +125,15 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 		return topKeywords, nil
 	})
 
-	if err != nil || val == nil {
-		return []string{}
+	if err != nil {
+		return nil, err
+	}
+	if val == nil {
+		return []string{}, nil
 	}
 	keywords, ok := val.([]string)
 	if !ok {
-		return []string{}
+		return nil, errors.New("热词结果无效")
 	}
-	return sliceHotKeywords(keywords, limit)
+	return sliceHotKeywords(keywords, limit), nil
 }

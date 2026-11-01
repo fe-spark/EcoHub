@@ -1,12 +1,11 @@
 import React, { useCallback, useMemo, useRef } from "react";
-import { Button, Empty, Space, Switch, Table, Tag, Typography, Card } from "antd";
+import { Button, Empty, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   FolderOpenOutlined,
   HolderOutlined,
   ReloadOutlined,
-  SaveOutlined,
   SubnodeOutlined,
 } from "@ant-design/icons";
 import {
@@ -30,12 +29,11 @@ interface CategoryTreeCardProps {
   expandedKeys: React.Key[];
   loadingTree: boolean;
   savingTree: boolean;
-  resettingTree: boolean;
-  updatingShowIds: number[];
-  hasPendingChanges: boolean;
+  sources: { id: string; name: string; state?: boolean }[];
+  sourceId: string;
+  stats: { total: number; roots: number; children: number; hidden: number };
+  onSourceChange: (sourceId: string) => void;
   onRefresh: () => void;
-  onReset: () => void;
-  onSave: () => void;
   onExpand: (keys: React.Key[]) => void;
   onMove: (dragId: number, dropId: number) => void;
   onShowChange: (id: number, show: boolean) => void;
@@ -79,12 +77,11 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     expandedKeys,
     loadingTree,
     savingTree,
-    resettingTree,
-    updatingShowIds,
-    hasPendingChanges,
+    sources,
+    sourceId,
+    stats,
+    onSourceChange,
     onRefresh,
-    onReset,
-    onSave,
     onExpand,
     onMove,
     onShowChange,
@@ -130,7 +127,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    if (!canWrite) {
+    if (!canWrite || savingTree) {
       return;
     }
     const { active, over } = event;
@@ -238,8 +235,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
         <Switch
           size="small"
           checked={value}
-          disabled={!canWrite}
-          loading={updatingShowIds.includes(record.id)}
+          disabled={!canWrite || savingTree}
           onChange={(checked) => onShowChange(record.id, checked)}
         />
       ),
@@ -262,7 +258,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       >
         <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
           <Table<FilmClassNode>
-            bordered
             rowKey="id"
             columns={columns}
             dataSource={classTree}
@@ -271,7 +266,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
             pagination={false}
             size="middle"
             scroll={{ x: "max-content" }}
-            locale={{ emptyText: <Empty description="暂无分类数据" /> }}
+            locale={{ emptyText: <Empty description="该采集站还没有分类" /> }}
             rowClassName={(record) => {
               const isExpandable = (record.children?.length || 0) > 0;
               const levelClass = record.pid === 0 ? styles.level1Row : styles.level2Row;
@@ -301,18 +296,48 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
             })}
             title={() => (
               <div className={styles.tableHeader}>
-                <div className={styles.tableTitle}>分类管理</div>
-                <Space wrap className={styles.tableActions}>
-                  <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree}>
+                <div className={styles.toolbarLead}>
+                  <div className={styles.sourceField}>
+                    <span className={styles.sourceLabel}>采集源</span>
+                    <Select
+                      placeholder="选择采集源"
+                      className={styles.sourceSelect}
+                      value={sourceId || undefined}
+                      onChange={onSourceChange}
+                      options={sources.map((source) => ({
+                        label: source.state === false ? `${source.name} (已停用)` : source.name,
+                        value: source.id,
+                      }))}
+                      showSearch
+                      optionFilterProp="label"
+                      popupMatchSelectWidth={false}
+                    />
+                  </div>
+                  <div className={styles.stats}>
+                    <span>
+                      <span className={styles.statValue}>{stats.total}</span> 个分类
+                    </span>
+                    <span className={styles.statSep} />
+                    <span>
+                      <span className={styles.statValue}>{stats.roots}</span> 主类
+                    </span>
+                    <span className={styles.statSep} />
+                    <span>
+                      <span className={styles.statValue}>{stats.children}</span> 子类
+                    </span>
+                    {stats.hidden > 0 ? (
+                      <>
+                        <span className={styles.statSep} />
+                        <span className={styles.statWarn}>隐藏 {stats.hidden}</span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                <div className={styles.tableActions}>
+                  <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree} disabled={savingTree}>
                     刷新分类
                   </Button>
-                  <Button onClick={onReset} loading={resettingTree} disabled={!canWrite}>
-                    重置分类
-                  </Button>
-                  <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={savingTree} disabled={!canWrite || !hasPendingChanges}>
-                    保存变更
-                  </Button>
-                </Space>
+                </div>
               </div>
             )}
             expandable={{

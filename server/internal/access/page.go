@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,10 +18,37 @@ var pageActions = map[string]struct{}{
 
 const pageMinInterval = 2 * time.Second
 
-var (
-	pageHitMu   sync.Mutex
-	pageHitLast = map[string]time.Time{}
-)
+const pageHitShardCount = 16
+
+type pageHitShard struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+var pageHitBuckets [pageHitShardCount]pageHitShard
+
+func init() {
+	for i := range pageHitBuckets {
+		pageHitBuckets[i].last = map[string]time.Time{}
+	}
+}
+
+func pageHitBucket(key string) *pageHitShard {
+	var hash uint32
+	for i := 0; i < len(key); i++ {
+		hash = hash*16777619 ^ uint32(key[i])
+	}
+	return &pageHitBuckets[hash%pageHitShardCount]
+}
+
+func resetPageHits() {
+	for i := range pageHitBuckets {
+		bucket := &pageHitBuckets[i]
+		bucket.mu.Lock()
+		bucket.last = map[string]time.Time{}
+		bucket.mu.Unlock()
+	}
+}
 
 type TrackViewPayload struct {
 	Action         string `json:"action"`
@@ -31,6 +57,7 @@ type TrackViewPayload struct {
 	ResourcePoster string `json:"resource_poster"`
 	ResourceCat    string `json:"resource_cat"`
 	Source         string `json:"source"`
+	CollectSource  string `json:"collect_source"`
 	Path           string `json:"path"`
 	Page           string `json:"page"`
 	PageTitle      string `json:"page_title"`
@@ -40,7 +67,7 @@ type TrackViewPayload struct {
 }
 
 func TrackPagePayload(c *gin.Context, p TrackViewPayload) {
-	if !config.AccessLogEnabled {
+	if !IsEnabled() {
 		return
 	}
 	Collect(buildPageEventPayload(c, p))
@@ -87,15 +114,6 @@ func isSafePagePath(s string) bool {
 		}
 	}
 	return true // 全程无冒号（如 "HomePage" 屏名），放行
-}
-
-func buildPageEvent(c *gin.Context, action, resource, source, path string) *AccessEvent {
-	return buildPageEventPayload(c, TrackViewPayload{
-		Action:   action,
-		Resource: resource,
-		Source:   source,
-		Path:     path,
-	})
 }
 
 func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
@@ -167,29 +185,30 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 	resourceCat := TruncateRunes(p.ResourceCat, 64)
 
 	return &AccessEvent{
-		Ts:             time.Now(),
-		Node:           CurrentNodeName(),
-		Method:         "PAGE",
-		Path:           routePath,
-		Page:           page,
-		PageTitle:      TruncateRunes(p.PageTitle, 64),
-		Route:          "page",
-		Action:         action,
-		Status:         200,
-		ClientType:     clientType,
-		AppVersion:     TruncateRunes(p.AppVersion, 32),
-		DeviceModel:    TruncateRunes(p.DeviceModel, 64),
-		DeviceId:       TruncateRunes(did, 64),
-		IPHash:         HashIP(ip),
-		IPPreview:      IPPreview(ip),
-		UAFamily:       uaFamily("", ua),
-		OS:             detectOS(ua),
-		Resource:       resource,
-		ResourceTitle:  resourceTitle,
-		ResourcePoster: resourcePoster,
-		ResourceCat:    resourceCat,
-		playMember:     pagePlayRankMember(action, p.Resource),
-		uvMember:       HashIP(ip + "|" + ua),
+		Ts:              time.Now(),
+		Node:            CurrentNodeName(),
+		Method:          "PAGE",
+		Path:            routePath,
+		Page:            page,
+		PageTitle:       TruncateRunes(p.PageTitle, 64),
+		Route:           "page",
+		Action:          action,
+		Status:          200,
+		ClientType:      clientType,
+		AppVersion:      TruncateRunes(p.AppVersion, 32),
+		DeviceModel:     TruncateRunes(p.DeviceModel, 64),
+		DeviceId:        TruncateRunes(did, 64),
+		IPHash:          HashIP(ip),
+		IPPreview:       IPPreview(ip),
+		UAFamily:        uaFamily("", ua),
+		OS:              detectOS(ua),
+		Resource:        resource,
+		ResourceTitle:   resourceTitle,
+		ResourcePoster:  resourcePoster,
+		ResourceCat:     resourceCat,
+		CollectSourceId: pageCollectSource(action, p.CollectSource, p.Resource),
+		playMember:      pagePlayRankMember(action, p.Resource),
+		uvMember:        HashIP(ip + "|" + ua),
 	}
 }
 
@@ -204,21 +223,22 @@ func pageTooFast(ip, pageKey string) bool {
 	}
 	key := ipHash + ":" + strings.TrimSpace(pageKey)
 	now := time.Now()
-	pageHitMu.Lock()
-	defer pageHitMu.Unlock()
-	if last, ok := pageHitLast[key]; ok && now.Sub(last) < pageMinInterval {
+	bucket := pageHitBucket(key)
+	bucket.mu.Lock()
+	defer bucket.mu.Unlock()
+	if last, ok := bucket.last[key]; ok && now.Sub(last) < pageMinInterval {
 		return true
 	}
-	pageHitLast[key] = now
-	if len(pageHitLast) > 10000 {
+	bucket.last[key] = now
+	if len(bucket.last) > 1024 {
 		cutoff := now.Add(-pageMinInterval)
-		for k, t := range pageHitLast {
+		for k, t := range bucket.last {
 			if t.Before(cutoff) && k != key {
-				delete(pageHitLast, k)
+				delete(bucket.last, k)
 			}
 		}
-		if len(pageHitLast) > 10000 {
-			pageHitLast = map[string]time.Time{key: now}
+		if len(bucket.last) > 1024 {
+			bucket.last = map[string]time.Time{key: now}
 		}
 	}
 	return false

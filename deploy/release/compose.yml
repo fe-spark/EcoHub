@@ -43,7 +43,7 @@ services:
 
   ecohub:
     container_name: Eco-hub
-    image: ghcr.io/fe-spark/ecohub:latest
+    image: ${ECOHUB_IMAGE:-ghcr.io/fe-spark/ecohub:latest}
     restart: always
     environment:
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
@@ -56,15 +56,11 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
-      # Telegram 专用代理（可选；通用代理 HTTPS_PROXY 等供采集等网络请求使用）
-      TG_PROXY: ${TG_PROXY:-}
+      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
+      # 通用代理供采集等网络请求使用（可选）
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
-      COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
-      # 数据分析（可选；默认 false 关闭）
-      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       # 前台与管理后台（如需不对公网暴露裸端口，可写为 127.0.0.1:${WEB_PORT:-3000}:3000 配合反向代理）
       - ${WEB_PORT:-3000}:3000

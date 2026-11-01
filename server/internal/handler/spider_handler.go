@@ -1,13 +1,10 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
-	"sync/atomic"
 
 	"server/internal/config"
-	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -20,27 +17,31 @@ type SpiderHandler struct{}
 
 var SpiderHd = new(SpiderHandler)
 
-// StopTask 停止单个采集任务（仅停止任务，不禁用采集站）。
+// StopTask 停止采集任务（统一批量 ids，单站传包含单个 id 的数组）
 func (h *SpiderHandler) StopTask(c *gin.Context) {
 	var req struct {
-		Id string `json:"id"`
+		Ids []string `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	if strings.TrimSpace(req.Id) == "" {
+	cleanIds := make([]string, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
 		dto.Failed("参数异常，采集站标识不能为空", c)
 		return
 	}
-	if err := service.SpiderSvc.StopTask(req.Id); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
+	go service.SpiderSvc.StopTasks(cleanIds)
 	dto.SuccessOnlyMsg("已发送停止指令，采集任务正在停止", c)
 }
 
-// StarSpider 开启并执行采集任务
+// StarSpider 开启并执行采集任务（统一批量 ids，单站传包含单个 id 的数组）
 func (h *SpiderHandler) StarSpider(c *gin.Context) {
 	var cp model.CollectParams
 	if err := c.ShouldBindJSON(&cp); err != nil {
@@ -51,33 +52,28 @@ func (h *SpiderHandler) StarSpider(c *gin.Context) {
 		dto.Failed("采集开启失败,采集时长不能为0", c)
 		return
 	}
-
-	if cp.Batch {
-		if len(cp.Ids) <= 0 {
-			dto.Failed("批量采集开启失败, 关联的资源站信息为空", c)
-			return
-		}
-		if err := service.SpiderSvc.BatchCollect(cp.Time, cp.Ids); err != nil {
-			dto.Failed(err.Error(), c)
-			return
-		}
-	} else {
-		if len(cp.Id) <= 0 {
-			dto.Failed("批量采集开启失败, 资源站Id获取失败", c)
-			return
-		}
-		if err := service.SpiderSvc.StartCollect(cp.Id, cp.Time); err != nil {
-			dto.Failed(fmt.Sprint("采集任务开启失败: ", err.Error()), c)
-			return
+	cleanIds := make([]string, 0, len(cp.Ids))
+	for _, id := range cp.Ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIds = append(cleanIds, id)
 		}
 	}
-	dto.SuccessOnlyMsg("采集任务已成功开启!!!", c)
+	if len(cleanIds) == 0 {
+		dto.Failed("采集开启失败, 关联的资源站信息为空", c)
+		return
+	}
+
+	result := service.SpiderSvc.BatchCollect(cp.Time, cleanIds)
+	msg := batchOutcomeMessage(result, "已开启", "没有可采集的站点")
+	if len(result.Started) == 0 {
+		dto.FailedWithData(result, msg, c)
+		return
+	}
+	dto.Success(result, msg, c)
 }
 
-// resetSiteDataRunning 防止并发重复触发站点数据重置（重置为长耗时异步任务）
-var resetSiteDataRunning atomic.Bool
-
-// ClearAllFilm 删除所有film信息：密钥校验通过后立即返回成功，重置在后台异步执行（仅超级管理员）。
+// ClearAllFilm 校验通过后以 SSE 推送数据重置进度。重置在后台跑完，连接断开不中止。
 func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
 	if !ok {
@@ -100,51 +96,34 @@ func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 		dto.Failed("重置失败, 密钥校验失败!!!", c)
 		return
 	}
-	if !resetSiteDataRunning.CompareAndSwap(false, true) {
+	if service.SpiderSvc.SiteResetRunning() {
 		dto.Failed("站点数据正在重置中，请勿重复操作", c)
 		return
 	}
-	go func() {
-		defer resetSiteDataRunning.Store(false)
-		if err := service.SpiderSvc.ClearFilms(); err != nil {
-			syslog.Errorf("[数据重置] 重置失败: %v", err)
-			return
-		}
-		syslog.Infof("[数据重置] 重置完成")
-	}()
-	dto.SuccessOnlyMsg("数据重置已开始，正在清空影视与采集数据", c)
-}
-
-// ResetProgress 返回数据重置实时进度（供前端轮询）
-func (h *SpiderHandler) ResetProgress(c *gin.Context) {
-	dto.Success(service.SpiderSvc.ResetProgress(), "获取成功", c)
-}
-
-// ResetImpactStats 返回数据重置影响面统计（将清空的数据量）
-func (h *SpiderHandler) ResetImpactStats(c *gin.Context) {
-	dto.Success(service.SpiderSvc.ResetImpactStats(), "获取成功", c)
-}
-
-// SingleUpdateSpider 单一影片主站更新采集
-func (h *SpiderHandler) SingleUpdateSpider(c *gin.Context) {
-	var req struct {
-		Ids string `json:"ids"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常!!!", c)
+	stream, ok := openSSE(c)
+	if !ok {
 		return
 	}
-	ids := req.Ids
-	if ids == "" {
-		dto.Failed("参数异常, 资源标识ID信息缺失", c)
-		return
+	if err := service.SpiderSvc.StreamSiteReset(c.Request.Context(), stream.SendData); err != nil {
+		_ = stream.SendData(map[string]any{"running": false, "error": err.Error()})
 	}
-	service.SpiderSvc.SyncCollect(ids)
-	dto.SuccessOnlyMsg("主站影片更新任务已成功开启!!!", c)
 }
 
-// StopAllTasks 一键终止所有采集中任务
-func (h *SpiderHandler) StopAllTasks(c *gin.Context) {
-	service.SpiderSvc.StopAllTasks()
-	dto.SuccessOnlyMsg("已发送终止指令，所有采集任务正在停止", c)
+// ResetProgressStream 订阅正在进行的数据重置进度。刷新页面后靠它接上。
+func (h *SpiderHandler) ResetProgressStream(c *gin.Context) {
+	stream, ok := openSSE(c)
+	if !ok {
+		return
+	}
+	_ = service.SpiderSvc.FollowSiteReset(c.Request.Context(), stream.SendData)
+}
+
+// InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
+func (h *SpiderHandler) InventoryStats(c *gin.Context) {
+	stats, err := service.SpiderSvc.InventoryStats(c.Query("scope"))
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(stats, "获取成功", c)
 }

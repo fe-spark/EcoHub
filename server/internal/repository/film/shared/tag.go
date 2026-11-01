@@ -252,9 +252,12 @@ func NormalizeSearchTagValue(tagType string, value string) string {
 
 // NormalizeSearchTagsVO 归一化检索条件：分类 ID 归位，并把「其它」类取值统一为 TagOthersValue。
 func NormalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
-	st.Pid = support.ResolveCategoryID(st.Pid)
-	if st.Cid > 0 {
-		st.Cid = support.ResolveCategoryID(st.Cid)
+	// 带了采集站时，Pid/Cid 是该站自己的 type_id，不能按本地 film_category 改写。
+	if strings.TrimSpace(st.SourceId) == "" {
+		st.Pid = support.ResolveCategoryID(st.Pid)
+		if st.Cid > 0 {
+			st.Cid = support.ResolveCategoryID(st.Cid)
+		}
 	}
 	if IsOthersSearchTagValue(st.Plot) {
 		st.Plot = model.TagOthersValue

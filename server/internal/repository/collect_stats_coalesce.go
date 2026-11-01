@@ -8,6 +8,10 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/model"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // collectStatsCoalescer 合并采集热路径中的 last_collect_time 写库。
@@ -150,4 +154,96 @@ func FlushCollectSourceStats(sourceIDs ...string) {
 		collectStats.lastFlushed[id] = nowFlush
 		collectStats.mu.Unlock()
 	}
+}
+
+// CollectSourceRunStat 保存各采集源最近一次采集的时间、上次总页与采集站全站总页。
+type CollectSourceRunStat struct {
+	LastRunTime      *time.Time
+	LastRunPageCount int
+	SitePageTotal    int
+}
+
+// NoteCollectSourceRun 记下一次采集跑完的时间与总页数，供卡片「上次采集」与「上次总页」。
+// 不写 last_collect_time，定时补窗锚点仍只在整次定时成功时更新。
+func NoteCollectSourceRun(sourceID string, pageCount int) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || db.Mdb == nil {
+		return
+	}
+	if err := touchCollectSourceRunTime(db.Mdb, sourceID, time.Now(), pageCount); err != nil {
+		log.Printf("NoteCollectSourceRun source=%s err=%v", sourceID, err)
+	}
+}
+
+func touchCollectSourceRunTime(tx *gorm.DB, sourceID string, at time.Time, pageCount int) error {
+	if tx == nil || sourceID == "" {
+		return nil
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	now := time.Now()
+	stat := model.CollectSourceStats{
+		SourceId:         sourceID,
+		LastRunTime:      &at,
+		LastRunPageCount: pageCount,
+	}
+	assignments := map[string]any{
+		"last_run_time": at,
+		"updated_at":    now,
+		"deleted_at":    nil,
+	}
+	if pageCount > 0 {
+		assignments["last_run_page_count"] = pageCount
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "source_id"}},
+		DoUpdates: clause.Assignments(assignments),
+	}).Create(&stat).Error
+}
+
+// GetCollectSourceRunStats 返回各站最近一次采集跑完时间与总页数。
+func GetCollectSourceRunStats(sourceIDs []string) map[string]CollectSourceRunStat {
+	result := make(map[string]CollectSourceRunStat, len(sourceIDs))
+	if len(sourceIDs) == 0 || db.Mdb == nil {
+		return result
+	}
+	var rows []model.CollectSourceStats
+	if err := db.Mdb.Where("source_id IN ?", sourceIDs).Find(&rows).Error; err != nil {
+		log.Println("GetCollectSourceRunStats Error:", err)
+		return result
+	}
+	for _, row := range rows {
+		item := CollectSourceRunStat{
+			LastRunPageCount: row.LastRunPageCount,
+			SitePageTotal:    row.SitePageTotal,
+		}
+		if row.LastRunTime != nil && !row.LastRunTime.IsZero() {
+			value := *row.LastRunTime
+			item.LastRunTime = &value
+		}
+		result[row.SourceId] = item
+	}
+	return result
+}
+
+// UpdateSitePageTotal 更新采集站全站总页数。
+func UpdateSitePageTotal(sourceID string, total int) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || db.Mdb == nil || total <= 0 {
+		return nil
+	}
+	now := time.Now()
+	stat := model.CollectSourceStats{
+		SourceId:      sourceID,
+		SitePageTotal: total,
+	}
+	return db.Mdb.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "source_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"site_page_total": total,
+			"updated_at":      now,
+			"deleted_at":      nil,
+		}),
+	}).Create(&stat).Error
 }

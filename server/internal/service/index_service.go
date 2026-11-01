@@ -8,26 +8,25 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
-
-	"golang.org/x/sync/singleflight"
 )
 
 type IndexService struct{}
 
 var IndexSvc = new(IndexService)
 
-func init() {
-	filmsnapshot.RegisterSnapshotPublishedHook(func(version string) {
-		startedAt := time.Now()
-		_ = IndexSvc.IndexPage()
-		log.Printf("[IndexService][Warmup] 快照发布后首页缓存预热完成 version=%s cost=%s", version, time.Since(startedAt))
-	})
+func (i *IndexService) BaselineSourceID() string {
+	if active := repository.GetActiveCollectSource(); active != nil {
+		return strings.TrimSpace(active.Id)
+	}
+	return ""
 }
 
 func normalizeIndexPage(page *dto.Page) *dto.Page {
@@ -58,232 +57,174 @@ func logSlowIndexServiceStep(name string, startedAt time.Time, fields ...any) {
 	log.Println(args...)
 }
 
-var indexPageSfGroup singleflight.Group
+func categoryHomeField(cat *model.CategoryTree) (string, int64) {
+	field := "cid"
+	if cat != nil && len(cat.Children) > 0 {
+		field = "pid"
+	}
+	id := int64(0)
+	if cat != nil {
+		id = cat.Id
+	}
+	return field, id
+}
 
-// IndexPage 首页数据处理
-func (i *IndexService) IndexPage() map[string]any {
+func infosByMid(version string, mids []int64) (map[int64]model.MovieBasicInfo, error) {
+	if len(mids) == 0 {
+		return map[int64]model.MovieBasicInfo{}, nil
+	}
+	snaps, err := filmsnapshot.GetSnapshotsByMidsOrdered(version, mids)
+	if err != nil {
+		return nil, err
+	}
+	infos := filmshared.BuildMovieBasicInfosFromSnapshots(snaps...)
+	byID := make(map[int64]model.MovieBasicInfo, len(infos))
+	for _, info := range infos {
+		if info.Id > 0 {
+			byID[info.Id] = info
+		}
+	}
+	return byID, nil
+}
+
+func pickInfos(byID map[int64]model.MovieBasicInfo, mids []int64) []model.MovieBasicInfo {
+	out := make([]model.MovieBasicInfo, 0, len(mids))
+	for _, mid := range mids {
+		info, ok := byID[mid]
+		if !ok {
+			continue
+		}
+		out = append(out, info)
+	}
+	return out
+}
+
+// IndexPage 首页。推荐片从热度池抽样，热播按热度排序。结果缓存 10 分钟，抽样在缓存期内不变。
+func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) {
+	if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
+		return nil, err
+	}
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceId == "" {
+		if defSource := repository.PickPrimarySourceForCategory(); defSource != nil {
+			sourceId = defSource.Id
+		}
+	}
+	if sourceId == "" {
+		return map[string]any{
+			"category": model.CategoryTree{
+				Id: 0, Pid: -1, Name: "分类信息", Show: true,
+				Children: make([]*model.CategoryTree, 0),
+			},
+			"content":       []map[string]any{},
+			"banners":       make(model.Banners, 0),
+			"currentSource": "",
+		}, nil
+	}
 	version := filmsnapshot.GetActiveReadModelVersion()
-	ruleVersion := repository.GetRuleVersion()
-	cacheKey := fmt.Sprintf("%s:s%s:r%s", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
-
-	// 1. 尝试从 Redis 获取缓存
-	if version != "" && db.Rdb != nil {
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:home", config.IndexPageCacheKey, version, sourceId)
+	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			res := make(map[string]any)
-			if json.Unmarshal([]byte(data), &res) == nil && res != nil {
-				res["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
-				overlayDynamicCategoryMovies(version, res)
-				return res
+			var cached map[string]any
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached, nil
 			}
 		}
 	}
-
-	val, err, _ := indexPageSfGroup.Do("IndexPage", func() (any, error) {
-		// Double check 缓存
-		if version != "" && db.Rdb != nil {
-			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				res := make(map[string]any)
-				if json.Unmarshal([]byte(data), &res) == nil && res != nil {
-					return res, nil
+	listGen := filmsnapshot.GetSearchCacheVersion()
+	tree, err := repository.GetActiveCategoryTree(sourceId)
+	if err != nil {
+		return nil, err
+	}
+	type homeSlot struct {
+		nav    *model.CategoryTree
+		movies []int64
+		hot    []int64
+	}
+	const maxHomeSections = 12
+	children := tree.Children
+	if len(children) > maxHomeSections {
+		children = children[:maxHomeSections]
+	}
+	slots := make([]homeSlot, len(children))
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var pageErr error
+	for idx, c := range children {
+		wg.Add(1)
+		go func(i int, cat *model.CategoryTree) {
+			defer wg.Done()
+			field, id := categoryHomeField(cat)
+			movies, hot, err := filmsnapshot.HomeCategoryMids(version, sourceId, field, id, 14, 50)
+			if err != nil {
+				errMu.Lock()
+				if pageErr == nil {
+					pageErr = err
 				}
+				errMu.Unlock()
+				return
 			}
-		}
-
-		info := make(map[string]any)
-		tree := repository.GetActiveCategoryTree()
-		info["category"] = tree
-		list := make([]map[string]any, len(tree.Children))
-		var wg sync.WaitGroup
-		for idx, c := range tree.Children {
-			wg.Add(1)
-			go func(i int, cat *model.CategoryTree) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[IndexPage] 加载分类 %d 发生异常: %v", cat.Id, r)
-					}
-					wg.Done()
-				}()
-				var movies []model.MovieBasicInfo
-				var hotMovies []model.MovieBasicInfo
-				if cat.Children != nil {
-					movies = filmsnapshot.GetSnapshotMovieListByCategory(version, "pid", cat.Id, 14, 0)
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategory(version, "pid", cat.Id, 14, 0)
-				} else {
-					movies = filmsnapshot.GetSnapshotMovieListByCategory(version, "cid", cat.Id, 14, 0)
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategory(version, "cid", cat.Id, 14, 0)
-				}
-				if movies == nil {
-					movies = make([]model.MovieBasicInfo, 0)
-				}
-				if hotMovies == nil {
-					hotMovies = make([]model.MovieBasicInfo, 0)
-				}
-				list[i] = map[string]any{"nav": cat, "movies": movies, "hot": hotMovies}
-			}(idx, c)
-		}
-		wg.Wait()
-		info["content"] = list
-		banners := overlayBannerLiveRemarks(repository.GetBanners())
-		if banners == nil {
-			banners = make(model.Banners, 0)
-		}
-		info["banners"] = banners
-
-		// 2. 写入 Redis 缓存
-		if version != "" && db.Rdb != nil {
-			if data, err := json.Marshal(info); err == nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*24).Err()
-			}
-		}
-		return info, nil
-	})
-
-	if err != nil || val == nil {
-		out := map[string]any{
-			"category": repository.GetActiveCategoryTree(),
-			"content":  []map[string]any{},
-			"banners":  overlayBannerLiveRemarks(repository.GetBanners()),
-		}
-		overlayDynamicCategoryMovies(version, out)
-		return out
+			slots[i] = homeSlot{nav: cat, movies: movies, hot: hot}
+		}(idx, c)
 	}
-
-	rawInfo, ok := val.(map[string]any)
-	if !ok {
-		return map[string]any{}
+	wg.Wait()
+	if pageErr != nil {
+		return nil, pageErr
 	}
-	outInfo := make(map[string]any, len(rawInfo))
-	for k, v := range rawInfo {
-		outInfo[k] = v
+	allMids := make([]int64, 0)
+	for _, slot := range slots {
+		allMids = append(allMids, slot.movies...)
+		allMids = append(allMids, slot.hot...)
 	}
-	outInfo["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
-	overlayDynamicCategoryMovies(version, outInfo)
-	return outInfo
+	byID, err := infosByMid(version, allMids)
+	if err != nil {
+		return nil, err
+	}
+	filteredList := make([]map[string]any, 0, len(slots))
+	for _, slot := range slots {
+		if slot.nav == nil {
+			continue
+		}
+		movies := pickInfos(byID, slot.movies)
+		if movies == nil {
+			movies = make([]model.MovieBasicInfo, 0)
+		}
+		hot := pickInfos(byID, slot.hot)
+		if hot == nil {
+			hot = make([]model.MovieBasicInfo, 0)
+		}
+		filteredList = append(filteredList, map[string]any{
+			"nav":    slot.nav,
+			"movies": movies,
+			"hot":    pickInfos(byID, slot.hot),
+		})
+	}
+	rawBanners, err := repository.GetBanners()
+	if err != nil {
+		return nil, err
+	}
+	banners := overlayBannerLiveRemarks(rawBanners)
+	if banners == nil {
+		banners = make(model.Banners, 0)
+	}
+	res := map[string]any{
+		"category":      tree,
+		"content":       filteredList,
+		"banners":       banners,
+		"currentSource": sourceId,
+	}
+	if db.Rdb != nil {
+		if data, err := json.Marshal(res); err == nil {
+			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), 10*time.Minute, listGen)
+		}
+	}
+	return res, nil
 }
 
-func extractCategoryID(nav any) (id int64, isPid bool) {
-	if nav == nil {
-		return 0, false
-	}
-	switch item := nav.(type) {
-	case model.CategoryTree:
-		return item.Id, len(item.Children) > 0
-	case *model.CategoryTree:
-		if item != nil {
-			return item.Id, len(item.Children) > 0
-		}
-	case map[string]any:
-		if v, ok := item["id"]; ok {
-			switch n := v.(type) {
-			case float64:
-				id = int64(n)
-			case int64:
-				id = n
-			case int:
-				id = int64(n)
-			}
-		}
-		if children, ok := item["children"]; ok && children != nil {
-			switch cList := children.(type) {
-			case []any:
-				isPid = len(cList) > 0
-			case []*model.CategoryTree:
-				isPid = len(cList) > 0
-			}
-		}
-	}
-	return id, isPid
-}
-
-func processDynamicRecommendSection(secMap map[string]any, version string) map[string]any {
-	itemCopy := make(map[string]any, len(secMap))
-	for k, v := range secMap {
-		itemCopy[k] = v
-	}
-	catID, isPid := extractCategoryID(itemCopy["nav"])
-	if catID > 0 {
-		field := "cid"
-		if isPid {
-			field = "pid"
-		}
-		dynamicMovies := filmsnapshot.GetSnapshotDynamicHotMovieListByCategory(version, field, catID, 14, 50)
-		if len(dynamicMovies) > 0 {
-			itemCopy["movies"] = dynamicMovies
-		}
-	}
-	return itemCopy
-}
-
-func overlayDynamicCategoryMovies(version string, outInfo map[string]any) {
-	rawContent, ok := outInfo["content"]
-	if !ok || rawContent == nil {
-		return
-	}
-
-	switch list := rawContent.(type) {
-	case []map[string]any:
-		newList := make([]map[string]any, len(list))
-		var wg sync.WaitGroup
-		for i, section := range list {
-			wg.Add(1)
-			go func(idx int, sec map[string]any) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[overlayDynamicCategoryMovies] 抽样板块发生异常: %v", r)
-					}
-					wg.Done()
-				}()
-				newList[idx] = processDynamicRecommendSection(sec, version)
-			}(i, section)
-		}
-		wg.Wait()
-		outInfo["content"] = newList
-	case []any:
-		newList := make([]any, len(list))
-		var wg sync.WaitGroup
-		for i, rawSec := range list {
-			wg.Add(1)
-			go func(idx int, raw any) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[overlayDynamicCategoryMovies] 抽样板块发生异常: %v", r)
-					}
-					wg.Done()
-				}()
-				if secMap, ok := raw.(map[string]any); ok {
-					newList[idx] = processDynamicRecommendSection(secMap, version)
-				} else {
-					newList[idx] = raw
-				}
-			}(i, rawSec)
-		}
-		wg.Wait()
-		outInfo["content"] = newList
-	}
-}
-
-func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {
-	if len(list) == 0 {
-		return
-	}
-	mids := make([]int64, 0, len(list))
-	for _, item := range list {
-		if item.Id > 0 {
-			mids = append(mids, item.Id)
-		}
-	}
-	live := filmrepo.LiveUpdateRemarksByMIDs(mids)
-	if len(live) == 0 {
-		return
-	}
-	for i := range list {
-		if remark, ok := live[list[i].Id]; ok {
-			list[i].Remarks = remark
-		}
-	}
-}
-
-// OverlayBannerLiveRemarks 实时叠加片库最新状态、海报图源高清封面与幻灯图
+// OverlayBannerLiveRemarks 只把片库更新状态补到轮播。图片和简介用轮播行自己的。
 func OverlayBannerLiveRemarks(banners model.Banners) model.Banners {
 	return overlayBannerLiveRemarks(banners)
 }
@@ -318,50 +259,8 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 		if snap.Remarks != "" {
 			out[i].Remark = snap.Remarks
 		}
-		if snap.Area != "" {
-			out[i].Area = snap.Area
-		}
-		if snap.ClassTag != "" {
-			out[i].ClassTag = snap.ClassTag
-		}
-		if snap.Actor != "" {
-			out[i].Actor = snap.Actor
-		}
-		if snap.Director != "" {
-			out[i].Director = snap.Director
-		}
-		if snap.Blurb != "" {
-			out[i].Blurb = snap.Blurb
-		}
-		if snap.Score > 0 {
-			out[i].Score = snap.Score
-		}
-		if snap.Hits > 0 {
-			out[i].Hits = snap.Hits
-		}
-		// 核心优先级：若该轮播项已由管理员手动自定义修改 (IsCustomPic == true)，严格展示用户的自定义图片（优先 CustomPicture，兼容历史 Picture 字段）
-		customPic := strings.TrimSpace(out[i].CustomPicture)
-		if customPic == "" {
-			customPic = strings.TrimSpace(out[i].Picture)
-		}
-		if out[i].IsCustomPic && customPic != "" {
-			out[i].Picture = customPic
-			out[i].Poster = customPic
-			if strings.TrimSpace(out[i].PictureSlide) == "" {
-				out[i].PictureSlide = customPic
-			}
-		} else {
-			dispPic := snap.DisplayPicture()
-			if dispPic != "" {
-				out[i].Picture = dispPic
-				out[i].Poster = dispPic
-			}
-			dispSlide := snap.DisplayPictureSlide()
-			if dispSlide != "" {
-				out[i].PictureSlide = dispSlide
-			} else if dispPic != "" {
-				out[i].PictureSlide = dispPic
-			}
+		if out[i].TmdbID > 0 {
+			out[i].IsScraped = true
 		}
 	}
 	return out

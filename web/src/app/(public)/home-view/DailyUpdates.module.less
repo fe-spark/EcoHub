@@ -373,6 +373,40 @@
   text-overflow: ellipsis;
 }
 
+.leadTagGroup {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: calc(100% - 72px);
+  pointer-events: none;
+}
+
+.leadTagItem {
+  display: inline-flex;
+  align-items: center;
+  padding: 1.5px 6px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &:first-child {
+    background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
+    border: none;
+  }
+}
+
 .leadCopy {
   position: relative;
   z-index: 1;
@@ -486,6 +520,40 @@
   text-overflow: ellipsis;
 }
 
+.cardTagGroup {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: calc(100% - 64px);
+  pointer-events: none;
+}
+
+.cardTagItem {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &:first-child {
+    background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
+    border: none;
+  }
+}
+
 .cardMeta {
   position: absolute;
   right: 8px;
@@ -506,6 +574,20 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+}
+
+.cardTags {
+  display: block;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 9.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  margin-top: 2px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 .posterFallback {

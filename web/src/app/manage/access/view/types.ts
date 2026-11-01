@@ -1,4 +1,16 @@
+import type { ReactNode } from "react";
 import type { SeriesPoint } from "./trend-chart";
+
+export type ChartSlice = {
+  key?: string;
+  name?: string;
+  label?: string;
+  value?: number;
+  count?: number;
+  color?: string;
+  icon?: ReactNode;
+  desc?: string;
+};
 
 export type Overview = {
   day: string;

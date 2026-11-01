@@ -14,9 +14,9 @@ func isTvboxPlay(path, query string) bool {
 }
 
 // enrichLogEvents 为访问流水记录按动作类型精准补齐详情信息
-func enrichLogEvents(events []AccessEvent) []AccessEvent {
+func enrichLogEvents(events []AccessEvent) ([]AccessEvent, error) {
 	if len(events) == 0 {
-		return events
+		return events, nil
 	}
 	filmIDs := make([]int64, 0, len(events))
 	catIDs := make([]int64, 0, len(events))
@@ -29,7 +29,7 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 
 		// 仅点播行为才提取影片 ID，分类筛选与搜索严禁当做影片处理
 		// 若事件自带不可变快照（已有合法片名），直接使用快照，无需反查
-		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/filmPlayInfo") || isTvboxPlay(it.Path, it.Query) {
+		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/films/play-info") || isTvboxPlay(it.Path, it.Query) {
 			if it.ResourceTitle != "" && !strings.HasPrefix(it.ResourceTitle, "影片 #") {
 				continue
 			}
@@ -46,8 +46,14 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 		}
 	}
 
-	metaMap := resolveFilmMetas(filmIDs)
-	catMap := resolveCategoryNames(catIDs)
+	metaMap, err := resolveFilmMetas(filmIDs)
+	if err != nil {
+		return nil, err
+	}
+	catMap, err := resolveCategoryNames(catIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	for i := range events {
 		it := &events[i]
@@ -56,7 +62,7 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 			res = strings.TrimSpace(res[:idx])
 		}
 
-		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/filmPlayInfo") || isTvboxPlay(it.Path, it.Query) {
+		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/films/play-info") || isTvboxPlay(it.Path, it.Query) {
 			// 若未固化片名，才尝试补齐
 			if it.ResourceTitle == "" || strings.HasPrefix(it.ResourceTitle, "影片 #") {
 				if id, ok := parseFilmID(res); ok {
@@ -64,8 +70,6 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 						it.ResourceTitle = meta.Title
 						it.ResourcePoster = meta.Poster
 						it.ResourceCat = meta.Category
-					} else if it.ResourceTitle == "" {
-						it.ResourceTitle = fmt.Sprintf("影片 #%d", id)
 					}
 				}
 			}
@@ -82,7 +86,7 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 			}
 		}
 	}
-	return events
+	return events, nil
 }
 
 func sanitizePosterURL(s string) string {
@@ -128,7 +132,7 @@ func snapshotAccessEvent(evt *AccessEvent) {
 		res = strings.TrimSpace(res[:idx])
 	}
 
-	if evt.Action == ActionPlay || strings.HasPrefix(evt.Path, "/api/filmPlayInfo") || isTvboxPlay(evt.Path, evt.Query) {
+	if evt.Action == ActionPlay || strings.HasPrefix(evt.Path, "/api/films/play-info") || isTvboxPlay(evt.Path, evt.Query) {
 		id, ok := parseFilmID(res)
 		if !ok {
 			return

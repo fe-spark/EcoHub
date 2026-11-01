@@ -11,7 +11,7 @@ import {
   getCategoryRuleTotals,
   saveCategoryRule,
 } from "./api";
-import RuleEditorModal from "./rule-editor-modal";
+import RuleEditorDrawer from "./rule-editor-drawer";
 import styles from "./index.module.less";
 import {
   CATEGORY_GROUPS,
@@ -274,7 +274,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
           <Button type="link" size="small" disabled={!canWrite} onClick={() => openEditRuleModal(record)}>
             编辑
           </Button>
-          <Popconfirm title="确认删除该规则？" okText="删除" cancelText="取消" onConfirm={() => void handleDeleteRule(record.id)}>
+          <Popconfirm title="删除该规则？" okText="删除" cancelText="取消" onConfirm={() => void handleDeleteRule(record.id)}>
             <Button type="link" size="small" danger disabled={!canWrite}>
               删除
             </Button>
@@ -318,7 +318,6 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       </Space>
 
       <Table<MappingRuleRecord>
-        bordered
         rowKey="id"
         columns={ruleColumns}
         dataSource={rules}
@@ -355,7 +354,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         )}
       />
 
-      <RuleEditorModal
+      <RuleEditorDrawer
         open={editorVisible}
         loading={rulesSubmitting}
         editingRule={editingRule}

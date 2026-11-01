@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -17,11 +19,10 @@ import (
 const maxProvideVodDetailBatch = 100
 
 // GetVodDetail 获取视频详情（带播放列表）
-func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
+func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.FilmDetail, error) {
 	if len(ids) == 0 {
-		return []model.FilmDetail{}
+		return []model.FilmDetail{}, nil
 	}
-
 	mids := make([]int64, 0, len(ids))
 	for _, idStr := range ids {
 		idInt, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
@@ -31,16 +32,32 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		mids = append(mids, idInt)
 	}
 	if len(mids) == 0 {
-		return []model.FilmDetail{}
+		return []model.FilmDetail{}, nil
 	}
-	if len(mids) > maxProvideVodDetailBatch {
-		mids = mids[:maxProvideVodDetailBatch]
+	sourceId = resolveProvideSourceID(sourceId)
+	all := make([]model.FilmDetail, 0, len(mids))
+	for start := 0; start < len(mids); start += maxProvideVodDetailBatch {
+		end := start + maxProvideVodDetailBatch
+		if end > len(mids) {
+			end = len(mids)
+		}
+		part, err := p.getVodDetailMids(mids[start:end], sourceId)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, part...)
 	}
+	return all, nil
+}
 
+func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]model.FilmDetail, error) {
 	version := filmsnapshot.GetActiveReadModelVersion()
-	snapshots := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	snapshots, err := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	if err != nil {
+		return nil, err
+	}
 	if len(snapshots) == 0 {
-		return []model.FilmDetail{}
+		return []model.FilmDetail{}, nil
 	}
 
 	cachedVos := make(map[int64]*model.MovieDetailVo, len(snapshots))
@@ -72,38 +89,87 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		}
 	}
 
-	detailList := make([]model.FilmDetail, 0, len(snapshots))
+	var uncachedMids []int64
 	for _, s := range snapshots {
+		if !support.IsCategoryVisible(s.Cid, s.Pid) {
+			continue
+		}
+		if _, ok := cachedVos[s.Mid]; !ok {
+			uncachedMids = append(uncachedMids, s.Mid)
+		}
+	}
+
+	var batchPlaylists map[int64][]model.PlayLinkVo
+	if len(uncachedMids) > 0 {
+		var err error
+		batchPlaylists, err = BatchGetPlayPlaylistsByMids(uncachedMids)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	detailList := make([]model.FilmDetail, 0, len(snapshots))
+	var toCacheVo map[int64]model.MovieDetailVo
+	if db.Rdb != nil && len(uncachedMids) > 0 {
+		toCacheVo = make(map[int64]model.MovieDetailVo, len(uncachedMids))
+	}
+	for _, s := range snapshots {
+		if !support.IsCategoryVisible(s.Cid, s.Pid) {
+			continue
+		}
 		voPtr, ok := cachedVos[s.Mid]
 		var vo model.MovieDetailVo
 		if ok && voPtr != nil {
 			vo = *voPtr
 		} else {
-			fetchedVo, err := IndexSvc.GetFilmDetail(int(s.Mid))
-			if err != nil {
-				continue
+			movieDetail, _ := filmsnapshot.GetMovieDetailBySnapshot(s)
+			if movieDetail != nil {
+				vo.MovieDetail = *movieDetail
 			}
-			vo = fetchedVo
+			vo.List = batchPlaylists[s.Mid]
+			if toCacheVo != nil {
+				toCacheVo[s.Mid] = vo
+			}
 		}
 
-		if vo.Id == 0 && vo.Name == "" {
+		if len(vo.List) == 0 && s.Name == "" {
 			continue
 		}
 
-		detailList = append(detailList, formatProvideFilmDetail(s, vo))
+		detail, err := formatProvideFilmDetail(s, vo, sourceId)
+		if err != nil {
+			return nil, err
+		}
+		detailList = append(detailList, detail)
 	}
 
-	return detailList
+	if len(toCacheVo) > 0 && db.Rdb != nil {
+		gen := filmsnapshot.PlayInfoGeneration()
+		for mid, v := range toCacheVo {
+			if b, err := json.Marshal(v); err == nil {
+				storeFilmPlayInfoCache(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid), string(b), 12*time.Hour, gen)
+			}
+		}
+	}
+
+	return detailList, nil
 }
 
-func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo model.MovieDetailVo) model.FilmDetail {
-	typeID, typeName := resolveProvideTypeFromSnapshot(snapshot)
+func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo model.MovieDetailVo, sourceId string) (model.FilmDetail, error) {
+	typeID, typeName, err := resolveProvideListedType(snapshot, sourceId)
+	if err != nil {
+		return model.FilmDetail{}, err
+	}
+	rootTypeID, err := resolveProvideListedRootType(snapshot, sourceId)
+	if err != nil {
+		return model.FilmDetail{}, err
+	}
 
 	var playFromList []string
 	var playUrlList []string
 
 	for _, source := range movieDetailVo.List {
-		playFromList = append(playFromList, source.Name)
+		playFromList = append(playFromList, providePlayFromName(source))
 
 		var linkStrs []string
 		for _, link := range source.LinkList {
@@ -131,7 +197,7 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 	return model.FilmDetail{
 		VodID:       snapshot.Mid,
 		TypeID:      typeID,
-		TypeID1:     resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot),
+		TypeID1:     rootTypeID,
 		TypeName:    typeName,
 		VodName:     snapshot.Name,
 		VodEn:       snapshot.Initial,
@@ -154,5 +220,5 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		VodHits:     snapshot.Hits,
 		VodScore:    movieDetailVo.DbScore,
 		VodContent:  movieDetailVo.Content,
-	}
+	}, nil
 }

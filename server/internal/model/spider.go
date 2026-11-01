@@ -10,16 +10,23 @@ import (
 )
 
 const (
-	TaskModelAutoCollect   = 0 // 自动更新已启用主站
-	TaskModelCustomCollect = 1 // 更新Ids中的指定站点数据
-	TaskModelRetryCollect  = 2 // 定期清理失败采集记录并重试
-	TaskModelOrphanClean   = 3 // 附属站播放列表孤儿治理
-	TaskModelLogClean      = 4 // 自动清理过期运行日志
-	TaskModelBannerAuto    = 5 // 首页轮播自动智能排片
+	TaskModelAutoCollect   = 0 // 采集已启用站点
+	TaskModelRetryCollect  = 1 // 重试待处理的失败记录
+	TaskModelOrphanClean   = 2 // 清理片库冗余和孤儿数据
+	TaskModelLogClean      = 3 // 清理过期运行日志
+	TaskModelFailureClean  = 4 // 清理已成功记录及超过 7 天的失败记录
+)
+
+// 采集触发方式常量。
+const (
+	CollectTriggerManual       = "manual"
+	CollectTriggerCron         = "cron"
+	CollectTriggerSingleUpdate = "single_update"
+	CollectTriggerRecover      = "recover"
 )
 
 const (
-	TaskIDBannerAuto = "sys_cron_banner_auto"
+	TaskIDFailureClean = "sys_cron_failure_clean"
 )
 
 // FilmCollectTask 影视采集任务
@@ -49,22 +56,6 @@ func (CrontabRecord) TableName() string {
 	return TableCrontabRecord
 }
 
-// CronSourceRel 定时任务与资源站关联表
-type CronSourceRel struct {
-	TaskId   string `gorm:"primaryKey;index;size:64"`
-	SourceId string `gorm:"primaryKey;index;size:64"`
-}
-
-func (CronSourceRel) TableName() string {
-	return TableCronSourceRel
-}
-
-type SourceGrade int
-
-const (
-	MasterCollect SourceGrade = iota
-	SlaveCollect
-)
 
 const (
 	SourceFormatJSON = "json"
@@ -73,18 +64,19 @@ const (
 
 // FilmSource 影视站点信息保存结构体
 type FilmSource struct {
-	Id    string      `json:"id" gorm:"primaryKey;size:32"`    // 唯一ID
-	Name  string      `json:"name" gorm:"size:64"`             // 采集站点备注名
-	Uri   string      `json:"uri" gorm:"uniqueIndex;size:255"` // 采集链接
-	Grade SourceGrade `json:"grade"`                           // 采集站等级 主站点 || 附属站
-	// SyncPictures 已废弃：采集不再下载封面到素材中心，字段仅兼容旧库列
-	SyncPictures       bool   `json:"-"`
-	State              bool   `json:"state"`                               // 是否启用
-	IsPosterSource     bool   `json:"isPosterSource" gorm:"default:false"` // 是否为海报/封面图源（全局单选）
-	Interval           int    `json:"interval"`                            // 采集时间间隔 单位/ms
-	Cd                 int    `json:"cd"`                                  // 采集时长 单位/小时
+	Id                 string    `json:"id" gorm:"primaryKey;size:32"`         // 唯一ID
+	Name               string    `json:"name" gorm:"size:64"`                  // 采集站点备注名
+	Uri                string    `json:"uri" gorm:"uniqueIndex;size:255"`      // 采集链接
+	State              bool      `json:"state"`                                // 是否启用
+	Sort               int       `json:"sort" gorm:"default:0;index"`          // 站点排序序号，越小越靠前
+	IsPrimary          bool      `json:"isPrimary" gorm:"-"`                   // 运行时动态标记是否为首位基准站（首位生效站点）
+	IsPosterSource     bool      `json:"isPosterSource" gorm:"default:false"`  // 是否为海报/封面图源（全局单选）
+	Interval           int       `json:"interval"`                             // 采集时间间隔 单位/ms
+	Cd                 int       `json:"cd"`                                   // 采集时长 单位/小时
 	Format             string    `json:"format" gorm:"size:16;default:'json'"` // 采集数据格式: json | xml (默认 json)
-	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"` // 播放链接域名替换规则 (每行一条: old.com => new.com)
+	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"`  // 播放链接域名替换规则 (每行一条: old.com => new.com)
+	ProxyCollect       bool      `json:"proxyCollect" gorm:"default:false"`    // 采集接口是否走代理
+	SkipTLSVerify      bool      `json:"skipTlsVerify" gorm:"default:false"`   // 仅自签名源站跳过证书校验
 	CreatedAt          time.Time `json:"createdAt" gorm:"autoCreateTime;<-:create;index"`
 }
 
@@ -101,8 +93,11 @@ func (f *FilmSource) TableName() string {
 
 type CollectSourceStats struct {
 	gorm.Model
-	SourceId        string     `gorm:"uniqueIndex;size:32"`
-	LastCollectTime *time.Time `gorm:"index"`
+	SourceId         string     `gorm:"uniqueIndex;size:32"`
+	LastCollectTime  *time.Time `gorm:"index"` // 定时采集整次成功，补窗锚点
+	LastRunTime      *time.Time `gorm:"index"` // 任意采集跑完，卡片「上次采集」
+	LastRunPageCount int        `gorm:"default:0"` // 任意采集跑完，卡片「上次采集总页」
+	SitePageTotal    int        `gorm:"default:0"` // 采集站全站总页
 }
 
 func (CollectSourceStats) TableName() string {
@@ -169,12 +164,12 @@ type FilmSourceStateBatchRequest struct {
 
 // SourceHealthItem 失效源检测结果项（连通性测试未通过或无法参与检测的站点）
 type SourceHealthItem struct {
-	Id     string      `json:"id"`
-	Name   string      `json:"name"`
-	Uri    string      `json:"uri"`
-	Grade  SourceGrade `json:"grade"`
-	State  bool        `json:"state"`
-	Reason string      `json:"reason"`
+	Id     string `json:"id"`
+	Name   string `json:"name"`
+	Uri    string `json:"uri"`
+	State  bool   `json:"state"`
+	Sort   int    `json:"sort"`
+	Reason string `json:"reason"`
 }
 
 // FilmSourceDelBatchRequest 批量删除采集站请求
@@ -195,9 +190,14 @@ type CollectProgress struct {
 
 type FilmSourceListItem struct {
 	FilmSource
-	LastCollectTime *time.Time       `json:"lastCollectTime,omitempty"`
-	Progress        *CollectProgress `json:"progress,omitempty"`
-	ProxyEnabled    bool             `json:"proxyEnabled"` // 是否启用了网络代理
+	LastRunTime      *time.Time       `json:"lastRunTime,omitempty"`
+	LastRunPageCount int              `json:"lastRunPageCount,omitempty"`
+	SitePageTotal    int              `json:"sitePageTotal,omitempty"`
+	Progress         *CollectProgress `json:"progress,omitempty"`
+	ProxyEnabled     bool             `json:"proxyEnabled"`    // 是否启用了网络代理
+	CategoryReady    bool             `json:"categoryReady"`   // 该站是否已有分类副本，没有则不能采集
+	CategorySyncing  bool             `json:"categorySyncing"` // 该站是否正在采集分类
+	Deleting         bool             `json:"deleting"`        // 该站是否正在执行后台异步级联删除
 }
 
 type Option struct {
@@ -207,10 +207,8 @@ type Option struct {
 
 type OptionGroup map[string][]Option
 
-// CollectParams 数据采集所需要的参数
+// CollectParams 数据采集所需要的参数（统一批量结构，单站即单个元素）
 type CollectParams struct {
-	Id    string   `json:"id"`    // 资源站id
-	Ids   []string `json:"ids"`   // 资源站id列表
-	Time  int      `json:"time"`  // 采集时长
-	Batch bool     `json:"batch"` // 是否批量执行
+	Ids  []string `json:"ids"`  // 资源站id列表
+	Time int      `json:"time"` // 采集时长
 }

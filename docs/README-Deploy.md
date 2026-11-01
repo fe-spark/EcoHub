@@ -37,7 +37,7 @@
 openssl rand -hex 32
 ```
 
-可选：`TG_PROXY`、`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`COLLECT_PROFILE`（`auto|light|standard|high`）、`ACCESS_ANALYTICS_ENABLED`。详见 [环境变量速查](#环境变量速查)。
+可选：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`。详见 [环境变量速查](#环境变量速查)。
 
 ---
 
@@ -74,7 +74,7 @@ docker compose up -d
 
 默认账号（**立刻改密**）：`admin` / `admin`。其它角色在账号管理中新建。
 
-首次需在后台配置 **采集源** 并执行采集，否则前台无影片。第一次全量采集**可能要数个小时**，**采集完成并发布后数据才会展示**。
+首次需在后台检查或配置 **采集站** 并执行采集，否则前台无影片。内置 12 个预设采集站批量采集通常在 10~20 分钟内完成；入库成功的页会按窗口刷进快照，前台按主站边采边展示。
 
 ### 4. 数据与更新
 
@@ -90,7 +90,10 @@ docker compose pull
 docker compose up -d
 ```
 
-固定版本：compose 中改为 `ghcr.io/fe-spark/ecohub:v2.0.1` 等。正式版 tag 会覆盖 `:latest`。升级请使用 `docker compose pull` 或拉取新镜像。
+固定版本：可在 `.env` 中指定 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-beta.0` 或在 compose 中修改。正式版 tag 会覆盖 `:latest`。
+
+> [!WARNING]
+> **v2.x 升级至 v3.0 注意事项**：v3.0 为底层架构重大重构版本，完全不兼容 v2.x 历史数据库。禁止在现有 `./data/mysql` 目录下直接 pull 升级；v2.x 用户必须使用全新目录从零部署并重新全量采集。
 
 ---
 
@@ -148,7 +151,7 @@ services:
 
   ecohub:
     container_name: Eco-hub
-    image: ghcr.io/fe-spark/ecohub:latest
+    image: ${ECOHUB_IMAGE:-ghcr.io/fe-spark/ecohub:latest}
     restart: always
     environment:
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
@@ -161,12 +164,10 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
-      TG_PROXY: ${TG_PROXY:-}
+      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
-      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - ${WEB_PORT:-3000}:3000
       - 0.0.0.0:${SERVER_PORT:-18080}:8080
@@ -201,9 +202,8 @@ networks:
 ```env
 WEB_PORT=3000
 SERVER_PORT=18080
-
 JWT_SECRET=请替换为长随机串
-
+ECOHUB_ADMIN_PASSWORD=请改成强密码（首次初始化生效；默认admin）
 MYSQL_ROOT_PASSWORD=请改成强密码
 MYSQL_HOST=mysql
 MYSQL_PORT=3306
@@ -291,6 +291,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -p 18080:8080 \
   -e PORT=8080 \
   -e JWT_SECRET="$JWT_SECRET" \
+  -e ECOHUB_ADMIN_PASSWORD="请改成强密码" \
   -e MYSQL_HOST=Eco-mysql \
   -e MYSQL_PORT=3306 \
   -e MYSQL_USER=eco \
@@ -319,6 +320,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
+| `ECOHUB_IMAGE` | 否 | `ghcr.io/fe-spark/ecohub:latest` | Docker 镜像地址及版本 Tag，可指定固定版本或预发布版本。 |
 | `WEB_PORT` | 否 | `3000` | 宿主机 Web 访问入口端口（包含前台页面与 `/manage` 管理后台）。 |
 | `SERVER_PORT` | 否 | `18080` | 宿主机后端 API 直连端口（供 TVBox 或外部播放器直连；生产环境建议不映射或绑定 `127.0.0.1`）。 |
 
@@ -329,7 +331,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
 | `JWT_SECRET` | **是** | - | 用户与管理员登录态 JWT 签名密钥，同时作为访问分析数据脱敏的 Salt 派生源。生产部署**必须**修改为长随机字符串（可通过 `openssl rand -hex 32` 生成）。 |
-
+| `ECOHUB_ADMIN_PASSWORD` | 否 | `admin` | 首次初始化超级管理员 `admin` 的密码。若未配置默认使用 `admin`（生产环境对外部署前**强烈建议修改为强密码**）。数据库已初始化内置管理员时忽略。 |
 ### 3. 数据存储（MySQL & Redis）
 
 | 环境变量 | 必填 | 默认值 | 说明 |
@@ -349,7 +351,6 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
-| `TG_PROXY` | 否 | 空 | Telegram Bot 出网专用代理（支持 `http://`、`socks5://`、`socks5h://`，如 `http://host.docker.internal:7890`）。优先级高于通用出网代理。 |
 | `HTTPS_PROXY` | 否 | 空 | 容器全局 HTTPS 出网代理（用于采集外部源、解析影片元数据等，防止直连外部站点超时）。 |
 | `HTTP_PROXY` | 否 | 空 | 容器全局 HTTP 出网代理。 |
 | `ALL_PROXY` | 否 | 空 | 容器全局出网代理（通常用于 SOCKS 协议代理）。 |
@@ -358,8 +359,6 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
-| `COLLECT_PROFILE` | 否 | `auto` | 采集并发与写库性能档位。可选值：<br>• `auto`: 根据服务器 CPU 核心数自动调优（推荐）；<br>• `light`: 低配单机（≤2 核），写库稳态 24 页/秒，事务并发 3；<br>• `standard`: 主流机型（3-7 核）；<br>• `high`: 高配机型（≥8 核），大幅提升写阀与分页抓取并发。 |
-| `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 全站访问量、播放热度与客户端设备类型数据分析总开关。默认 `false` 保持系统零额外开销与完全无痕；设为 `true` 或 `1` 开启后台统计报表。 |
 | `NODE_NAME` | 否 | 主机名 | 多节点分布式部署时当前节点的标识名称（单机部署无需配置）。 |
 | `ECOHUB_LOG_DIR` | 否 | 容器内 `logs/` | 自定义日志落盘目录（容器部署默认挂载或保留即可，无需修改）。 |
 
@@ -394,8 +393,6 @@ docker inspect Eco-hub --format '{{range .Config.Env}}{{println .}}{{end}}'
 - 方式 1 / 2 反复重启：查 `.env` 密码、`JWT_SECRET`、端口占用、`docker pull ghcr.io/fe-spark/ecohub:latest`
 - 方式 3 反复重启：`docker logs Eco-hub`，用 `docker inspect Eco-hub` 核对环境变量与端口
 - 前台开、接口挂：反代是否只指 Web、是否误配 `API_URL`
-- Telegram 发不出：方式 1 / 2 在 `.env` 配 `TG_PROXY`；方式 3 在 `docker run` 增加 `-e TG_PROXY=...`；Token 在后台配置  
-
 更多：[README-FAQ.md](./README-FAQ.md)
 
 ---

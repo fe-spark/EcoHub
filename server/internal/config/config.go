@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -44,22 +43,20 @@ var (
 
 const (
 
-	// 采集默认面向 2C2G 单机「速度优先仍可控」档（写阀 + 站/页并发），
-	// 同时作为运行时参数为 0 时的兜底默认值。实际档位按 CPU 核数自动选
-	// （见 resolveCollectProfile），可用 COLLECT_PROFILE 手动覆盖。
-	DefaultCollectWriteMaxInflight              = 3   // 写库事务并发（2 核可承受 3）
-	DefaultCollectWritePagesPerSec              = 24  // 稳态页/秒（主要吞吐闸）
-	DefaultCollectWriteBurstPages               = 8   // 突发，减少写阀空转
-	DefaultCollectWriteMaxPendingPagesPerSource = 48  // 单站写队列
-	DefaultCollectWriteMaxPendingPagesGlobal    = 144 // 全局写队列
-	DefaultCollectPageWorkers                   = 6   // 单站分页 HTTP 并发
-	DefaultCollectPageWorkersSolo               = 10  // 仅 1 站在跑时提高页并发，吃满写阀
-	DefaultCollectSourceConcurrency             = 6   // 批量同时跑的站点数；0=不限制
+	// 统一高吞吐采集运行时参数（支持 12 站全并行，稳态 240 页/s，30 分钟内跑完全站）
+	DefaultCollectWriteMaxInflight              = 16  // 写库事务并发
+	DefaultCollectWritePagesPerSec              = 240 // 稳态页/秒
+	DefaultCollectWriteBurstPages               = 80  // 突发，减少写阀空转
+	DefaultCollectWriteMaxPendingPagesPerSource = 500 // 单站写队列
+	DefaultCollectWriteMaxPendingPagesGlobal    = 5000 // 全局写队列
+	DefaultCollectPageWorkers                   = 16  // 单站分页 HTTP 并发
+	DefaultCollectPageWorkersSolo               = 32  // 仅 1 站在跑时提高页并发
+	DefaultCollectSourceConcurrency             = 0   // 批量同时跑的站点数；0=不限制全部站点并行
+	DefaultCollectFetchInFlight                 = 128 // 全局取数在途上限
 	DefaultCollectStatsFlushIntervalSec         = 5
-	DefaultCollectCacheFlushIntervalSec         = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
-	// 仅保留足够前端完成结束态展示的窗口（轮询 + 倒计时），过后查询不到，避免残留到下次进入。
-	DefaultCollectProgressRetainSec = 10
+	// 仅保留足够前端完成结束态展示的窗口（SSE 实时推送 + 倒计时），过后自动清除，恢复初始态。
+	DefaultCollectProgressRetainSec = 3
 	// DefaultCollectProgressStaleSec 无 live task 的 running，以及无占用的 starting，超时秒数。
 	// 占用中的 starting 是排队等槽，不算僵尸。不含 waiting_publish / finalizing / page_done。
 	DefaultCollectProgressStaleSec = 30 * 60
@@ -85,10 +82,9 @@ var (
 	CollectPageWorkersSolo = DefaultCollectPageWorkersSolo
 	// CollectSourceConcurrency 批量采集同时运行的站点数；0 表示不限制。
 	CollectSourceConcurrency = DefaultCollectSourceConcurrency
+	CollectFetchInFlight = DefaultCollectFetchInFlight
 	// CollectStatsFlushIntervalSec last_collect_time 合并写库最小间隔（秒）。
 	CollectStatsFlushIntervalSec = DefaultCollectStatsFlushIntervalSec
-	// CollectCacheFlushIntervalSec 采集 Redis 缓存合并清理最小间隔（秒）。
-	CollectCacheFlushIntervalSec = DefaultCollectCacheFlushIntervalSec
 	// CollectProgressRetainSec done/failed 进度保留秒数。
 	CollectProgressRetainSec = DefaultCollectProgressRetainSec
 	// CollectProgressStaleSec 活跃进度超时秒数。
@@ -165,12 +161,10 @@ const (
 	// --- 5. 首页聚合 (Index) ---
 	// IndexPageCacheKey 首页数据缓存 key
 	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
-	// IndexDailyUpdatesCacheKey 首页「每日更新」候选池短缓存；接口每次从池中随机抽取
-	IndexDailyUpdatesCacheKey = RedisKeyPrefix + ":Index:DailyUpdates:v4"
-	// DailyUpdatesV2CachePrefix 每日更新 V2 分页短缓存前缀
-	DailyUpdatesV2CachePrefix = RedisKeyPrefix + ":DailyUpdates:V2"
-	// DailyUpdatesV2CatCacheKey 每日更新 V2 分类统计短缓存
-	DailyUpdatesV2CatCacheKey = RedisKeyPrefix + ":DailyUpdates:Categories"
+	// DailyUpdatesCachePrefix 每日更新分页短缓存前缀
+	DailyUpdatesCachePrefix = RedisKeyPrefix + ":DailyUpdates"
+	// DailyUpdatesCatCacheKey 每日更新分类统计短缓存
+	DailyUpdatesCatCacheKey = RedisKeyPrefix + ":DailyUpdates:Categories"
 
 	// --- 6. 运维治理与通知 (Maintenance & Notice) ---
 	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标重启备忘 key
@@ -190,25 +184,21 @@ const (
 
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
-	// MaxScanCount redis Scan 操作每次扫描的数据量, 每次最多扫描300条数据
-	MaxScanCount = 300
+	// MaxScanCount redis Scan 每次建议条数。实际删除按批 pipeline。
+	MaxScanCount = 1000
 )
 
 const (
-	AuthUserClaims     = "UserClaims"
-	AuthCookieName     = "ecohub_auth_token"
-	DefaultAdminUser   = "admin"
-	DefaultAdminPass   = "admin"
-	DefaultVisitorUser = "guest"
-	DefaultVisitorPass = "guest"
+	AuthUserClaims   = "UserClaims"
+	AuthCookieName   = "ecohub_auth_token"
+	DefaultAdminUser     = "admin"
+	DefaultAdminPassword = "admin"
 )
 
 // -------------------------manage 管理后台相关key----------------------------------
 const (
 	// SiteConfigBasic 网站参数配置
 	SiteConfigBasic = RedisKeyPrefix + ":Config:Site:Basic"
-	// NotifyConfigKey Telegram 通知配置缓存
-	NotifyConfigKey = RedisKeyPrefix + ":Config:Notify"
 	// TMDBConfigKey TMDB 刮削配置缓存
 	TMDBConfigKey = RedisKeyPrefix + ":Config:TMDB"
 	// BannersKey 轮播组件key
@@ -217,15 +207,19 @@ const (
 	BannerConfigKey = RedisKeyPrefix + ":Config:BannerConfig"
 	// ProxyConfigKey 采集网络代理配置缓存
 	ProxyConfigKey = RedisKeyPrefix + ":Config:Proxy"
+	// NotifyConfigKey Telegram 通知配置缓存
+	NotifyConfigKey = RedisKeyPrefix + ":Config:Notify"
+	// AnalyticsConfigKey 数据分析配置缓存
+	AnalyticsConfigKey = RedisKeyPrefix + ":Config:Analytics"
 
-	// DefaultUpdateSpec 每30分钟执行一次
-	DefaultUpdateSpec = "0 */30 * * * ?"
+	// DefaultUpdateSpec 每小时整点执行一次
+	DefaultUpdateSpec = "0 0 * * * *"
 	// EveryDaySpec 每天凌晨0点执行一次
 	EveryDaySpec = "0 0 0 * * *"
-	// OrphanCleanSpec 每天 04:35，错开 DefaultUpdateSpec 的 30 分钟整点（含 04:30）。
-	OrphanCleanSpec = "0 35 4 * * *"
-	// DefaultUpdateTime 每次采集最近 3 小时内更新的影片
-	DefaultUpdateTime = 3
+	// OrphanCleanSpec 每天 02:00，错开整点增量采集。
+	OrphanCleanSpec = "0 0 2 * * *"
+	// DefaultUpdateTime 每次采集最近 24 小时内更新的影片
+	DefaultUpdateTime = 24
 	// DefaultSpiderInterval 默认采集间隔 (ms)，当站点未配置时使用
 	DefaultSpiderInterval = 100
 )
@@ -286,7 +280,7 @@ func InitConfig() {
 		ListenerPort = port
 	}
 	if ListenerPort == "" {
-		panic("环境变量缺失: PORT")
+		ListenerPort = "8080"
 	}
 
 	fmt.Printf("[Config] 加载端口: %s\n", ListenerPort)
@@ -347,96 +341,15 @@ func InitConfig() {
 	loadAccessRuntimeConfig()
 
 }
-
-// collectProfile 采集并发/写阀档位：light=2C2G 保守档，standard=4C 中档，high=8C+ 高档。
-type collectProfile struct {
-	writeMaxInflight      int
-	writePagesPerSec      int
-	writeBurstPages       int
-	writePendingPerSource int
-	writePendingGlobal    int
-	pageWorkers           int
-	pageWorkersSolo       int
-	sourceConcurrency     int
-}
-
-// collectProfiles 档位数值表（light 与 Default* 兜底一致）。
-var collectProfiles = map[string]collectProfile{
-	"light": {
-		writeMaxInflight:      3,
-		writePagesPerSec:      24,
-		writeBurstPages:       8,
-		writePendingPerSource: 48,
-		writePendingGlobal:    144,
-		pageWorkers:           6,
-		pageWorkersSolo:       10,
-		sourceConcurrency:     6,
-	},
-	"standard": {
-		writeMaxInflight:      6,
-		writePagesPerSec:      48,
-		writeBurstPages:       12,
-		writePendingPerSource: 96,
-		writePendingGlobal:    288,
-		pageWorkers:           10,
-		pageWorkersSolo:       16,
-		sourceConcurrency:     8,
-	},
-	"high": {
-		writeMaxInflight:      10,
-		writePagesPerSec:      96,
-		writeBurstPages:       20,
-		writePendingPerSource: 160,
-		writePendingGlobal:    480,
-		pageWorkers:           16,
-		pageWorkersSolo:       24,
-		sourceConcurrency:     12,
-	},
-}
-
-// resolveCollectProfile 解析采集档位：COLLECT_PROFILE 显式指定（auto|light|standard|high）；
-// auto 或未设置时按 CPU 核数自动选档（≤2=light，3-7=standard，≥8=high）。
-func resolveCollectProfile() (collectProfile, string) {
-	name := strings.ToLower(strings.TrimSpace(os.Getenv("COLLECT_PROFILE")))
-	if name == "" || name == "auto" {
-		name = ""
-	} else if p, ok := collectProfiles[name]; ok {
-		return p, name
-	} else {
-		fmt.Printf("[Config] COLLECT_PROFILE=%q 无效，回退自动选档\n", name)
-		name = ""
-	}
-	switch n := runtime.NumCPU(); {
-	case n <= 2:
-		return collectProfiles["light"], "light"
-	case n >= 8:
-		return collectProfiles["high"], "high"
-	default:
-		return collectProfiles["standard"], "standard"
-	}
-}
-
-// loadCollectRuntimeConfig 按服务器资源自动选择采集写阀/并发档位（无环境变量配置）。
 func loadCollectRuntimeConfig() {
-	p, name := resolveCollectProfile()
-	CollectWriteMaxInflight = p.writeMaxInflight
-	CollectWritePagesPerSec = p.writePagesPerSec
-	CollectWriteBurstPages = p.writeBurstPages
-	CollectWriteMaxPendingPagesPerSource = p.writePendingPerSource
-	CollectWriteMaxPendingPagesGlobal = p.writePendingGlobal
-	CollectPageWorkers = p.pageWorkers
-	CollectPageWorkersSolo = p.pageWorkersSolo
-	CollectSourceConcurrency = p.sourceConcurrency
-
 	srcLimit := "不限制"
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集档位=%s（CPU=%d核） 写阀 inflight=%d pages/s=%d burst=%d pending=%d/%d | 页并发=%d(单站=%d) 站并发=%s | retain=%ds stale=%ds\n",
-		name, runtime.NumCPU(),
+	fmt.Printf("[Config] 采集配置: 写并发=%d 速率=%d页/s burst=%d 队列缓冲=%d/%d | 页并发=%d(单站=%d) 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
 		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
-		CollectPageWorkers, CollectPageWorkersSolo, srcLimit,
+		CollectPageWorkers, CollectPageWorkersSolo, srcLimit, CollectFetchInFlight,
 		CollectProgressRetainSec, CollectProgressStaleSec)
 }
 

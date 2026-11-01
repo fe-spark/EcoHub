@@ -8,7 +8,7 @@ import (
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/notify"
+	"server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -79,7 +79,7 @@ func TestAssembleDailyUpdateCategories(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("want 4 items (全部+电影+动漫+其他), got %+v", got)
 	}
-	if got[0].Pid != notify.DailyPidAll || got[0].Name != "全部" || got[0].Count != 17 {
+	if got[0].Pid != film.DailyPidAll || got[0].Name != "全部" || got[0].Count != 17 {
 		t.Fatalf("all: %+v", got[0])
 	}
 	if got[1].Pid != 1 || got[1].Count != 10 {
@@ -88,7 +88,7 @@ func TestAssembleDailyUpdateCategories(t *testing.T) {
 	if got[2].Pid != 3 || got[2].Name != "动漫" {
 		t.Fatalf("anime: %+v", got[2])
 	}
-	if got[3].Pid != notify.DailyPidOther || got[3].Count != 3 {
+	if got[3].Pid != film.DailyPidOther || got[3].Count != 3 {
 		t.Fatalf("other: %+v", got[3])
 	}
 }
@@ -100,7 +100,7 @@ func TestAssembleDailyUpdateCategoriesEmpty(t *testing.T) {
 	}
 }
 
-func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
+func TestDailyUpdates_CacheBehavior(t *testing.T) {
 	gdb, mr := setupTestDBAndRedis(t)
 	_ = mr
 
@@ -108,52 +108,89 @@ func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
 	version := "v_test_daily"
 	// 插入测试影片索引与快照
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001, ContentKey: "vod_1"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001},
 		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11},
 		FilmIndexContent:  model.FilmIndexContent{Name: "测试电影1", UpdateStamp: now.Unix()},
-	})
-	gdb.Create(&model.FilmListSnapshot{
-		SnapshotVersion: version,
-		Mid:             1001,
-		Name:            "测试电影1",
-		Pid:             1,
-		Cid:             11,
-		UpdateStamp:     now.Unix(),
 	})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	gdb.Create(&model.Category{Id: 1, Name: "电影", Show: true})
 
 	req := DailyUpdateListReq{
-		Pid: 0,
-		Page: &dto.Page{Current: 1, PageSize: 21},
+		Pid:    0,
+		Page:   &dto.Page{Current: 1, PageSize: 21},
 		Random: false,
 	}
 
 	// 1. 首次调用
-	res1, err := IndexSvc.DailyUpdatesV2(req)
+	res1, err := IndexSvc.DailyUpdates(req)
 	if err != nil {
-		t.Fatalf("first DailyUpdatesV2 call failed: %v", err)
+		t.Fatalf("first DailyUpdates call failed: %v", err)
 	}
 	if len(res1.Categories) == 0 {
 		t.Fatalf("expected categories not empty")
 	}
-
-	// 2. 验证缓存已写入 Redis
-	catKey := config.DailyUpdatesV2CatCacheKey
-	if !mr.Exists(catKey) {
-		t.Fatalf("expected category cache key %s to exist in redis", catKey)
+	if res1.Page.Total != 1 {
+		t.Fatalf("want total 1, got %d", res1.Page.Total)
 	}
-	pageKey := fmt.Sprintf("%s:p0:c1:s21", config.DailyUpdatesV2CachePrefix)
-	if !mr.Exists(pageKey) {
-		t.Fatalf("expected page cache key %s to exist in redis", pageKey)
+	catKey := config.DailyUpdatesCatCacheKey
+	if mr.Exists(catKey) {
+		t.Fatalf("category cache %s must not be written", catKey)
+	}
+	pageKey := fmt.Sprintf("%s:p0:c1:s21", config.DailyUpdatesCachePrefix)
+	if mr.Exists(pageKey) {
+		t.Fatalf("page cache %s must not be written", pageKey)
 	}
 
-	// 3. 再次调用验证直接走缓存
-	res2, err := IndexSvc.DailyUpdatesV2(req)
+	res2, err := IndexSvc.DailyUpdates(req)
 	if err != nil {
-		t.Fatalf("second DailyUpdatesV2 call failed: %v", err)
+		t.Fatalf("second DailyUpdates call failed: %v", err)
 	}
 	if res2.Page.Total != res1.Page.Total {
 		t.Fatalf("want total %d, got %d", res1.Page.Total, res2.Page.Total)
+	}
+}
+
+func TestDailyUpdates_PrimarySourceCategoryIsolation(t *testing.T) {
+	gdb, _ := setupTestDBAndRedis(t)
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.SourceCategory{}, &model.FilmSourcePlaylist{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	now := time.Now()
+	_ = filmsnapshot.SetActiveSnapshotVersion("live")
+
+	gdb.Create(&model.FilmSource{Id: "src_a", Name: "A站", State: true, Sort: 1})
+	gdb.Create(&model.FilmSource{Id: "src_b", Name: "B站", State: true, Sort: 2})
+	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 10, ParentSourceTypeId: 0, RawName: "电影", Sort: 1})
+	gdb.Create(&model.SourceCategory{SourceId: "src_b", SourceTypeId: 20, ParentSourceTypeId: 0, RawName: "连续剧", Sort: 1})
+
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2001, FirstSourceId: "src_a"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:10", RootCategoryKey: "source:src_a:10"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "A站电影", UpdateStamp: now.Unix()},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 2001, SourceId: "src_a", LineKind: "play", GroupIndex: 0})
+
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2002, FirstSourceId: "src_b"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_b:20", RootCategoryKey: "source:src_b:20"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "B站剧集", UpdateStamp: now.Unix()},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 2002, SourceId: "src_b", LineKind: "play", GroupIndex: 0})
+
+	resA, err := IndexSvc.DailyUpdates(DailyUpdateListReq{Pid: 10, SourceId: "src_a"})
+	if err != nil {
+		t.Fatalf("src_a query failed: %v", err)
+	}
+	if resA.Page.Total != 1 || len(resA.Categories) != 2 || resA.Categories[1].Pid != 10 {
+		t.Fatalf("src_a unexpected result: total=%d cats=%+v", resA.Page.Total, resA.Categories)
+	}
+
+	resB, err := IndexSvc.DailyUpdates(DailyUpdateListReq{Pid: 20, SourceId: "src_b"})
+	if err != nil {
+		t.Fatalf("src_b query failed: %v", err)
+	}
+	if resB.Page.Total != 1 || len(resB.Categories) != 2 || resB.Categories[1].Pid != 20 {
+		t.Fatalf("src_b unexpected result: total=%d cats=%+v", resB.Page.Total, resB.Categories)
 	}
 }

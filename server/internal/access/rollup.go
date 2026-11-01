@@ -2,6 +2,7 @@ package access
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -74,24 +75,24 @@ func mergeNestedIntMap(m map[string]map[string]int64) map[string]int64 {
 	return merged
 }
 
-// versionsFromDaily 解析日归档版本分布。新格式为按平台嵌套；旧格式为扁平 version->count，两者都可读。
-func versionsFromDaily(raw, platform string) map[string]int64 {
+// versionsFromDaily 只读按平台嵌套的版本分布。
+func versionsFromDaily(raw, platform string) (map[string]int64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "{}" {
-		return map[string]int64{}
+		return map[string]int64{}, nil
 	}
 	var nested map[string]map[string]int64
-	if err := json.Unmarshal([]byte(raw), &nested); err == nil && len(nested) > 0 {
-		platform = strings.ToLower(strings.TrimSpace(platform))
-		if platform != "" && platform != "all" {
-			if m := nested[platform]; len(m) > 0 {
-				return m
-			}
-			return map[string]int64{}
-		}
-		return mergeNestedIntMap(nested)
+	if err := json.Unmarshal([]byte(raw), &nested); err != nil || len(nested) == 0 {
+		return nil, fmt.Errorf("版本分布格式无效")
 	}
-	return unmarshalIntMap(raw)
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if platform != "" && platform != "all" {
+		if m := nested[platform]; len(m) > 0 {
+			return m, nil
+		}
+		return map[string]int64{}, nil
+	}
+	return mergeNestedIntMap(nested), nil
 }
 
 func unmarshalIntMap(raw string) map[string]int64 {
@@ -125,7 +126,7 @@ func startDailyRollup() {
 }
 
 func safeDailyRollup() {
-	if !config.AccessLogEnabled {
+	if !IsEnabled() {
 		return
 	}
 	defer func() {
@@ -138,7 +139,7 @@ func safeDailyRollup() {
 
 // RunDailyRollup 把已闭合的 Redis 日桶 UPSERT 进 MySQL，并裁剪 14 天外的行。
 func RunDailyRollup() {
-	if !config.AccessLogEnabled || db.Rdb == nil || db.Mdb == nil {
+	if !IsEnabled() || db.Rdb == nil || db.Mdb == nil {
 		return
 	}
 	rollupMu.Lock()
@@ -351,7 +352,10 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 
 	tops := make([]model.AccessDailyTop, 0, accessTopKeep*4)
 	searchItems := zsetToTopItems(searchCmd.Val())
-	playItems := takePlayTops(zsetToTopItems(playCmd.Val()), accessTopKeep)
+	playItems, err := takePlayTops(zsetToTopItems(playCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
 	webItems := zsetToTopItems(webTopCmd.Val())
 	appItems := zsetToTopItems(appTopCmd.Val())
 
@@ -360,23 +364,54 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	tops = append(tops, topItemsToRows(stats.Day, "page", zsetToTopItems(pageCmd.Val()))...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_page", webItems)...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_page", appItems)...)
-	tops = append(tops, topItemsToRows(stats.Day, "web_play", takePlayTops(zsetToTopItems(webPlayCmd.Val()), accessTopKeep))...)
+	webPlay, err := takePlayTops(zsetToTopItems(webPlayCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
+	tops = append(tops, topItemsToRows(stats.Day, "web_play", webPlay)...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_search", zsetToTopItems(webSearchCmd.Val()))...)
-	tops = append(tops, topItemsToRows(stats.Day, "web_classify", takeClassifyTops(zsetToTopItems(webClassifyCmd.Val()), accessTopKeep))...)
-	tops = append(tops, topItemsToRows(stats.Day, "app_play", takePlayTops(zsetToTopItems(appPlayCmd.Val()), accessTopKeep))...)
+	tops, err = appendClassifyTopRows(tops, stats.Day, "web_classify", zsetToTopItems(webClassifyCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
+	appPlay, err := takePlayTops(zsetToTopItems(appPlayCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
+	tops = append(tops, topItemsToRows(stats.Day, "app_play", appPlay)...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_search", zsetToTopItems(appSearchCmd.Val()))...)
-	tops = append(tops, topItemsToRows(stats.Day, "app_classify", takeClassifyTops(zsetToTopItems(appClassifyCmd.Val()), accessTopKeep))...)
+	tops, err = appendClassifyTopRows(tops, stats.Day, "app_classify", zsetToTopItems(appClassifyCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
 	for _, p := range appPlatforms {
 		cmds := platTops[p]
 		tops = append(tops, topItemsToRows(stats.Day, p+"_page", zsetToTopItems(cmds.page.Val()))...)
-		tops = append(tops, topItemsToRows(stats.Day, p+"_play", takePlayTops(zsetToTopItems(cmds.play.Val()), accessTopKeep))...)
+		platPlay, err := takePlayTops(zsetToTopItems(cmds.play.Val()), accessTopKeep)
+		if err != nil {
+			return model.AccessDailyStats{}, nil, false, err
+		}
+		tops = append(tops, topItemsToRows(stats.Day, p+"_play", platPlay)...)
 		tops = append(tops, topItemsToRows(stats.Day, p+"_search", zsetToTopItems(cmds.search.Val()))...)
-		tops = append(tops, topItemsToRows(stats.Day, p+"_classify", takeClassifyTops(zsetToTopItems(cmds.classify.Val()), accessTopKeep))...)
+		tops, err = appendClassifyTopRows(tops, stats.Day, p+"_classify", zsetToTopItems(cmds.classify.Val()), accessTopKeep)
+		if err != nil {
+			return model.AccessDailyStats{}, nil, false, err
+		}
 	}
-	tops = append(tops, topItemsToRows(stats.Day, "tvbox_play", takePlayTops(zsetToTopItems(tvboxPlayCmd.Val()), accessTopKeep))...)
+	tvboxPlay, err := takePlayTops(zsetToTopItems(tvboxPlayCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
+	tops = append(tops, topItemsToRows(stats.Day, "tvbox_play", tvboxPlay)...)
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_search", zsetToTopItems(tvboxSearchCmd.Val()))...)
-	tops = append(tops, topItemsToRows(stats.Day, "tvbox_classify", takeClassifyTops(zsetToTopItems(tvboxClassifyCmd.Val()), accessTopKeep))...)
-	tops = append(tops, topItemsToRows(stats.Day, "classify", takeClassifyTops(zsetToTopItems(classifyCmd.Val()), accessTopKeep))...)
+	tops, err = appendClassifyTopRows(tops, stats.Day, "tvbox_classify", zsetToTopItems(tvboxClassifyCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
+	tops, err = appendClassifyTopRows(tops, stats.Day, "classify", zsetToTopItems(classifyCmd.Val()), accessTopKeep)
+	if err != nil {
+		return model.AccessDailyStats{}, nil, false, err
+	}
 
 	has := stats.PV > 0 || stats.UV > 0 || stats.WebPV > 0 || stats.AppPV > 0 ||
 		stats.ProvidePV > 0 || stats.Err4 > 0 || stats.Err5 > 0 || stats.Dropped > 0 ||

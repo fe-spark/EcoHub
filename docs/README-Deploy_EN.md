@@ -37,7 +37,7 @@ Before going live, change at least `JWT_SECRET` and MySQL/Redis passwords.
 openssl rand -hex 32
 ```
 
-Optional: `TG_PROXY`, `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, `COLLECT_PROFILE` (`auto|light|standard|high`), `ACCESS_ANALYTICS_ENABLED`. See [Environment Variables](#environment-variables).
+Optional: `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`. See [Environment Variables](#environment-variables).
 
 ---
 
@@ -74,7 +74,7 @@ With the bundled databases keep `MYSQL_HOST=mysql` and `REDIS_HOST=redis` (Compo
 
 Default account (**change the password immediately**): `admin` / `admin`. Create other roles in account management.
 
-First run: configure **collect sources** in admin and run a collect, or the site has no titles. The first full collect **can take several hours**. **Data shows only after collect finishes and publishes.**
+First run: check or configure **collect sources** in admin and run a collect, or the site has no titles. Batch collection across the 12 built-in sources typically finishes in 10-20 minutes; successfully saved pages stream into the live snapshot window, visible as collection progresses.
 
 ### 4. Data and updates
 
@@ -90,7 +90,10 @@ docker compose pull
 docker compose up -d
 ```
 
-Pin a version by changing the compose image to `ghcr.io/fe-spark/ecohub:v2.0.1` (or similar). Release tags overwrite `:latest`. To update, run `docker compose pull` or pull the newer image.
+Pin a specific image version by setting `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-beta.0` in `.env` or in compose. Formal release tags overwrite `:latest`.
+
+> [!WARNING]
+> **Notice on Upgrading from v2.x to v3.0**: v3.0 is a major architectural rewrite and is completely incompatible with v2.x legacy databases. Do NOT upgrade by simply running `docker compose pull` on an existing `./data/mysql` directory. v2.x operators must deploy in a brand new directory from scratch and re-run full collection.
 
 ---
 
@@ -148,7 +151,7 @@ services:
 
   ecohub:
     container_name: Eco-hub
-    image: ghcr.io/fe-spark/ecohub:latest
+    image: ${ECOHUB_IMAGE:-ghcr.io/fe-spark/ecohub:latest}
     restart: always
     environment:
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
@@ -161,12 +164,10 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
-      TG_PROXY: ${TG_PROXY:-}
+      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
-      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - ${WEB_PORT:-3000}:3000
       - 0.0.0.0:${SERVER_PORT:-18080}:8080
@@ -201,9 +202,8 @@ networks:
 ```env
 WEB_PORT=3000
 SERVER_PORT=18080
-
 JWT_SECRET=replace-with-a-long-random-string
-
+ECOHUB_ADMIN_PASSWORD=replace-with-a-strong-password
 MYSQL_ROOT_PASSWORD=use-a-strong-password
 MYSQL_HOST=mysql
 MYSQL_PORT=3306
@@ -291,6 +291,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -p 18080:8080 \
   -e PORT=8080 \
   -e JWT_SECRET="$JWT_SECRET" \
+  -e ECOHUB_ADMIN_PASSWORD="replace-with-a-strong-password" \
   -e MYSQL_HOST=Eco-mysql \
   -e MYSQL_PORT=3306 \
   -e MYSQL_USER=eco \
@@ -319,6 +320,7 @@ All environment variables supported via `.env`, Docker Compose, or container run
 
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
+| `ECOHUB_IMAGE` | No | `ghcr.io/fe-spark/ecohub:latest` | Docker image repository and tag. Set to a specific version or pre-release tag as needed. |
 | `WEB_PORT` | No | `3000` | Host Web access entrance port (serves both web frontend and `/manage` admin panel). |
 | `SERVER_PORT` | No | `18080` | Host backend API direct access port (optional, for TVBox or external players; recommended unmapped or bound to `127.0.0.1` in production). |
 
@@ -329,7 +331,7 @@ All environment variables supported via `.env`, Docker Compose, or container run
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
 | `JWT_SECRET` | **Yes** | - | Secret key used for signing JWT tokens and deriving IP masking salt. **Must** be changed to a strong random string in production (generate via `openssl rand -hex 32`). |
-
+| `ECOHUB_ADMIN_PASSWORD` | No | `admin` | Password for the initial administrator (`admin`) on first database setup. Defaults to `admin` if unset (**strongly recommend changing to a strong password** for public deployments). Ignored if admin account already exists. |
 ### 3. Data Storage (MySQL & Redis)
 
 | Variable | Required | Default | Description |
@@ -349,7 +351,6 @@ All environment variables supported via `.env`, Docker Compose, or container run
 
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
-| `TG_PROXY` | No | Empty | Dedicated proxy for Telegram Bot (supports `http://`, `socks5://`, `socks5h://`, e.g., `http://host.docker.internal:7890`). Takes precedence over global proxies. |
 | `HTTPS_PROXY` | No | Empty | Container global HTTPS outbound proxy (for scraping external sources, fetching metadata, etc., avoiding timeouts). |
 | `HTTP_PROXY` | No | Empty | Container global HTTP outbound proxy. |
 | `ALL_PROXY` | No | Empty | Container global outbound proxy (typically for SOCKS protocols). |
@@ -358,8 +359,6 @@ All environment variables supported via `.env`, Docker Compose, or container run
 
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
-| `COLLECT_PROFILE` | No | `auto` | Collect concurrency and DB write throttle profile. Options:<br>• `auto`: Auto-tuned based on server CPU core count (recommended);<br>• `light`: Low-spec machines (≤2 cores), write throttle 24 pages/s, tx concurrency 3;<br>• `standard`: Mainstream machines (3-7 cores);<br>• `high`: High-performance machines (≥8 cores), significantly boosts write limits and pagination concurrency. |
-| `ACCESS_ANALYTICS_ENABLED` | No | `false` | Master toggle for access metrics, playback analytics, and client device tracking. Set to `false` for zero overhead and complete privacy; set to `true` or `1` to enable admin analytics reports. |
 | `NODE_NAME` | No | Hostname | Current node identifier in distributed multi-node setups (leave empty for single-node deployments). |
 | `ECOHUB_LOG_DIR` | No | Container `logs/` | Custom log directory (defaults to container internal logs directory; usually left unchanged). |
 
@@ -394,8 +393,6 @@ Data is in the install directory `data/` (Method 3 defaults to `~/ecohub/data`).
 - Methods 1 / 2 restart loop: check `.env` passwords, `JWT_SECRET`, port conflicts, `docker pull ghcr.io/fe-spark/ecohub:latest`
 - Method 3 restart loop: `docker logs Eco-hub`; use `docker inspect Eco-hub` for env and ports
 - Site opens, APIs fail: reverse proxy should target Web only; do not set `API_URL` on the release image
-- Telegram never sends: Methods 1 / 2 set `TG_PROXY` in `.env`; Method 3 add `-e TG_PROXY=...` to `docker run`; Token is configured in admin
-
 More: [README-FAQ_EN.md](./README-FAQ_EN.md)
 
 ---

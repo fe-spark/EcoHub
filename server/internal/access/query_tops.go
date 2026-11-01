@@ -6,15 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 
 	"github.com/redis/go-redis/v9"
 )
-
-func QueryTops(day, kind string, limit int) ([]TopItem, error) {
-	return QueryTopsScope(day, kind, "", "", limit)
-}
 
 func scopedTopKind(kind, module, platform string) string {
 	kind = strings.ToLower(strings.TrimSpace(kind))
@@ -63,23 +58,39 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 	platform = strings.ToLower(strings.TrimSpace(platform))
 	if !isLocalToday(target, now) {
 		dayStr := target.Format("2006-01-02")
-		if _, ok := loadDailyStats(dayStr); ok {
+		if _, ok, err := loadDailyStats(dayStr); err != nil {
+			return nil, err
+		} else if ok {
 			queryKind := scopedTopKind(kind, module, platform)
-			items := loadDailyTops(dayStr, queryKind, fetch)
+			items, err := loadDailyTops(dayStr, queryKind, fetch)
+			if err != nil {
+				return nil, err
+			}
 			if len(items) == 0 && queryKind == "page" {
-				items = mergeTopItemsByCount(
-					loadDailyTops(dayStr, "web_page", fetch),
-					loadDailyTops(dayStr, "app_page", fetch),
-				)
+				webItems, err := loadDailyTops(dayStr, "web_page", fetch)
+				if err != nil {
+					return nil, err
+				}
+				appItems, err := loadDailyTops(dayStr, "app_page", fetch)
+				if err != nil {
+					return nil, err
+				}
+				items = mergeTopItemsByCount(webItems, appItems)
 				if fetch > 0 && len(items) > fetch {
 					items = items[:fetch]
 				}
 			}
 			if kind == "play" {
-				items = takePlayTops(items, limit)
+				items, err = takePlayTops(items, limit)
+				if err != nil {
+					return nil, err
+				}
 			}
 			if kind == "classify" {
-				items = takeClassifyTops(items, limit)
+				items, err = takeClassifyTops(items, limit)
+				if err != nil {
+					return nil, err
+				}
 			}
 			if len(items) > 0 {
 				return items, nil
@@ -90,7 +101,7 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 		}
 	}
 	if db.Rdb == nil {
-		if !config.AccessLogEnabled {
+		if !IsEnabled() {
 			return []TopItem{}, nil
 		}
 		return nil, fmt.Errorf("redis unavailable")
@@ -163,10 +174,16 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 		items = append(items, TopItem{Key: member, Count: int64(p.Score)})
 	}
 	if kind == "play" {
-		items = takePlayTops(items, limit)
+		items, err = takePlayTops(items, limit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if kind == "classify" {
-		items = takeClassifyTops(items, limit)
+		items, err = takeClassifyTops(items, limit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return items, nil
 }

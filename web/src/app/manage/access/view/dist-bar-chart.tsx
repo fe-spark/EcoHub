@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { Empty, Tooltip } from "antd";
-import type { DonutSlice } from "./donut-chart";
+import type { ChartSlice } from "./types";
 import styles from "./index.module.less";
 
 const DEFAULT_PALETTE = [
@@ -14,11 +14,8 @@ const DEFAULT_PALETTE = [
   "#13c2c2", // 青
 ];
 
-export type DistBarItem = DonutSlice;
-
 export interface DistBarChartProps {
-  data?: DistBarItem[];
-  slices?: DistBarItem[];
+  slices: ChartSlice[];
   unit?: string;
   title?: string;
 }
@@ -35,15 +32,14 @@ type FormattedItem = {
 };
 
 export default function DistBarChart({
-  data,
-  slices: propSlices,
+  slices,
   unit = "次",
   title = "接口总调用构成 (100%)",
 }: DistBarChartProps) {
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
   const { list, total } = useMemo(() => {
-    const rawList = propSlices || data || [];
+    const rawList = slices || [];
     const validItems = rawList.filter((item) => (item.count ?? item.value ?? 0) > 0);
     const sum = validItems.reduce((acc, item) => acc + (item.count ?? item.value ?? 0), 0);
 
@@ -66,11 +62,11 @@ export default function DistBarChart({
     // 默认按调用次数降序排列
     formatted.sort((a, b) => b.count - a.count);
     return { list: formatted, total: sum };
-  }, [propSlices, data]);
+  }, [slices]);
 
   if (total === 0 || list.length === 0) {
     return (
-      <div className={styles.pieCardContainer}>
+      <div className={styles.distEmpty}>
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无接口调用分布数据" />
       </div>
     );

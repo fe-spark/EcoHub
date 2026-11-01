@@ -18,7 +18,7 @@ export default function RouteTracker() {
     if (
       pathname.startsWith("/play") ||
       pathname.startsWith("/search") ||
-      pathname.startsWith("/filmClassify")
+      pathname.startsWith("/category")
     ) {
       return;
     }

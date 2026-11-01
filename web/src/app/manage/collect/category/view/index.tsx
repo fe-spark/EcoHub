@@ -1,78 +1,77 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Card, Descriptions, Modal, Tag, Typography } from "antd";
+import { useEffect } from "react";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { useManagePermission } from "@/lib/manage-permission";
+import { useAppMessage } from "@/lib/useAppMessage";
 import CategoryTreeCard from "./category-tree-card";
 import { useCategoryTreeState } from "./use-category-tree-state";
 import styles from "./index.module.less";
 
 export default function CategoryWorkspacePageView() {
-  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const treeState = useCategoryTreeState();
+  const { canWrite } = useManagePermission();
+  const { modal } = useAppMessage();
   const { fetchFilmClassTree } = treeState;
 
   useEffect(() => {
     void fetchFilmClassTree();
   }, [fetchFilmClassTree]);
 
-  const handleResetConfirm = async () => {
-    const resetDone = await treeState.resetTree();
-    if (resetDone) {
-      setResetConfirmOpen(false);
+  const runUnlessDirty = (action: () => void, title: string, okText: string) => {
+    if (treeState.savingTree) {
+      return;
     }
+    if (!treeState.hasPendingChanges) {
+      action();
+      return;
+    }
+    modal.confirm({
+      title,
+      content: "当前调整还没保存，继续后会丢掉这次调整。",
+      okText,
+      cancelText: "留下",
+      onOk: action,
+    });
   };
 
   return (
     <div className={styles.pageBody}>
-      <ManagePageHeader title="分类管理" description="维护当前主采集站分类框架、排序与显示状态；分类不允许删除，只能隐藏或显示。" />
+      <ManagePageHeader
+        className={styles.pageHeader}
+        title="分类管理"
+        description="按采集源查看该站分类，调整排序和显示。分类不能删除，只能隐藏或显示。"
+      />
 
-      <Card className={styles.panelCard} styles={{ body: { padding: "14px 16px" } }}>
-        <Descriptions size="small" column={{ xs: 1, sm: 3, md: 3 }}>
-          <Descriptions.Item label="分类节点总数">
-            <Typography.Text strong>{treeState.stats.total}</Typography.Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="主类 / 子类结构">
-            <Typography.Text strong>{treeState.stats.roots}</Typography.Text> 主类 / <Typography.Text type="secondary">{treeState.stats.children} 子类</Typography.Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="隐藏分类状态">
-            <Tag color={treeState.stats.hidden === 0 ? "success" : "warning"} variant="filled">
-              {treeState.stats.hidden === 0 ? "全部显示 (正常)" : `已隐藏 ${treeState.stats.hidden} 个`}
-            </Tag>
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
-
-      <div className={styles.workspace}>
-        <CategoryTreeCard
-          classTree={treeState.classTree}
-          expandedKeys={treeState.expandedKeys}
-          loadingTree={treeState.loadingTree}
-          savingTree={treeState.savingTree}
-          resettingTree={treeState.resettingTree}
-          updatingShowIds={treeState.updatingShowIds}
-          hasPendingChanges={treeState.hasPendingChanges}
-          onRefresh={() => void treeState.fetchFilmClassTree()}
-          onReset={() => setResetConfirmOpen(true)}
-          onSave={() => void treeState.saveTree()}
-          onExpand={(keys) => treeState.setExpandedKeys(keys)}
-          onMove={treeState.moveClassWithinSameParent}
-          onShowChange={(id, show) => void treeState.updateClassVisibility(id, show)}
-        />
-      </div>
-
-      <Modal
-        title="确认重置分类？"
-        open={resetConfirmOpen}
-        width={560}
-        okText="确认重置"
-        cancelText="取消"
-        confirmLoading={treeState.resettingTree}
-        onOk={() => void handleResetConfirm()}
-        onCancel={() => setResetConfirmOpen(false)}
-      >
-        该操作会清空当前分类框架，并重新获取主采集站原始分类；分类规则会重新生成展示分类与来源映射，不会重写历史影片。
-      </Modal>
+      <CategoryTreeCard
+        classTree={treeState.classTree}
+        expandedKeys={treeState.expandedKeys}
+        loadingTree={treeState.loadingTree}
+        savingTree={treeState.savingTree}
+        sources={treeState.sources}
+        sourceId={treeState.sourceId}
+        stats={treeState.stats}
+        onSourceChange={(value) =>
+          runUnlessDirty(() => void treeState.fetchFilmClassTree(value), "切换采集源？", "切换")
+        }
+        onRefresh={() =>
+          runUnlessDirty(
+            () => void treeState.fetchFilmClassTree(treeState.sourceId),
+            "刷新分类？",
+            "刷新",
+          )
+        }
+        onExpand={(keys) => treeState.setExpandedKeys(keys)}
+        onMove={treeState.moveClassWithinSameParent}
+        onShowChange={(id, show) => void treeState.updateClassVisibility(id, show)}
+      />
+      <UnsavedChangesBar
+        visible={canWrite && treeState.hasPendingChanges}
+        saving={treeState.savingTree}
+        onDiscard={treeState.discardTree}
+        onSave={() => void treeState.saveTree()}
+      />
     </div>
   );
 }

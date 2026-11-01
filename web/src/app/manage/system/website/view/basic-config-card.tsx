@@ -9,6 +9,7 @@ import {
   Input,
   Space,
   Spin,
+  Switch,
   Typography,
 } from "antd";
 import {
@@ -21,6 +22,8 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import ImagePicker from "@/app/manage/components/image-picker";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { isFormValuesEqual } from "@/lib/deep-equal";
 import styles from "./basic-config-card.module.less";
 
 export interface BasicInfoPayload {
@@ -38,7 +41,6 @@ const DEFAULT_BASIC_INFO: BasicInfoPayload = {
   logo: "",
   describe: "",
 };
-
 const MAX_SITE_NAME_LEN = 64;
 const MAX_KEYWORD_LEN = 128;
 const MAX_DESCRIBE_LEN = 512;
@@ -52,6 +54,7 @@ function normalizeBasicInfo(
     keyword: String(raw?.keyword ?? "").trim(),
     logo: String(raw?.logo ?? "").trim(),
     describe: String(raw?.describe ?? "").trim(),
+
   };
 }
 
@@ -62,7 +65,7 @@ interface BasicConfigCardProps {
 export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
   const [data, setData] = useState<BasicInfoPayload>(DEFAULT_BASIC_INFO);
   const [draft, setDraft] = useState<BasicInfoPayload>(DEFAULT_BASIC_INFO);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isTouched, setIsTouched] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -78,6 +81,7 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
         const normalized = normalizeBasicInfo(resp.data);
         setData(normalized);
         setDraft(normalized);
+        setIsTouched(false);
       }
     } finally {
       setFetching(false);
@@ -89,12 +93,12 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
   }, [loadData]);
 
   const hasDirty = useMemo(() => {
-    return JSON.stringify(draft) !== JSON.stringify(data);
-  }, [draft, data]);
+    return isTouched && !isFormValuesEqual(draft, data);
+  }, [isTouched, draft, data]);
 
   const handleCancel = () => {
     setDraft(data);
-    setIsEditing(false);
+    setIsTouched(false);
   };
 
   const handleSave = async () => {
@@ -106,12 +110,12 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
     setSaving(true);
     try {
       const normalized = normalizeBasicInfo(draft);
-      const resp = await ApiPost("/manage/config/basic/update", normalized);
+      const resp = await ApiPost("/manage/config/basic", normalized);
       if (resp.code === 0) {
         message.success(resp.msg || "基本信息已保存");
         setData(normalized);
         setDraft(normalized);
-        setIsEditing(false);
+        setIsTouched(false);
         await refreshSiteConfig();
       } else {
         message.error(resp.msg || "保存失败");
@@ -121,7 +125,7 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
     }
   };
 
-  const currentValues = isEditing ? draft : data;
+  const currentValues = draft;
 
   return (
     <Card
@@ -130,40 +134,6 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
         <Space size={8} align="center">
           <SettingOutlined style={{ color: "var(--ant-color-primary)" }} />
           <span>网站基本信息</span>
-        </Space>
-      }
-      extra={
-        <Space size={8} align="center">
-          {isEditing ? (
-            <>
-              <Button size="small" disabled={saving} onClick={handleCancel}>
-                取消
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<SaveOutlined />}
-                disabled={!canWrite || !hasDirty}
-                loading={saving}
-                onClick={handleSave}
-              >
-                保存信息
-              </Button>
-            </>
-          ) : (
-            <Button
-              size="small"
-              type="primary"
-              icon={<EditOutlined />}
-              disabled={!canWrite}
-              onClick={() => {
-                setDraft(data);
-                setIsEditing(true);
-              }}
-            >
-              编辑
-            </Button>
-          )}
         </Space>
       }
     >
@@ -178,13 +148,14 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
               </Typography.Text>
             </Flex>
             <Input
-              disabled={!isEditing || !canWrite}
+              disabled={!canWrite}
               maxLength={MAX_SITE_NAME_LEN}
               placeholder="请输入网站名称，例如 EcoHub"
               value={currentValues.siteName}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, siteName: e.target.value }))
-              }
+              onChange={(e) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, siteName: e.target.value }));
+              }}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               展示在前台顶部导航、浏览器标题及页面元数据中
@@ -195,12 +166,13 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
           <div className={styles.field}>
             <Typography.Text strong>网站访问地址</Typography.Text>
             <Input
-              disabled={!isEditing || !canWrite}
+              disabled={!canWrite}
               placeholder="https://example.com"
               value={currentValues.siteUrl}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, siteUrl: e.target.value }))
-              }
+              onChange={(e) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, siteUrl: e.target.value }));
+              }}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               公网访问根地址，用于点击 Logo 跳转以及外部链接复用
@@ -221,16 +193,17 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
               ) : null}
               <Space.Compact style={{ width: "100%" }}>
                 <Input
-                  disabled={!isEditing || !canWrite}
+                  disabled={!canWrite}
                   placeholder="输入 Logo 地址，或从素材中心选择"
                   value={currentValues.logo}
-                  onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, logo: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setIsTouched(true);
+                    setDraft((prev) => ({ ...prev, logo: e.target.value }));
+                  }}
                 />
                 <Button
                   icon={<PictureOutlined />}
-                  disabled={!isEditing || !canWrite}
+                  disabled={!canWrite}
                   onClick={() => setPickerOpen(true)}
                 >
                   选图
@@ -251,13 +224,14 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
               </Typography.Text>
             </Flex>
             <Input
-              disabled={!isEditing || !canWrite}
+              disabled={!canWrite}
               maxLength={MAX_KEYWORD_LEN}
               placeholder="在线视频, 免费观影, 高清电影"
               value={currentValues.keyword}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, keyword: e.target.value }))
-              }
+              onChange={(e) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, keyword: e.target.value }));
+              }}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               用于搜索引擎 SEO 优化，多个关键词以逗号隔开
@@ -273,16 +247,19 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
               </Typography.Text>
             </Flex>
             <Input.TextArea
-              disabled={!isEditing || !canWrite}
+              disabled={!canWrite}
               maxLength={MAX_DESCRIBE_LEN}
               rows={3}
               placeholder="请输入网站描述信息..."
               value={currentValues.describe}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, describe: e.target.value }))
-              }
+              onChange={(e) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, describe: e.target.value }));
+              }}
             />
           </div>
+
+
         </Flex>
       </Spin>
 
@@ -291,9 +268,17 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
         title="从素材中心选择 Logo"
         onCancel={() => setPickerOpen(false)}
         onSelect={(link) => {
+          setIsTouched(true);
           setDraft((prev) => ({ ...prev, logo: link }));
           setPickerOpen(false);
         }}
+      />
+
+      <UnsavedChangesBar
+        visible={hasDirty}
+        saving={saving}
+        onDiscard={handleCancel}
+        onSave={() => void handleSave()}
       />
     </Card>
   );

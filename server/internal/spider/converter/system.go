@@ -51,11 +51,11 @@ func CovertFilmDetailVo(fd model.FilmDetailVo) (model.MovieDetail, error) {
 			Content:     fd.Content,
 		},
 	}
-	// 通过分割符切分播放源信息  PlaySeparator $$$
-	//md.PlayFrom = strings.Split(fd.VodPlayFrom, fd.VodPlayNote)
+	md.ManualLinesUpdate = fd.ManualLinesUpdate
+	if len(fd.PlayFrom) > 0 {
+		md.PlayFrom = fd.PlayFrom
+	}
 	// v2 只保留m3u8播放源
 	md.PlayList = GenFilmPlayList(fd.PlayLink, "$$$")
-	//md.DownloadList = GenFilmPlayList(fd.DownloadLink, fd.VodPlayNote)
-
 	return md, err
 }

@@ -1,24 +1,26 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/model"
+	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/film/writer"
+	"server/internal/repository/support"
 )
 
-// ApplyDetail 将 TMDB 刮削出的元数据应用到指定影片并落库刷新
+// ApplyDetail 把刮削结果写入影片。写入后就是这部影片的内容。
 func (s *TMDBService) ApplyDetail(req model.TMDBApplyReq) error {
 	_, err := s.ApplyDetailWithOptions(req, true)
 	return err
 }
 
-// ApplyDetailWithOptions 将 TMDB 刮削出的元数据应用到指定影片并落库，支持按需控制是否立即增量发布快照
+// ApplyDetailWithOptions 把选中的刮削字段写入 film_index。片名和分类不改。词条只记 mid 与 tmdb_id。
 func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnapshot bool) (int64, error) {
 	if req.Mid <= 0 || req.TmdbID <= 0 {
 		return 0, errors.New("影片ID或 TMDB ID 参数非法")
@@ -28,91 +30,40 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 	if err != nil {
 		return 0, fmt.Errorf("获取 TMDB 详情失败: %w", err)
 	}
+	if tmdbData == nil {
+		return 0, errors.New("获取 TMDB 详情失败")
+	}
 
-	var detailRec model.MovieDetailInfo
-	if err := db.Mdb.Where("mid = ?", req.Mid).First(&detailRec).Error; err != nil {
+	indexRec, err := filmrepo.FindFilmIndex(req.Mid)
+	if err != nil {
 		return 0, fmt.Errorf("未找到对应的影片信息 (mid=%d): %w", req.Mid, err)
 	}
 
-	var detail model.MovieDetail
-	if err := json.Unmarshal([]byte(detailRec.Content), &detail); err != nil {
-		return 0, fmt.Errorf("解析既有影片数据失败: %w", err)
+	updates := filmScrapeUpdates(indexRec, *tmdbData, req.Fields)
+	scrapeRecord := model.FilmTMDBScrape{
+		Mid:       req.Mid,
+		TmdbID:    req.TmdbID,
+		MediaType: strings.TrimSpace(req.MediaType),
 	}
-	detail.Id = req.Mid
-
-	var indexRec model.FilmIndex
-	_ = db.Mdb.Where("mid = ?", req.Mid).First(&indexRec).Error
-
-	fieldSet := make(map[string]struct{}, len(req.Fields))
-	for _, f := range req.Fields {
-		fieldSet[strings.ToLower(strings.TrimSpace(f))] = struct{}{}
+	if err := repository.SaveFilmScrape(req.Mid, updates, scrapeRecord); err != nil {
+		return 0, fmt.Errorf("写入影片失败: %w", err)
 	}
-	applyAll := len(fieldSet) == 0
 
-	shouldApply := func(names ...string) bool {
-		if applyAll {
-			return true
+	if publishSnapshot {
+		if _, _, err := filmsnapshot.UpsertActiveSnapshotsByMids(req.Mid); err != nil {
+			syslog.Errorf("[TMDB] 影片 %d 快照发布失败: %v", req.Mid, err)
+			return req.Mid, err
 		}
-		for _, name := range names {
-			if _, ok := fieldSet[strings.ToLower(name)]; ok {
-				return true
-			}
-		}
-		return false
+		filmsnapshot.ClearDynamicPlayCaches()
+		support.ClearIndexPageCache()
 	}
 
-	// 字段覆盖
-	if shouldApply("poster", "picture") && tmdbData.Poster != "" {
-		detail.Picture = tmdbData.Poster
-		detail.CustomPicture = tmdbData.Poster
-		detail.IsCustomPicture = true
-	}
-	// 仅写横图，不设置 IsCustomPicture，避免排片刮削把片库封面锁死
-	if shouldApply("backdrop", "pictureslide") && tmdbData.Backdrop != "" {
-		detail.PictureSlide = tmdbData.Backdrop
-		detail.CustomPictureSlide = tmdbData.Backdrop
-	}
-	if shouldApply("overview", "content") && tmdbData.Overview != "" {
-		detail.MovieDescriptor.Content = tmdbData.Overview
-		detail.MovieDescriptor.Blurb = tmdbData.Overview
-	}
-	if shouldApply("subtitle", "originaltitle") && tmdbData.OriginalTitle != "" {
-		detail.MovieDescriptor.SubTitle = tmdbData.OriginalTitle
-	}
-	if shouldApply("actor", "credits") && len(tmdbData.Actors) > 0 {
-		detail.MovieDescriptor.Actor = strings.Join(tmdbData.Actors, "/")
-	}
-	if shouldApply("director", "credits") && len(tmdbData.Directors) > 0 {
-		detail.MovieDescriptor.Director = strings.Join(tmdbData.Directors, "/")
-	}
-	if shouldApply("year", "releasedate") {
-		if tmdbData.Year != "" {
-			detail.MovieDescriptor.Year = tmdbData.Year
-		}
-		if tmdbData.ReleaseDate != "" {
-			detail.MovieDescriptor.ReleaseDate = tmdbData.ReleaseDate
-		} else if detail.MovieDescriptor.ReleaseDate == "" && tmdbData.Year != "" {
-			detail.MovieDescriptor.ReleaseDate = tmdbData.Year
-		}
-	}
-	if shouldApply("score", "voteaverage") && tmdbData.VoteScore != "" {
-		detail.MovieDescriptor.DbScore = tmdbData.VoteScore
-	}
-	if shouldApply("tag", "genres") && len(tmdbData.Genres) > 0 {
-		detail.MovieDescriptor.ClassTag = strings.Join(tmdbData.Genres, ",")
+	// 清理分类列表缓存
+	if indexRec.Pid > 0 {
+		writer.ClearFilmIndexCachesByPidSet(map[int64]struct{}{indexRec.Pid: {}})
 	}
 
-	detail.MovieDescriptor.UpdateTime = time.Now().Format(time.DateTime)
-
-	sourceID := indexRec.SourceId
-	if sourceID == "" {
-		sourceID = detailRec.SourceId
-	}
-	if sourceID == "" {
-		sourceID = "manual"
-	}
-
-	return writer.SaveDetailWithOptions(sourceID, detail, writer.SaveDetailOptions{PublishSnapshot: publishSnapshot})
+	return req.Mid, nil
 }
 
 // FetchFormPrefill 拉取用于前端表单自动填充的元数据
@@ -130,6 +81,9 @@ func (s *TMDBService) FetchFormPrefill(tmdbID int64, mediaType string) (map[stri
 		"content":      d.Overview,
 		"actor":        strings.Join(d.Actors, "/"),
 		"director":     strings.Join(d.Directors, "/"),
+		"writer":       strings.Join(d.Writers, "/"),
+		"area":         d.Area,
+		"language":     d.Language,
 		"year":         d.Year,
 		"releaseDate":  d.ReleaseDate,
 		"dbScore":      d.VoteScore,

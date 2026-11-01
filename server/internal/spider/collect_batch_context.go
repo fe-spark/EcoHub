@@ -2,14 +2,12 @@ package spider
 
 import (
 	"log"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/spider/progress"
 )
 
@@ -166,7 +164,17 @@ func isOccupiedCollectSource(sourceID string) bool {
 	collectingSourcesMu.Lock()
 	defer collectingSourcesMu.Unlock()
 	_, ok := collectingSources[sourceID]
-	return ok
+	if !ok {
+		return false
+	}
+	// 真实终态校验：若站点在 progress 中已明确处于完成、失败或已停止等终态，且没有活跃任务在运行，
+	// 说明该站点采集已完结退出，立即清理占用标记并放行
+	snap, hasSnap := progress.Snapshot(sourceID)
+	if hasSnap && progress.IsTerminalStatus(snap.Status) && !progress.IsTaskRunning(sourceID) {
+		delete(collectingSources, sourceID)
+		return false
+	}
+	return true
 }
 
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
@@ -175,22 +183,21 @@ type collectBatchContext struct {
 	trigger            string
 	tag                string
 	sources            []model.FilmSource
-	batch              *notify.ChangeBatch
 	startedAt          time.Time
 	isStandalone       bool
-	affectedMIDs       map[int64]struct{}
+	primaryWarmedUp    bool
 	masterAffectedMIDs map[int64]struct{}
-	pendingMasterMIDs  map[string]map[int64]struct{}
+	notifyMIDs         map[int64]struct{}
+	sourceNotifyMIDs   map[string]map[int64]struct{}
+	sourceErrors       map[string]string
 	finishedSources    map[string]model.FilmSource
 	occupyTokens       map[string]uint64
+	runNoted           atomic.Bool
 }
 
-func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, batch *notify.ChangeBatch, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
+func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
 	if startedAt.IsZero() {
 		startedAt = time.Now()
-	}
-	if batch == nil {
-		batch = notify.StartChangeBatch()
 	}
 	standalone := false
 	if len(isStandalone) > 0 {
@@ -200,12 +207,12 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 		trigger:            trigger,
 		tag:                tag,
 		sources:            sources,
-		batch:              batch,
 		startedAt:          startedAt,
 		isStandalone:       standalone,
-		affectedMIDs:       make(map[int64]struct{}),
 		masterAffectedMIDs: make(map[int64]struct{}),
-		pendingMasterMIDs:  make(map[string]map[int64]struct{}),
+		notifyMIDs:         make(map[int64]struct{}),
+		sourceNotifyMIDs:   make(map[string]map[int64]struct{}, len(sources)),
+		sourceErrors:       make(map[string]string),
 		finishedSources:    make(map[string]model.FilmSource),
 		occupyTokens:       snapshotOccupyTokens(sources),
 	}
@@ -213,50 +220,28 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 	return b
 }
 
-func (b *collectBatchContext) beginMasterRebuild(sourceID string) {
-	if b == nil {
+func (b *collectBatchContext) noteCronCollectStarted() {
+	if b == nil || b.trigger != model.CollectTriggerCron || b.runNoted.Swap(true) {
 		return
 	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.pendingMasterMIDs[sourceID] = make(map[int64]struct{})
+	noteTaskRan("sys_cron_auto_collect", time.Now())
 }
 
-func (b *collectBatchContext) publishPendingMasterMIDs(sourceID string) {
+func (b *collectBatchContext) takeAffectedMIDs() []int64 {
 	if b == nil {
-		return
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return
+		return nil
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	pending := b.pendingMasterMIDs[sourceID]
-	delete(b.pendingMasterMIDs, sourceID)
-	for mid := range pending {
-		if mid > 0 {
-			b.affectedMIDs[mid] = struct{}{}
-			b.masterAffectedMIDs[mid] = struct{}{}
-		}
+	if len(b.masterAffectedMIDs) == 0 {
+		return nil
 	}
-}
-
-func (b *collectBatchContext) discardPendingMasterMIDs(sourceID string) {
-	if b == nil {
-		return
+	mids := make([]int64, 0, len(b.masterAffectedMIDs))
+	for mid := range b.masterAffectedMIDs {
+		mids = append(mids, mid)
 	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.pendingMasterMIDs, sourceID)
+	b.masterAffectedMIDs = make(map[int64]struct{})
+	return mids
 }
 
 func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids []int64) {
@@ -264,29 +249,21 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids [
 		return
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if s.Grade == model.MasterCollect && h < 0 {
-		pending := b.pendingMasterMIDs[s.Id]
-		if pending == nil {
-			pending = make(map[int64]struct{})
-			b.pendingMasterMIDs[s.Id] = pending
-		}
-		for _, mid := range mids {
-			if mid > 0 {
-				pending[mid] = struct{}{}
-			}
-		}
-		return
-	}
-
+	const maxTrackedMIDs = 1500
 	for _, mid := range mids {
 		if mid > 0 {
-			b.affectedMIDs[mid] = struct{}{}
-			if s.Grade == model.MasterCollect {
+			if len(b.masterAffectedMIDs) < maxTrackedMIDs {
 				b.masterAffectedMIDs[mid] = struct{}{}
+			} else {
+				b.masterAffectedMIDs[int64(maxTrackedMIDs+1)] = struct{}{}
+				break
 			}
 		}
+	}
+	sourceID := s.Id
+	b.mu.Unlock()
+	if err := enqueueStreamPublish(sourceID, mids); err != nil {
+		log.Printf("[Spider][StreamPublish] 流式刷窗失败 source=%s err=%v", sourceID, err)
 	}
 }
 
@@ -300,48 +277,125 @@ func (b *collectBatchContext) AddAffectedMIDs(s *model.FilmSource, h int, mids [
 	b.addAffectedMIDs(s, h, mids)
 }
 
-// NoteCollectedMIDs 实现 fetcher.Batch：累计本源应进更新列表的 mid。
-func (b *collectBatchContext) NoteCollectedMIDs(sourceID, sourceName string, mids []int64) {
-	if b == nil {
+// AddNotifyMIDs 实现 fetcher.Batch：记录本批次新增或播放线路实质变更的 mid（含分源去重统计）。
+func (b *collectBatchContext) AddNotifyMIDs(sourceID string, mids []int64) {
+	if b == nil || len(mids) == 0 {
 		return
 	}
-	noteCollectedMIDs(b.batch, sourceID, sourceName, mids)
+	sourceID = strings.TrimSpace(sourceID)
+	b.mu.Lock()
+	var srcSet map[int64]struct{}
+	if sourceID != "" {
+		srcSet = b.sourceNotifyMIDs[sourceID]
+		if srcSet == nil {
+			srcSet = make(map[int64]struct{}, len(mids))
+			b.sourceNotifyMIDs[sourceID] = srcSet
+		}
+	}
+	for _, mid := range mids {
+		if mid > 0 {
+			b.notifyMIDs[mid] = struct{}{}
+			if srcSet != nil {
+				srcSet[mid] = struct{}{}
+			}
+		}
+	}
+	b.mu.Unlock()
 }
 
-func (b *collectBatchContext) dropOccupyToken(id string) {
+// RecordSourceError 实现 fetcher.Batch：记录单站采集错误信息。
+func (b *collectBatchContext) RecordSourceError(sourceID, reason string) {
 	if b == nil {
 		return
 	}
+	sourceID = strings.TrimSpace(sourceID)
+	reason = strings.TrimSpace(reason)
+	if sourceID == "" || reason == "" {
+		return
+	}
+	b.mu.Lock()
+	b.sourceErrors[sourceID] = reason
+	b.mu.Unlock()
+}
+
+// emitSummary 构建并异步投递本次采集批次汇总通知。
+func (b *collectBatchContext) emitSummary() {
+	emitBatchNotify(b)
+}
+
+func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	id = collectSourceID(id)
 	if id == "" {
 		return
 	}
+	if b == nil {
+		releaseCollectSourceIDs(id)
+		return
+	}
 	b.mu.Lock()
+	tok, hasTok := b.occupyTokens[id]
 	delete(b.occupyTokens, id)
 	b.mu.Unlock()
+	if hasTok && tok > 0 {
+		releaseCollectTokens(map[string]uint64{id: tok})
+	} else {
+		releaseCollectSourceIDs(id)
+	}
+}
+
+// ownsOccupy 当前占用令牌仍是本批次抢到的那一个。停止后被新采集重新占用时为 false。
+func (b *collectBatchContext) ownsOccupy(id string) bool {
+	if b == nil {
+		return false
+	}
+	id = collectSourceID(id)
+	b.mu.Lock()
+	tok, ok := b.occupyTokens[id]
+	b.mu.Unlock()
+	if !ok {
+		return false
+	}
+	collectingSourcesMu.Lock()
+	cur, exists := collectingSources[id]
+	collectingSourcesMu.Unlock()
+	return exists && cur == tok
+}
+
+// releaseQueuedCollectOccupies 放掉还没跑起来的队列占用。运行中的任务仍由自己的退出释放。
+func releaseQueuedCollectOccupies() {
+	live := make(map[string]struct{})
+	progress.RangeTasks(func(id, _ string) bool {
+		live[id] = struct{}{}
+		return true
+	})
+	collectingSourcesMu.Lock()
+	defer collectingSourcesMu.Unlock()
+	for id := range collectingSources {
+		if _, ok := live[id]; ok {
+			continue
+		}
+		delete(collectingSources, id)
+	}
 }
 
 func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
+	if batchCtx != nil && !batchCtx.ownsOccupy(id) {
+		batchCtx.releaseSourceOccupy(id)
+		return
+	}
 	progress.Update(id, func(cur *model.CollectProgress) {
 		switch cur.Status {
 		case progress.StatusStarting, progress.StatusRunning:
 			cur.Status = progress.StatusFailed
 		}
 	})
-	if batchCtx != nil {
-		batchCtx.dropOccupyToken(id)
-	}
-	releaseCollectSourceIDs(id)
+	batchCtx.releaseSourceOccupy(id)
 }
 
-// abandonQueuedCollectSource 站点不再采集（排队中停止 / 一键终止未派发）：记完成并立刻放占用，允许单独重试。
+// abandonQueuedCollectSource 站点不再采集（排队中停止 / 一键终止未派发）：立刻放占用，允许单独重试。
 func abandonQueuedCollectSource(source model.FilmSource, batchCtx *collectBatchContext) {
 	progress.MarkStopped(source.Id)
-	if batchCtx != nil {
-		batchCtx.markSourceFinished(source)
-		batchCtx.dropOccupyToken(source.Id)
-	}
-	releaseCollectSourceIDs(source.Id)
+	batchCtx.releaseSourceOccupy(source.Id)
 }
 
 func (b *collectBatchContext) markSourceFinished(source model.FilmSource) {
@@ -357,62 +411,55 @@ func (b *collectBatchContext) markSourceFinished(source model.FilmSource) {
 	b.finishedSources[source.Id] = source
 }
 
-func (b *collectBatchContext) flushAndFinalize() error {
-	if b == nil {
+// finalizePrimarySource 首选采集站完成时立即刷窗并触发首页缓存预热，无需等待同批其余慢速非首选站。
+func (b *collectBatchContext) finalizePrimarySource(sourceID string) error {
+	if b == nil || !isPreferredCollectSource(sourceID) {
 		return nil
 	}
 	b.mu.Lock()
-	if len(b.finishedSources) == 0 && len(b.affectedMIDs) == 0 {
+	if b.primaryWarmedUp {
 		b.mu.Unlock()
 		return nil
 	}
-
-	sources := make([]model.FilmSource, 0, len(b.finishedSources))
-	for _, s := range b.finishedSources {
-		sources = append(sources, s)
-	}
-	sort.Slice(sources, func(i, j int) bool {
-		if sources[i].Grade == sources[j].Grade {
-			return sources[i].Id < sources[j].Id
-		}
-		return sources[i].Grade == model.MasterCollect
-	})
-
-	affectedMIDs := make([]int64, 0, len(b.affectedMIDs))
-	for mid := range b.affectedMIDs {
-		if mid > 0 {
-			affectedMIDs = append(affectedMIDs, mid)
-		}
-	}
-	sort.Slice(affectedMIDs, func(i, j int) bool { return affectedMIDs[i] < affectedMIDs[j] })
-
-	masterMIDs := make([]int64, 0, len(b.masterAffectedMIDs))
-	for mid := range b.masterAffectedMIDs {
-		if mid > 0 {
-			masterMIDs = append(masterMIDs, mid)
-		}
-	}
-	sort.Slice(masterMIDs, func(i, j int) bool { return masterMIDs[i] < masterMIDs[j] })
-	finishedMap := b.finishedSources
-	b.finishedSources = make(map[string]model.FilmSource)
-	b.affectedMIDs = make(map[int64]struct{})
-	b.masterAffectedMIDs = make(map[int64]struct{})
+	b.primaryWarmedUp = true
 	b.mu.Unlock()
-
-	progress.MarkSourcesFinalizing(finishedMap)
 
 	collectLifecycle.beginPublish()
 	defer collectLifecycle.endPublish()
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	_, _, err := finalizeCollectRun(sources, affectedMIDs, masterMIDs)
-	if err != nil {
-		progress.MarkSourcesFinalizeFailed(finishedMap)
-		return err
+	return finalizeStreamPublish(b.takeAffectedMIDs, true)
+}
+
+func (b *collectBatchContext) flushAndFinalize() error {
+	if b == nil {
+		return nil
 	}
-	progress.MarkSourcesPublished(finishedMap)
-	return nil
+	b.mu.Lock()
+	hasWork := len(b.finishedSources) > 0 || len(b.masterAffectedMIDs) > 0 || streamBuf.pendingCount() > 0
+	warmupHome := false
+	if !b.primaryWarmedUp {
+		for id := range b.finishedSources {
+			if isPreferredCollectSource(id) {
+				warmupHome = true
+				b.primaryWarmedUp = true
+				break
+			}
+		}
+	}
+	b.finishedSources = make(map[string]model.FilmSource)
+	b.mu.Unlock()
+	if !hasWork {
+		return nil
+	}
+
+	collectLifecycle.beginPublish()
+	defer collectLifecycle.endPublish()
+	publishMu.Lock()
+	defer publishMu.Unlock()
+
+	return finalizeStreamPublish(b.takeAffectedMIDs, warmupHome)
 }
 
 func (b *collectBatchContext) close() {
@@ -425,12 +472,4 @@ func (b *collectBatchContext) close() {
 	b.occupyTokens = nil
 	b.mu.Unlock()
 	releaseCollectTokens(tokens)
-}
-
-func (b *collectBatchContext) emitSummary(finalizeErr error) {
-	if b == nil {
-		return
-	}
-	defer b.close()
-	emitBatchSummaryForSources(b.batch, b.trigger, b.sources, b.startedAt, finalizeErr)
 }

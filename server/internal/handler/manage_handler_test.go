@@ -1,19 +1,41 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+func setupManageConfigDB(t *testing.T) {
+	t.Helper()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.Banner{}, &model.MappingRule{}, &model.TMDBConfigRecord{}, &model.User{}, &model.FileInfo{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+}
 
 func init() {
 	gin.SetMode(gin.TestMode)
@@ -23,6 +45,14 @@ func testContext(method, path string) (*gin.Context, *httptest.ResponseRecorder)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(method, path, nil)
+	return c, w
+}
+
+func testJSONContext(method, path, body string) (*gin.Context, *httptest.ResponseRecorder) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(method, path, strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
 	return c, w
 }
 
@@ -150,7 +180,7 @@ func TestUpdateSiteAccess_Validation(t *testing.T) {
 	h := &ManageHandler{}
 
 	t.Run("PrivateAccess true requires ProvideKey", func(t *testing.T) {
-		c, w := testContext(http.MethodPost, "/api/manage/config/access/update")
+		c, w := testContext(http.MethodPost, "/api/manage/config/access")
 		c.Request.Header.Set("Content-Type", "application/json")
 		c.Request.Body = http.NoBody
 		h.UpdateSiteAccess(c)
@@ -162,6 +192,7 @@ func TestUpdateSiteAccess_Validation(t *testing.T) {
 }
 
 func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
+	setupManageConfigDB(t)
 	h := &ManageHandler{}
 	cases := []struct {
 		name   string
@@ -199,11 +230,12 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 	}
 }
 
-func TestBannerGenerateAndProgressHandlers(t *testing.T) {
+func TestBannerHandlers(t *testing.T) {
+	setupManageConfigDB(t)
 	h := &ManageHandler{}
 
-	c, w := testContext(http.MethodPost, "/api/manage/banner/generate")
-	h.BannerGenerate(c)
+	c, w := testContext(http.MethodGet, "/api/manage/banner/list")
+	h.BannerList(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d want 200 body=%s", w.Code, w.Body.String())
 	}
@@ -212,15 +244,169 @@ func TestBannerGenerateAndProgressHandlers(t *testing.T) {
 		t.Fatalf("code=%d want 0", resp.Code)
 	}
 
-	cProg, wProg := testContext(http.MethodGet, "/api/manage/banner/generate/progress")
-	h.BannerGenerateProgress(cProg)
-	if wProg.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200 body=%s", wProg.Code, wProg.Body.String())
-	}
-	respProg := decodeResponse(t, wProg)
-	if respProg.Code != dto.SUCCESS {
-		t.Fatalf("code=%d want 0", respProg.Code)
+	// 测试一键排片参数解析异常与成功处理
+	cGen, wGen := testJSONContext(http.MethodPost, "/api/manage/banner/quick-generate", `{"count":6,"strategy":"hot"}`)
+	h.BannerQuickGenerate(cGen)
+	if wGen.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 body=%s", wGen.Code, wGen.Body.String())
 	}
 }
 
+func TestBannerAndMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
+	setupManageConfigDB(t)
+	h := &ManageHandler{}
 
+	// 1. BannerSave (新增，不传 ID)
+	bannerAddBody := `{"title":"测试轮播","mid":101,"poster":"http://test.jpg"}`
+	c, w := testJSONContext(http.MethodPost, "/api/manage/banner/save", bannerAddBody)
+	h.BannerSave(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected BannerSave success, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	// 获取生成的 banner
+	banners, err := service.ManageSvc.GetBanners()
+	if err != nil || len(banners) != 1 {
+		t.Fatalf("expected 1 banner, got %v, err=%v", len(banners), err)
+	}
+	bannerID := banners[0].Id
+
+	// 2. BannerDelete 批量删除
+	delBody, _ := json.Marshal(map[string][]string{"ids": {bannerID}})
+	c, w = testJSONContext(http.MethodPost, "/api/manage/banner/delete", string(delBody))
+	h.BannerDelete(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected BannerDelete success, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	bannersAfter, _ := service.ManageSvc.GetBanners()
+	if len(bannersAfter) != 0 {
+		t.Fatalf("expected 0 banners after delete, got %d", len(bannersAfter))
+	}
+
+	// 3. MappingRuleSave (新增，ID=0)
+	ruleAddBody := `{"raw":"大陆","target":"中国大陆","matchType":"exact","group":"Area"}`
+	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", ruleAddBody)
+	h.MappingRuleSave(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected MappingRuleSave success, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	// 4. MappingRuleDelete 批量删除
+	delRuleBody, _ := json.Marshal(map[string][]uint{"ids": {1}})
+	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/delete", string(delRuleBody))
+	h.MappingRuleDelete(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected MappingRuleDelete success, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+}
+
+func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
+	// 1. 无凭证调用 UserSave -> Failed
+	c, w := testJSONContext(http.MethodPost, "/api/manage/user/save", `{"userName":"test"}`)
+	UserHd.UserSave(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on unauthenticated UserSave, got %d", resp.Code)
+	}
+
+	// 2. 无凭证调用 UserDelete -> Failed
+	c, w = testJSONContext(http.MethodPost, "/api/manage/user/delete", `{"ids":[100]}`)
+	UserHd.UserDelete(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on unauthenticated UserDelete, got %d", resp.Code)
+	}
+
+	// 3. 超管使用 string id 更新用户 -> 成功
+	setupManageConfigDB(t)
+	salt, _ := utils.GenerateSalt()
+	u10005 := model.User{
+		Model:    gorm.Model{ID: 10005},
+		UserName: "testuser10005",
+		NickName: "OldNick",
+		Role:     model.UserRoleNormal,
+		Status:   0,
+		Password: utils.PasswordEncrypt("pwd123", salt),
+		Salt:     salt,
+	}
+	db.Mdb.Create(&u10005)
+
+	c, w = testContext(http.MethodPost, "/api/manage/user/save")
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, UserName: "admin", Role: model.UserRoleAdmin})
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/save", bytes.NewReader([]byte(`{"id":"10005","nickName":"StringNick"}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	UserHd.UserSave(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected SUCCESS on string id UserSave, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	var checkU model.User
+	db.Mdb.First(&checkU, 10005)
+	if checkU.NickName != "StringNick" {
+		t.Fatalf("expected NickName StringNick, got %s", checkU.NickName)
+	}
+
+	// 4. 超管使用大写 ID (number) 更新用户 -> 成功
+	c, w = testContext(http.MethodPost, "/api/manage/user/save")
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, UserName: "admin", Role: model.UserRoleAdmin})
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/save", bytes.NewReader([]byte(`{"ID":10005,"nickName":"CapIDNick"}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	UserHd.UserSave(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected SUCCESS on uppercase ID UserSave, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	db.Mdb.First(&checkU, 10005)
+	if checkU.NickName != "CapIDNick" {
+		t.Fatalf("expected NickName CapIDNick, got %s", checkU.NickName)
+	}
+}
+
+func TestCronHandler_StateAndRun_Validation(t *testing.T) {
+	// 1. 空 ids 变更状态 -> Failed
+	c, w := testJSONContext(http.MethodPost, "/api/manage/cron/state", `{"ids":[],"state":true}`)
+	CronHd.ChangeTaskState(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on empty ids for ChangeTaskState, got %d", resp.Code)
+	}
+
+	// 2. 空 ids 执行任务 -> Failed
+	c, w = testJSONContext(http.MethodPost, "/api/manage/cron/run", `{"ids":[]}`)
+	CronHd.RunFilmCronTask(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on empty ids for RunFilmCronTask, got %d", resp.Code)
+	}
+}
+
+func TestExportConfigBackup_PasswordValidation(t *testing.T) {
+	// 1. 无凭证 -> 401
+	c, w := testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":"test"}`)
+	ManageHd.ExportConfigBackup(c)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on unauthenticated export, got %d", w.Code)
+	}
+
+	// 2. 非超管 -> 403
+	c, w = testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":"test"}`)
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleNormal})
+	ManageHd.ExportConfigBackup(c)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on non-admin export, got %d", w.Code)
+	}
+
+	// 3. 超管但密码为空 -> FAILED
+	c, w = testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":""}`)
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, Role: model.UserRoleAdmin})
+	ManageHd.ExportConfigBackup(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on empty password, got code=%d", resp.Code)
+	}
+}

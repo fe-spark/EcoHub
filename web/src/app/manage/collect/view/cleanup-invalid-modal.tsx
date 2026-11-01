@@ -33,15 +33,15 @@ export default function CleanupInvalidModal({
     >
       {scanning ? (
         <div className={styles.cleanupLoading}>
-          <Spin size="large" description="正在逐一检测采集站接口，请稍候…" />
+          <Spin size="large" description="正在检测接口…" />
         </div>
       ) : (
         <div className={styles.cleanupContent}>
           <Alert
             type="warning"
             showIcon
-            title={`检测到 ${invalidSources.length} 个采集不通的采集站`}
-            description="删除后无法恢复；已禁用的采集站也会一并删除，请确认无误后再操作。"
+            title={`删除 ${invalidSources.length} 个失效站？`}
+            description="不可恢复"
           />
 
           <div className={styles.cleanupList}>
@@ -51,9 +51,6 @@ export default function CleanupInvalidModal({
                   <Typography.Text strong ellipsis className={styles.cleanupItemName}>
                     {item.name}
                   </Typography.Text>
-                  <Tag color={item.grade === 0 ? "gold" : "default"} variant="filled">
-                    {item.grade === 0 ? "主采集站" : "附属采集站"}
-                  </Tag>
                   {!item.state ? (
                     <Tag color="default" variant="filled">
                       已禁用

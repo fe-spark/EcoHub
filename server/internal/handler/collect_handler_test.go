@@ -12,7 +12,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -29,12 +29,14 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 
 	if err := gdb.AutoMigrate(
 		&model.FilmSource{},
-		&model.SlaveMoviePlaylist{},
+		&model.FilmSourcePlaylist{},
 		&model.CollectSourceStats{},
 		&model.Category{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.FailureRecord{},
+		&model.MovieSourceMapping{},
+		&model.FilmIndex{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -52,7 +54,7 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 		Id:     "src_unreachable",
 		Name:   "原始站点",
 		Uri:    unreachableURI,
-		Grade:  model.SlaveCollect,
+		Sort:   0,
 		Format: model.SourceFormatJSON,
 		State:  true,
 	}
@@ -69,17 +71,17 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 			Id:     "src_unreachable",
 			Name:   "新站点",
 			Uri:    unreachableURI,
-			Grade:  model.SlaveCollect,
+			Sort:   0,
 			Format: model.SourceFormatJSON,
 			State:  true,
 		},
 	}
 	bodyBytes, _ := json.Marshal(updateBody)
-	c, w := testContext(http.MethodPost, "/api/manage/collect/update")
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/update", bytes.NewReader(bodyBytes))
+	c, w := testContext(http.MethodPost, "/api/manage/collect/save")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(bodyBytes))
 	c.Request.Header.Set("Content-Type", "application/json")
 
-	h.FilmSourceUpdate(c)
+	h.FilmSourceSave(c)
 	resp := decodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected update to succeed when URI unchanged even if unreachable, got code=%d msg=%s", resp.Code, resp.Msg)
@@ -94,26 +96,161 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 		t.Fatalf("expected updated name '新站点', got '%s'", updated.Name)
 	}
 
-	// 2. 修改 URI 指向另一个无法连接的地址 -> 此时必须触发接口探测并报错拦截
+	// 2. 修改 URI 指向另一个地址 -> 不进行同步阻塞探测，直接保存成功并通过异步处理分类
 	newUnreachableURI := "http://127.0.0.1:59998/new_unreachable/api.php"
 	updateBodyUriChanged := filmSourceBody{
 		FilmSource: model.FilmSource{
 			Id:     "src_unreachable",
 			Name:   "修改地址",
 			Uri:    newUnreachableURI,
-			Grade:  model.SlaveCollect,
+			Sort:   0,
 			Format: model.SourceFormatJSON,
 			State:  true,
 		},
 	}
 	bodyBytes2, _ := json.Marshal(updateBodyUriChanged)
-	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/update")
-	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/update", bytes.NewReader(bodyBytes2))
+	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/save")
+	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(bodyBytes2))
 	c2.Request.Header.Set("Content-Type", "application/json")
 
-	h.FilmSourceUpdate(c2)
+	h.FilmSourceSave(c2)
+	resp2 := decodeResponse(t, w2)
+	if resp2.Code != dto.SUCCESS {
+		t.Fatalf("expected update to succeed immediately without blocking network probe, got code=%d msg=%s", resp2.Code, resp2.Msg)
+	}
+
+	var updated2 model.FilmSource
+	if err := gdb.First(&updated2, "id = ?", "src_unreachable").Error; err != nil {
+		t.Fatalf("query updated source: %v", err)
+	}
+	if updated2.Uri != newUnreachableURI {
+		t.Fatalf("expected updated uri '%s', got '%s'", newUnreachableURI, updated2.Uri)
+	}
+}
+
+func TestCollectHandler_FilmSourceSyncCategory_Validations(t *testing.T) {
+	_ = setupCollectHandlerTestDB(t)
+	h := &CollectHandler{}
+
+	// 1. 空 ID 校验
+	c, w := testContext(http.MethodPost, "/api/manage/collect/category/sync")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/category/sync", bytes.NewReader([]byte(`{"id":""}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceSyncCategory(c)
+	resp := decodeResponse(t, w)
+	if resp.Code == dto.SUCCESS {
+		t.Fatal("expected failure for empty source ID")
+	}
+
+	// 2. 站点不存在校验
+	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/category/sync")
+	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/category/sync", bytes.NewReader([]byte(`{"id":"non_existent"}`)))
+	c2.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceSyncCategory(c2)
 	resp2 := decodeResponse(t, w2)
 	if resp2.Code == dto.SUCCESS {
-		t.Fatal("expected update to fail when changing URI to an unreachable address")
+		t.Fatal("expected failure for non-existent source")
+	}
+}
+
+func TestCollectHandler_FilmSourceAdd_AsyncCategorySync(t *testing.T) {
+	gdb := setupCollectHandlerTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":1,"msg":"数据列表","page":1,"pagecount":1,"limit":"20","total":0,"list":[],"class":[]}`))
+	}))
+	defer server.Close()
+
+	h := &CollectHandler{}
+	body := filmSourceBody{
+		FilmSource: model.FilmSource{
+			Name:   "测试新站",
+			Uri:    server.URL,
+			Format: model.SourceFormatJSON,
+			State:  true,
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	c, w := testContext(http.MethodPost, "/api/manage/collect/save")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(bodyBytes))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.FilmSourceSave(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected add to succeed immediately, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	var count int64
+	if err := gdb.Model(&model.FilmSource{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected 1 source saved, got count=%d, err=%v", count, err)
+	}
+}
+
+func TestCollectHandler_StateBatchAndRecordOperations(t *testing.T) {
+	gdb := setupCollectHandlerTestDB(t)
+
+	src1 := model.FilmSource{Id: "src_s1", Name: "站点1", Uri: "http://127.0.0.1:59991", State: false}
+	src2 := model.FilmSource{Id: "src_s2", Name: "站点2", Uri: "http://127.0.0.1:59992", State: false}
+	gdb.Create(&src1)
+	gdb.Create(&src2)
+
+	h := &CollectHandler{}
+
+	// 1. 批量/单站更新状态: 启用 src_s1 与 src_s2
+	stateReq := model.FilmSourceStateBatchRequest{
+		Ids:   []string{"src_s1", "src_s2"},
+		State: true,
+	}
+	bodyBytes, _ := json.Marshal(stateReq)
+	c, w := testContext(http.MethodPost, "/api/manage/collect/state")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/state", bytes.NewReader(bodyBytes))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceBatchChange(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected state update success, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	var s1 model.FilmSource
+	gdb.First(&s1, "id = ?", "src_s1")
+	if !s1.State {
+		t.Fatalf("expected src_s1 state to be true")
+	}
+
+	// 2. 异常记录测试: 写入测试记录
+	rec1 := model.FailureRecord{OriginId: "src_s1", Status: model.FailureRecordStatusFailed, OriginName: "测试站1"}
+	rec2 := model.FailureRecord{OriginId: "src_s1", Status: model.FailureRecordStatusSuccess, OriginName: "测试站1"}
+	gdb.Create(&rec1)
+	gdb.Create(&rec2)
+
+	// 3. 测试清理范围 scope="retried"
+	clearReq := map[string]string{"scope": "retried"}
+	bodyBytes, _ = json.Marshal(clearReq)
+	c, w = testContext(http.MethodPost, "/api/manage/collect/record/clear")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/record/clear", bytes.NewReader(bodyBytes))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ClearRecords(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected clear retried success, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	// 4. 测试清理范围 scope="all"
+	clearAllReq := map[string]string{"scope": "all"}
+	bodyBytes, _ = json.Marshal(clearAllReq)
+	c, w = testContext(http.MethodPost, "/api/manage/collect/record/clear")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/record/clear", bytes.NewReader(bodyBytes))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ClearRecords(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected clear all success, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	var recCount int64
+	gdb.Model(&model.FailureRecord{}).Count(&recCount)
+	if recCount != 0 {
+		t.Fatalf("expected 0 failure records, got %d", recCount)
 	}
 }

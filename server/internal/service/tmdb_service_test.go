@@ -58,6 +58,36 @@ func TestCleanKeywordForSearch(t *testing.T) {
 			expectedName: "Gotham Knights",
 			expectedYear: "",
 		},
+		{
+			input:        "异星战境 预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "异星战境   预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "异星战境　预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "异星战境 - 预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "阿凡达：水之道 特辑 (2022)",
+			expectedName: "阿凡达：水之道",
+			expectedYear: "2022",
+		},
+		{
+			input:        "蜡笔小新：爆盛！功夫男孩.拉面大乱.",
+			expectedName: "蜡笔小新：爆盛！功夫男孩.拉面大乱",
+			expectedYear: "",
+		},
 	}
 
 	for _, tc := range tests {
@@ -68,6 +98,26 @@ func TestCleanKeywordForSearch(t *testing.T) {
 		if year != tc.expectedYear {
 			t.Errorf("CleanKeywordForSearch(%q) year = %q, expected %q", tc.input, year, tc.expectedYear)
 		}
+	}
+}
+
+func TestPrepareManualSearchKeepsQueryAndYear(t *testing.T) {
+	query, year := prepareManualSearch("流浪地球：飞跃2020 1080p", "2020")
+	if query != "流浪地球：飞跃2020" {
+		t.Fatalf("query = %q", query)
+	}
+	if year != "2020" {
+		t.Fatalf("year = %q", year)
+	}
+
+	query, year = prepareManualSearch("星际穿越 (2014) [1080P]", "")
+	if query != "星际穿越" || year != "2014" {
+		t.Fatalf("query = %q year = %q", query, year)
+	}
+
+	query, year = prepareManualSearch("流浪地球：飞跃2020", "1999")
+	if query != "流浪地球：飞跃2020" || year != "1999" {
+		t.Fatalf("query = %q year = %q", query, year)
 	}
 }
 
@@ -98,7 +148,6 @@ func TestNormalizeTMDBConfig(t *testing.T) {
 	cfg := model.TMDBConfig{
 		Enabled:     true,
 		ApiKey:      "  test_key  ",
-		Proxy:       " http://127.0.0.1:7890/ ",
 		Language:    "",
 		ImageDomain: "https://image.tmdb.org/t/p///",
 	}

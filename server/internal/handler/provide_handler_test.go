@@ -13,7 +13,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -22,6 +22,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 func TestNormalizeMediaURL(t *testing.T) {
@@ -92,12 +93,6 @@ func TestNormalizeMediaURL(t *testing.T) {
 }
 
 func TestHandleProvideConfig_RedisNilSafety(t *testing.T) {
-	origRdb := db.Rdb
-	db.Rdb = nil
-	defer func() {
-		db.Rdb = origRdb
-	}()
-
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -172,6 +167,15 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		t.Fatalf("create catSub: %v", err)
 	}
 
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_default",
+		Name:  "默认主源",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatalf("create default film source: %v", err)
+	}
+
 	// 2. 初始化影片快照与详情
 	// 影片 201: 两集，相对路径海报
 	snap201 := model.FilmListSnapshot{
@@ -180,6 +184,8 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Name:            "流浪地球",
 		Pid:             1,
 		Cid:             10,
+		CategoryKey:     "source:src_default:1",
+		RootCategoryKey: "source:src_default:1",
 		Hits:            500,
 		Year:            2021,
 		Area:            "中国大陆",
@@ -188,7 +194,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Picture:         "/upload/pic/201.jpg",
 		UpdateStamp:     time.Now().Unix(),
 	}
-	if err := gdb.Create(&snap201).Error; err != nil {
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap201}); err != nil {
 		t.Fatalf("create snap201: %v", err)
 	}
 	detail201 := model.MovieDetail{
@@ -209,9 +215,20 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			Remarks:  "HD中字",
 		},
 	}
-	raw201, _ := json.Marshal(detail201)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: 201, Content: string(raw201)}).Error; err != nil {
-		t.Fatalf("create detail201: %v", err)
+	rawUrls201, _ := json.Marshal(detail201.PlayList[0])
+	if err := gdb.Model(&model.FilmIndex{}).Where("mid = ?", 201).Update("content", "流浪地球内容简介").Error; err != nil {
+		t.Fatalf("update film index 201: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          201,
+		SourceId:     "src_default",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail201.PlayList[0]),
+		Content:      string(rawUrls201),
+	}).Error; err != nil {
+		t.Fatalf("create playlist 201: %v", err)
 	}
 
 	// 影片 202: 绝对路径海报
@@ -221,6 +238,8 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Name:            "星际穿越",
 		Pid:             1,
 		Cid:             10,
+		CategoryKey:     "source:src_default:1",
+		RootCategoryKey: "source:src_default:1",
 		Hits:            800,
 		Year:            2014,
 		Area:            "美国",
@@ -229,7 +248,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Picture:         "https://img.test.com/202.jpg",
 		UpdateStamp:     time.Now().Unix(),
 	}
-	if err := gdb.Create(&snap202).Error; err != nil {
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap202}); err != nil {
 		t.Fatalf("create snap202: %v", err)
 	}
 	detail202 := model.MovieDetail{
@@ -249,9 +268,20 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			Remarks:  "超清",
 		},
 	}
-	raw202, _ := json.Marshal(detail202)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: 202, Content: string(raw202)}).Error; err != nil {
-		t.Fatalf("create detail202: %v", err)
+	rawUrls202, _ := json.Marshal(detail202.PlayList[0])
+	if err := gdb.Model(&model.FilmIndex{}).Where("mid = ?", 202).Update("content", "星际穿越内容简介").Error; err != nil {
+		t.Fatalf("update film index 202: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          202,
+		SourceId:     "src_default",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail202.PlayList[0]),
+		Content:      string(rawUrls202),
+	}).Error; err != nil {
+		t.Fatalf("create playlist 202: %v", err)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
@@ -281,8 +311,18 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected non-empty sites")
 		}
 		firstSite := sites[0].(map[string]any)
-		if firstSite["key"] != "EcoHub" {
-			t.Fatalf("expected EcoHub site key, got %v", firstSite["key"])
+		if firstSite["key"] != "source_src_default" {
+			t.Fatalf("expected primary site key, got %v", firstSite["key"])
+		}
+		api, _ := firstSite["api"].(string)
+		if !strings.Contains(api, "source=src_default") {
+			t.Fatalf("primary api = %v", api)
+		}
+		for _, item := range sites {
+			name, _ := item.(map[string]any)["name"].(string)
+			if strings.Contains(name, "全量") {
+				t.Fatalf("不应再有全量站点: %v", name)
+			}
 		}
 	})
 
@@ -475,6 +515,49 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected code=1 and item 202, got %+v", res)
 		}
 	})
+	// 验证分类停用全链路拦截：当根分类 1 或子分类 10 停用时，详情与列表均应阻断
+	t.Run("ProvideVodCategoryVisibilityInterception", func(t *testing.T) {
+		support.SetCategoryShowForTest(map[int64]bool{1: false, 10: true})
+		defer support.SetCategoryShowForTest(map[int64]bool{})
+
+		// 验证 ids 详情拉取被拦截（返回空列表）
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=detail&ids=201,202", nil)
+		c.Request.Host = "127.0.0.1:8080"
+		ProvideHd.HandleProvide(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var resDetail struct {
+			Code int                `json:"code"`
+			List []model.FilmDetail `json:"list"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resDetail); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(resDetail.List) != 0 {
+			t.Fatalf("expected 0 details when category disabled, got %d", len(resDetail.List))
+		}
+
+		// 验证分类列表拉取被拦截
+		w2 := httptest.NewRecorder()
+		c2, _ := gin.CreateTestContext(w2)
+		c2.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=1", nil)
+		c2.Request.Host = "127.0.0.1:8080"
+		ProvideHd.HandleProvide(c2)
+		var resList struct {
+			Code int              `json:"code"`
+			List []model.FilmList `json:"list"`
+		}
+		if err := json.Unmarshal(w2.Body.Bytes(), &resList); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(resList.List) != 0 {
+			t.Fatalf("expected 0 list items when category disabled, got %d", len(resList.List))
+		}
+	})
+
 
 	// F. 验证 GET /api/provide/vod?wd=星际 (关键字搜索)
 	t.Run("ProvideVodKeywordSearch", func(t *testing.T) {
@@ -567,7 +650,7 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 		Cid:             10,
 		Hits:            100,
 	}
-	_ = db.Mdb.Create(&snap).Error
+	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
@@ -575,6 +658,7 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=1&pg=1", nil)
+	c.Request.Host = "tvbox.ecohub.com"
 	ProvideHd.HandleProvide(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -606,6 +690,7 @@ func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	// 请求无数据的分类 t=999
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=999&pg=1", nil)
+	c.Request.Host = "tvbox.ecohub.com"
 	ProvideHd.HandleProvide(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -634,7 +719,7 @@ func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
 		Picture:         "/static/poster.jpg", // 相对路径，依赖 baseURL 归一化
 		Hits:            500,
 	}
-	_ = db.Mdb.Create(&snap).Error
+	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()

@@ -8,6 +8,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -17,14 +18,6 @@ import (
 type IndexHandler struct{}
 
 var IndexHd = new(IndexHandler)
-
-// Health 健康检查接口
-// Deprecated: 后续主版本计划移除。
-// 该接口仅返回静态健康状态，无法校验私有化密钥安全与站点核心依赖。
-// 探活与站点公开基础信息请统一使用 /api/config/basic；EcoHub 客户端软件源鉴权测通统一使用 /api/provide/app。
-func Health(c *gin.Context) {
-	dto.Success(gin.H{"status": "ok"}, "服务正常", c)
-}
 
 func hasSearchOptions(searchTags map[string]any) bool {
 	if len(searchTags) == 0 {
@@ -69,7 +62,6 @@ func hasRealSearchTagList(value any) bool {
 	return false
 }
 
-
 func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
 	cost := time.Since(startedAt)
 	if cost < 500*time.Millisecond {
@@ -81,28 +73,21 @@ func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
 
 // Index 首页数据
 func (h *IndexHandler) Index(c *gin.Context) {
-	data := service.IndexSvc.IndexPage()
+	data, err := service.IndexSvc.IndexPage()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(data, "首页数据获取成功", c)
 }
 
-// DailyUpdates 近 24h 更新。
-// Deprecated: 保持早期版本（beta.3）原始接口契约（不传 limit 返回全部；传 limit 则随机抽取，exclude 排除当前批次）。
-// 后续主版本计划移除，请迁移至 /api/dailyUpdates (DailyUpdatesV2)，支持 pid 大类分类、标准分页、排除已出现项与随机抽样。
-func (h *IndexHandler) DailyUpdates(c *gin.Context) {
-	data := service.IndexSvc.HomeDailyUpdates(parseDailyUpdateLimit(c.Query("limit")), parseDailyUpdateExclude(c.Query("exclude")))
-	if data == nil {
-		data = make([]model.MovieBasicInfo, 0)
-	}
-	dto.Success(data, "每日更新获取成功", c)
-}
-
-// DailyUpdatesV2 近 24h 更新：
+// DailyUpdates 近 24h 更新：
 //
 //	pid=0 全部；pid=-1 其他；pid>0 导航大类
 //	current/page + pageSize/size 标准分页
 //	random=1 时按分类随机抽样，exclude 排除已出现的 mid
-func (h *IndexHandler) DailyUpdatesV2(c *gin.Context) {
-	result, err := service.IndexSvc.DailyUpdatesV2(service.DailyUpdateListReq{
+func (h *IndexHandler) DailyUpdates(c *gin.Context) {
+	result, err := service.IndexSvc.DailyUpdates(service.DailyUpdateListReq{
 		Pid: parseDailyUpdatePid(queryFirst(c, "pid", "Pid")),
 		Page: &dto.Page{
 			Current:  parseQueryInt(queryFirst(c, "page", "current"), 1),
@@ -112,10 +97,14 @@ func (h *IndexHandler) DailyUpdatesV2(c *gin.Context) {
 		Exclude: parseDailyUpdateExclude(c.Query("exclude")),
 	})
 	if err != nil {
-		dto.Failed("获取每日更新失败", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(result, "获取每日更新成功", c)
+}
+
+func pageSizeSpecified(c *gin.Context) bool {
+	return c.Query("pageSize") != "" || c.Query("pagesize") != "" || c.Query("size") != "" || c.Query("limit") != ""
 }
 
 func queryFirst(c *gin.Context, keys ...string) string {
@@ -171,18 +160,6 @@ func parseDailyUpdatePid(raw string) int64 {
 	return n
 }
 
-func parseDailyUpdateLimit(raw string) int {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
 const dailyUpdateExcludeCap = 500
 
 func parseDailyUpdateExclude(raw string) []int64 {
@@ -212,14 +189,17 @@ func parseDailyUpdateExclude(raw string) []int64 {
 
 // CategoriesInfo 分类信息获取
 func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
-	data := service.IndexSvc.GetNavCategory()
+	data, err := service.IndexSvc.GetNavCategory()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	if len(data) <= 0 {
 		dto.Failed("暂无分类信息", c)
 		return
 	}
 	dto.Success(data, "分类信息获取成功", c)
 }
-
 
 const (
 	searchFilmDefaultPageSize = 12
@@ -248,53 +228,56 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	page := dto.GetPageParams(c)
 	resolveSearchFilmPageSize(c, page)
 	trimmed := strings.TrimSpace(keyword)
-	sourceID := strings.TrimSpace(c.Query("source"))
-	result := service.IndexSvc.SearchFilm(trimmed, sourceID, sortField, page)
+	result := service.IndexSvc.SearchFilm(trimmed, "", sortField, page)
+	if strings.TrimSpace(result.Error) != "" {
+		dto.Failed(result.Error, c)
+		return
+	}
 	if result.List == nil {
 		result.List = []model.MovieBasicInfo{}
 	}
 	if result.Sources == nil {
 		result.Sources = []model.SearchSourceTab{}
 	}
-
-	payload := gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}
-	if strings.TrimSpace(result.Error) != "" {
-		payload["error"] = result.Error
-	}
-	dto.Success(payload, "影片搜索成功", c)
+	dto.Success(gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}, "影片搜索成功", c)
 }
 
 // HotKeywords 获取当前全站热门搜索推荐词
 func (h *IndexHandler) HotKeywords(c *gin.Context) {
 	limit := parseHotKeywordsLimit(c.Query("limit"))
-	list := service.IndexSvc.GetHotSearchKeywords(limit)
+	list, err := service.IndexSvc.GetHotSearchKeywords(limit)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(list, "热门搜索获取成功", c)
 }
 
-// FilmTagSearch 通过tag获取满足条件的对应影片
+// FilmTagSearch 通过tag获取满足条件的对应影片 (GET /api/films/filter)
 func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params := model.SearchTagsVO{}
-	pidStr := c.DefaultQuery("Pid", "")
-	cidStr := c.DefaultQuery("Category", "")
-	yStr := c.DefaultQuery("Year", "")
+	pidStr := queryFirst(c, "pid", "Pid")
+	cidStr := queryFirst(c, "category", "Category", "cid", "Cid")
+	yStr := queryFirst(c, "year", "Year")
 	if pidStr == "" {
 		dto.Failed("缺少分类信息", c)
 		return
 	}
 	params.Pid, _ = strconv.ParseInt(pidStr, 10, 64)
 	params.Cid, _ = strconv.ParseInt(cidStr, 10, 64)
-	params.Plot = c.DefaultQuery("Plot", "")
-	params.Area = c.DefaultQuery("Area", "")
-	params.Language = c.DefaultQuery("Language", "")
+	params.Plot = queryFirst(c, "plot", "Plot")
+	params.Area = queryFirst(c, "area", "Area")
+	params.Language = queryFirst(c, "language", "Language")
 	params.Year = yStr
-	params.Sort = c.DefaultQuery("Sort", "update_stamp")
+	params.Sort = queryFirst(c, "sort", "Sort")
+	params.SourceId = service.IndexSvc.BaselineSourceID()
 
 	page := dto.GetPageParams(c)
-	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("limit") == "" {
+	if !pageSizeSpecified(c) {
 		page.PageSize = 48
 	}
 
-	cat := service.IndexSvc.GetPidCategory(params.Pid)
+	cat := service.IndexSvc.GetPidCategory(params.Pid, params.SourceId)
 
 	list, err := service.IndexSvc.GetFilmsByTags(params, page)
 	if err != nil {
@@ -304,7 +287,11 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	if list == nil {
 		list = make([]model.MovieBasicInfo, 0)
 	}
-	searchTags := service.IndexSvc.SearchTags(params)
+	searchTags, err := service.IndexSvc.SearchTags(params)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 
 	var titleObj *model.Category
 	if cat != nil {
@@ -324,13 +311,13 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 		"title": titleObj,
 		"list":  list,
 		"params": map[string]string{
-			"Pid":      pidStr,
-			"Category": cidStr,
-			"Plot":     params.Plot,
-			"Area":     params.Area,
-			"Language": params.Language,
-			"Year":     yStr,
-			"Sort":     params.Sort,
+			"pid":      pidStr,
+			"category": cidStr,
+			"plot":     params.Plot,
+			"area":     params.Area,
+			"language": params.Language,
+			"year":     yStr,
+			"sort":     params.Sort,
 		},
 		"page": page,
 	}
@@ -340,19 +327,42 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	dto.Success(response, "分类影片数据获取成功", c)
 }
 
-// FilmClassify  影片分类首页数据展示
+// FilmClassify 影片分类首页数据展示 (GET /api/categories/overview)
 func (h *IndexHandler) FilmClassify(c *gin.Context) {
-	pidStr := c.DefaultQuery("Pid", "")
-	if pidStr == "" {
+	sourceId := service.IndexSvc.BaselineSourceID()
+	pidStr := queryFirst(c, "pid", "Pid")
+	var pid int64
+	if pidStr != "" {
+		pid, _ = strconv.ParseInt(pidStr, 10, 64)
+	}
+	title := service.IndexSvc.GetPidCategory(pid, sourceId)
+	if title == nil {
+		tree, err := repository.GetActiveCategoryTree(sourceId)
+		if err == nil && len(tree.Children) > 0 {
+			for _, child := range tree.Children {
+				if child != nil && child.Show && child.Id > 0 {
+					pid = child.Id
+					title = child
+					break
+				}
+			}
+		}
+	}
+	if title == nil {
 		dto.Failed("主分类信息获取异常", c)
 		return
 	}
-	pid, _ := strconv.ParseInt(pidStr, 10, 64)
-	title := service.IndexSvc.GetPidCategory(pid)
 	page := dto.GetPageParams(c)
-	page.PageSize = 21
+	if !pageSizeSpecified(c) {
+		page.PageSize = 24
+	}
+	content, err := service.IndexSvc.GetFilmClassify(pid, page, sourceId)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
 		"title":   title,
-		"content": service.IndexSvc.GetFilmClassify(pid, page),
+		"content": content,
 	}, "分类影片信息获取成功", c)
 }

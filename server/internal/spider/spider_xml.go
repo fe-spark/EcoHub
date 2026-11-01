@@ -54,21 +54,21 @@ type XMLVideoList struct {
 
 // XMLVideo 单部影片基础与明细字段
 type XMLVideo struct {
-	ID       int64  `xml:"id"`
-	Tid      int64  `xml:"tid"`
-	Name     string `xml:"name"`
-	Type     string `xml:"type"`
-	Pic      string `xml:"pic"`
-	Lang     string `xml:"lang"`
-	Area     string `xml:"area"`
-	Year     string `xml:"year"`
-	State    string `xml:"state"`
-	Note     string `xml:"note"`
-	Actor    string `xml:"actor"`
-	Director string `xml:"director"`
-	Des      string `xml:"des"`
-	Last     string   `xml:"last"`
-	DLs      []XMLDL  `xml:"dl"`
+	ID       int64   `xml:"id"`
+	Tid      int64   `xml:"tid"`
+	Name     string  `xml:"name"`
+	Type     string  `xml:"type"`
+	Pic      string  `xml:"pic"`
+	Lang     string  `xml:"lang"`
+	Area     string  `xml:"area"`
+	Year     string  `xml:"year"`
+	State    string  `xml:"state"`
+	Note     string  `xml:"note"`
+	Actor    string  `xml:"actor"`
+	Director string  `xml:"director"`
+	Des      string  `xml:"des"`
+	Last     string  `xml:"last"`
+	DLs      []XMLDL `xml:"dl"`
 }
 
 // XMLDL 播放来源集合
@@ -94,7 +94,7 @@ func unmarshalXMLWithCharset(data []byte, v any) error {
 type XmlCollect struct{}
 
 // GetCategoryTree 获取 XML 源分类树形数据
-func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, error) {
+func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, int, error) {
 	ensureParams(&r)
 	if r.Params.Get("ac") == "" {
 		r.Params.Set("ac", "list")
@@ -109,16 +109,16 @@ func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree,
 			errMsg = "response is empty"
 		}
 		log.Printf("[Spider-XML] 分类数据获取异常: %s", errMsg)
-		return nil, fmt.Errorf("XML 分类数据获取异常: %s", errMsg)
+		return nil, 0, fmt.Errorf("XML 分类数据获取异常: %s", errMsg)
 	}
 
 	var rss XMLRSS
 	if err := unmarshalXMLWithCharset(r.Resp, &rss); err != nil {
-		return nil, fmt.Errorf("XML unmarshal error: %w", err)
+		return nil, 0, fmt.Errorf("XML unmarshal error: %w", err)
 	}
 
 	if len(rss.Class.Types) == 0 {
-		return &model.CategoryTree{}, nil
+		return &model.CategoryTree{}, rss.List.PageCount, nil
 	}
 
 	classes := make([]model.FilmClass, 0, len(rss.Class.Types))
@@ -135,7 +135,7 @@ func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree,
 	}
 
 	tree := converter.GenCategoryTreeWithParentHints(classes, nil)
-	return tree, nil
+	return tree, rss.List.PageCount, nil
 }
 
 // GetPageCount 探测 XML 源分页总页数
@@ -164,13 +164,6 @@ func (xc *XmlCollect) GetPageCount(r utils.RequestInfo) (int, error) {
 
 // GetFilmDetail 获取 XML 源单页影片明细
 func (xc *XmlCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDetail, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			log.Printf("[Spider-XML] GetFilmDetail 异常恢复: %v", e)
-			err = fmt.Errorf("XML GetFilmDetail panic recovered: %v", e)
-		}
-	}()
-
 	ensureParams(&r)
 	if len(r.Params.Get("ac")) == 0 {
 		r.Params.Set("ac", "videolist")
@@ -232,25 +225,24 @@ func convertXMLVideosToFilmDetails(videos []XMLVideo) []model.FilmDetail {
 		playURLStr := strings.Join(playURLs, "$$$")
 
 		details = append(details, model.FilmDetail{
-			VodID:         v.ID,
-			TypeID:        v.Tid,
-			VodName:       name,
-			TypeName:      strings.TrimSpace(v.Type),
-			VodPic:        strings.TrimSpace(v.Pic),
-			VodLang:       strings.TrimSpace(v.Lang),
-			VodArea:       strings.TrimSpace(v.Area),
-			VodYear:       strings.TrimSpace(v.Year),
-			VodState:      strings.TrimSpace(v.State),
-			VodRemarks:    strings.TrimSpace(v.Note),
-			VodActor:      strings.TrimSpace(v.Actor),
-			VodDirector:   strings.TrimSpace(v.Director),
-			VodContent:    strings.TrimSpace(v.Des),
-			VodTime:       strings.TrimSpace(v.Last),
-			VodPlayFrom:   playFromStr,
-			VodPlayURL:    playURLStr,
-			VodPlayNote:   "$$$",
+			VodID:       v.ID,
+			TypeID:      v.Tid,
+			VodName:     name,
+			TypeName:    strings.TrimSpace(v.Type),
+			VodPic:      strings.TrimSpace(v.Pic),
+			VodLang:     strings.TrimSpace(v.Lang),
+			VodArea:     strings.TrimSpace(v.Area),
+			VodYear:     strings.TrimSpace(v.Year),
+			VodState:    strings.TrimSpace(v.State),
+			VodRemarks:  strings.TrimSpace(v.Note),
+			VodActor:    strings.TrimSpace(v.Actor),
+			VodDirector: strings.TrimSpace(v.Director),
+			VodContent:  strings.TrimSpace(v.Des),
+			VodTime:     strings.TrimSpace(v.Last),
+			VodPlayFrom: playFromStr,
+			VodPlayURL:  playURLStr,
+			VodPlayNote: "$$$",
 		})
 	}
 	return details
 }
-
