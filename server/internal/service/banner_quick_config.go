@@ -204,7 +204,7 @@ func storedQuickStrategy(name string) (string, error) {
 		return repository.BannerStrategyHot, nil
 	case "score", repository.BannerStrategyScore:
 		return repository.BannerStrategyScore, nil
-	case "latest", repository.BannerStrategyLatest:
+	case "latest", "update_stamp", repository.BannerStrategyLatest:
 		return repository.BannerStrategyLatest, nil
 	default:
 		return "", fmt.Errorf("排片策略无效")

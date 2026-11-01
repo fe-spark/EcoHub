@@ -79,7 +79,7 @@ var resetSiteDataRunning atomic.Bool
 
 // ClearFilms 重置站点业务数据：清空影视/采集派生数据。
 // 清空会连分类一起清掉，随后按每个采集站重新拉取分类副本。
-// 注意：不重置任何账号与密码，也不改网站配置、映射规则、采集源和采集计划任务。线上轮播清空，定时排片关闭，排片规则保留。
+// 注意：不重置任何账号与密码，也不改网站配置、映射规则、采集源和采集计划任务。线上轮播清空，排片规则保留。
 // 全程按关键节点上报真实进度，由 SSE 推给页面。
 func (s *SpiderService) ClearFilms() (retErr error) {
 	filmrepo.StartResetProgress()

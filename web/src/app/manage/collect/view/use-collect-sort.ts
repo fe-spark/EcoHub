@@ -35,7 +35,7 @@ export function useCollectSort(
       sortConfirmRef.current = modal.confirm({
         title: "保存顺序？",
         content: isPrimaryChanged && nextPrimary
-          ? `主站改为「${nextPrimary.name}」。将清空轮播和排片配置，并关闭定时排片`
+          ? `主站改为「${nextPrimary.name}」。将清空当前轮播卡组与排片配置。`
           : undefined,
         okText: "保存",
         cancelText: "取消",

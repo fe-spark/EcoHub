@@ -9,6 +9,7 @@ export interface BannerQuickRecipe {
 
 export function normalizeQuickStrategy(value?: string): QuickStrategy {
   if (value === "score" || value === "latest") return value;
+  if (value === "update_stamp" || value === "latest_random") return "latest";
   return "hot";
 }
 

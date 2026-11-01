@@ -23,7 +23,7 @@ import styles from "./banner-quick.module.less";
 const STRATEGY_LABEL: Record<QuickStrategy, string> = {
   hot: "最热排片",
   score: "评分优先",
-  latest: "最新上线",
+  latest: "最近更新",
 };
 
 interface BannerQuickDrawerProps {

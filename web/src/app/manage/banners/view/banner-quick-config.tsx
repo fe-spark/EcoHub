@@ -23,7 +23,7 @@ interface BannerQuickConfigProps {
 const STRATEGY_OPTIONS = [
   { label: "最热排片", value: "hot" },
   { label: "评分优先", value: "score" },
-  { label: "最新上线", value: "latest" },
+  { label: "最近更新", value: "latest" },
 ];
 
 export default function BannerQuickConfig({

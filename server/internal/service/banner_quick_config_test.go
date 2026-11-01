@@ -61,6 +61,16 @@ func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
 	if enabled.Strategy != "latest" {
 		t.Fatalf("enabled view: %+v", enabled)
 	}
+	withUpdateStamp, err := ManageSvc.SaveBannerQuickConfig(BannerQuickConfigInput{
+		Strategy: "update_stamp",
+		Quotas:   []model.BannerQuota{{CategoryID: 9, Count: 1}},
+	})
+	if err != nil {
+		t.Fatalf("save update_stamp: %v", err)
+	}
+	if withUpdateStamp.Strategy != "latest" {
+		t.Fatalf("update_stamp view: %+v", withUpdateStamp)
+	}
 	if err := ManageSvc.RunBannerQuickSchedule(); err == nil {
 		t.Fatal("run without snapshot should fail and keep the live deck")
 	}
