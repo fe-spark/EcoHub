@@ -75,9 +75,9 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 	case "score", "score_random":
 		strategy = "score_random"
 		strategyDesc = "评分优先"
-	case "latest", "latest_random":
+	case "latest", "latest_random", "update_stamp":
 		strategy = "latest_random"
-		strategyDesc = "最新更新"
+		strategyDesc = "最近更新"
 	default:
 		strategy = "hot_random"
 		strategyDesc = "最热优先"

@@ -208,7 +208,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             <Flex vertical gap={4} className={styles.dangerText}>
               <Typography.Text type="danger" strong>数据重置</Typography.Text>
               <Typography.Text type="secondary">
-                清空影片档案、播放线路、失败记录和轮播，并关闭定时排片。账号、采集站、分类结构与排片规则保留。
+                清空影片档案、播放线路、失败记录和轮播。账号、采集站、分类结构与排片规则保留。
               </Typography.Text>
             </Flex>
             <Button
@@ -257,7 +257,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             showIcon
             type="error"
             title="该操作不可逆"
-            description="清空片库与分类，并关闭定时排片。采集站和账号保留。"
+            description="清空片库与分类。采集站和账号保留。"
           />
           <Input.Password
             placeholder="请输入管理密码"

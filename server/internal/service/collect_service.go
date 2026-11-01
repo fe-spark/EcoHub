@@ -166,7 +166,7 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 		return false
 	}
 	epoch := primarySwitchEpoch.Add(1)
-	// 分类编号属于原首选站。轮播和排片规则一起清空，定时排片关闭。
+	// 分类编号属于原首选站。轮播和排片规则一起清空。
 	if err := ResetBannerDeckForSourceChange(); err != nil {
 		syslog.Errorf("[Banner] 切换首选站清空轮播失败: %v", err)
 	}

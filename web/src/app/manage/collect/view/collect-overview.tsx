@@ -107,8 +107,8 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
       return;
     }
     modal.confirm({
-      title: "切换主站？",
-      content: `主站改为「${chosen.name}」。将清空轮播和排片配置，并关闭定时排片`,
+      title: `主站改为「${chosen.name}」？`,
+      content: "将清空当前轮播卡组与排片配置。",
       okText: "切换",
       cancelText: "取消",
       centered: true,
