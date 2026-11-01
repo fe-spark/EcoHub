@@ -15,7 +15,7 @@
 
 [中文](../README.md) | English
 
-[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram Group](https://t.me/ecohub_club)
+[Demo](https://eco.fe-spark.cn) · [v3 Preview](http://148.135.106.141:3000) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram Group](https://t.me/ecohub_club)
 
 </div>
 
@@ -44,6 +44,8 @@ Client apps live in separate repos, not this repo's server or web UI:
 | --- | --- |
 | Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
+| v3 Preview | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
+| v3 Preview Admin | [http://148.135.106.141:3000/manage](http://148.135.106.141:3000/manage) |
 
 Visitors log in with `guest` / `guest`. This account is read-only and cannot save settings. For a real deployment, use your own accounts and change the default passwords.
 

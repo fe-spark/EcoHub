@@ -15,7 +15,7 @@
 
 中文 | [English](./docs/README_EN.md)
 
-[在线演示](https://eco.fe-spark.cn) · [管理后台](https://eco.fe-spark.cn/manage) · [部署指南](./docs/README-Deploy.md) · [常见问题](./docs/README-FAQ.md) · [交流群组](https://t.me/ecohub_club)
+[在线演示](https://eco.fe-spark.cn) · [v3 体验地址](http://148.135.106.141:3000) · [管理后台](https://eco.fe-spark.cn/manage) · [部署指南](./docs/README-Deploy.md) · [常见问题](./docs/README-FAQ.md) · [交流群组](https://t.me/ecohub_club)
 
 </div>
 
@@ -45,6 +45,8 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 | --- | --- |
 | 前台 | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | 管理后台 | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
+| v3 体验地址 | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
+| v3 体验管理后台 | [http://148.135.106.141:3000/manage](http://148.135.106.141:3000/manage) |
 
 访客登录使用 `guest` / `guest`。该账号只读，不能保存配置。正式部署请使用自有账号并修改默认密码。
 
