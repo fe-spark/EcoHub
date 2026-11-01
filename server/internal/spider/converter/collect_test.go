@@ -6,6 +6,69 @@ import (
 	"server/internal/model"
 )
 
+func TestNormalizeReleaseDate(t *testing.T) {
+	raw := "2025-05-17(戛纳国际电影节),2025-10-08(法国),2025-10-31(美国)"
+	if got := NormalizeReleaseDate(raw); got != "2025-05-17" {
+		t.Fatalf("date=%q", got)
+	}
+	if got := NormalizeReleaseDate("2025年"); got != "" {
+		t.Fatalf("year-only date=%q", got)
+	}
+	detail := ConvertFilmDetail(model.FilmDetail{
+		VodID:      1,
+		VodName:    "猎杀之后",
+		VodPubDate: raw,
+	})
+	if detail.ReleaseDate != "2025-05-17" {
+		t.Fatalf("release=%q", detail.ReleaseDate)
+	}
+	if detail.Year != "2025" {
+		t.Fatalf("year=%q", detail.Year)
+	}
+	yearOnly := ConvertFilmDetail(model.FilmDetail{VodID: 2, VodName: "只有年", VodPubDate: "2024年"})
+	if yearOnly.ReleaseDate != "" || yearOnly.Year != "2024" {
+		t.Fatalf("year-only release=%q year=%q", yearOnly.ReleaseDate, yearOnly.Year)
+	}
+}
+
+func TestParseEpisodeGluedURL(t *testing.T) {
+	ep, link, ok := parseEpisode("第04集https://v2.ppqrrs.com/wjv2/202607/18/abc/video/index.m3u8$https://cdn.example/real.m3u8")
+	if !ok || ep != "第04集" || link != "https://cdn.example/real.m3u8" {
+		t.Fatalf("glued dollar ok=%v ep=%q link=%q", ok, ep, link)
+	}
+	ep, link, ok = parseEpisode("第04集https://v2.ppqrrs.com/a.m3u8")
+	if !ok || ep != "第04集" || link != "https://v2.ppqrrs.com/a.m3u8" {
+		t.Fatalf("glued only ok=%v ep=%q link=%q", ok, ep, link)
+	}
+	list := ConvertPlayUrl("正片$https://cdn.example/1.m3u8#第2集$https://cdn.example/2.m3u8")
+	if len(list) != 2 || list[0].Episode != "正片" || list[1].Episode != "第2集" {
+		t.Fatalf("normal list=%+v", list)
+	}
+	bare := ConvertPlayUrl("https://cdn.example/only.m3u8")
+	if len(bare) != 1 || bare[0].Episode != "第1集" || bare[0].Link != "https://cdn.example/only.m3u8" {
+		t.Fatalf("bare=%+v", bare)
+	}
+}
+
+func TestLovedanDollarNoteDoesNotMergePlayGroups(t *testing.T) {
+	detail := ConvertFilmDetail(model.FilmDetail{
+		VodID:       147496,
+		VodName:     "时光代理人第三季",
+		VodPlayNote: "$$$$$$$$$$$$$$$$$$$$$",
+		VodPlayFrom: "1080zyk$$$ffm3u8",
+		VodPlayURL:  "第01集$https://cdn.example/a1.m3u8#第02集$https://cdn.example/a2.m3u8$$$第01集$https://cdn.example/b1.m3u8#第02集$https://cdn.example/b2.m3u8",
+	})
+	if len(detail.PlayFrom) != 2 || len(detail.PlayList) != 2 {
+		t.Fatalf("from=%v groups=%d", detail.PlayFrom, len(detail.PlayList))
+	}
+	if len(detail.PlayList[0]) != 2 || detail.PlayList[0][0].Episode != "第01集" {
+		t.Fatalf("group0=%+v", detail.PlayList[0])
+	}
+	if len(detail.PlayList[1]) != 2 || detail.PlayList[1][1].Link != "https://cdn.example/b2.m3u8" {
+		t.Fatalf("group1=%+v", detail.PlayList[1])
+	}
+}
+
 func TestInferCategoryParentsBySemantic(t *testing.T) {
 	classes := []model.FilmClass{
 		{ID: 1, Name: "电影"},
@@ -222,5 +285,41 @@ func TestInferCategoryParentsBySemantic_RootAliases(t *testing.T) {
 	}
 	if _, ok := hints[46]; ok {
 		t.Errorf("expected 悬疑 to stay unhinted, got parent %d", hints[46])
+	}
+}
+
+func TestConvertFilmDetails_FiltersUnplayableFilms(t *testing.T) {
+	details := []model.FilmDetail{
+		{
+			VodID:       101,
+			VodName:     "有播放地址影片",
+			VodPlayFrom: "hnyun",
+			VodPlayURL:  "第1集$https://cdn.example/1.m3u8",
+		},
+		{
+			VodID:       102,
+			VodName:     "只有分隔符空壳",
+			VodPlayFrom: "hnyun$$$hnm3u8",
+			VodPlayURL:  "$$$",
+		},
+		{
+			VodID:       103,
+			VodName:     "播放地址完全为空",
+			VodPlayFrom: "",
+			VodPlayURL:  "",
+		},
+		{
+			VodID:       104,
+			VodName:     "",
+			VodPlayFrom: "hnyun",
+			VodPlayURL:  "第1集$https://cdn.example/4.m3u8",
+		},
+	}
+	converted := ConvertFilmDetails(details)
+	if len(converted) != 1 {
+		t.Fatalf("expected 1 playable film, got %d", len(converted))
+	}
+	if converted[0].Id != 101 || converted[0].Name != "有播放地址影片" {
+		t.Fatalf("unexpected film: %+v", converted[0])
 	}
 }

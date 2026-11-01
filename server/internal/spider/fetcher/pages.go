@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"server/internal/infra/syslog"
 	"server/internal/model"
@@ -23,8 +24,10 @@ type Batch interface {
 	IsStandalone() bool
 	// AddAffectedMIDs 记录影响到的全局 mid，供本轮发布使用。
 	AddAffectedMIDs(s *model.FilmSource, h int, mids []int64)
-	// NoteCollectedMIDs 累计本源应进更新列表的 mid。
-	NoteCollectedMIDs(sourceID, sourceName string, mids []int64)
+	// AddNotifyMIDs 记录应进通知更新列表的全局 mid（新片或播放线路实质变更）。
+	AddNotifyMIDs(sourceID string, mids []int64)
+	// RecordSourceError 记录站点采集错误原因。
+	RecordSourceError(sourceID, reason string)
 }
 
 const (
@@ -35,11 +38,6 @@ const (
 	// failureLogStep 失败日志的步长。
 	failureLogStep = 10
 )
-
-// shouldWrapUpAfterFetchAbort 连续失败停抓后，已有成功入库且允许发布时进入收尾，而不是立刻 failed/stopped。
-func shouldWrapUpAfterFetchAbort(success int, skipPublish bool) bool {
-	return success > 0 && !skipPublish
-}
 
 type pageStats struct {
 	latestPage int
@@ -55,23 +53,106 @@ func shouldLogFailure(failed int) bool {
 	return failed == 1 || failed%failureLogStep == 0
 }
 
-func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int, batch Batch) (bool, error) {
+type dynamicLimiter struct {
+	mu      sync.Mutex
+	cond    *sync.Cond
+	running int
+	limitFn func() int
+}
+
+func newDynamicLimiter(limitFn func() int) *dynamicLimiter {
+	l := &dynamicLimiter{limitFn: limitFn}
+	l.cond = sync.NewCond(&l.mu)
+	return l
+}
+
+func (l *dynamicLimiter) startProbe(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				l.mu.Lock()
+				l.cond.Broadcast()
+				l.mu.Unlock()
+				return
+			case <-ticker.C:
+				l.mu.Lock()
+				if l.running < l.limitFn() {
+					l.cond.Broadcast()
+				}
+				l.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (l *dynamicLimiter) acquire(ctx context.Context) error {
+	stop := context.AfterFunc(ctx, func() {
+		l.mu.Lock()
+		l.cond.Broadcast()
+		l.mu.Unlock()
+	})
+	defer stop()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		limit := l.limitFn()
+		if limit <= 0 {
+			limit = 1
+		}
+		if l.running < limit {
+			l.running++
+			return nil
+		}
+		l.cond.Wait()
+	}
+}
+
+func (l *dynamicLimiter) release() {
+	l.mu.Lock()
+	if l.running > 0 {
+		l.running--
+	}
+	l.cond.Broadcast()
+	l.mu.Unlock()
+}
+
+func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource, h int, batch Batch) (bool, int, error) {
 	if pageCount <= 0 {
-		return false, nil
+		return false, 0, nil
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
-	if requestWorkerLimit <= 0 {
-		requestWorkerLimit = 1
-	}
-	requestWorkers := min(pageCount, requestWorkerLimit)
 
-	pages := make(chan int, pageCount)
-	writeCompletions := make(chan scheduler.Completion, pageCount)
-	for pg := 1; pg <= pageCount; pg++ {
-		pages <- pg
+	maxWorkers := min(pageCount, GetSourcePageConcurrencyMax(s))
+	if maxWorkers <= 0 {
+		maxWorkers = 1
 	}
-	close(pages)
+
+	limiter := newDynamicLimiter(func() int {
+		return GetSourcePageConcurrency(s)
+	})
+	limiter.startProbe(ctx, 300*time.Millisecond)
+
+	pages := make(chan int, maxWorkers)
+	writeCompletions := make(chan scheduler.Completion, 2048)
+	go func() {
+		defer close(pages)
+		for pg := 1; pg <= pageCount; pg++ {
+			select {
+			case <-ctx.Done():
+				return
+			case pages <- pg:
+			}
+		}
+	}()
 
 	var writeWG sync.WaitGroup
 	var consecutiveFailuresMu sync.Mutex
@@ -122,6 +203,12 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		stopOnce.Do(func() {
 			stopErr = fmt.Errorf("站点 %s 连续采集失败 %d 次，已终止本次采集", s.Name, sourceConsecutiveFailureLimit)
 			syslog.Errorf("[Spider] 站点 %s 连续失败达到阈值，终止采集 page=%d stage=%s err=%v", s.Name, page, stage, err)
+			if batch != nil {
+				batch.RecordSourceError(s.Id, stopErr.Error())
+			}
+			if deps.OnSourceFailed != nil {
+				deps.OnSourceFailed(s.Id, s.Name, stopErr.Error())
+			}
 			cancel()
 		})
 	}
@@ -131,28 +218,19 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		consecutiveFailuresMu.Unlock()
 	}
 	markStopped := func() {
-		// 连续失败停抓走收尾，不能写成用户「已停止」。
+		// 连续失败停抓不写成用户「已停止」。
 		if stopErr != nil {
 			return
 		}
 		progress.MarkStopped(s.Id)
 	}
-	maybeMarkPagePhaseDone := func(cur *model.CollectProgress, snapshot pageStats) {
-		if cur.Status != progress.StatusRunning && cur.Status != progress.StatusStarting {
-			return
-		}
-		if cur.Total > 0 && snapshot.success+snapshot.failed >= cur.Total {
-			cur.Status = progress.StatusPageDone
-		}
-	}
 	recordPageFailure := func(page int, stage string, err error) {
 		snapshot := recordPageFinished(page, false)
-		progress.Update(s.Id, func(cur *model.CollectProgress) {
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Failed = snapshot.failed
 			if page > cur.Current {
 				cur.Current = page
 			}
-			maybeMarkPagePhaseDone(cur, snapshot)
 		})
 		deps.SavePageFailure(s, h, page, stage, err)
 		if shouldLogFailure(snapshot.failed) {
@@ -165,23 +243,22 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
 		if batch != nil {
-			batch.NoteCollectedMIDs(s.Id, s.Name, notifyMIDs)
 			batch.AddAffectedMIDs(s, h, affectedMIDs)
+			batch.AddNotifyMIDs(s.Id, notifyMIDs)
 		}
-		progress.Update(s.Id, func(cur *model.CollectProgress) {
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Success = snapshot.success
 			cur.Failed = snapshot.failed
 			if page > cur.Current {
 				cur.Current = page
 			}
-			maybeMarkPagePhaseDone(cur, snapshot)
 		})
 		logProgress(false)
 	}
 
 	var requestWG sync.WaitGroup
-	requestWG.Add(requestWorkers)
-	for i := 0; i < requestWorkers; i++ {
+	requestWG.Add(maxWorkers)
+	for i := 0; i < maxWorkers; i++ {
 		go func() {
 			defer requestWG.Done()
 			for {
@@ -193,10 +270,21 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 					if !ok {
 						return
 					}
-					progress.Update(s.Id, func(cur *model.CollectProgress) {
-						progress.StampPageRunning(cur, pg)
-					})
-					list, err := GetFilmDetailWithRetry(ctx, s, buildPageRequest(s, h, pg))
+					if err := limiter.acquire(ctx); err != nil {
+						markStopped()
+						return
+					}
+					list, err := func() ([]model.MovieDetail, error) {
+						defer limiter.release()
+						progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+							progress.StampPageRunning(cur, pg)
+						})
+						req, reqErr := buildPageRequest(s, h, pg)
+						if reqErr != nil {
+							return nil, reqErr
+						}
+						return GetFilmDetailWithRetry(ctx, s, req)
+					}()
 					if err == nil && len(list) == 0 {
 						err = errors.New("response list is empty")
 					}
@@ -214,14 +302,20 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 					submitErr := scheduler.Submit(ctx, scheduler.Job{
 						SourceID:   s.Id,
 						SourceName: s.Name,
-						Grade:      s.Grade,
 						Page:       page,
 						Write: func() (scheduler.Mids, error) {
 							return deps.SavePage(context.Background(), s, page, items)
 						},
 						Complete: func(completion scheduler.Completion) {
-							writeCompletions <- completion
-							writeWG.Done()
+							select {
+							case writeCompletions <- completion:
+								writeWG.Done()
+							default:
+								go func() {
+									writeCompletions <- completion
+									writeWG.Done()
+								}()
+							}
 						},
 					})
 					if submitErr != nil {
@@ -239,7 +333,7 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 	}
 	go func() {
 		requestWG.Wait()
-		scheduler.FinishSource(s.Grade, s.Id)
+		scheduler.FinishSource(s.Id)
 		writeWG.Wait()
 		close(writeCompletions)
 	}()
@@ -259,28 +353,18 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
 	if stopErr != nil {
-		skipPublish := deps.SkipPublishOnError(*s, h)
-		if shouldWrapUpAfterFetchAbort(stats.success, skipPublish) {
-			deps.NoteSourceError(s.Id, stopErr.Error())
-			return true, nil
-		}
-		progress.Update(s.Id, func(cur *model.CollectProgress) {
-			if !progress.IsTerminalStatus(cur.Status) {
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+			if !progress.IsTerminalStatus(cur.Status) && cur.Status != progress.StatusStopping {
 				cur.Status = progress.StatusFailed
 			}
 		})
-		isStandalone := batch.IsStandalone()
-		if isStandalone || !deps.BatchSummaryEnabled() {
-			deps.NotifySourceFailed(s.Id, s.Name, stopErr.Error())
-		}
-		deps.NoteSourceError(s.Id, stopErr.Error())
-		return stats.success > 0, stopErr
-	}
-	if s.Grade == model.MasterCollect && h < 0 && stats.failed > 0 {
-		return stats.success > 0, fmt.Errorf("主站全量采集存在失败页 failed=%d，跳过本次框架发布", stats.failed)
+		return stats.success > 0, stats.success, stopErr
 	}
 	if ctx.Err() != nil {
-		return stats.success > 0, nil
+		return stats.success > 0, stats.success, ctx.Err()
 	}
-	return stats.success > 0, nil
+	if stats.failed > 0 {
+		return stats.success > 0, stats.success, fmt.Errorf("站点 %s 有 %d 页采集失败", s.Name, stats.failed)
+	}
+	return stats.success > 0, stats.success, nil
 }

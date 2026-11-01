@@ -417,10 +417,20 @@
   flex-wrap: nowrap;
   gap: 8px;
   width: 100%;
+  max-width: 100%;
   margin-top: 6px;
-  padding-top: 14px;
+  padding: 14px 2px 10px;
   border-top: 1px solid var(--hero-divider);
   box-sizing: border-box;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+    height: 0;
+  }
 }
 
 .thumb {

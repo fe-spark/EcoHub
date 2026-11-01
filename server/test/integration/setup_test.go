@@ -18,7 +18,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -28,12 +28,15 @@ import (
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	dsn := fmt.Sprintf("file:it_%s?mode=memory&cache=shared", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	dsn := fmt.Sprintf("file:it_%s?mode=memory&cache=shared&_busy_timeout=5000", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("打开内存 sqlite 失败: %v", err)
+	}
+	if sqlDB, err := gdb.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
 		t.Fatalf("迁移测试库结构失败: %v", err)
@@ -93,22 +96,25 @@ func activateVersion(t *testing.T, version string) {
 	})
 }
 
-// seedSnapshots 按指定版本写入快照数据。
+// seedSnapshots 把列表结构写入 film_index。version 只用于激活读模型，不落快照表。
 func seedSnapshots(t *testing.T, gdb *gorm.DB, version string, rows ...model.FilmListSnapshot) {
 	t.Helper()
-
-	for _, row := range rows {
-		row.SnapshotVersion = version
-		if err := gdb.Create(&row).Error; err != nil {
-			t.Fatalf("写入快照失败: %v", err)
-		}
+	_ = gdb
+	for i := range rows {
+		rows[i].SnapshotVersion = version
+	}
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(rows); err != nil {
+		t.Fatalf("写入影片失败: %v", err)
 	}
 }
 
 // searchFilms 执行前台关键词检索，返回命中的快照与分页态。
 func searchFilms(version, keyword string, pageSize int) ([]model.FilmListSnapshot, *dto.Page) {
 	page := &dto.Page{Current: 1, PageSize: pageSize}
-	rows := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, keyword, "", page)
+	rows, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, keyword, "", page)
+	if err != nil {
+		panic(err)
+	}
 	return rows, page
 }
 

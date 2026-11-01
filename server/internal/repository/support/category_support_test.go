@@ -4,6 +4,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
+	"server/internal/infra/db"
 	"server/internal/model"
 )
 
@@ -161,3 +166,102 @@ func TestResolveRootCategoryIDByCName_ConcurrencyDeadlockFree(t *testing.T) {
 	wg.Wait()
 	close(done)
 }
+
+func TestPickPrimarySourceForCategory_DisabledReturnsNil(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	// 1. 无任何站点
+	if primary := PickPrimarySourceForCategory(); primary != nil {
+		t.Fatalf("expected nil when no sources, got %+v", primary)
+	}
+
+	// 2. 插入两个站点，但全部为停用 (state = false)
+	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://src1.test", State: false, Sort: 0}).Error; err != nil {
+		t.Fatalf("create src_1 error: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://src2.test", State: false, Sort: 1}).Error; err != nil {
+		t.Fatalf("create src_2 error: %v", err)
+	}
+
+	if primary := PickPrimarySourceForCategory(); primary != nil {
+		t.Fatalf("expected nil when all sources are disabled, got %+v", primary)
+	}
+
+	// 3. 启用站2
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "src_2").Update("state", true).Error; err != nil {
+		t.Fatalf("update error: %v", err)
+	}
+	primary := PickPrimarySourceForCategory()
+	if primary == nil || primary.Id != "src_2" {
+		t.Fatalf("expected src_2 as primary, got %+v", primary)
+	}
+}
+
+func TestIsCategoryVisible_Cascade(t *testing.T) {
+	catMu.Lock()
+	idToPid = map[int64]int64{
+		1:  0, // 电影 (root)
+		2:  0, // 电视剧 (root)
+		11: 1, // 动作片 (子分类，归属电影)
+		12: 1, // 喜剧片 (子分类，归属电影)
+		21: 2, // 国产剧 (子分类，归属电视剧)
+	}
+	categoryShowMap = map[int64]bool{
+		1:  true,  // 电影开启
+		2:  false, // 电视剧停用
+		11: true,  // 动作片开启
+		12: false, // 喜剧片停用
+		21: true,  // 国产剧虽然自身标记 true，但父级电视剧停用
+	}
+	catInitialized = true
+	catMu.Unlock()
+	t.Cleanup(func() {
+		catMu.Lock()
+		idToPid = make(map[int64]int64)
+		categoryShowMap = make(map[int64]bool)
+		catInitialized = false
+		catMu.Unlock()
+	})
+
+	// 1. 根分类与子分类均开启
+	if !IsCategoryVisible(11, 1) {
+		t.Fatalf("expected category 11 under 1 to be visible")
+	}
+
+	// 2. 根分类开启，但子分类停用
+	if IsCategoryVisible(12, 1) {
+		t.Fatalf("expected category 12 (disabled) to be hidden")
+	}
+
+	// 3. 根分类停用，哪怕子分类自身 show=true，整体也必须不可见
+	if IsCategoryVisible(21, 2) {
+		t.Fatalf("expected category 21 under disabled root 2 to be hidden")
+	}
+
+	// 4. 单独传入停用的 pid
+	if IsCategoryVisible(0, 2) {
+		t.Fatalf("expected disabled pid 2 to be hidden")
+	}
+
+	// 5. 单独传入停用的 cid
+	if IsCategoryVisible(12, 0) {
+		t.Fatalf("expected disabled cid 12 to be hidden")
+	}
+
+	// 6. 传入未在后台显式禁用的未知 cid，默认放行
+	if !IsCategoryVisible(999, 0) {
+		t.Fatalf("expected unconfigured cid 999 to be visible by default")
+	}
+}
+

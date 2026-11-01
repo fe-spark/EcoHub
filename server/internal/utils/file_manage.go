@@ -3,8 +3,20 @@ package utils
 import (
 	"os"
 	"path/filepath"
+	"strings"
+
 	"server/internal/config"
 )
+
+// IsGalleryImage 图库只接受这些图片后缀。
+func IsGalleryImage(filename string) bool {
+	switch strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), ".")) {
+	case "jpg", "jpeg", "png", "webp", "ico":
+		return true
+	default:
+		return false
+	}
+}
 
 /*
 文件读写

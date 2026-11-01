@@ -77,27 +77,45 @@ func CleanCompactText(s string) string {
 }
 
 func cleanCompactNormalized(s string) string {
-	if s == "" {
-		return ""
+	if s == "" || compactIsIdentity(s) {
+		return s
 	}
 	var b strings.Builder
 	for _, r := range s {
-		if r >= 0xFF01 && r <= 0xFF5E {
-			r = r - 0xFEE0
-		}
-		if r < 128 {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-				b.WriteRune(r)
-			} else if r >= 'A' && r <= 'Z' {
-				b.WriteRune(r + ('a' - 'A'))
-			}
-			continue
-		}
-		if unicode.Is(unicode.Han, r) {
-			b.WriteRune(r)
+		if out, ok := compactRune(r); ok {
+			b.WriteRune(out)
 		}
 	}
 	return b.String()
+}
+
+func compactIsIdentity(s string) bool {
+	for _, r := range s {
+		out, ok := compactRune(r)
+		if !ok || out != r {
+			return false
+		}
+	}
+	return true
+}
+
+func compactRune(r rune) (rune, bool) {
+	if r >= 0xFF01 && r <= 0xFF5E {
+		r = r - 0xFEE0
+	}
+	if r < 128 {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r, true
+		}
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A'), true
+		}
+		return 0, false
+	}
+	if unicode.Is(unicode.Han, r) {
+		return r, true
+	}
+	return 0, false
 }
 
 // ExtractSearchTokens 提取有效关键词 Token 列表

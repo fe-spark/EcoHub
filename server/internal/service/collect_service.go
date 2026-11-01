@@ -3,27 +3,39 @@ package service
 import (
 	"errors"
 	"fmt"
-	"log"
-	"strings"
-	"time"
-
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
+	"server/internal/spider/progress"
 	"server/internal/utils"
-
-	"gorm.io/gorm"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type CollectService struct{}
 
 var CollectSvc = new(CollectService)
+
+var (
+	primarySwitchEpoch atomic.Uint64
+	primarySwitchMu    sync.Mutex
+	isPrimaryWarming   atomic.Bool
+)
+
+// IsPrimarySiteSwitching 返回当前是否正在构建检索索引或预热主站缓存
+func IsPrimarySiteSwitching() bool {
+	return filmsnapshot.IsSearchIndexBuilding() || isPrimaryWarming.Load()
+}
+
+func (s *CollectService) SearchIndexProgress() filmsnapshot.SearchIndexProgress {
+	return *filmsnapshot.GetLatestSearchIndexProgress()
+}
 
 func clearProvideNetworkConfigCache() {
 	if db.Rdb == nil {
@@ -36,58 +48,271 @@ func clearProvideNetworkConfigCache() {
 	}
 }
 
-func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
-	sources := repository.GetCollectSourceList()
+func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
 	list := make([]model.FilmSourceListItem, 0, len(sources))
 	progressByID := make(map[string]model.CollectProgress)
 	for _, progress := range spider.GetActiveTaskProgress() {
 		progressByID[progress.Id] = progress
 	}
-	lastCollectTimeByID := getLastCollectTimeBySource(sources)
-	for _, source := range sources {
-		item := model.FilmSourceListItem{FilmSource: source, LastCollectTime: lastCollectTimeByID[source.Id]}
-		if progress, ok := progressByID[source.Id]; ok {
-			item.Progress = &progress
-		}
-		if ok, _ := repository.ResolveSourceProxy(source.Id); ok {
-			item.ProxyEnabled = true
-		}
-		list = append(list, item)
-	}
-	return list
-}
-
-func getLastCollectTimeBySource(sources []model.FilmSource) map[string]*time.Time {
+	runStatsByID := getRunStatsBySource(sources)
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
 		if source.Id != "" {
 			sourceIDs = append(sourceIDs, source.Id)
 		}
 	}
-	return repository.GetCollectSourceStats(sourceIDs)
+	categoryReady := repository.SourceIDsWithCategory(sourceIDs)
+	primarySource := repository.GetActiveCollectSource()
+	primaryID := ""
+	if primarySource != nil {
+		primaryID = primarySource.Id
+	}
+	for _, source := range sources {
+		if source.Id == primaryID {
+			source.IsPrimary = true
+		} else {
+			source.IsPrimary = false
+		}
+		stat := runStatsByID[source.Id]
+		item := model.FilmSourceListItem{
+			FilmSource:       source,
+			LastRunTime:      stat.LastRunTime,
+			LastRunPageCount: stat.LastRunPageCount,
+			SitePageTotal:    stat.SitePageTotal,
+			Deleting:         progress.IsSourceDeleting(source.Id),
+		}
+		if progress, ok := progressByID[source.Id]; ok {
+			item.Progress = &progress
+		}
+		ok, _, err := repository.ResolveSourceProxy(source.Id)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			item.ProxyEnabled = true
+		}
+		if _, ok := categoryReady[source.Id]; ok {
+			item.CategoryReady = true
+		}
+		if progress.IsCategorySyncing(source.Id) {
+			item.CategorySyncing = true
+		}
+		list = append(list, item)
+	}
+	return list, nil
+}
+
+// GetCategoryStatusMap 返回所有采集站的分类同步状态映射 ("syncing" | "ready" | "failed")
+func (s *CollectService) GetCategoryStatusMap() (map[string]string, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
+	sourceIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			sourceIDs = append(sourceIDs, source.Id)
+		}
+	}
+	readySet := repository.SourceIDsWithCategory(sourceIDs)
+	result := make(map[string]string, len(sources))
+	for _, source := range sources {
+		if progress.IsCategorySyncing(source.Id) {
+			result[source.Id] = "syncing"
+		} else if _, ok := readySet[source.Id]; ok {
+			result[source.Id] = "ready"
+		} else {
+			result[source.Id] = "failed"
+		}
+	}
+	return result, nil
+}
+
+// GetCategoryReadyMap 返回所有采集站的分类就绪状态映射
+func (s *CollectService) GetCategoryReadyMap() (map[string]bool, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
+	sourceIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			sourceIDs = append(sourceIDs, source.Id)
+		}
+	}
+	readySet := repository.SourceIDsWithCategory(sourceIDs)
+	result := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		_, ok := readySet[source.Id]
+		result[source.Id] = ok
+	}
+	return result, nil
+}
+
+func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool {
+	oldID := ""
+	if oldPrimary != nil {
+		oldID = oldPrimary.Id
+	}
+	newID := ""
+	if newPrimary != nil {
+		newID = newPrimary.Id
+	}
+	if oldID == newID {
+		return false
+	}
+	epoch := primarySwitchEpoch.Add(1)
+	// 分类编号属于原首选站。轮播和排片规则一起清空。
+	if err := ResetBannerDeckForSourceChange(); err != nil {
+		syslog.Errorf("[Banner] 切换首选站清空轮播失败: %v", err)
+	}
+	repository.MarkCategoryChanged()
+	repository.ClearIndexPageCache()
+	filmsnapshot.BumpSearchCacheVersion()
+	filmsnapshot.RefreshAccessDataCaches()
+	filmsnapshot.ClearSearchCache()
+	enabled, err := repository.GetEnabledCollectSourceList()
+	if err != nil {
+		syslog.Errorf("[Collect] 读取启用采集站失败: %v", err)
+	} else {
+		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
+	}
+	go func(targetSourceID string, currentEpoch uint64) {
+		defer func() {
+			if r := recover(); r != nil {
+				syslog.Errorf("[Collect] 切换主站后异步预热索引发生异常: %v", r)
+			}
+		}()
+
+		// 150ms 防抖：如果连续快速拖拽切换主站，直接跳过旧代数，避免短时间内多次并发全库扫描
+		time.Sleep(150 * time.Millisecond)
+		if primarySwitchEpoch.Load() != currentEpoch {
+			syslog.Infof("[Collect] 检测到更新的主站切换，跳过历史代数预热 epoch=%d targetSource=%s", currentEpoch, targetSourceID)
+			return
+		}
+
+		// 互斥排队串行化构建，杜绝多线程重叠全表扫描导致 DB 负载过高
+		primarySwitchMu.Lock()
+		defer primarySwitchMu.Unlock()
+		isPrimaryWarming.Store(true)
+		defer isPrimaryWarming.Store(false)
+
+		// 获取锁后再次检查代数与当前最新主站：如果中途有更新切换，立即退出
+		if primarySwitchEpoch.Load() != currentEpoch {
+			syslog.Infof("[Collect] 排队期间主站再次变更，放弃本代构建 epoch=%d", currentEpoch)
+			return
+		}
+		latestPrimary := repository.PickPrimarySourceForCategory()
+		if latestPrimary == nil || latestPrimary.Id != targetSourceID {
+			syslog.Infof("[Collect] 实际主站已非目标站，跳过预热 targetSource=%s", targetSourceID)
+			return
+		}
+
+		syslog.Infof("[Collect] 开始预热主站首页缓存 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
+		if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
+			syslog.Errorf("[Collect] 切换主站后确认检索索引失败: %v", err)
+			return
+		}
+
+		if primarySwitchEpoch.Load() != currentEpoch {
+			syslog.Infof("[Collect] 索引已就绪，但主站代数已失效，跳过首页缓存写入 epoch=%d", currentEpoch)
+			return
+		}
+
+		if targetSourceID != "" {
+			if _, err := IndexSvc.IndexPage(targetSourceID); err != nil {
+				syslog.Errorf("[Collect] 切换主站后预热首页数据失败: %v", err)
+			} else {
+				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
+				if _, _, err := ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil {
+					syslog.Errorf("[Banner] 切换主站后初始化默认排片规则失败: %v", err)
+				}
+			}
+		}
+	}(newID, epoch)
+	return true
+}
+
+func (s *CollectService) SortFilmSources(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if IsPrimarySiteSwitching() {
+		return errors.New("检索索引正在构建中，暂不可切换主站，请稍候")
+	}
+	oldPrimary := repository.PickPrimarySourceForCategory()
+	if err := repository.SortCollectSources(ids); err != nil {
+		return err
+	}
+	filmsnapshot.ClearDynamicPlayCaches()
+	clearProvideNetworkConfigCache()
+	newPrimary := repository.PickPrimarySourceForCategory()
+	if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
+		enabled, err := repository.GetEnabledCollectSourceList()
+		if err != nil {
+			return err
+		}
+		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
+	}
+	return nil
+}
+
+func getRunStatsBySource(sources []model.FilmSource) map[string]repository.CollectSourceRunStat {
+	sourceIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			sourceIDs = append(sourceIDs, source.Id)
+		}
+	}
+	return repository.GetCollectSourceRunStats(sourceIDs)
+}
+
+func (s *CollectService) RefreshSitePageTotal(id string) (int, error) {
+	src := repository.FindCollectSourceById(id)
+	if src == nil {
+		return 0, errors.New("当前资源站信息不存在")
+	}
+	total, err := spider.ProbeSitePageTotal(src)
+	if err != nil {
+		return 0, err
+	}
+	if total > 0 {
+		_ = repository.UpdateSitePageTotal(id, total)
+	}
+	return total, nil
 }
 
 func (s *CollectService) GetFilmSource(id string) *model.FilmSource {
 	return repository.FindCollectSourceById(id)
 }
 
-func (s *CollectService) GetEnabledFilmSources() []model.FilmSource {
+func (s *CollectService) GetEnabledFilmSources() ([]model.FilmSource, error) {
 	return repository.GetEnabledCollectSourceList()
 }
 
-func (s *CollectService) GetAllFilmSources() []model.FilmSource {
+func (s *CollectService) GetAllFilmSources() ([]model.FilmSource, error) {
 	return repository.GetCollectSourceList()
 }
 
-// UpdateFilmSource 编辑采集源配置（单源），发生变更时发送 source_config_changed 通知。
+// UpdateFilmSource 编辑采集源配置（单源）。
+// 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
-	return s.updateFilmSource(source, nil)
+	oldPrimary := repository.PickPrimarySourceForCategory()
+	if IsPrimarySiteSwitching() {
+		return errors.New("检索索引正在构建中，暂不可修改站点配置，请稍候")
+	}
+	if err := s.updateFilmSourceCore(source); err != nil {
+		return err
+	}
+	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+	return nil
 }
 
-// updateFilmSource 编辑采集源配置核心逻辑。
-// collector 非 nil 时（批量操作）不直接发送通知，而是把各源变更追加到收集器，
-// 由调用方统一发送聚合通知，避免批量操作逐源轰炸。
-func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]notify.SourceConfigChangeItem) error {
+func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	old := repository.FindCollectSourceById(source.Id)
 	if old == nil {
 		return errors.New("采集站信息不存在")
@@ -95,82 +320,32 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	if source.CreatedAt.IsZero() && !old.CreatedAt.IsZero() {
 		source.CreatedAt = old.CreatedAt
 	}
-	masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
+	// 排序只走排序接口。编辑请求不带 sort，不能写成 0 把别的站顶成主站。
+	source.Sort = old.Sort
 
-	// 0. 主站保护规则：系统必须保留一个主站，主站不可直接降级为附属站
-	if old.Grade == model.MasterCollect && source.Grade != model.MasterCollect {
-		return errors.New("系统必须保留一个主站，主站不可直接降级为附属站")
-	}
-
-	// 1. 安全校验：如果有任何采集任务正在运行，禁止修改等级、URI 或数据协议，防止引发元数据清空或解析错乱
-	isGradeChanged := old.Grade != source.Grade
+	// 安全校验：如果当前采集站有任务正在运行，禁止修改 URI 或数据协议，防止引发解析错乱
 	isUriChanged := old.Uri != source.Uri
 	isFormatChanged := old.ResolveFormat() != source.ResolveFormat()
-	if (isGradeChanged || isUriChanged || isFormatChanged) && spider.IsAnyTaskRunning() {
-		return errors.New("当前有采集任务正在运行，请先停止所有任务后再执行等级、地址或协议变更操作")
-	}
-
-	// 2. 强制单主站机制：附属站提升为主站时，自动将旧主站降级为附属站
-	if source.Grade == model.MasterCollect && old.Grade != model.MasterCollect {
-		log.Printf("[Collect] 站点 %s 提升为主采集站，保留附属站播放列表并降级现有主站...", source.Name)
-	}
-
-	// 3. 检测主站切换并清理数据
-	// 情况A: 原来是附属站、现在升级为主站
-	masterLookup := old.Grade == model.SlaveCollect && source.Grade == model.MasterCollect
-	// 情况B: 依然是主站，但 URI 发生变更
-	masterUriChanged := old.Grade == model.MasterCollect && source.Grade == model.MasterCollect && old.Uri != source.Uri
-	// 情况C: 依然是主站，但数据格式发生变更
-	masterFormatChanged := old.Grade == model.MasterCollect && source.Grade == model.MasterCollect && isFormatChanged
-
-	if masterLookup || masterUriChanged || masterFormatChanged {
-		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v, formatChanged=%v)，进行数据重置...", masterLookup, masterUriChanged, masterFormatChanged)
-		// 强制中断所有任务（双重保险）
-		spider.StopAllTasks()
-	}
-
-	affectedSourceIDs := make([]string, 0, len(masters)+2)
-	for _, master := range masters {
-		affectedSourceIDs = append(affectedSourceIDs, master.Id)
-	}
-	affectedSourceIDs = append(affectedSourceIDs, source.Id)
-
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if masterLookup {
-			if err := repository.DemoteExistingMasterTx(tx); err != nil {
-				syslog.Errorf("[Collect] 自动降级旧主站失败: %v", err)
-				return errors.New("主站自动降级失败，请重试")
-			}
-			// 附属站升级为主站：硬物理删除该站点在附属播放列表中的历史残留，避免自挂接重复及软删除墓碑唯一键冲突
-			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
-				syslog.Errorf("[Collect] 清理历史附属播放列表失败: %v", err)
-				return errors.New("清理历史附属播放列表失败，请重试")
-			}
-			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
-				syslog.Errorf("[Collect] 清理关联失败记录失败: %v", err)
-				return errors.New("清理关联失败记录失败，请重试")
-			}
+	if (isUriChanged || isFormatChanged) && spider.IsTaskRunning(source.Id) {
+		name := strings.TrimSpace(source.Name)
+		if name == "" {
+			name = old.Name
 		}
+		return fmt.Errorf("采集站「%s」当前有采集任务正在运行或正在停止退出中，请稍候几秒后再修改地址或协议", name)
+	}
 
-		// 接口地址或数据格式变更时同步清空该源站的历史失败采集记录，避免使用新接口拉取旧页码导致数据错乱
-		if isUriChanged || isFormatChanged {
-			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
-				syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
-				return errors.New("清理原失败记录失败，请重试")
-			}
-		}
-
-		return repository.UpdateCollectSourceTx(tx, source)
-	})
+	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged, isUriChanged || isFormatChanged)
+	if len(orphanMids) > 0 {
+		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
+	}
 	if err != nil {
 		return err
 	}
 
-	if masterLookup || masterUriChanged || masterFormatChanged {
-		if err := filmrepo.ClearMasterDataBySourceIDsFast(affectedSourceIDs...); err != nil {
-			syslog.Errorf("[Collect] 主站切换数据清理失败: %v", err)
-			return errors.New("主站切换数据清理失败，请重试")
-		}
+	if isUriChanged {
+		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据、失败记录和分类，删除档案 %d 部", source.Name, source.Id, len(orphanMids))
+		repository.MarkCategoryChanged()
+		progress.BroadcastCategoryReady(source.Id, false)
 	}
 
 	spider.ClearLimiter(source.Id)
@@ -178,105 +353,37 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 		spider.StopTask(source.Id)
 	}
 
-	// 分类树只跟主站走（主站未启用也可同步）；无主站则不同步、不从附属站构建
-	if masterLookup || masterUriChanged || masterFormatChanged {
-		if source.Grade == model.MasterCollect {
-			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
-				return syncErr
-			}
-		}
-	} else if source.Grade == model.MasterCollect && old.State != source.State {
-		// 主站启用/停用变更：停用后仍可用该主站 URI 同步分类；降级后若无主站则 Sync 会失败（符合「无主站无分类树」）
-		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
-			return syncErr
-		}
-	}
 	clearProvideNetworkConfigCache()
-	if old.DomainReplaceRules != source.DomainReplaceRules {
-		filmsnapshot.ClearDynamicPlayCaches()
+	filmsnapshot.ClearDynamicPlayCaches()
+	if old.IsPosterSource != source.IsPosterSource {
+		filmsnapshot.BumpSearchCacheVersion()
+		filmsnapshot.ClearDerivedFilmListCaches()
+		filmsnapshot.RefreshAccessDataCaches()
+		filmsnapshot.ClearSearchCache()
 	}
-	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
-		notifySourceConfigChanged(source.Name, source.Id, changes, collector)
-	}
-	// masterLookup：旧主站被自动降级且主数据已清空，单独通知，避免切换静默
-	if masterLookup {
-		for _, m := range masters {
-			if m.Id == source.Id {
-				continue
-			}
-			notifySourceConfigChanged(m.Name, m.Id, []string{"原主站已降级为附属站，主站数据已清空"}, collector)
-		}
-	}
-	return nil
-}
-
-// notifySourceConfigChanged 单条源配置变更通知：批量收集器非空时累积到收集器，否则立即发送。
-func notifySourceConfigChanged(sourceName, sourceID string, changes []string, collector *[]notify.SourceConfigChangeItem) {
-	if collector != nil {
-		*collector = append(*collector, notify.SourceConfigChangeItem{
-			SourceName: sourceName,
-			SourceID:   sourceID,
-			Changes:    changes,
-		})
-		return
-	}
-	notify.PublishSourceConfigChanged(sourceName, sourceID, changes)
-}
-
-// sourceChangeLabels 对比 old→next 生成源配置变更描述；无差异时返回 nil。
-func sourceChangeLabels(old, next model.FilmSource) []string {
-	var changes []string
-	if old.State != next.State {
-		changes = append(changes, fmt.Sprintf("启用状态: %s → %s", sourceStateLabel(old.State), sourceStateLabel(next.State)))
-	}
-	if old.Grade != next.Grade {
-		changes = append(changes, fmt.Sprintf("站点类型: %s → %s", sourceGradeLabel(old.Grade), sourceGradeLabel(next.Grade)))
-	}
-	if old.ResolveFormat() != next.ResolveFormat() {
-		changes = append(changes, fmt.Sprintf("接口格式: %s → %s", strings.ToUpper(old.ResolveFormat()), strings.ToUpper(next.ResolveFormat())))
-	}
-	if old.Uri != next.Uri {
-		changes = append(changes, "接口地址已变更")
-	}
-	if old.Name != next.Name {
-		changes = append(changes, fmt.Sprintf("站点名称: %s → %s", old.Name, next.Name))
-	}
-	if old.Interval != next.Interval {
-		changes = append(changes, fmt.Sprintf("请求间隔: %dms → %dms", old.Interval, next.Interval))
-	}
-	if old.Cd != next.Cd {
-		changes = append(changes, fmt.Sprintf("采集时长: %d小时 → %d小时", old.Cd, next.Cd))
-	}
-	if old.IsPosterSource != next.IsPosterSource {
-		if next.IsPosterSource {
-			changes = append(changes, "海报图源: 设为优先海报图源")
-		} else {
-			changes = append(changes, "海报图源: 取消优先海报图源")
-		}
-	}
-	if old.DomainReplaceRules != next.DomainReplaceRules {
-		changes = append(changes, "播放链接域名替换规则已更新")
-	}
-	return changes
-}
-
-func sourceStateLabel(on bool) string {
-	if on {
-		return "已启用"
-	}
-	return "已停用"
-}
-
-func sourceGradeLabel(g model.SourceGrade) string {
-	if g == model.MasterCollect {
-		return "主站"
-	}
-	return "附属站"
+	return repository.RefreshCollectSourceCatalog()
 }
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
-	var collector []notify.SourceConfigChangeItem
+	if IsPrimarySiteSwitching() {
+		return errors.New("检索索引正在构建中，暂不可切换站点状态，请稍候")
+	}
+	planned := make(map[string]bool)
+	for _, id := range ids {
+		source := repository.FindCollectSourceById(id)
+		if source == nil {
+			return errors.New("采集站信息不存在")
+		}
+		if source.State != state {
+			planned[id] = state
+		}
+	}
+	if len(planned) == 0 {
+		return nil
+	}
+	oldPrimary := repository.PickPrimarySourceForCategory()
 	var firstErr error
+	changed := false
 	for _, id := range ids {
 		source := repository.FindCollectSourceById(id)
 		if source == nil {
@@ -288,64 +395,20 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 		}
 		next := *source
 		next.State = state
-		if err := s.updateFilmSource(next, &collector); err != nil {
+		if err := s.updateFilmSourceCore(next); err != nil {
 			firstErr = err
 			break
 		}
+		changed = true
 	}
-	// 全成功或部分成功均发送已收集的变更，避免中途失败时静默丢失已生效的源
-	if len(collector) > 0 {
-		notify.PublishSourceConfigsChanged(collector)
+	if changed {
+		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 	}
 	return firstErr
 }
 
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
-	// 强制单主站机制：如果新增站点为主站，自动降级现有主站
-	if source.Grade == model.MasterCollect {
-		if source.Id == "" {
-			source.Id = utils.GenerateHashKey(source.Uri)
-		}
-		masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
-		affectedSourceIDs := make([]string, 0, len(masters)+1)
-		for _, master := range masters {
-			affectedSourceIDs = append(affectedSourceIDs, master.Id)
-		}
-		affectedSourceIDs = append(affectedSourceIDs, source.Id)
-
-		log.Printf("[Collect] 新增站点 %s 为主采集站，自动降级现有主站...", source.Name)
-		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-			if err := repository.DemoteExistingMasterTx(tx); err != nil {
-				return err
-			}
-			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
-				return err
-			}
-			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
-				return err
-			}
-			return repository.AddCollectSourceTx(tx, source)
-		}); err != nil {
-			return err
-		}
-		if err := filmrepo.ClearMasterDataBySourceIDsFast(affectedSourceIDs...); err != nil {
-			syslog.Errorf("[Collect] 新主站接管前数据清理失败: %v", err)
-			return errors.New("主站切换数据清理失败，请重试")
-		}
-		spider.ClearLimiter(source.Id)
-		// 新增主站即同步分类树（未启用也要同步；分类树只认主站）
-		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
-			return syncErr
-		}
-		clearProvideNetworkConfigCache()
-		notify.PublishSourceConfigChanged(source.Name, source.Id, []string{"新增采集源（主站）"})
-		// 现有主站被自动降级且主数据已清空，单独通知
-		for _, m := range masters {
-			notify.PublishSourceConfigChanged(m.Name, m.Id, []string{"原主站已降级为附属站，主站数据已清空"})
-		}
-		return nil
-	}
-	// 附属站新增：与主站分支一致，先基于 URI 生成稳定 ID，供通知限流 key 与消息展示使用。
+	oldPrimary := repository.PickPrimarySourceForCategory()
 	if source.Id == "" {
 		source.Id = utils.GenerateHashKey(source.Uri)
 	}
@@ -354,91 +417,70 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	}
 	spider.ClearLimiter(source.Id)
 	clearProvideNetworkConfigCache()
-	notify.PublishSourceConfigChanged(source.Name, source.Id, []string{"新增采集源（附属站）"})
+	filmsnapshot.ClearDynamicPlayCaches()
+	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 	return nil
 }
 
-func (s *CollectService) DelFilmSource(id string) error {
-	src := repository.FindCollectSourceById(id)
-	if src == nil {
-		return errors.New("当前资源站信息不存在, 请勿重复操作")
+// PrepareRecordQuery 未指定采集源时落到首选站。没有站点时保持空条件。
+func (s *CollectService) PrepareRecordQuery(params model.RecordRequestVo) model.RecordRequestVo {
+	params.OriginId = strings.TrimSpace(params.OriginId)
+	if params.OriginId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			params.OriginId = active.Id
+		}
 	}
-	if src.Grade == model.MasterCollect {
-		return errors.New("主站点无法直接删除，请先将其他附属站设为主站后再删除")
-	}
-	if err := repository.DelCollectResource(id); err != nil {
-		return err
-	}
-	spider.ClearLimiter(id)
-	clearProvideNetworkConfigCache()
-	notify.PublishSourceConfigChanged(src.Name, src.Id, []string{"删除采集源"})
-	removeSourceFromProxyConfig(id)
-	return nil
+	return params
 }
 
-func (s *CollectService) GetRecordList(params model.RecordRequestVo) []model.FailureRecord {
-	repository.NormalizeFailureRecordsRetryCount()
+func (s *CollectService) GetRecordList(params model.RecordRequestVo) ([]model.FailureRecord, error) {
+	params = s.PrepareRecordQuery(params)
 	return repository.FailureRecordList(params)
 }
 
-func (s *CollectService) GetRecordOptions() model.OptionGroup {
-	options := make(model.OptionGroup)
-	options["status"] = []model.Option{
-		{Name: "全部", Value: -1},
-		{Name: "待重试", Value: model.FailureRecordStatusPending},
-		{Name: "重试成功", Value: model.FailureRecordStatusSuccess},
-		{Name: "重试失败", Value: model.FailureRecordStatusFailed},
+func (s *CollectService) GetRecordOptions() (map[string]any, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
 	}
-
-	originOptions := []model.Option{{Name: "全部", Value: ""}}
-	for _, v := range repository.GetCollectSourceList() {
-		originOptions = append(originOptions, model.Option{Name: v.Name, Value: v.Id})
+	defaultSourceId := ""
+	if active := repository.GetActiveCollectSource(); active != nil {
+		defaultSourceId = active.Id
+	} else if len(sources) > 0 {
+		defaultSourceId = sources[0].Id
 	}
-	options["origin"] = originOptions
-	return options
+	originOptions := make([]model.Option, 0, len(sources))
+	for _, v := range sources {
+		name := v.Name
+		if !v.State {
+			name += " (已停用)"
+		}
+		originOptions = append(originOptions, model.Option{Name: name, Value: v.Id})
+	}
+	return map[string]any{
+		"status": []model.Option{
+			{Name: "全部", Value: -1},
+			{Name: "待重试", Value: model.FailureRecordStatusPending},
+			{Name: "重试成功", Value: model.FailureRecordStatusSuccess},
+			{Name: "重试失败", Value: model.FailureRecordStatusFailed},
+		},
+		"origin":          originOptions,
+		"defaultSourceId": defaultSourceId,
+	}, nil
 }
 
 func (s *CollectService) CollectRecover(id int) error {
-	fr := repository.FindRecordById(uint(id))
-	if fr == nil {
-		return errors.New("采集重试执行失败: 失败记录信息获取异常")
-	}
-	if fr.Status == model.FailureRecordStatusFailed {
-		_ = repository.UpdateFailureRecordStatusByID(fr.ID, model.FailureRecordStatusPending)
-		fr.Status = model.FailureRecordStatusPending
-	}
-	go spider.SingleRecoverSpider(fr)
-	return nil
+	return spider.AcceptFailureRecover(repository.FindRecordById(uint(id)))
 }
 
-func (s *CollectService) RecoverAll() {
-	go spider.FullRecoverSpider()
+func (s *CollectService) RecoverAll() (spider.FailureRecoverOutcome, error) {
+	return spider.EnqueuePendingFailureRecovers()
 }
 
-func (s *CollectService) ClearRetriedRecords() {
-	repository.DeleteRetriedRecords()
+func (s *CollectService) ClearRetriedRecords() error {
+	return repository.DeleteRetriedRecords()
 }
 
-func (s *CollectService) ClearAllRecord() {
-	repository.TruncateRecordTable()
-}
-
-func removeSourceFromProxyConfig(sourceID string) {
-	if sourceID == "" {
-		return
-	}
-	cfg := repository.GetProxyConfig()
-	var newIds []string
-	changed := false
-	for _, id := range cfg.SourceIds {
-		if id == sourceID {
-			changed = true
-		} else {
-			newIds = append(newIds, id)
-		}
-	}
-	if changed {
-		cfg.SourceIds = newIds
-		_ = repository.SaveProxyConfig(cfg)
-	}
+func (s *CollectService) ClearAllRecord() error {
+	return repository.TruncateRecordTable()
 }

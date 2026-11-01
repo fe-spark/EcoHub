@@ -1,9 +1,26 @@
 package spider
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+func TestWaitSourceReturnsAfterEnd(t *testing.T) {
+	state := newCollectLifecycle()
+	if err := state.beginSource("s1"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- state.waitSource("s1", time.Second)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	state.endSource("s1")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestCollectLifecycle_IsBusy(t *testing.T) {
 	s := newCollectLifecycle()
@@ -74,6 +91,48 @@ func TestCollectLifecycle_WaitNotBusy(t *testing.T) {
 	if err := s.waitNotBusy(time.Second); err != nil {
 		t.Fatalf("waitNotBusy while publish ending: %v", err)
 	}
+
+	s.beginPublish()
+	start := time.Now()
+	if err := s.waitNotBusy(40 * time.Millisecond); err == nil {
+		t.Fatal("expected timeout while publish stays active")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout waited %s", time.Since(start))
+	}
+	s.endPublish()
+}
+
+func TestCollectLifecycle_WaitSourceTimeout(t *testing.T) {
+	s := newCollectLifecycle()
+	if err := s.beginSource("s1"); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err := s.waitSource("s1", 40*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout waited %s", time.Since(start))
+	}
+	if err := s.beginSource("s2"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- s.beginDrain(time.Second)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := s.beginSource("s3"); err == nil {
+		t.Fatal("expected drain to reject new collect")
+	}
+	s.endSource("s1")
+	s.endSource("s2")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	s.endDrain()
 }
 
 func TestCollectLifecycle_RunExclusiveIsBusy(t *testing.T) {
@@ -94,5 +153,65 @@ func TestCollectLifecycle_RunExclusiveIsBusy(t *testing.T) {
 	}
 	if s.isBusy() {
 		t.Fatal("expected isBusy to be false after runExclusive finishes")
+	}
+}
+
+func TestCollectLifecycle_ReserveMaintenanceBlocksNewCollect(t *testing.T) {
+	s := newCollectLifecycle()
+	if err := s.beginSource("in-flight"); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.reserveMaintenance(time.Second, func() error {
+			close(entered)
+			if err := s.beginSource("late"); err == nil {
+				return errors.New("maintenance should reject new collect")
+			}
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+		t.Fatal("maintenance entered before in-flight source finished")
+	case <-time.After(30 * time.Millisecond):
+	}
+	s.endSource("in-flight")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.beginSource("after"); err != nil {
+		t.Fatalf("collect should resume after maintenance: %v", err)
+	}
+	s.endSource("after")
+}
+
+func TestCollectLifecycle_BeginDrainTimeoutDoesNotReleaseOwner(t *testing.T) {
+	s := newCollectLifecycle()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.reserveMaintenance(time.Second, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("maintenance did not start")
+	}
+	if err := s.beginDrain(40 * time.Millisecond); err == nil || !errors.Is(err, errDrainTimeout) {
+		t.Fatalf("second drain should time out, got %v", err)
+	}
+	if err := s.beginSource("during"); err == nil {
+		t.Fatal("owner gate must still reject collect after the other drain times out")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

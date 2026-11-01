@@ -13,9 +13,8 @@ import {
   ReloadOutlined,
   EditOutlined,
   DeleteOutlined,
-  AimOutlined,
   FireOutlined,
-  CompassOutlined,
+  AimOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
@@ -38,23 +37,21 @@ export interface FilmItem {
 interface UseFilmColumnsProps {
   syncingIds: number[];
   canWrite: boolean;
-  router: any;
   styles: any;
   handleUpdateSingle: (mid: number) => void;
   handleDelFilm: (id: number) => void;
-  handleScrapeFilm: (record: FilmItem) => void;
-  tmdbEnabled?: boolean;
+  handleEditFilm: (mid: number) => void;
+  activeSourceId?: string;
 }
 
 export function useFilmColumns({
   syncingIds,
   canWrite,
-  router,
   styles,
   handleUpdateSingle,
   handleDelFilm,
-  handleScrapeFilm,
-  tmdbEnabled = false,
+  handleEditFilm,
+  activeSourceId,
 }: UseFilmColumnsProps) {
   return useMemo<ColumnsType<FilmItem>>(
     () => [
@@ -80,9 +77,7 @@ export function useFilmColumns({
             <Text
               className={styles.filmName}
               style={{ whiteSpace: "nowrap" }}
-              onClick={() =>
-                window.open(resolvePlayEntryPath(record.mid), "_blank")
-              }
+              onClick={() => handleEditFilm(record.mid)}
             >
               {record.name}
             </Text>
@@ -140,7 +135,7 @@ export function useFilmColumns({
         align: "center",
         render: (v) => (
           <Text type="secondary" style={{ fontSize: 13 }}>
-            {dayjs(v * 1000).format("YYYY-MM-DD HH:ss")}
+            {dayjs(v * 1000).format("YYYY-MM-DD HH:mm:ss")}
           </Text>
         ),
       },
@@ -149,33 +144,23 @@ export function useFilmColumns({
         key: "action",
         align: "center",
         fixed: "right",
+        width: 160,
         render: (_, record) => (
           <Space size={8}>
-            <Tooltip title="打开播放页">
+            <Tooltip title="定位">
               <Button
-                type="primary"
                 shape="circle"
                 size="small"
                 icon={<AimOutlined />}
                 onClick={() =>
-                  window.open(resolvePlayEntryPath(record.mid), "_blank")
+                  window.open(
+                    resolvePlayEntryPath(record.mid, { sourceId: activeSourceId }),
+                    "_blank",
+                  )
                 }
               />
             </Tooltip>
-            {tmdbEnabled && (
-              <Tooltip title="TMDB 刮削">
-                <Button
-                  type="primary"
-                  shape="circle"
-                  size="small"
-                  style={{ background: "#722ed1", borderColor: "#722ed1" }}
-                  icon={<CompassOutlined />}
-                  disabled={!canWrite}
-                  onClick={() => handleScrapeFilm(record)}
-                />
-              </Tooltip>
-            )}
-            <Tooltip title="同步更新">
+            <Tooltip title="更新">
               <Button
                 type="primary"
                 shape="circle"
@@ -190,7 +175,7 @@ export function useFilmColumns({
                 onClick={() => handleUpdateSingle(record.mid)}
               />
             </Tooltip>
-            <Tooltip title="修改影视">
+            <Tooltip title="编辑">
               <Button
                 type="primary"
                 shape="circle"
@@ -198,11 +183,13 @@ export function useFilmColumns({
                 style={{ background: "#1890ff", borderColor: "#1890ff" }}
                 icon={<EditOutlined />}
                 disabled={!canWrite}
-                onClick={() => router.push(`/manage/film/add?id=${record.mid}`)}
+                onClick={() => handleEditFilm(record.mid)}
               />
             </Tooltip>
             <Popconfirm
-              title="确认删除此影片？"
+              title="确定删除？"
+              okText="确定"
+              cancelText="取消"
               onConfirm={() => handleDelFilm(record.mid || record.ID)}
             >
               <Tooltip title="删除">
@@ -220,6 +207,14 @@ export function useFilmColumns({
         ),
       },
     ],
-    [syncingIds, router, handleDelFilm, handleUpdateSingle, handleScrapeFilm, canWrite, styles, tmdbEnabled],
+    [
+      syncingIds,
+      handleDelFilm,
+      handleUpdateSingle,
+      handleEditFilm,
+      canWrite,
+      styles,
+      activeSourceId,
+    ],
   );
 }

@@ -8,6 +8,7 @@ import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import ThemeDock, { type ThemeMode } from "./ThemeDock";
 import { THEME_STORAGE_KEY, writeThemeCookie, isThemeMode } from "@/lib/theme";
+import { setAppMessage } from "@/lib/app-message";
 
 const DEFAULT_PRIMARY_COLOR = "#fa8c16";
 
@@ -25,6 +26,14 @@ export function useThemeMode() {
     throw new Error("useThemeMode must be used within GlobalThemeProvider");
   }
   return context;
+}
+
+function AppMessageBridge() {
+  const { message } = App.useApp();
+  useEffect(() => {
+    setAppMessage(message);
+  }, [message]);
+  return null;
 }
 
 function resolveEffective(mode: ThemeMode): "dark" | "light" {
@@ -182,6 +191,7 @@ export default function GlobalThemeProvider({
     <ConfigProvider locale={zhCN} theme={providerTheme}>
       <ThemeModeContext.Provider value={contextValue}>
         <App>
+          <AppMessageBridge />
           {children}
           {showDock && <ThemeDock mode={mode} onSelect={handleSelect} />}
         </App>

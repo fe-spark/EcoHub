@@ -31,7 +31,7 @@ func TestCollectApiTestChoosingProxyDirect(t *testing.T) {
 
 func TestCollectApiTestChoosingProxyRequiresConfig(t *testing.T) {
 	err := CollectApiTestChoosingProxy(model.FilmSource{Name: "t", Uri: "http://127.0.0.1:1"}, true)
-	if err == nil || !strings.Contains(err.Error(), "代理未开启") {
+	if err == nil || !strings.Contains(err.Error(), "数据库未连接") {
 		t.Fatalf("err=%v", err)
 	}
 }

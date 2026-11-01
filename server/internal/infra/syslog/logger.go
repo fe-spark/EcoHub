@@ -93,6 +93,8 @@ type rollingLogger struct {
 	fileSize int64
 	nextSeq  int64
 	entries  []Entry
+	// watchers 日志页 SSE 订阅。容量 1，写路径只做非阻塞唤醒。
+	watchers map[chan struct{}]struct{}
 	// mirror 额外镜像输出（通常 os.Stdout）；由 Init/SetMirror 配置。
 	mirror io.Writer
 }
@@ -296,6 +298,7 @@ func pruneExpiredLogsLocked(now time.Time) error {
 // appendEntriesLocked 使用写入时给定的 level；行内已有结构化 [LEVEL] 时以标签为准。
 func (l *rollingLogger) appendEntriesLocked(defaultLevel string, lines []string) {
 	defaultLevel = normalizeLevel(defaultLevel)
+	added := 0
 	for _, line := range lines {
 		level := defaultLevel
 		if lv, ok := levelFromStructuredLine(line); ok {
@@ -307,6 +310,10 @@ func (l *rollingLogger) appendEntriesLocked(defaultLevel string, lines []string)
 		if len(l.entries) > entryBufferSize {
 			l.entries = l.entries[len(l.entries)-entryBufferSize:]
 		}
+		added++
+	}
+	if added > 0 {
+		l.notifyLocked()
 	}
 }
 

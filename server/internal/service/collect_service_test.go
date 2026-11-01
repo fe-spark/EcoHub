@@ -1,21 +1,19 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/notify"
 	"server/internal/repository"
+	"server/internal/spider/progress"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -32,12 +30,17 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 
 	if err := gdb.AutoMigrate(
 		&model.FilmSource{},
-		&model.SlaveMoviePlaylist{},
+		&model.FilmSourcePlaylist{},
 		&model.CollectSourceStats{},
 		&model.Category{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.FailureRecord{},
+		&model.ProxyConfigRecord{},
+		&model.BannerConfigRecord{},
+		&model.NotifyConfigRecord{},
+		&model.Banner{},
+		&model.SiteConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -52,119 +55,200 @@ func mockCollectServer() *httptest.Server {
 	}))
 }
 
-func TestCollectService_SaveFilmSource_MasterCleansSlavePlaylists(t *testing.T) {
+func TestGetFilmSourceList_MarksMissingCategory(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "ready", Name: "有分类", Uri: "http://ready", State: true, Sort: 0}).Error; err != nil {
+		t.Fatalf("create ready: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "missing", Name: "缺分类", Uri: "http://missing", State: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create missing: %v", err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "ready", SourceTypeId: 1, CategoryId: 9}).Error; err != nil {
+		t.Fatalf("create mapping: %v", err)
+	}
+
+	list, err := (&CollectService{}).GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]model.FilmSourceListItem, len(list))
+	for _, item := range list {
+		byID[item.Id] = item
+	}
+	if !byID["ready"].CategoryReady {
+		t.Fatal("source with category mapping should be collectable")
+	}
+	if byID["missing"].CategoryReady {
+		t.Fatal("source without category should be marked")
+	}
+}
+
+func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 
 	ts := mockCollectServer()
 	defer ts.Close()
 
-	// 先前已有主站
 	gdb.Create(&model.FilmSource{
-		Id:    "master_old",
-		Name:  "旧主站",
-		Uri:   ts.URL + "/old",
-		Grade: model.MasterCollect,
+		Id:    "src_1",
+		Name:  "站1",
+		Uri:   ts.URL + "/1",
+		Sort:  0,
 		State: true,
-	})
-
-	// 新站（ID: src_new），但在附属表中存在历史残留
-	gdb.Create(&model.SlaveMoviePlaylist{
-		SourceId:   "src_new",
-		MovieKey:   "k1",
-		GroupIndex: 0,
-		GroupName:  "线路1",
-		Content:    "[]",
 	})
 
 	srv := &CollectService{}
-	newMaster := model.FilmSource{
-		Id:    "src_new",
-		Name:  "新主站",
-		Uri:   ts.URL + "/new",
-		Grade: model.MasterCollect,
+	newSrc := model.FilmSource{
+		Id:    "src_2",
+		Name:  "站2",
+		Uri:   ts.URL + "/2",
 		State: true,
 	}
 
-	// 触发 SaveFilmSource
-	err := srv.SaveFilmSource(newMaster)
+	err := srv.SaveFilmSource(newSrc)
 	if err != nil {
 		t.Fatalf("SaveFilmSource failed: %v", err)
 	}
 
-	// 1. 旧主站应被自动降级为附属站 (SlaveCollect)
-	var oldMaster model.FilmSource
-	if err := gdb.First(&oldMaster, "id = ?", "master_old").Error; err != nil {
-		t.Fatalf("query old master: %v", err)
+	list, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if oldMaster.Grade != model.SlaveCollect {
-		t.Fatalf("expected old master to be demoted to SlaveCollect, got %v", oldMaster.Grade)
+	if len(list) < 2 {
+		t.Fatalf("expected at least 2 sources, got %d", len(list))
+	}
+	if list[0].Id != "src_1" {
+		t.Fatalf("expected src_1 to be first, got %s", list[0].Id)
+	}
+	if list[1].Id != "src_2" {
+		t.Fatalf("expected src_2 (added at end) to be second, got %s", list[1].Id)
 	}
 
-	// 2. 新主站历史残留必须被物理清空
-	var slaveCount int64
-	gdb.Model(&model.SlaveMoviePlaylist{}).Where("source_id = ?", "src_new").Count(&slaveCount)
-	if slaveCount != 0 {
-		t.Fatalf("expected 0 residual slave playlists for new master, got %d", slaveCount)
+	// 测试拖拽排序
+	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
+		t.Fatalf("SortFilmSources failed: %v", err)
+	}
+	sortedList, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sortedList[0].Id != "src_2" || sortedList[1].Id != "src_1" {
+		t.Fatalf("expected src_2 to be first after sorting, got %+v", sortedList)
+	}
+	var categoryCount int64
+	gdb.Model(&model.CategoryMapping{}).Count(&categoryCount)
+	if categoryCount != 0 {
+		t.Fatalf("switching preferred source must not fetch categories, got %d mappings", categoryCount)
 	}
 }
 
-func TestCollectService_UpdateFilmSource_MasterDowngrade(t *testing.T) {
+func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
-
-	// 原主站
-	if err := gdb.Create(&model.FilmSource{
-		Id:    "master_old",
-		Name:  "旧主站",
-		Uri:   "http://master.old/json",
-		Grade: model.MasterCollect,
-		State: true,
-	}).Error; err != nil {
-		t.Fatalf("create master_old failed: %v", err)
+	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", Sort: 0, State: true}).Error; err != nil {
+		t.Fatalf("create src_1: %v", err)
 	}
-	// 原附属站
-	if err := gdb.Create(&model.FilmSource{
-		Id:    "slave_1",
-		Name:  "附属站1",
-		Uri:   "http://slave1.old/json",
-		Grade: model.SlaveCollect,
-		State: true,
-	}).Error; err != nil {
-		t.Fatalf("create slave_1 failed: %v", err)
+	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", Sort: 1, State: true}).Error; err != nil {
+		t.Fatalf("create src_2: %v", err)
 	}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "src_1", Name: "站1"}}, "q-test")
+	t.Cleanup(func() { progress.MarkStopped("src_1") })
 
 	srv := &CollectService{}
+	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
+		t.Fatalf("switch while collecting: %v", err)
+	}
+	list, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) == 0 || list[0].Id != "src_2" || !list[0].IsPrimary {
+		t.Fatalf("primary should be src_2, got %+v", list)
+	}
+	if !progress.IsTaskRunning("src_1") {
+		t.Fatal("the running collect should stay running")
+	}
+	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
+		t.Fatalf("reordering without changing primary should pass: %v", err)
+	}
+	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", State: false}); err != nil {
+		t.Fatalf("disabling primary while collecting should pass: %v", err)
+	}
+	list, err = srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var primaryID string
+	for _, item := range list {
+		if item.IsPrimary {
+			primaryID = item.Id
+		}
+	}
+	if primaryID != "src_1" {
+		t.Fatalf("primary should fall back to src_1, got %+v", list)
+	}
+}
+
+func TestSyncSourceCategories_MissingSourceClearsSyncing(t *testing.T) {
+	setupCollectServiceTestDB(t)
+	progress.BroadcastCategoryStatus("gone-src", "syncing")
+	t.Cleanup(func() { progress.BroadcastCategoryStatus("gone-src", "idle") })
+
+	_, err := SpiderSvc.SyncSourceCategories("gone-src", "")
+	if err == nil || err.Error() != "采集站信息不存在" {
+		t.Fatalf("err=%v", err)
+	}
+	if progress.IsCategorySyncing("gone-src") {
+		t.Fatal("missing source left category syncing")
+	}
+}
+
+func TestSyncSourceCategories_StoresCopyForThatSource(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
 	ts := mockCollectServer()
 	defer ts.Close()
 
-	// 试图将 master_old 直接降级为附属站，应当被拦截并拒绝
-	demoted := model.FilmSource{
-		Id:    "master_old",
-		Name:  "旧主站降级",
-		Uri:   "http://master.old/json",
-		Grade: model.SlaveCollect,
-		State: true,
+	if err := gdb.Create(&model.FilmSource{Id: "src_sync", Name: "同步站", Uri: ts.URL, State: true}).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if _, err := SpiderSvc.SyncSourceCategories("src_sync", ""); err != nil {
+		t.Fatalf("SyncSourceCategories: %v", err)
 	}
 
-	err := srv.UpdateFilmSource(demoted)
-	if err == nil {
-		t.Fatal("expected error when downgrading master source directly, got nil")
+	var rawCount int64
+	var mapCount int64
+	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src_sync").Count(&rawCount)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src_sync").Count(&mapCount)
+	if rawCount == 0 || mapCount == 0 {
+		t.Fatalf("expected a stored category copy, raw=%d map=%d", rawCount, mapCount)
 	}
-	if !strings.Contains(err.Error(), "系统必须保留一个主站，主站不可直接降级为附属站") {
-		t.Fatalf("unexpected error message: %v", err)
+}
+
+func TestCollectService_UpdateFilmSource_NameChange(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+
+	s := model.FilmSource{
+		Id:    "src_name_test",
+		Name:  "测试源",
+		Uri:   "https://example.com/api",
+		State: true,
+		Sort:  0,
+	}
+	gdb.Create(&s)
+
+	srv := &CollectService{}
+	sUpdate := s
+	sUpdate.Name = "新名称"
+	if err := srv.UpdateFilmSource(sUpdate); err != nil {
+		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
 	var updated model.FilmSource
-	if err := gdb.First(&updated, "id = ?", "master_old").Error; err != nil {
-		t.Fatalf("query updated master_old: %v", err)
+	if err := gdb.First(&updated, "id = ?", "src_name_test").Error; err != nil {
+		t.Fatalf("query updated: %v", err)
 	}
-	if updated.Grade != model.MasterCollect {
-		t.Fatalf("expected master_old grade to remain MasterCollect, got %v", updated.Grade)
+	if updated.Name != "新名称" {
+		t.Fatalf("expected name 新名称, got %s", updated.Name)
 	}
-
-	// 排空在途异步通知协程，确保测试结束前完全执行完毕
-	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer drainCancel()
-	_ = notify.WaitPendingPublishes(drainCtx)
 }
 
 func TestCollectService_FailureRecords(t *testing.T) {
@@ -211,20 +295,30 @@ func TestCollectService_FailureRecords(t *testing.T) {
 		Paging: &dto.Page{Current: 1, PageSize: 10},
 		Status: -1,
 	}
-	list := srv.GetRecordList(params)
+	list, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 3 {
 		t.Fatalf("expected 3 failure records, got %d", len(list))
 	}
 
 	// 3. 测试 GetRecordOptions
-	opts := srv.GetRecordOptions()
-	if len(opts["status"]) == 0 {
+	opts, err := srv.GetRecordOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _ := opts["status"].([]model.Option)
+	if len(status) == 0 {
 		t.Fatalf("expected non-empty status options")
 	}
 
 	// 4. 测试 ClearRetriedRecords (应清理 success 和 failed，保留 pending)
 	srv.ClearRetriedRecords()
-	listAfterClear := srv.GetRecordList(params)
+	listAfterClear, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(listAfterClear) != 1 {
 		t.Fatalf("expected 1 record after ClearRetriedRecords, got %d", len(listAfterClear))
 	}
@@ -234,9 +328,66 @@ func TestCollectService_FailureRecords(t *testing.T) {
 
 	// 5. 测试 ClearAllRecord (truncate table)
 	srv.ClearAllRecord()
-	listAfterTruncate := srv.GetRecordList(params)
+	listAfterTruncate, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(listAfterTruncate) != 0 {
 		t.Fatalf("expected 0 records after ClearAllRecord, got %d", len(listAfterTruncate))
+	}
+}
+
+func TestGetRecordList_DefaultsToPrimarySource(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "src_b", Name: "站点B", Uri: "http://b", State: true, Sort: 2}).Error; err != nil {
+		t.Fatalf("create src_b: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
+		t.Fatalf("create src_a: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_off", Name: "停用站", Uri: "http://off", State: false, Sort: 1}).Error; err != nil {
+		t.Fatalf("create src_off: %v", err)
+	}
+	gdb.Create(&model.FailureRecord{OriginId: "src_a", OriginName: "站点A", PageNumber: 1, Status: model.FailureRecordStatusPending})
+	gdb.Create(&model.FailureRecord{OriginId: "src_b", OriginName: "站点B", PageNumber: 2, Status: model.FailureRecordStatusPending})
+
+	srv := &CollectService{}
+	params := srv.PrepareRecordQuery(model.RecordRequestVo{
+		Paging: &dto.Page{Current: 1, PageSize: 10},
+		Status: -1,
+	})
+	if params.OriginId != "src_a" {
+		t.Fatalf("empty origin should fall back to primary src_a, got %q", params.OriginId)
+	}
+	list, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].OriginId != "src_a" {
+		t.Fatalf("expected only primary source records, got %+v", list)
+	}
+
+	opts, err := srv.GetRecordOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts["defaultSourceId"] != "src_a" {
+		t.Fatalf("defaultSourceId = %v, want src_a", opts["defaultSourceId"])
+	}
+	origins, ok := opts["origin"].([]model.Option)
+	if !ok {
+		t.Fatalf("origin options type %T", opts["origin"])
+	}
+	if len(origins) != 3 {
+		t.Fatalf("expected 3 total sources, got %d", len(origins))
+	}
+	for _, item := range origins {
+		if item.Name == "全部" || item.Value == "" {
+			t.Fatalf("origin options must not include 全部: %+v", item)
+		}
+	}
+	if origins[0].Value != "src_a" {
+		t.Fatalf("first origin should be primary src_a, got %v", origins[0].Value)
 	}
 }
 
@@ -249,7 +400,7 @@ func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 		Name:   "格式测试源",
 		Uri:    "https://example.com/api",
 		State:  true,
-		Grade:  model.SlaveCollect,
+		Sort:   0,
 		Format: model.SourceFormatJSON,
 	}
 	gdb.Create(&s)
@@ -266,18 +417,6 @@ func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 	// 更新为 XML 格式
 	sUpdate := s
 	sUpdate.Format = model.SourceFormatXML
-	labels := sourceChangeLabels(s, sUpdate)
-	foundFormatLabel := false
-	for _, l := range labels {
-		if l == "接口格式: JSON → XML" {
-			foundFormatLabel = true
-			break
-		}
-	}
-	if !foundFormatLabel {
-		t.Fatalf("expected format change label '接口格式: JSON → XML', got: %v", labels)
-	}
-
 	if err := srv.UpdateFilmSource(sUpdate); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
@@ -295,12 +434,12 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 	srv := &CollectService{}
 
 	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	// 插入一个主站和两个附属站
+	// 插入三个按顺序的站
 	master := model.FilmSource{
 		Id:        "master_site",
 		Name:      "主站",
 		Uri:       "https://master.example.com/api",
-		Grade:     model.MasterCollect,
+		Sort:      0,
 		State:     true,
 		CreatedAt: baseTime,
 	}
@@ -308,7 +447,7 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		Id:        "slave_1_zz", // 故意使用字典序较大的 id
 		Name:      "附属站1",
 		Uri:       "https://slave1.example.com/api",
-		Grade:     model.SlaveCollect,
+		Sort:      1,
 		State:     true,
 		CreatedAt: baseTime.Add(1 * time.Minute),
 	}
@@ -316,7 +455,7 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		Id:        "slave_2_mm",
 		Name:      "附属站2",
 		Uri:       "https://slave2.example.com/api",
-		Grade:     model.SlaveCollect,
+		Sort:      2,
 		State:     true,
 		CreatedAt: baseTime.Add(2 * time.Minute),
 	}
@@ -330,12 +469,11 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		t.Fatalf("create slave2: %v", err)
 	}
 
-	// 新增一个附属站（id 字典序可能极小，如 "000_new_slave"）
+	// 新增一个站点（id 字典序可能极小，如 "000_new_slave"）
 	newSlave := model.FilmSource{
 		Id:        "000_new_slave",
 		Name:      "新增附属站",
 		Uri:       "https://newslave.example.com/api",
-		Grade:     model.SlaveCollect,
 		State:     true,
 		CreatedAt: baseTime.Add(3 * time.Minute),
 	}
@@ -343,12 +481,15 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		t.Fatalf("SaveFilmSource failed: %v", err)
 	}
 
-	list := srv.GetFilmSourceList()
+	list, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 4 {
 		t.Fatalf("expected 4 sources, got %d", len(list))
 	}
 
-	// 验证顺序：主站第一，附属站按创建时间排序，新增采集站排在最后一个
+	// 验证顺序：高权重第一，同权重按创建时间排序，新增采集站排在最后一个
 	if list[0].Id != "master_site" {
 		t.Errorf("expected list[0] to be master_site, got %s", list[0].Id)
 	}
@@ -370,7 +511,10 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
-	listAfterUpdate := srv.GetFilmSourceList()
+	listAfterUpdate, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if listAfterUpdate[1].Id != "slave_1_zz" || listAfterUpdate[1].Name != "附属站1重命名" {
 		t.Errorf("expected list[1] to remain slave_1_zz after update, got %+v", listAfterUpdate[1])
 	}
@@ -387,16 +531,19 @@ func TestRepository_ReplaceCollectSources_PreservesOrderWithoutCreatedAt(t *test
 
 	// 模拟从不含 createdAt 的旧备份恢复，id 使用逆序字典序测试是否严格按列表顺序保存
 	sources := []model.FilmSource{
-		{Id: "zzz_source", Name: "站点Z", Uri: "https://z.com/api", Grade: model.SlaveCollect, State: true},
-		{Id: "mmm_source", Name: "站点M", Uri: "https://m.com/api", Grade: model.SlaveCollect, State: true},
-		{Id: "aaa_source", Name: "站点A", Uri: "https://a.com/api", Grade: model.SlaveCollect, State: true},
+		{Id: "zzz_source", Name: "站点Z", Uri: "https://z.com/api", Sort: 0, State: true},
+		{Id: "mmm_source", Name: "站点M", Uri: "https://m.com/api", Sort: 1, State: true},
+		{Id: "aaa_source", Name: "站点A", Uri: "https://a.com/api", Sort: 2, State: true},
 	}
 
 	if err := repository.ReplaceCollectSources(sources); err != nil {
 		t.Fatalf("ReplaceCollectSources failed: %v", err)
 	}
 
-	list := repository.GetCollectSourceList()
+	list, err := repository.GetCollectSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 3 {
 		t.Fatalf("expected 3 sources, got %d", len(list))
 	}
@@ -412,6 +559,3 @@ func TestRepository_ReplaceCollectSources_PreservesOrderWithoutCreatedAt(t *test
 		}
 	}
 }
-
-
-

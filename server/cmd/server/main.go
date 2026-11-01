@@ -14,9 +14,11 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
-	"server/internal/notify"
+	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/router"
 	"server/internal/service"
+	"server/internal/service/upgrade"
 	"server/internal/spider"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +27,9 @@ import (
 func init() {
 	if config.IsUpgradeHelper() {
 		return
+	}
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
 	}
 	setupLogging()
 	if err := waitForRedis(30, 2*time.Second); err != nil {
@@ -94,15 +99,36 @@ func start() {
 	db.StartRedisHealthCheck()
 	db.StartMysqlHealthCheck()
 
-	service.InitSvc.DefaultDataInit()
+	if err := service.InitSvc.DefaultDataInit(); err != nil {
+		log.Fatalf("[Init] 初始化失败: %v", err)
+	}
+	if err := repository.RefreshCollectSourceCatalog(); err != nil {
+		log.Fatalf("[Init] 采集站目录加载失败: %v", err)
+	}
+	upgrade.StartReleasePoller()
 	access.StartCollector()
-	notify.EnsureBotPoller()
 
 	r := router.SetupRouter()
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", config.ListenerPort),
 		Handler: r,
 	}
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Init] 启动预热首页缓存发生异常: %v", r)
+			}
+		}()
+		if primary := repository.PickPrimarySourceForCategory(); primary != nil {
+			if _, err := service.IndexSvc.IndexPage(primary.Id); err == nil {
+				log.Printf("[Init] 首页数据缓存预热完成 primary=%s", primary.Name)
+			}
+			if _, _, err := service.ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil {
+				log.Printf("[Init] 初始化排片规则失败: %v", err)
+			}
+		}
+	}()
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		log.Fatalf("[Init] HTTP 监听失败: %v", err)
@@ -123,11 +149,9 @@ func start() {
 	// 1. 立即关闭 HTTP 端口监听（断开连接，避免新请求进入与端口占用）
 	_ = srv.Close()
 
-	// 2. 快速停止采集任务（非阻塞通知协程退出）
+	// 2. 快速停止采集任务与通知轮询（非阻塞通知协程退出）
 	spider.StopAllTasks()
-
-	// 3. 停止 Telegram Bot 轮询
-	notify.StopBotPoller()
+	service.NotifySvc.StopBotPoller()
 
 	log.Printf("[Shutdown] 退出完成")
 }

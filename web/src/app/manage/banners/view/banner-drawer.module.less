@@ -1,0 +1,216 @@
+/* 手动新增/编辑轮播抽屉样式 */
+.drawerStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.drawerSectionCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawerSectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.filmSelectTrigger {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 16px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+
+  &:hover {
+    border-color: var(--ant-color-primary);
+    background: rgba(250, 140, 22, 0.04);
+  }
+}
+
+.triggerIcon {
+  font-size: 28px;
+  color: var(--ant-color-primary);
+}
+
+.triggerText {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.triggerHint {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.filmProfileCard {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+.filmProfileContent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filmTitleRow {
+  width: 100%;
+}
+
+.filmMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filmActionRow {
+  margin-top: 4px;
+}
+
+/* 轮播画幅工业级标准视窗 */
+.frameStack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 4px;
+}
+
+.heroBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.heroHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.heroTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.heroCanvas {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.heroImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.heroEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.heroActionRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.posterCompactBlock {
+  display: flex;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary);
+  align-items: center;
+}
+
+.posterMiniFrame {
+  width: 52px;
+  height: 76px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.posterMiniInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.posterMiniHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.posterMiniTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.urlReadonlyHint {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+

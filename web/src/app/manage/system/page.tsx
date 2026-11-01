@@ -1,9 +1,14 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { serverGet } from "@/lib/server-api";
-import SystemSettingsPageView from "./view";
 
-export default async function SystemSettingsPage() {
+interface SystemRedirectPageProps {
+  searchParams?: Promise<{ tab?: string }>;
+}
+
+export default async function SystemRedirectPage({ searchParams }: SystemRedirectPageProps) {
+  const params = await searchParams;
+  const tab = params?.tab;
   const cookieStore = await cookies();
   let isAdmin = false;
   try {
@@ -14,8 +19,15 @@ export default async function SystemSettingsPage() {
   } catch {
     isAdmin = false;
   }
-  if (!isAdmin) {
-    redirect("/manage");
+
+  if (tab === "website") {
+    redirect("/manage/system/website");
   }
-  return <SystemSettingsPageView />;
+  if (isAdmin && (tab === "notify" || tab === "tmdb" || tab === "proxy" || tab === "security" || tab === "logs" || tab === "users")) {
+    redirect(`/manage/system/${tab}`);
+  }
+  if (isAdmin) {
+    redirect("/manage/system/proxy");
+  }
+  redirect("/manage/system/website");
 }

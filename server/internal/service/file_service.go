@@ -29,36 +29,42 @@ func (s *FileService) SingleFileUpload(fileName string, name string, uid int) st
 	return f.Link
 }
 
-func (s *FileService) GetPhotoPage(name string, beginTime, endTime time.Time, page *dto.Page) []model.FileInfo {
+func (s *FileService) GetPhotoPage(name string, beginTime, endTime time.Time, page *dto.Page) ([]model.FileInfo, error) {
 	var tl = []string{"jpeg", "jpg", "png", "webp", "ico"}
 	return repository.GetFileInfoPage(tl, name, beginTime, endTime, page)
 }
 
-// StorageStatus 素材存储探测结果；文案由前端组装。
-type StorageStatus struct {
-	VolumeMounted bool `json:"volumeMounted"`
-	MissingCount  int  `json:"missingCount"`
-}
-
-func (s *FileService) StorageStatus() StorageStatus {
-	return StorageStatus{
-		VolumeMounted: config.ContainerUploadVolumeOK(),
-		MissingCount:  repository.CountMissingUserGallery(),
-	}
-}
-
-func (s *FileService) RenameFile(id uint, name string) error {
+func (s *FileService) RenameFile(id uint, name string, operatorID uint, operatorIsAdmin bool) error {
 	f := repository.GetFileInfoById(id)
 	if f.ID == 0 {
 		return fmt.Errorf("图片不存在")
+	}
+	if !operatorIsAdmin && f.Uid != int(operatorID) {
+		return fmt.Errorf("权限不足，仅可操作本人上传的素材")
 	}
 	return repository.RenameFileInfo(id, name)
 }
+func (s *FileService) ValidateFilesRemovable(ids []uint, operatorID uint, operatorIsAdmin bool) error {
+	for _, id := range ids {
+		f := repository.GetFileInfoById(id)
+		if f.ID == 0 {
+			return fmt.Errorf("素材 ID %d 不存在", id)
+		}
+		if !operatorIsAdmin && f.Uid != int(operatorID) {
+			return fmt.Errorf("权限不足，仅可操作本人上传的素材")
+		}
+	}
+	return nil
+}
 
-func (s *FileService) RemoveFileById(id uint) error {
+
+func (s *FileService) RemoveFileById(id uint, operatorID uint, operatorIsAdmin bool) error {
 	f := repository.GetFileInfoById(id)
 	if f.ID == 0 {
 		return fmt.Errorf("图片不存在")
+	}
+	if !operatorIsAdmin && f.Uid != int(operatorID) {
+		return fmt.Errorf("权限不足，仅可操作本人上传的素材")
 	}
 	storagePath := repository.StoragePath(&f)
 	err := os.Remove(storagePath)

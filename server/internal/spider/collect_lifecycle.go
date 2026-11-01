@@ -18,6 +18,7 @@ type collectLifecycleState struct {
 	activeSources map[string]struct{}
 	activeCount   int
 	publishing    int
+	draining      bool
 }
 
 func newCollectLifecycle() *collectLifecycleState {
@@ -36,6 +37,9 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.draining {
+		return errors.New("片库正在清空，已拒绝采集")
+	}
 	if _, ok := s.activeSources[sourceID]; ok {
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
 	}
@@ -96,9 +100,10 @@ func (s *collectLifecycleState) endPublish() {
 }
 
 func (s *collectLifecycleState) runExclusive(action func() error) error {
-	s.mu.Lock()
-	s.waitIdleLocked()
-	s.mu.Unlock()
+	if err := s.beginDrain(30 * time.Second); err != nil {
+		return err
+	}
+	defer s.endDrain()
 
 	s.beginPublish()
 	defer s.endPublish()
@@ -106,6 +111,94 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	defer publishMu.Unlock()
 
 	return action()
+}
+
+// reserveMaintenance 低频维护预约：立刻拒绝新采集，等在途站点与发布收尾后独占执行。
+func (s *collectLifecycleState) reserveMaintenance(timeout time.Duration, action func() error) error {
+	if err := s.beginDrain(timeout); err != nil {
+		return err
+	}
+	defer s.endDrain()
+	s.beginPublish()
+	defer s.endPublish()
+	publishMu.Lock()
+	defer publishMu.Unlock()
+	return action()
+}
+
+var errDrainTimeout = errors.New("等待采集空闲超时")
+
+func (s *collectLifecycleState) beginDrain(timeout time.Duration) error {
+	s.mu.Lock()
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+
+	for s.draining {
+		if !time.Now().Before(deadline) {
+			s.mu.Unlock()
+			return fmt.Errorf("%w: 维护闸门仍被占用", errDrainTimeout)
+		}
+		s.cond.Wait()
+	}
+	s.draining = true
+
+	for s.activeCount > 0 || s.publishing > 0 {
+		if !time.Now().Before(deadline) {
+			s.draining = false
+			s.cond.Broadcast()
+			s.mu.Unlock()
+			return fmt.Errorf("%w: active=%d publishing=%d", errDrainTimeout, s.activeCount, s.publishing)
+		}
+		s.cond.Wait()
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *collectLifecycleState) endDrain() {
+	s.mu.Lock()
+	s.draining = false
+	s.cond.Broadcast()
+	s.mu.Unlock()
+}
+
+// waitSource 等到该站离开采集生命周期。超时表示这次运行还没退出。
+func (s *collectLifecycleState) waitSource(sourceID string, timeout time.Duration) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.activeSources[sourceID]; !ok {
+		return nil
+	}
+	if timeout <= 0 {
+		return errors.New("停止采集超时，未删除")
+	}
+
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+
+	for {
+		if _, ok := s.activeSources[sourceID]; !ok {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return errors.New("停止采集超时，未删除")
+		}
+		s.cond.Wait()
+	}
 }
 
 func (s *collectLifecycleState) waitIdle(timeout time.Duration) error {
@@ -141,35 +234,23 @@ func (s *collectLifecycleState) waitNotBusy(timeout time.Duration) error {
 		return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
 	}
 
-	timer := time.NewTimer(timeout)
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
 	defer timer.Stop()
 
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-timer.C:
-			s.mu.Lock()
-			s.cond.Broadcast()
-			s.mu.Unlock()
-		case <-done:
-		}
-	}()
-
 	for s.activeCount > 0 || s.publishing > 0 {
-		s.cond.Wait()
-		select {
-		case <-timer.C:
-			if s.activeCount == 0 && s.publishing == 0 {
-				return nil
-			}
+		if !time.Now().Before(deadline) {
 			return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
-		default:
 		}
+		s.cond.Wait()
 	}
 	return nil
 }
 
 func shouldSkipCollectPublishOnError(source model.FilmSource, h int) bool {
-	return source.Grade == model.MasterCollect && h < 0
+	return false
 }

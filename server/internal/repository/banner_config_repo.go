@@ -2,7 +2,7 @@ package repository
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -14,75 +14,51 @@ import (
 )
 
 const (
-	BannerModeManual        = "manual"
-	BannerModeAuto          = "auto"
-	BannerStrategyHot       = "hot_random"
-	BannerStrategyScore     = "score_random"
-	BannerStrategyLatest    = "latest_random"
-	BannerStrategySmartMix  = "smart_mix"
-	DefaultBannerCount      = model.DefaultBannerCount
-	MaxBannerCount          = model.MaxBannerCount
-	DefaultBannerRefreshCron = "0 0 */12 * * *"
+	BannerStrategyHot    = "hot_random"
+	BannerStrategyScore  = "score_random"
+	BannerStrategyLatest = "latest_random"
 )
 
-// DefaultBannerConfig 返回默认轮播配置
+// DefaultBannerConfig 返回未保存时的排片配置。
 func DefaultBannerConfig() model.BannerConfig {
 	return model.BannerConfig{
-		Mode:        BannerModeManual,
-		Strategy:    BannerStrategyHot,
-		Count:       DefaultBannerCount,
-		AutoTMDB:    true,
-		RefreshCron: DefaultBannerRefreshCron,
-		PinnedMids:  []int64{},
-		Categories:  []int64{},
+		Strategy: BannerStrategyHot,
+		Quotas:   []model.BannerQuota{},
 	}
 }
 
-// NormalizeBannerConfig 规范化轮播配置
+// NormalizeBannerConfig 规范化轮播排片配置。
 func NormalizeBannerConfig(cfg model.BannerConfig) model.BannerConfig {
-	cfg.Mode = strings.ToLower(strings.TrimSpace(cfg.Mode))
-	if cfg.Mode != BannerModeAuto {
-		cfg.Mode = BannerModeManual
-	}
-
 	cfg.Strategy = strings.ToLower(strings.TrimSpace(cfg.Strategy))
 	switch cfg.Strategy {
-	case BannerStrategyHot, BannerStrategyScore, BannerStrategyLatest, BannerStrategySmartMix:
+	case BannerStrategyHot, BannerStrategyScore, BannerStrategyLatest:
 	default:
 		cfg.Strategy = BannerStrategyHot
 	}
-
-	if cfg.Count <= 0 {
-		cfg.Count = DefaultBannerCount
-	} else if cfg.Count > MaxBannerCount {
-		cfg.Count = MaxBannerCount
-	}
-
-	cfg.RefreshCron = strings.TrimSpace(cfg.RefreshCron)
-	if cfg.RefreshCron == "" {
-		cfg.RefreshCron = DefaultBannerRefreshCron
-	}
-
-	if cfg.PinnedMids == nil {
-		cfg.PinnedMids = []int64{}
-	}
-	if cfg.Categories == nil {
-		cfg.Categories = []int64{}
-	} else {
-		validCats := make([]int64, 0, len(cfg.Categories))
-		seenCat := make(map[int64]struct{}, len(cfg.Categories))
-		for _, cat := range cfg.Categories {
-			if cat > 0 {
-				if _, ok := seenCat[cat]; !ok {
-					seenCat[cat] = struct{}{}
-					validCats = append(validCats, cat)
-				}
-			}
-		}
-		// 动态过滤已在分类管理中设置为不显示的分类：哪怕之前选中的时候显示，后面分类设置为不显示，依旧过滤
-		cfg.Categories = FilterShownCategoryIDs(validCats)
-	}
+	cfg.Quotas = normalizeBannerQuotas(cfg.Quotas)
 	return cfg
+}
+
+func normalizeBannerQuotas(quotas []model.BannerQuota) []model.BannerQuota {
+	if len(quotas) == 0 {
+		return []model.BannerQuota{}
+	}
+	out := make([]model.BannerQuota, 0, len(quotas))
+	seen := make(map[int64]struct{}, len(quotas))
+	for _, quota := range quotas {
+		if quota.CategoryID <= 0 {
+			continue
+		}
+		if _, ok := seen[quota.CategoryID]; ok {
+			continue
+		}
+		seen[quota.CategoryID] = struct{}{}
+		if quota.Count <= 0 {
+			continue
+		}
+		out = append(out, model.BannerQuota{CategoryID: quota.CategoryID, Count: quota.Count})
+	}
+	return out
 }
 
 var (
@@ -90,50 +66,110 @@ var (
 	memBannerConfig     *model.BannerConfig
 )
 
-// GetBannerConfig 读取轮播排片配置（Redis 缓存优先，MySQL 兜底）
-func GetBannerConfig() model.BannerConfig {
-	cfg := DefaultBannerConfig()
-	if db.Rdb != nil {
-		if data := db.Rdb.Get(db.Cxt, config.BannerConfigKey).Val(); data != "" && data != "null" {
-			if err := json.Unmarshal([]byte(data), &cfg); err == nil {
-				return NormalizeBannerConfig(cfg)
+// DeleteBannerConfig 删除已存排片配置。
+func DeleteBannerConfig() error {
+	memBannerConfigLock.Lock()
+	memBannerConfig = nil
+	memBannerConfigLock.Unlock()
+
+	if err := dropCache(config.BannerConfigKey); err != nil {
+		return err
+	}
+	if db.Mdb == nil {
+		return nil
+	}
+	return db.Mdb.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerConfigRecord{}).Error
+}
+
+// BannerConfigExists 是否已经保存过排片配置。
+func BannerConfigExists() (bool, error) {
+	_, exists, err := LoadBannerConfig()
+	return exists, err
+}
+
+// GetBannerConfig 读取轮播排片配置。没有记录时返回默认配置，不写入缓存。
+func GetBannerConfig() (model.BannerConfig, error) {
+	cfg, _, err := LoadBannerConfig()
+	return cfg, err
+}
+
+// LoadBannerConfig 读取轮播排片配置及是否存在记录。
+func LoadBannerConfig() (model.BannerConfig, bool, error) {
+	if data, ok, err := readCache(config.BannerConfigKey); err != nil {
+		return model.BannerConfig{}, false, err
+	} else if ok && data != "" && data != "null" {
+		cfg, err := decodeBannerConfig(data)
+		if err != nil {
+			if delErr := dropCache(config.BannerConfigKey); delErr != nil {
+				return model.BannerConfig{}, false, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
 			}
+		} else {
+			return cfg, true, nil
 		}
 	}
-
 	if db.Mdb == nil {
 		memBannerConfigLock.RLock()
 		defer memBannerConfigLock.RUnlock()
 		if memBannerConfig != nil {
-			return NormalizeBannerConfig(*memBannerConfig)
+			return *memBannerConfig, true, nil
 		}
-		return cfg
+		return DefaultBannerConfig(), false, nil
 	}
-
 	var rec model.BannerConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		return cfg
+		if recordNotFound(err) {
+			return DefaultBannerConfig(), false, nil
+		}
+		return model.BannerConfig{}, false, err
 	}
-	raw := strings.TrimSpace(rec.Payload)
-	if raw == "" {
-		return cfg
+	cfg, err := decodeBannerConfig(rec.Payload)
+	if err != nil {
+		return model.BannerConfig{}, false, err
 	}
+	if err := cacheBannerConfig(cfg); err != nil {
+		return model.BannerConfig{}, false, err
+	}
+	return cfg, true, nil
+}
+
+func decodeBannerConfig(raw string) (model.BannerConfig, error) {
+	if strings.TrimSpace(raw) == "" {
+		return DefaultBannerConfig(), nil
+	}
+	var cfg model.BannerConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		log.Println("[BannerConfig] 解析配置 JSON 异常:", err)
-		return cfg
+		return model.BannerConfig{}, fmt.Errorf("排片配置无法解析: %w", err)
 	}
-	cfg = NormalizeBannerConfig(cfg)
-	cacheBannerConfig(cfg)
-	return cfg
+	return NormalizeBannerConfig(cfg), nil
 }
 
 // SaveBannerConfig 持久化轮播排片配置并同步刷新 Redis 缓存
 func SaveBannerConfig(cfg model.BannerConfig) error {
 	cfg = NormalizeBannerConfig(cfg)
 	memBannerConfigLock.Lock()
-	memBannerConfig = &cfg
+	stored := cfg
+	memBannerConfig = &stored
 	memBannerConfigLock.Unlock()
+	return writeBannerConfigRecord(cfg)
+}
 
+// SaveBannerConfigIfEmpty 仅在还没有正数量配额时写入。已有配额则原样返回。
+func SaveBannerConfigIfEmpty(cfg model.BannerConfig) (model.BannerConfig, bool, error) {
+	cfg = NormalizeBannerConfig(cfg)
+	memBannerConfigLock.Lock()
+	defer memBannerConfigLock.Unlock()
+	if memBannerConfig != nil && len(memBannerConfig.Quotas) > 0 {
+		return *memBannerConfig, false, nil
+	}
+	if err := writeBannerConfigRecord(cfg); err != nil {
+		return model.BannerConfig{}, false, err
+	}
+	stored := cfg
+	memBannerConfig = &stored
+	return stored, true, nil
+}
+
+func writeBannerConfigRecord(cfg model.BannerConfig) error {
 	if db.Mdb == nil {
 		return nil
 	}
@@ -150,17 +186,13 @@ func SaveBannerConfig(cfg model.BannerConfig) error {
 	}); err != nil {
 		return err
 	}
-	cacheBannerConfig(cfg)
-	return nil
+	return cacheBannerConfig(cfg)
 }
 
-func cacheBannerConfig(cfg model.BannerConfig) {
-	if db.Rdb == nil {
-		return
-	}
+func cacheBannerConfig(cfg model.BannerConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		return
+		return err
 	}
-	_ = db.Rdb.Set(db.Cxt, config.BannerConfigKey, string(data), config.ConfigCacheTTL).Err()
+	return writeCache(config.BannerConfigKey, string(data))
 }

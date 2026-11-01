@@ -16,24 +16,16 @@ import {
   Alert,
 } from "antd";
 import {
-  HomeOutlined,
-  ThunderboltOutlined,
-  VideoCameraOutlined,
-  FolderOpenOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   LogoutOutlined,
   UserOutlined,
-  TeamOutlined,
-  SettingOutlined,
   BgColorsOutlined,
   SunOutlined,
   MoonOutlined,
   DesktopOutlined,
-  GlobalOutlined,
   GithubOutlined,
   QuestionCircleOutlined,
-  LineChartOutlined,
 } from "@ant-design/icons";
 import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 
@@ -46,6 +38,12 @@ import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
 import { ManagePermissionProvider } from "@/lib/manage-permission";
 import ManageTour, { replayManageTour } from "@/app/manage/components/manage-tour";
 import SiderVersion from "@/app/manage/components/sider-version";
+import {
+  menuItems,
+  resolveMenuKey,
+  resolveParentMenuKeys,
+  themeModeLabels,
+} from "./menu-config";
 import styles from "./index.module.less";
 
 type AdminNotice = {
@@ -59,104 +57,6 @@ type AdminNotice = {
 const { Sider, Header, Content } = Layout;
 const { useBreakpoint } = Grid;
 
-type MenuItem = Required<MenuProps>["items"][number];
-
-const themeModeLabels: Record<ThemeMode, string> = {
-  light: "浅色",
-  dark: "深色",
-  system: "跟随系统",
-};
-
-const menuItems: MenuItem[] = [
-  {
-    key: "/manage",
-    icon: <HomeOutlined />,
-    label: "工作台",
-  },
-  {
-    key: "sub-collect",
-    icon: <ThunderboltOutlined />,
-    label: "采集管理",
-    children: [
-      { key: "/manage/collect", label: <span data-tour="menu-collect">采集中心</span> },
-      { key: "/manage/collect/record", label: <span data-tour="menu-record">失败记录</span> },
-      { key: "/manage/cron", label: <span data-tour="menu-cron">计划任务</span> },
-    ],
-  },
-  {
-    key: "sub-film",
-    icon: <VideoCameraOutlined />,
-    label: "内容管理",
-    children: [
-      { key: "/manage/film", label: <span data-tour="menu-film">影片列表</span> },
-      { key: "/manage/banners", label: "首页轮播" },
-      { key: "/manage/collect/category", label: <span data-tour="menu-category">分类管理</span> },
-      { key: "/manage/collect/category/rules", label: <span data-tour="menu-rules">分类规则</span> },
-    ],
-  },
-  {
-    key: "/manage/file",
-    icon: <FolderOpenOutlined />,
-    label: "素材中心",
-  },
-  {
-    key: "/manage/system/users",
-    icon: <TeamOutlined />,
-    label: "账号管理",
-  },
-  {
-    key: "/manage/system/website",
-    icon: <GlobalOutlined />,
-    label: "网站配置",
-  },
-  {
-    key: "/manage/access",
-    icon: <LineChartOutlined />,
-    label: "数据分析",
-  },
-  {
-    key: "/manage/system",
-    icon: <SettingOutlined />,
-    label: "系统设置",
-  },
-];
-
-function resolveMenuKey(pathname: string) {
-  if (pathname.startsWith("/manage/banners")) return "/manage/banners";
-  if (pathname.startsWith("/manage/film/add")) return "/manage/film";
-  if (pathname.startsWith("/manage/collect/category/rules")) return "/manage/collect/category/rules";
-  if (pathname.startsWith("/manage/collect/category")) return "/manage/collect/category";
-  if (pathname.startsWith("/manage/film")) return "/manage/film";
-  if (pathname.startsWith("/manage/collect/record")) return "/manage/collect/record";
-  if (pathname.startsWith("/manage/collect")) return "/manage/collect";
-  if (pathname.startsWith("/manage/cron")) return "/manage/cron";
-  if (pathname.startsWith("/manage/system/users")) return "/manage/system/users";
-  if (pathname.startsWith("/manage/system/website")) return "/manage/system/website";
-  if (pathname.startsWith("/manage/access")) return "/manage/access";
-  if (pathname.startsWith("/manage/system")) return "/manage/system";
-  if (pathname.startsWith("/manage/file")) return "/manage/file";
-  return "/manage";
-}
-
-
-function collectAllOpenKeys(items: MenuItem[]) {
-  const openKeys: string[] = [];
-  for (const item of items) {
-    if (
-      !item ||
-      typeof item !== "object" ||
-      !("children" in item) ||
-      !item.children ||
-      !("key" in item) ||
-      typeof item.key !== "string"
-    ) {
-      continue;
-    }
-    openKeys.push(item.key);
-  }
-  return openKeys;
-}
-
 export default function ManageLayoutView({
   children,
 }: {
@@ -169,30 +69,33 @@ export default function ManageLayoutView({
   const [userInfo, setUserInfo] = useState<any>(null);
   const [notices, setNotices] = useState<AdminNotice[]>([]);
   const screens = useBreakpoint();
-  const isMobile = !screens.lg;
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isMobile = mounted && screens.lg === false;
 
   const router = useRouter();
   const pathname = usePathname();
-  const isFixedTabbedPage = pathname === "/manage/system" || pathname.startsWith("/manage/system/website");
+  const isFixedTabbedPage = pathname.startsWith("/manage/system/website");
   const selectedKey = resolveMenuKey(pathname);
-
-
-
-
-
-
-  const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
+  const [openKeys, setOpenKeys] = useState<string[]>(() => resolveParentMenuKeys(menuItems, resolveMenuKey(pathname)));
 
   useEffect(() => {
-    ApiGet("/manage/user/info").then((resp) => {
-      if (resp.code === 0) {
-        setUserInfo(resp.data);
-      }
-    });
-    ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
+    const parentKeys = resolveParentMenuKeys(menuItems, selectedKey);
+    if (parentKeys.length > 0) {
+      setOpenKeys((prev) => Array.from(new Set([...prev, ...parentKeys])));
+    }
+  }, [selectedKey]);
+  const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
+
+  const fetchAccessVisible = useCallback(() => {
+    ApiGet<{ enabled: boolean }>("/manage/access/status")
       .then((resp) => {
-        if (resp.code === 0 && resp.data?.enabled) {
-          setAccessVisible(true);
+        if (resp.code === 0 && resp.data) {
+          setAccessVisible(Boolean(resp.data.enabled));
         } else {
           setAccessVisible(false);
         }
@@ -203,22 +106,40 @@ export default function ManageLayoutView({
   }, []);
 
   useEffect(() => {
-    if (pathname.startsWith("/manage/access")) {
-      if (userInfo && (!userInfo.isAdmin || accessVisible === false)) {
-        router.replace("/manage");
+    fetchAccessVisible();
+    const handleConfigChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ enabled: boolean }>;
+      if (customEvent?.detail?.enabled !== undefined) {
+        setAccessVisible(Boolean(customEvent.detail.enabled));
+      } else {
+        fetchAccessVisible();
       }
-    }
+    };
+    window.addEventListener("ecohub:access-config-changed", handleConfigChange);
+    return () => {
+      window.removeEventListener("ecohub:access-config-changed", handleConfigChange);
+    };
+  }, [fetchAccessVisible]);
+
+  useEffect(() => {
+    ApiGet("/manage/user/info").then((resp) => {
+      if (resp.code === 0) {
+        setUserInfo(resp.data);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     if (
+      pathname !== "/manage/system" &&
       pathname.startsWith("/manage/system") &&
-      !pathname.startsWith("/manage/system/users") &&
       !pathname.startsWith("/manage/system/website")
     ) {
       if (userInfo && !userInfo.isAdmin) {
         router.replace("/manage");
       }
     }
-  }, [userInfo, accessVisible, pathname, router]);
-
+  }, [userInfo, pathname, router]);
   // 进入后台及路由切换时刷新公告（数据重置后应消失）
   useEffect(() => {
     ApiGet("/manage/index").then((resp) => {
@@ -254,19 +175,31 @@ export default function ManageLayoutView({
     }
   }, [isMobile]);
 
-
   const visibleMenuItems = useMemo(() => {
-    return menuItems.filter((item) => {
-      if (item?.key === "/manage/access") {
-        return Boolean(userInfo?.isAdmin && accessVisible);
-      }
-      if (item?.key === "/manage/system") {
-        return Boolean(userInfo?.isAdmin);
-      }
-      return true;
-    });
+    const isAdmin = Boolean(userInfo?.isAdmin);
+    return menuItems
+      .filter((item) => {
+        if (item?.key === "/manage/access") return Boolean(accessVisible);
+        if (item?.key === "/manage/system/proxy" || item?.key === "sub-integrations") return isAdmin;
+        return true;
+      })
+      .map((item) => {
+        if (!item || !("children" in item) || !item.children) return item;
+        const filteredChildren = item.children.filter((child) => {
+          if (
+            child &&
+            "key" in child &&
+            (child.key === "/manage/system/security" ||
+              child.key === "/manage/system/logs" ||
+              child.key === "/manage/system/users")
+          ) {
+            return isAdmin;
+          }
+          return true;
+        });
+        return { ...item, children: filteredChildren };
+      });
   }, [userInfo?.isAdmin, accessVisible]);
-  const openKeys = collectAllOpenKeys(visibleMenuItems);
   const themeMenuItems: MenuProps["items"] = [
     {
       key: "light",
@@ -311,7 +244,12 @@ export default function ManageLayoutView({
           className={styles.menu}
           style={{ borderInlineEnd: 0 }}
           selectedKeys={[selectedKey]}
-          defaultOpenKeys={openKeys}
+          openKeys={collapsed ? [] : openKeys}
+          onOpenChange={(keys) => {
+            if (!collapsed) {
+              setOpenKeys(keys);
+            }
+          }}
           items={visibleMenuItems}
           onClick={onMenuClick}
         />
@@ -416,7 +354,11 @@ export default function ManageLayoutView({
                 <div className={styles.userTrigger}>
                   <Space size="small">
                     <Avatar
-                      src={userInfo.avatar === "empty" ? null : userInfo.avatar}
+                      src={
+                        userInfo.avatar?.trim() && userInfo.avatar !== "empty"
+                          ? userInfo.avatar.trim()
+                          : null
+                      }
                       icon={<UserOutlined />}
                       style={{ backgroundColor: "#1890ff" }}
                     />
@@ -436,7 +378,6 @@ export default function ManageLayoutView({
           className={`${styles.content} ${isFixedTabbedPage ? styles.contentFixed : ""}`}
           style={{ flex: 1, overflow: isFixedTabbedPage ? "hidden" : "auto" }}
         >
-
           {notices.length > 0 && (
             <div className={styles.noticeStack}>
               {notices.map((n) => (

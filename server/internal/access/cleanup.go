@@ -31,11 +31,15 @@ type ClearAccessResult struct {
 }
 
 // GetAccessDataStats 统计当前数据分析积累的数据体量
-func GetAccessDataStats() AccessDataStats {
+func GetAccessDataStats() (AccessDataStats, error) {
 	var stats AccessDataStats
 	if db.Mdb != nil {
-		_ = db.Mdb.Model(&model.AccessDailyStats{}).Count(&stats.DailyStatsCount).Error
-		_ = db.Mdb.Model(&model.AccessDailyTop{}).Count(&stats.DailyTopCount).Error
+		if err := db.Mdb.Model(&model.AccessDailyStats{}).Count(&stats.DailyStatsCount).Error; err != nil {
+			return stats, err
+		}
+		if err := db.Mdb.Model(&model.AccessDailyTop{}).Count(&stats.DailyTopCount).Error; err != nil {
+			return stats, err
+		}
 
 		if stats.DailyStatsCount > 0 {
 			type statsAgg struct {
@@ -45,9 +49,11 @@ func GetAccessDataStats() AccessDataStats {
 				TotalUV  int64  `gorm:"column:total_uv"`
 			}
 			var agg statsAgg
-			_ = db.Mdb.Model(&model.AccessDailyStats{}).
+			if err := db.Mdb.Model(&model.AccessDailyStats{}).
 				Select("MIN(day) AS earliest, MAX(day) AS latest, COALESCE(SUM(pv), 0) AS total_pv, COALESCE(SUM(uv), 0) AS total_uv").
-				Scan(&agg).Error
+				Scan(&agg).Error; err != nil {
+				return stats, err
+			}
 			stats.EarliestDay = agg.Earliest
 			stats.LatestDay = agg.Latest
 			stats.TotalPV = agg.TotalPV
@@ -58,9 +64,11 @@ func GetAccessDataStats() AccessDataStats {
 				Latest   string `gorm:"column:latest"`
 			}
 			var tagg topAgg
-			_ = db.Mdb.Model(&model.AccessDailyTop{}).
+			if err := db.Mdb.Model(&model.AccessDailyTop{}).
 				Select("MIN(day) AS earliest, MAX(day) AS latest").
-				Scan(&tagg).Error
+				Scan(&tagg).Error; err != nil {
+				return stats, err
+			}
 			stats.EarliestDay = tagg.Earliest
 			stats.LatestDay = tagg.Latest
 		}
@@ -72,7 +80,7 @@ func GetAccessDataStats() AccessDataStats {
 		for {
 			keys, nextCursor, err := db.Rdb.Scan(ctx, cursor, config.AccessKeyPrefix+"*", 500).Result()
 			if err != nil {
-				break
+				return stats, err
 			}
 			stats.RedisKeyCount += int64(len(keys))
 			cursor = nextCursor
@@ -82,7 +90,7 @@ func GetAccessDataStats() AccessDataStats {
 		}
 	}
 
-	return stats
+	return stats, nil
 }
 
 // ClearAccessData 清理数据分析积累的数据。
@@ -101,8 +109,30 @@ func ClearAccessData(retentionDays int) (ClearAccessResult, error) {
 		if err := db.Rdb.Ping(db.Cxt).Err(); err != nil {
 			return res, fmt.Errorf("Redis 不可用，取消清理: %w", err)
 		}
+
+		var cutoffRedisDay string
+		if retentionDays > 0 {
+			now := time.Now().In(time.Local)
+			cutoff := startOfLocalDay(now).AddDate(0, 0, -retentionDays)
+			cutoffRedisDay = cutoff.Format("20060102")
+		}
+		deleted, err := deleteMatchingAccessRedisKeys(retentionDays, cutoffRedisDay)
+		res.DeletedRedisKeys = deleted
+		if err != nil {
+			return res, fmt.Errorf("清理 Redis 访问分析缓存失败: %w", err)
+		}
+
+		// 全量清空时进行二次扫描，消除批量删除期间新写进来的键
+		if retentionDays <= 0 {
+			secondPass, err := deleteMatchingAccessRedisKeys(retentionDays, cutoffRedisDay)
+			if err != nil {
+				return res, fmt.Errorf("二次清理 Redis 访问分析缓存失败: %w", err)
+			}
+			res.DeletedRedisKeys += secondPass
+		}
 	}
 
+	// Redis 清理成功后再动 MySQL；若 Redis 失败则保持 MySQL 完整，方便重试且不丢数据
 	if db.Mdb != nil {
 		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 			if retentionDays <= 0 {
@@ -138,20 +168,6 @@ func ClearAccessData(retentionDays int) (ClearAccessResult, error) {
 		})
 		if err != nil {
 			return res, err
-		}
-	}
-
-	if db.Rdb != nil {
-		var cutoffRedisDay string
-		if retentionDays > 0 {
-			now := time.Now().In(time.Local)
-			cutoff := startOfLocalDay(now).AddDate(0, 0, -retentionDays)
-			cutoffRedisDay = cutoff.Format("20060102")
-		}
-		deleted, err := deleteMatchingAccessRedisKeys(retentionDays, cutoffRedisDay)
-		res.DeletedRedisKeys = deleted
-		if err != nil {
-			return res, fmt.Errorf("清理 Redis 访问分析缓存失败: %w", err)
 		}
 	}
 

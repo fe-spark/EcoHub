@@ -17,7 +17,7 @@ func InitMappingEngine() {
 
 func ReloadMappingRules() {
 	var rules []model.MappingRule
-	db.Mdb.Find(&rules)
+	db.Mdb.Order("id ASC").Find(&rules)
 
 	var catMappings []model.CategoryMapping
 	db.Mdb.Find(&catMappings)
@@ -26,6 +26,15 @@ func ReloadMappingRules() {
 		newSourceMap[fmt.Sprintf("%s_%d", m.SourceId, m.SourceTypeId)] = m.CategoryId
 	}
 
+	var srcCats []model.SourceCategory
+	db.Mdb.Find(&srcCats)
+	newSrcCats := make(map[string]SourceCategoryInfo, len(srcCats))
+	for _, sc := range srcCats {
+		newSrcCats[fmt.Sprintf("%s_%d", sc.SourceId, sc.SourceTypeId)] = SourceCategoryInfo{
+			RawName:            sc.RawName,
+			ParentSourceTypeId: sc.ParentSourceTypeId,
+		}
+	}
 	newArea := make(map[string]string)
 	newLang := make(map[string]string)
 	newFilter := make(map[string]bool)
@@ -83,6 +92,7 @@ func ReloadMappingRules() {
 		CategoryRootRegex: newCategoryRootRegex,
 		CategorySubRegex:  newCategorySubRegex,
 		Source:            newSourceMap,
+		SourceCategories:  newSrcCats,
 	})
 
 	RefreshCategoryCache()
@@ -93,6 +103,28 @@ func TouchRuleVersion() {
 		return
 	}
 	db.Rdb.Set(db.Cxt, config.RuleVersionKey, time.Now().UnixNano(), 0)
+}
+
+// CurrentMappingSnapshotForTest 取出当前规则快照，测试结束时放回去。
+func CurrentMappingSnapshotForTest() *MappingSnapshot {
+	return getMappingSnapshot()
+}
+
+// StoreMappingSnapshotForTest 换上测试用的规则快照。
+func StoreMappingSnapshotForTest(snapshot *MappingSnapshot) {
+	if snapshot == nil {
+		snapshot = &MappingSnapshot{
+			Area:         map[string]string{},
+			Lang:         map[string]string{},
+			Filter:       map[string]bool{},
+			Attribute:    map[string]string{},
+			Plot:         map[string]string{},
+			CategoryRoot: map[string]string{},
+			CategorySub:  map[string]string{},
+			Source:       map[string]int64{},
+		}
+	}
+	mappingState.Store(snapshot)
 }
 
 func GetRuleVersion() string {
@@ -217,12 +249,38 @@ func SetCategoryNameCache(id int64, name string) {
 func ResetCategoryNameCache() {
 	categoryNameCache.Clear()
 }
+func GetCategoryStableKeyFromCache(id int64) (string, bool) {
+	val, ok := categoryStableKeyCache.Load(id)
+	if !ok {
+		return "", false
+	}
+	return val.(string), true
+}
+
+func SetCategoryStableKeyCache(id int64, key string) {
+	categoryStableKeyCache.Store(id, key)
+}
+
+func ResetCategoryStableKeyCache() {
+	categoryStableKeyCache.Clear()
+}
+
 
 func GetLocalCategoryId(sourceId string, sourceTypeId int64) int64 {
 	key := fmt.Sprintf("%s_%d", sourceId, sourceTypeId)
 	snap := getMappingSnapshot()
 	return snap.Source[key]
 }
+func GetSourceCategoryInfo(sourceId string, sourceTypeId int64) (SourceCategoryInfo, bool) {
+	key := fmt.Sprintf("%s_%d", sourceId, sourceTypeId)
+	snap := getMappingSnapshot()
+	if snap.SourceCategories == nil {
+		return SourceCategoryInfo{}, false
+	}
+	info, ok := snap.SourceCategories[key]
+	return info, ok
+}
+
 
 func GetMainCategoryName(pid int64) string {
 	if pid <= 0 {
@@ -231,13 +289,16 @@ func GetMainCategoryName(pid int64) string {
 	if name, ok := GetCategoryNameFromCache(pid); ok {
 		return name
 	}
+	if catInitialized || db.Mdb == nil {
+		return ""
+	}
 
 	var m model.Category
 	if err := db.Mdb.Where("pid = 0 AND id = ?", pid).First(&m).Error; err == nil {
 		SetCategoryNameCache(pid, m.Name)
 		return m.Name
 	}
-
+	SetCategoryNameCache(pid, "")
 	return ""
 }
 
@@ -248,12 +309,16 @@ func GetCategoryNameById(id int64) string {
 	if name, ok := GetCategoryNameFromCache(id); ok {
 		return name
 	}
+	if catInitialized || db.Mdb == nil {
+		return ""
+	}
 
 	var c model.Category
 	if err := db.Mdb.Where("id = ?", id).First(&c).Error; err == nil {
 		SetCategoryNameCache(id, c.Name)
 		return c.Name
 	}
+	SetCategoryNameCache(id, "")
 	return ""
 }
 

@@ -3,24 +3,30 @@ export interface FilmSource {
   name: string;
   uri: string;
   state: boolean;
-  grade: number;
+  sort?: number;
   isPosterSource?: boolean;
+  isPrimary?: boolean;
   interval: number;
   cd?: number;
   format?: "json" | "xml";
   domainReplaceRules?: string;
-  lastCollectTime?: string;
+  lastRunTime?: string;
+  lastRunPageCount?: number;
+  sitePageTotal?: number;
   progress?: CollectProgress | null;
-  proxyEnabled?: boolean;
+  proxyCollect?: boolean;
+  /** 该站是否已有分类副本。没有分类时采集中心不能开始采集。 */
+  categoryReady?: boolean;
+  /** 该站当前是否正在采集分类 */
+  categorySyncing?: boolean;
+  /** 该站当前是否正在执行删除 */
+  deleting?: boolean;
   createdAt?: string;
 }
 
 export type CollectProgressStatus =
   | "starting"
   | "running"
-  | "page_done"
-  | "waiting_publish"
-  | "finalizing"
   | "done"
   | "failed"
   | "stopped"
@@ -36,25 +42,18 @@ export interface CollectProgress {
   status: CollectProgressStatus;
   /** 同一次采集队列的标识；不同队列各自一条总进度 */
   queueId?: string;
+  /** 本地 starting 记下的上一轮 queueId。空字符串表示当时没有上一轮。 */
+  staleQueueId?: string;
 }
 
-/** 仍处于采集生命周期、列表应展示进度的状态 */
+/** 仍在拉页或排队。停止中的收尾不算，避免按钮提前变成开始采集。 */
 export function isActiveCollectStatus(status?: string | null): boolean {
-  return (
-    status === "starting" ||
-    status === "running" ||
-    status === "page_done" ||
-    status === "waiting_publish" ||
-    status === "finalizing"
-  );
+  return status === "starting" || status === "running";
 }
 
-export function isCollectWrapUpStatus(status?: string | null): boolean {
-  return (
-    status === "page_done" ||
-    status === "waiting_publish" ||
-    status === "finalizing"
-  );
+/** 含停止后的收尾。这段时间按钮保持「停止采集」并显示 loading。 */
+export function isCollectBusyStatus(status?: string | null): boolean {
+  return isActiveCollectStatus(status) || status === "stopping";
 }
 
 export function isPartialCollectFailure(progress?: CollectProgress | null): boolean {
@@ -67,12 +66,8 @@ export function resolveCollectStatusText(status?: string | null): string {
       return "等待中";
     case "running":
       return "采集中";
-    case "page_done":
-      return "分页完成";
-    case "waiting_publish":
-      return "等待收尾";
-    case "finalizing":
-      return "收尾发布中";
+    case "stopping":
+      return "停止中";
     case "done":
       return "采集完成";
     case "failed":
@@ -88,9 +83,6 @@ export function resolveCollectProgressStatusText(progress?: CollectProgress | nu
   if (!progress) {
     return "暂无采集进度";
   }
-  if (isCollectWrapUpStatus(progress.status) && isPartialCollectFailure(progress)) {
-    return progress.status === "finalizing" ? "部分失败，收尾发布中" : "部分失败，等待收尾";
-  }
   if (progress.status === "failed") {
     return progress.success > 0 ? "部分失败" : "采集失败";
   }
@@ -100,11 +92,14 @@ export function resolveCollectProgressStatusText(progress?: CollectProgress | nu
   return resolveCollectStatusText(progress.status);
 }
 
-export interface BatchOption {
+export interface CollectBatchItem {
   id: string;
-  name: string;
-  grade?: number;
-  state?: boolean;
+  name?: string;
+}
+
+export interface CollectBatchResult {
+  started: CollectBatchItem[];
+  skipped: CleanupSkippedItem[];
 }
 
 /** 失效源检测结果项 */
@@ -112,7 +107,7 @@ export interface InvalidSourceItem {
   id: string;
   name: string;
   uri: string;
-  grade: number;
+  sort?: number;
   state: boolean;
   reason: string;
 }
@@ -140,24 +135,24 @@ export interface SourceFormValues {
   name: string;
   uri: string;
   state: boolean;
-  grade: number;
   format: "json" | "xml";
   isPosterSource: boolean;
   interval?: number;
   cd?: number;
   domainReplaceRules?: string;
+  proxyCollect?: boolean;
 }
 
 export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   name: "",
   uri: "",
   state: true,
-  grade: 1,
   format: "json",
   isPosterSource: false,
   interval: 0,
   cd: 24,
   domainReplaceRules: "",
+  proxyCollect: false,
 };
 
 export const collectDuration = [
@@ -174,35 +169,64 @@ export const collectDuration = [
 /** 超过该数量时弹窗提醒：排队、写库、快照和内存占用都会上升 */
 export const COLLECT_SOURCE_WARN_COUNT = 12;
 
-/**
- * 单站进度百分比。
- * 活跃态与 CollectProgressView 一致；终态（done/failed/stopped）计 100%，便于批量总进度收口。
- */
-export function stationProgressPercent(progress?: CollectProgress | null): number {
-  if (!progress) {
-    return 0;
-  }
-  if (
-    progress.status === "done" ||
-    progress.status === "failed" ||
-    progress.status === "stopped"
-  ) {
-    return 100;
-  }
-  const total = Math.max(progress.total, 0);
-  const finished = Math.max(progress.success + progress.failed, 0);
-  const done = Math.min(finished, total || finished);
-  const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
-  const inPostPagePhase =
-    progress.status === "page_done" ||
-    progress.status === "waiting_publish" ||
-    progress.status === "finalizing";
-  const zeroPageFinished = total === 0 && inPostPagePhase;
-  if (inPostPagePhase || zeroPageFinished) {
-    return 99;
-  }
-  if (progress.status === "starting") {
-    return 0;
-  }
-  return Math.min(rawPercent, 99);
+export interface CollectListItemResponse extends Partial<FilmSource> {
+  id: string;
+  name: string;
+  uri: string;
 }
+
+/** 点击停止后先标成停止中，避免服务端进度还没回来时按钮跳成开始采集。 */
+export function progressAsStopping(
+  progress: CollectProgress | null | undefined,
+  id: string,
+  name: string,
+): CollectProgress {
+  if (progress) {
+    return { ...progress, status: "stopping" };
+  }
+  return { id, name, total: 0, current: 0, success: 0, failed: 0, status: "stopping" };
+}
+
+export function makeStartingProgress(
+  id: string,
+  name: string,
+  queueId: string,
+  staleQueueId?: string | null,
+): CollectProgress {
+  return {
+    id,
+    name,
+    total: 0,
+    current: 0,
+    success: 0,
+    failed: 0,
+    status: "starting",
+    queueId,
+    staleQueueId: staleQueueId == null ? undefined : staleQueueId.trim(),
+  };
+}
+
+export function normalizeSource(item: CollectListItemResponse): FilmSource {
+  return {
+    id: item.id,
+    name: item.name,
+    uri: item.uri,
+    state: Boolean(item.state),
+    sort: Number(item.sort ?? 0),
+    isPosterSource: Boolean(item.isPosterSource),
+    isPrimary: Boolean(item.isPrimary),
+    interval: Number(item.interval ?? 0),
+    cd: Number(item.cd > 0 ? item.cd : 24),
+    format: (item.format as "json" | "xml") || "json",
+    lastRunTime: item.lastRunTime,
+    lastRunPageCount: item.lastRunPageCount ? Number(item.lastRunPageCount) : 0,
+    sitePageTotal: item.sitePageTotal ? Number(item.sitePageTotal) : 0,
+    progress: item.progress ?? null,
+    proxyCollect: Boolean(item.proxyCollect),
+    categoryReady: item.categoryReady !== undefined ? Boolean(item.categoryReady) : true,
+    categorySyncing: Boolean(item.categorySyncing),
+    deleting: Boolean(item.deleting),
+    createdAt: item.createdAt,
+  };
+}
+

@@ -4,8 +4,8 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"log"
 	"net/url"
 	"regexp"
 	"strings"
@@ -59,26 +59,25 @@ var englishSegmentTypeAlias = map[string]string{
 	"episode": "episode",
 }
 
-// RandomString 生成指定长度两倍的随机字符串
-func RandomString(length int) (uuid string) {
-	b := make([]byte, length)
-	_, err := rand.Read(b)
-	if err != nil {
-		log.Fatal(err)
+// RandomString 生成指定长度两倍的十六进制随机串。
+func RandomString(length int) (string, error) {
+	if length <= 0 {
+		return "", errors.New("随机串长度无效")
 	}
-	uuid = fmt.Sprintf("%x", b)
-	return
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", b), nil
 }
 
-// GenerateSalt 生成 length为16的随机字符串
-func GenerateSalt() (uuid string) {
+// GenerateSalt 生成 16 位十六进制随机串。
+func GenerateSalt() (string, error) {
 	b := make([]byte, 8)
-	_, err := rand.Read(b)
-	if err != nil {
-		log.Fatal(err)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
 	}
-	uuid = fmt.Sprintf("%X", b)
-	return
+	return fmt.Sprintf("%X", b), nil
 }
 
 // PasswordEncrypt 密码加密 , (password+salt) md5 * 3
@@ -92,10 +91,14 @@ func PasswordEncrypt(password, salt string) string {
 	return hex.EncodeToString(r[:])
 }
 
-// ValidURL 校验http链接是否是符合规范的URL
+// ValidURL 校验http/https链接是否是符合规范的URL
 func ValidURL(s string) bool {
-	_, err := url.ParseRequestURI(s)
-	return err == nil
+	u, err := url.ParseRequestURI(strings.TrimSpace(s))
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	return (scheme == "http" || scheme == "https") && u.Host != ""
 }
 
 // ContainsAny 判断字符串是否包含切片中的任意一个关键词

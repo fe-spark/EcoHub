@@ -5,31 +5,15 @@ import AccessPageView from "./view";
 
 export default async function AccessPage() {
   const cookieStore = await cookies();
-  let isAdmin = false;
   try {
-    const response = await serverGet<{ isAdmin?: boolean }>("/manage/user/info", undefined, {
+    const response = await serverGet<{ id?: number }>("/manage/user/info", undefined, {
       Cookie: cookieStore.toString(),
     });
-    isAdmin = response.code === 0 && Boolean(response.data?.isAdmin);
-  } catch {
-    isAdmin = false;
-  }
-  if (!isAdmin) {
-    redirect("/manage");
-  }
-  try {
-    const statusResp = await serverGet<{ enabled?: boolean; hasData?: boolean; totalRows?: number }>(
-      "/manage/access/status",
-      undefined,
-      {
-        Cookie: cookieStore.toString(),
-      }
-    );
-    if (statusResp.code !== 0 || !statusResp.data?.enabled) {
-      redirect("/manage");
+    if (response.code !== 0 || !response.data?.id) {
+      redirect("/login");
     }
   } catch {
-    redirect("/manage");
+    redirect("/login");
   }
   return <AccessPageView />;
 }

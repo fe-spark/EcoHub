@@ -13,21 +13,17 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	filmplaylist "server/internal/repository/film/playlist"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/fetcher"
 	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
 	"server/internal/utils"
 )
-
-// recoverMaxRetryCount 失败页重试的最大轮次。
-const recoverMaxRetryCount = 5
 
 func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
 	if s == nil {
@@ -58,7 +54,10 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 		ctx = context.Background()
 	}
 
-	r := requestForSource(s.Uri, s.Id)
+	r, err := requestForSource(s)
+	if err != nil {
+		return scheduler.Mids{}, err
+	}
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
@@ -76,8 +75,17 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 	if batchCtx != nil {
 		batchCtx.markSourceFinished(*s)
 		batchCtx.addAffectedMIDs(s, 1, written.Affected)
+		batchCtx.AddNotifyMIDs(s.Id, written.Notify)
 	}
 	return written, nil
+}
+
+func CollectFilms(mids []int64) {
+	for _, id := range mids {
+		if id > 0 {
+			CollectSingleFilm(strconv.FormatInt(id, 10))
+		}
+	}
 }
 
 func CollectSingleFilm(ids string) {
@@ -87,7 +95,12 @@ func CollectSingleFilm(ids string) {
 		return
 	}
 
-	enabled := filterEnabledSources(repository.GetCollectSourceList())
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		log.Printf("[Spider] CollectSingleFilm 读取采集站失败: %v", err)
+		return
+	}
+	enabled := filterEnabledSources(sources)
 	if len(enabled) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 未找到任何启用的站点")
 		return
@@ -110,18 +123,9 @@ func CollectSingleFilm(ids string) {
 	}
 
 	startedAt := time.Now()
-	batch := notify.StartChangeBatch()
-	batchCtx := newCollectBatchContext(model.NotifyTriggerSingleUpdate, "单片更新", targets, batch, startedAt)
+	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, "单片更新", targets, startedAt)
 	defer batchCtx.close()
 
-	type singleResult struct {
-		source model.FilmSource
-		err    error
-	}
-	var (
-		mu      sync.Mutex
-		results []singleResult
-	)
 	var wg sync.WaitGroup
 	for _, source := range targets {
 		requestID := sourceMids[source.Id]
@@ -132,59 +136,38 @@ func CollectSingleFilm(ids string) {
 		wg.Add(1)
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
-			mids, err := collectFilmById(sourceMid, &src, batchCtx)
+			defer batchCtx.releaseSourceOccupy(src.Id)
+			_, err := collectFilmById(sourceMid, &src, batchCtx)
 			if err != nil {
+				batchCtx.RecordSourceError(src.Id, err.Error())
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
-			} else if len(mids) > 0 {
-				noteCollectedMIDs(batch, src.Id, src.Name, mids)
+				return
 			}
-			mu.Lock()
-			results = append(results, singleResult{source: src, err: err})
-			mu.Unlock()
+			if isPreferredCollectSource(src.Id) {
+				if err := batchCtx.finalizePrimarySource(src.Id); err != nil {
+					syslog.Errorf("[CollectSingleFilm] 首选站 %s 缓存刷新失败: %v", src.Name, err)
+				}
+			}
 		}(source, requestID)
 	}
 	wg.Wait()
 
-	var finalizeErr error
 	if err := batchCtx.flushAndFinalize(); err != nil {
-		syslog.Errorf("[CollectSingleFilm] 收尾刷新失败: %v", err)
-		finalizeErr = err
+		syslog.Errorf("[CollectSingleFilm] 缓存刷新失败: %v", err)
 	}
-
-	notifyResults := make([]model.SourceNotifyResult, 0, len(results))
-	for _, r := range results {
-		status := progress.StatusDone
-		errMsg := ""
-		if r.err != nil {
-			status = progress.StatusFailed
-			errMsg = r.err.Error()
-		} else if finalizeErr != nil {
-			status = progress.StatusFailed
-			errMsg = finalizeErr.Error()
-		}
-		notifyResults = append(notifyResults, notify.BuildSourceResultDirect(r.source, status, errMsg))
-	}
-	if len(notifyResults) == 0 {
-		notifyResults = append(notifyResults, model.SourceNotifyResult{
-			SourceName: "单片更新",
-			Status:     progress.StatusFailed,
-			Error:      fmt.Sprintf("影片 #%d 未匹配到任何启用站点的 source_mid", globalMid),
-			FailedCnt:  1,
-		})
-	}
-	emitBatchSummaryDirect(batch, model.NotifyTriggerSingleUpdate, notifyResults, startedAt, finalizeErr)
+	batchCtx.emitSummary()
 }
 
 func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) string {
 	if globalMid <= 0 {
 		return ""
 	}
-	sourceMid := filmplaylist.LoadSourceMidByGlobalMid(globalMid, source.Id)
-	if sourceMid > 0 {
+	var sourceMid int64
+	if err := db.Mdb.Model(&model.MovieSourceMapping{}).
+		Where("global_mid = ? AND source_id = ?", globalMid, source.Id).
+		Select("source_mid").
+		First(&sourceMid).Error; err == nil && sourceMid > 0 {
 		return strconv.FormatInt(sourceMid, 10)
-	}
-	if source.Grade == model.MasterCollect {
-		return strconv.FormatInt(globalMid, 10)
 	}
 	return ""
 }
@@ -193,174 +176,323 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 	if s == nil || fr == nil {
 		return
 	}
+	beginFailureRetry(fr.ID)
+	settled := false
+	finish := func(status, retryCount int, cause string, hasResult bool) {
+		if settled {
+			return
+		}
+		settled = true
+		settleFailureRetry(fr.ID, status, retryCount, cause, hasResult)
+	}
+	defer func() {
+		finish(fr.Status, fr.RetryCount, fr.Cause, false)
+	}()
 	select {
 	case <-ctx.Done():
+		settled = true
+		abandonFailureRetry(fr.ID)
 		return
 	default:
 	}
-	r := requestForSource(s.Uri, s.Id)
+	r, err := requestForSource(s)
+	if err != nil {
+		finish(fr.Status, fr.RetryCount, err.Error(), false)
+		return
+	}
 	r.Params.Set("pg", fmt.Sprint(fr.PageNumber))
 	if fr.Hour > 0 {
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
 	}
 
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		settled = true
+		abandonFailureRetry(fr.ID)
+		return
+	}
 	if err != nil || len(list) <= 0 {
-		markRecoverFailure(s, fr, "recover_fetch", err)
-		log.Println("Recover GetMovieDetail Error: ", err)
+		if err == nil {
+			err = errors.New("response list is empty")
+		}
+		if batchCtx != nil {
+			batchCtx.RecordSourceError(s.Id, err.Error())
+		}
+		status, retryCount, cause, wrote := markRecoverFailure(s, fr, "recover_fetch", err)
+		if wrote {
+			finish(status, retryCount, cause, true)
+		}
+		syslog.Warnf("[Spider][Recover] 采集详情失败 source=%s page=%d err=%v", s.Name, fr.PageNumber, err)
 		return
 	}
 
 	written, err := saveCollectedFilmForCollect(ctx, s, fr.PageNumber, list)
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		settled = true
+		abandonFailureRetry(fr.ID)
+		return
+	}
 	if err != nil {
-		markRecoverFailure(s, fr, "recover_save", err)
-		log.Println("Recover saveCollectedFilm Error: ", err)
+		if batchCtx != nil {
+			batchCtx.RecordSourceError(s.Id, err.Error())
+		}
+		status, retryCount, cause, wrote := markRecoverFailure(s, fr, "recover_save", err)
+		if wrote {
+			finish(status, retryCount, cause, true)
+		}
+		syslog.Warnf("[Spider][Recover] 保存影片失败 source=%s page=%d err=%v", s.Name, fr.PageNumber, err)
 		return
 	}
 	if batchCtx != nil {
-		noteCollectedMIDs(batchCtx.batch, s.Id, s.Name, written.Notify)
 		batchCtx.addAffectedMIDs(s, fr.Hour, written.Affected)
+		batchCtx.AddNotifyMIDs(s.Id, written.Notify)
 	}
-	repository.DeleteFailureRecord(fr)
+	if err = repository.MarkFailureRecordRetrySucceeded(fr); err != nil {
+		syslog.Errorf("[Spider][Recover] 失败记录标记成功失败 source_id=%s source=%s page=%d hour=%d err=%v", s.Id, s.Name, fr.PageNumber, fr.Hour, err)
+		return
+	}
+	finish(model.FailureRecordStatusSuccess, fr.RetryCount, "", true)
 }
 
-func markRecoverFailure(s *model.FilmSource, fr *model.FailureRecord, phase string, err error) {
+func markRecoverFailure(s *model.FilmSource, fr *model.FailureRecord, phase string, err error) (status, retryCount int, cause string, wrote bool) {
 	if err == nil {
 		err = errors.New("unknown error")
 	}
-	cause := fmt.Sprintf("%s: %v", phase, err)
-	final, retryCount, updateErr := repository.MarkFailureRecordRetryFailed(fr, cause, recoverMaxRetryCount)
+	cause = fmt.Sprintf("%s: %v", phase, err)
+	final, count, updateErr := repository.MarkFailureRecordRetryFailed(fr, cause, model.MaxFailureRetryCount)
 	if updateErr != nil {
 		syslog.Errorf("[Spider][Recover] 失败记录更新失败 source_id=%s source=%s page=%d hour=%d err=%v", s.Id, s.Name, fr.PageNumber, fr.Hour, updateErr)
-		return
+		return 0, 0, "", false
 	}
 	if final {
-		syslog.Warnf("[Spider][Recover] 失败页达到最大自动重试次数 source_id=%s source=%s page=%d hour=%d retry_count=%d", s.Id, s.Name, fr.PageNumber, fr.Hour, retryCount)
+		syslog.Warnf("[Spider][Recover] 失败页达到最大自动重试次数 source_id=%s source=%s page=%d hour=%d retry_count=%d", s.Id, s.Name, fr.PageNumber, fr.Hour, count)
+	}
+	status = model.FailureRecordStatusPending
+	if final {
+		status = model.FailureRecordStatusFailed
+	}
+	return status, count, cause, true
+}
+
+var (
+	errFailureRecoverMissing  = errors.New("采集重试执行失败: 失败记录不存在")
+	errFailureRecoverSuccess  = errors.New("已重试成功，无需重复重试")
+	errFailureRecoverNoSource = errors.New("采集站不存在，不能重试")
+	errFailureRecoverDisabled = errors.New("采集站已停用，不能重试")
+	errFailureRecoverBusy     = errors.New("采集站正在采集，请稍后再试")
+	errFailureRecoverIndexing = errors.New("检索索引构建中，请稍后再试")
+	errFailureRecoverRunning  = errors.New("正在重试中")
+)
+
+// FailureRecoverOutcome 是一次重试入队的结果。排队本身不代表页面已经重试完成。
+type FailureRecoverOutcome struct {
+	Queued   int
+	Already  int
+	Skipped  int
+	Busy     int
+	Disabled int
+	NotFound int
+	Indexing int
+}
+
+func (o FailureRecoverOutcome) skippedReasonDesc() string {
+	parts := make([]string, 0, 4)
+	if o.Disabled > 0 {
+		parts = append(parts, fmt.Sprintf("采集站已停用 %d 条", o.Disabled))
+	}
+	if o.Indexing > 0 {
+		parts = append(parts, fmt.Sprintf("检索索引构建中 %d 条", o.Indexing))
+	}
+	if o.Busy > 0 {
+		parts = append(parts, fmt.Sprintf("采集站正在采集中 %d 条", o.Busy))
+	}
+	if o.NotFound > 0 {
+		parts = append(parts, fmt.Sprintf("采集站不存在 %d 条", o.NotFound))
+	}
+	other := o.Skipped - (o.Disabled + o.Busy + o.NotFound + o.Indexing)
+	if other > 0 && len(parts) > 0 {
+		parts = append(parts, fmt.Sprintf("其他 %d 条", other))
+	}
+	if len(parts) == 1 {
+		switch {
+		case o.Disabled == o.Skipped:
+			return "采集站已停用"
+		case o.Indexing == o.Skipped:
+			return "检索索引构建中"
+		case o.Busy == o.Skipped:
+			return "采集站正在采集中"
+		case o.NotFound == o.Skipped:
+			return "采集站不存在"
+		}
+	}
+	return strings.Join(parts, "、")
+}
+
+func (o FailureRecoverOutcome) Message() string {
+	switch {
+	case o.Queued == 0 && o.Already == 0 && o.Skipped == 0:
+		return "没有待重试的记录"
+	case o.Queued == 0 && o.Skipped == 0:
+		return fmt.Sprintf("%d 条已在重试，没有新的任务", o.Already)
+	case o.Queued == 0 && o.Already == 0:
+		if desc := o.skippedReasonDesc(); desc != "" {
+			return fmt.Sprintf("%d 条未开始：%s", o.Skipped, desc)
+		}
+		return fmt.Sprintf("%d 条未开始：采集站正在采集、已停用或不存在", o.Skipped)
+	case o.Queued == 0:
+		if desc := o.skippedReasonDesc(); desc != "" {
+			return fmt.Sprintf("没有新的任务：已在重试 %d 条，跳过 %d 条（%s）", o.Already, o.Skipped, desc)
+		}
+		return fmt.Sprintf("没有新的任务：已在重试 %d 条，跳过 %d 条", o.Already, o.Skipped)
+	default:
+		msg := fmt.Sprintf("已加入重试 %d 条", o.Queued)
+		if o.Already > 0 {
+			msg += fmt.Sprintf("，已在重试 %d 条", o.Already)
+		}
+		if o.Skipped > 0 {
+			if desc := o.skippedReasonDesc(); desc != "" {
+				msg += fmt.Sprintf("，跳过 %d 条（%s）", o.Skipped, desc)
+			} else {
+				msg += fmt.Sprintf("，跳过 %d 条", o.Skipped)
+			}
+		}
+		return msg
 	}
 }
 
-func SingleRecoverSpider(fr *model.FailureRecord) {
-	s := repository.FindCollectSourceById(fr.OriginId)
-	if s == nil {
-		syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
-		return
+// AcceptFailureRecover 校验通过后才进入重试队列。站点不存在、已停用或正被别的采集占用时直接拒绝。
+func AcceptFailureRecover(fr *model.FailureRecord) error {
+	if fr == nil || fr.ID == 0 {
+		return errFailureRecoverMissing
 	}
-	claimed := filterCollectableSources([]model.FilmSource{*s}, "失败恢复")
-	if len(claimed) == 0 {
-		log.Printf("[Spider] 站点 %s 已在正采集队列中，跳过失败页重试", s.Id)
-		return
+	if fr.Status == model.FailureRecordStatusSuccess {
+		return errFailureRecoverSuccess
 	}
-	startedAt := time.Now()
-	batch := notify.StartChangeBatch()
-	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "失败恢复", claimed, batch, startedAt, true)
-	if err := collectLifecycle.beginSource(s.Id); err != nil {
-		syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", s.Id, err)
-		batchCtx.close()
-		if notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
-			emitBatchSummaryDirect(batch, model.NotifyTriggerRecover, []model.SourceNotifyResult{
-				notify.BuildSourceResultDirect(*s, progress.StatusFailed, err.Error()),
-			}, startedAt, err)
-		} else {
-			emitSourceFailedNotify(s.Id, s.Name, err.Error())
-		}
-		return
+	source := repository.FindCollectSourceById(fr.OriginId)
+	if source == nil {
+		return errFailureRecoverNoSource
 	}
-	defer collectLifecycle.endSource(s.Id)
+	if !source.State {
+		return errFailureRecoverDisabled
+	}
+	if filmsnapshot.IsSearchIndexRebuilding() {
+		return errFailureRecoverIndexing
+	}
+	if failureRecoverBlocked(source.Id) {
+		return errFailureRecoverBusy
+	}
+	if !TryBeginFailureRetry(fr.ID) {
+		return errFailureRecoverRunning
+	}
+	if fr.Status == model.FailureRecordStatusFailed {
+		_ = repository.UpdateFailureRecordStatusByID(fr.ID, model.FailureRecordStatusPending)
+		fr.Status = model.FailureRecordStatusPending
+	}
+	if pushFailureRecover(source.Id, *fr) {
+		go serveFailureRecoverLane(source.Id, *source, recoverQueuedFailureRecords)
+	}
+	return nil
+}
 
-	recoverFilmPage(context.Background(), s, fr, batchCtx)
-	batchCtx.markSourceFinished(*s)
-	finalizeErr := batchCtx.flushAndFinalize()
-	if finalizeErr != nil {
-		syslog.Errorf("[Spider] 站点 %s 失败页重试收尾刷新失败: %v", s.Id, finalizeErr)
+// EnqueuePendingFailureRecovers 把所有待重试记录放进各自站点的队列。
+// 本站队列已在跑时继续加入；别的采集占着站点时跳过，不把记录标成重试中。
+func EnqueuePendingFailureRecovers() (FailureRecoverOutcome, error) {
+	var out FailureRecoverOutcome
+	list, err := repository.PendingRecord()
+	if err != nil {
+		return out, err
 	}
-	batchCtx.emitSummary(finalizeErr)
+	for i := range list {
+		rec := &list[i]
+		err := AcceptFailureRecover(rec)
+		switch {
+		case err == nil:
+			out.Queued++
+		case errors.Is(err, errFailureRecoverRunning):
+			out.Already++
+		case errors.Is(err, errFailureRecoverIndexing):
+			out.Skipped++
+			out.Indexing++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 检索索引构建中",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
+		case errors.Is(err, errFailureRecoverBusy):
+			out.Skipped++
+			out.Busy++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 采集站正在采集中",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
+		case errors.Is(err, errFailureRecoverDisabled):
+			out.Skipped++
+			out.Disabled++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 采集站已停用",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
+		case errors.Is(err, errFailureRecoverNoSource):
+			out.Skipped++
+			out.NotFound++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 采集站不存在",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
+		default:
+			out.Skipped++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: %v",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber, err)
+		}
+	}
+	return out, nil
+}
+
+func recoverQueuedFailureRecords(source model.FilmSource, records []model.FailureRecord, batchCtx *collectBatchContext) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// 上一轮采集留下的 stopping/stopped 不是这次重试的停止信号。
+	baselineStopped := progress.IsStopping(source.Id) || progress.IsStopped(source.Id)
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-ticker.C:
+				if recoverStopRequested(source.Id, baselineStopped) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	for i := range records {
+		if ctx.Err() != nil || recoverStopRequested(source.Id, baselineStopped) {
+			for j := i; j < len(records); j++ {
+				abandonFailureRetry(records[j].ID)
+			}
+			abandonFailureRecoverPending(source.Id)
+			break
+		}
+		record := records[i]
+		recoverFilmPage(ctx, &source, &record, batchCtx)
+	}
+}
+
+func recoverStopRequested(id string, baselineStopped bool) bool {
+	if baselineStopped {
+		return false
+	}
+	return progress.IsStopping(id) || progress.IsStopped(id)
 }
 
 func FullRecoverSpider() {
-	list := repository.PendingRecord()
-	if len(list) == 0 {
+	out, err := EnqueuePendingFailureRecovers()
+	if err != nil {
+		log.Printf("[Spider] 失败记录重试：读取待重试记录失败: %v", err)
 		return
 	}
-	sourcesToFlush := make([]model.FilmSource, 0, len(list))
-	seen := make(map[string]struct{}, len(list))
-	recordsBySource := make(map[string][]model.FailureRecord, len(list))
-	sourceByID := make(map[string]model.FilmSource, len(list))
-	limit := config.CollectPageWorkers
-	if limit <= 0 {
-		limit = config.DefaultCollectPageWorkers
-	}
-	if limit <= 0 {
-		limit = 1
-	}
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
-	startedAt := time.Now()
-	batch := notify.StartChangeBatch()
-	for i := range list {
-		fr := list[i]
-		s := repository.FindCollectSourceById(fr.OriginId)
-		if s == nil {
-			syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
-			continue
-		}
-		if _, ok := seen[s.Id]; !ok {
-			seen[s.Id] = struct{}{}
-			sourcesToFlush = append(sourcesToFlush, *s)
-			sourceByID[s.Id] = *s
-		}
-		recordsBySource[s.Id] = append(recordsBySource[s.Id], fr)
-	}
-	sourcesToFlush = filterCollectableSources(sourcesToFlush, "FullRecoverSpider")
-	if len(sourcesToFlush) == 0 {
-		log.Println("[Spider] FullRecoverSpider: 待恢复站点均已在正采集队列中，跳过")
-		return
-	}
-	claimed := make(map[string]struct{}, len(sourcesToFlush))
-	for _, source := range sourcesToFlush {
-		claimed[source.Id] = struct{}{}
-	}
-	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "FullRecoverSpider", sourcesToFlush, batch, startedAt)
-	for sourceID, records := range recordsBySource {
-		src, ok := sourceByID[sourceID]
-		if !ok {
-			continue
-		}
-		if _, ok := claimed[sourceID]; !ok {
-			continue
-		}
-		recordsCopy := append([]model.FailureRecord(nil), records...)
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(source model.FilmSource, pending []model.FailureRecord) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if err := collectLifecycle.beginSource(source.Id); err != nil {
-				syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", source.Id, err)
-				return
-			}
-			defer collectLifecycle.endSource(source.Id)
-			for i := range pending {
-				record := pending[i]
-				recoverFilmPage(context.Background(), &source, &record, batchCtx)
-			}
-			batchCtx.markSourceFinished(source)
-		}(src, recordsCopy)
-	}
-	wg.Wait()
-	var finalizeErr error
-	if err := batchCtx.flushAndFinalize(); err != nil {
-		syslog.Errorf("[FullRecoverSpider] 收尾刷新失败: %v", err)
-		finalizeErr = err
-	}
-	batchCtx.emitSummary(finalizeErr)
+	log.Printf("[Spider] 失败记录重试：%s", out.Message())
 }
 
 func ClearSpider() error {
 	filmrepo.ReportResetProgress(5, "正在停止采集任务")
 	StopAllTasks()
-	if err := collectLifecycle.waitIdle(time.Second * 30); err != nil {
-		return err
-	}
 	filmrepo.ReportResetProgress(15, "正在清空数据")
 	return collectLifecycle.runExclusive(func() error {
 		repository.ResetCollectStatsCoalescer()
@@ -369,19 +501,27 @@ func ClearSpider() error {
 }
 
 func CollectApiTest(s model.FilmSource) error {
-	return CollectApiTestWithTimeout(s, 0)
+	return CollectApiTestCtx(context.Background(), s)
+}
+
+// CollectApiTestCtx 在给定超时内探测采集站。
+func CollectApiTestCtx(ctx context.Context, s model.FilmSource) error {
+	return collectApiTest(ctx, s, 0, false, false)
 }
 
 func CollectApiTestChoosingProxy(s model.FilmSource, useProxy bool) error {
-	return collectApiTest(s, 0, useProxy, true)
+	return collectApiTest(context.Background(), s, 0, useProxy, true)
 }
 
 func CollectApiTestWithTimeout(s model.FilmSource, timeoutSeconds int) error {
-	return collectApiTest(s, timeoutSeconds, false, false)
+	return collectApiTest(context.Background(), s, timeoutSeconds, false, false)
 }
 
-func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxyChosen bool) error {
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+func collectApiTest(ctx context.Context, s model.FilmSource, timeoutSeconds int, useProxy bool, proxyChosen bool) error {
+	if ctx == nil {
+		return errors.New("检测上下文为空")
+	}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, Ctx: ctx, SkipTLSVerify: s.SkipTLSVerify}
 	r.Params.Set("ac", "list")
 	r.Params.Set("pg", "1")
 	if timeoutSeconds > 0 {
@@ -389,20 +529,30 @@ func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxy
 	}
 	if proxyChosen {
 		if useProxy {
-			cfg := repository.GetProxyConfig()
+			cfg, err := repository.GetProxyConfig()
+			if err != nil {
+				return err
+			}
 			if !cfg.Enabled || strings.TrimSpace(cfg.ProxyURL) == "" {
 				return errors.New("测试失败, 代理未开启或地址为空")
 			}
 			r.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
 		}
-	} else if s.Id != "" {
-		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+	} else if s.ProxyCollect {
+		ok, proxy, err := repository.ResolveSpiderProxy()
+		if err != nil {
+			return err
+		}
+		if ok {
 			r.ProxyURL = proxy
 		}
-	} else {
-		cfg := repository.GetProxyConfig()
-		if cfg.Enabled && cfg.Scope == model.ProxyScopeAll && cfg.ProxyURL != "" {
-			r.ProxyURL = cfg.ProxyURL
+	} else if s.Id != "" {
+		ok, proxy, err := repository.ResolveSourceProxy(s.Id)
+		if err != nil {
+			return err
+		}
+		if ok {
+			r.ProxyURL = proxy
 		}
 	}
 	err := utils.ApiTest(&r)

@@ -10,6 +10,7 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/service"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -21,54 +22,82 @@ type AccessHandler struct{}
 
 var AccessHd = new(AccessHandler)
 
-func (h *AccessHandler) isAccessible() bool {
-	if config.AccessLogEnabled {
-		return true
-	}
-	hasData, _ := access.HasPersistedData()
-	return hasData
-}
-
 // Status 查询数据分析功能开启状态与落库数据状态
 func (h *AccessHandler) Status(c *gin.Context) {
-	hasData, totalRows := access.HasPersistedData()
+	hasData, totalRows, err := access.HasPersistedData()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
-		"enabled":   config.AccessLogEnabled,
+		"enabled":   access.IsEnabled(),
 		"hasData":   hasData,
 		"totalRows": totalRows,
 	}, "数据分析状态获取成功", c)
 }
 
-func (h *AccessHandler) Overview(c *gin.Context) {
-	if !h.isAccessible() {
-		dto.Failed("数据分析功能未开启", c)
+// GetConfig 读取数据分析配置
+func (h *AccessHandler) GetConfig(c *gin.Context) {
+	cfg, err := service.ManageSvc.GetAnalyticsConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
+	dto.Success(cfg, "数据分析配置获取成功", c)
+}
+
+// UpdateAnalyticsConfigRequest 更新数据分析配置请求
+type UpdateAnalyticsConfigRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// UpdateConfig 更新数据分析配置并热生效
+func (h *AccessHandler) UpdateConfig(c *gin.Context) {
+	var req UpdateAnalyticsConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if err := service.ManageSvc.UpdateAnalyticsConfig(model.AnalyticsConfig{
+		Enabled: req.Enabled,
+	}); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(model.AnalyticsConfig{Enabled: req.Enabled}, "数据分析配置更新成功", c)
+}
+
+func (h *AccessHandler) Overview(c *gin.Context) {
 	data, err := access.QueryOverviewScope(c.Query("day"), c.Query("module"), c.Query("platform"))
 	if err != nil {
-		dto.Failed("数据分析暂不可用", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(data, "数据分析概览获取成功", c)
 }
 
-func (h *AccessHandler) Tops(c *gin.Context) {
-	if !h.isAccessible() {
-		dto.Failed("数据分析功能未开启", c)
+func (h *AccessHandler) SourceCalls(c *gin.Context) {
+	list, err := access.QuerySourceCalls(c.Query("day"))
+	if err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
+	dto.Success(gin.H{"list": list}, "采集站调用次数获取成功", c)
+}
+
+func (h *AccessHandler) Tops(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	kind := c.DefaultQuery("kind", "path")
 	items, err := access.QueryTopsScope(c.Query("day"), kind, c.Query("module"), c.Query("platform"), limit)
 	if err != nil {
-		dto.Failed("数据分析暂不可用", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(gin.H{"kind": kind, "items": items}, "数据分析榜单获取成功", c)
 }
 
 func (h *AccessHandler) TrackView(c *gin.Context) {
-	if !config.AccessLogEnabled {
+	if !access.IsEnabled() {
 		dto.SuccessOnlyMsg("ok", c)
 		return
 	}
@@ -85,10 +114,6 @@ func (h *AccessHandler) TrackView(c *gin.Context) {
 }
 
 func (h *AccessHandler) Logs(c *gin.Context) {
-	if !h.isAccessible() {
-		dto.Failed("数据分析功能未开启", c)
-		return
-	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
 	list, err := access.QueryLogsScope(
 		c.Query("day"),
@@ -101,7 +126,7 @@ func (h *AccessHandler) Logs(c *gin.Context) {
 		limit,
 	)
 	if err != nil {
-		dto.Failed("数据分析暂不可用", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(gin.H{"list": list}, "数据流转日志获取成功", c)
@@ -119,7 +144,11 @@ func (h *AccessHandler) DataStats(c *gin.Context) {
 		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可查看数据分析统计", c)
 		return
 	}
-	stats := access.GetAccessDataStats()
+	stats, err := access.GetAccessDataStats()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(stats, "数据分析统计获取成功", c)
 }
 

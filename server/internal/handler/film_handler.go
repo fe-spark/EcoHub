@@ -22,6 +22,7 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	var s = model.SearchVo{Paging: &dto.Page{}}
 	var err error
 
+	s.SourceId = strings.TrimSpace(c.DefaultQuery("sourceId", ""))
 	s.Name = c.DefaultQuery("name", "")
 	s.Pid, err = strconv.ParseInt(c.DefaultQuery("pid", "0"), 10, 64)
 	if err != nil {
@@ -71,51 +72,59 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	}
 
 	s.Paging = dto.GetPageParams(c)
-	sl := service.FilmSvc.GetFilmPage(s)
-	options := service.FilmSvc.GetSearchOptions()
+	sl, err := service.FilmSvc.GetFilmPage(&s)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
-		"params":  s,
-		"list":    sl,
-		"options": options,
+		"params": s,
+		"list":   sl,
 	}, "影片分页信息获取成功", c)
 }
 
-// FilmAdd 手动添加影片
-func (h *FilmHandler) FilmAdd(c *gin.Context) {
+// FilmSearchOptions 获取影片检索筛选项（按 sourceId 联动返回对应站点的分类树与配置项）
+func (h *FilmHandler) FilmSearchOptions(c *gin.Context) {
+	sourceId := strings.TrimSpace(c.DefaultQuery("sourceId", ""))
+	options, err := service.FilmSvc.GetSearchOptions(sourceId)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(options, "影片检索筛选项获取成功", c)
+}
+
+// FilmSave 保存影片信息（支持手动添加或编辑更新）
+func (h *FilmHandler) FilmSave(c *gin.Context) {
 	var fd = model.FilmDetailVo{}
 	if err := c.ShouldBindJSON(&fd); err != nil {
-		dto.Failed("影片添加失败, 影片参数提交异常", c)
+		dto.Failed("影片保存失败, 影片参数提交异常", c)
 		return
 	}
 
 	if err := service.FilmSvc.SaveFilmDetail(fd); err != nil {
-		dto.Failed(fmt.Sprint("影片添加失败, 影片信息保存错误: ", err.Error()), c)
+		dto.Failed(fmt.Sprint("影片保存失败, 影片信息保存错误: ", err.Error()), c)
 		return
 	}
-	dto.SuccessOnlyMsg("影片信息添加成功", c)
+	dto.SuccessOnlyMsg("影片信息已保存", c)
 }
 
-// FilmDelete 删除影片检索信息
+// FilmDelete 删除影片检索信息（兼容单个与批量）
 func (h *FilmHandler) FilmDelete(c *gin.Context) {
 	var req struct {
-		Id string `json:"id"`
+		Ids []int64 `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常", c)
+		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	idStr := strings.TrimSpace(req.Id)
-	if idStr == "" {
-		dto.Failed("删除失败,缺少ID参数", c)
+	if len(req.Ids) == 0 {
+		dto.Failed("缺少影片 ID", c)
 		return
 	}
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		dto.Failed("删除失败,参数类型异常", c)
-		return
-	}
-	if err = service.FilmSvc.DelFilm(id); err != nil {
-		dto.Failed(fmt.Sprintln("删除失败: ", err.Error()), c)
+
+	if err := service.FilmSvc.DelFilms(req.Ids); err != nil {
+		dto.Failed("删除失败: "+err.Error(), c)
 		return
 	}
 	dto.SuccessOnlyMsg("影片删除成功", c)
@@ -123,53 +132,61 @@ func (h *FilmHandler) FilmDelete(c *gin.Context) {
 
 // ----------------------------------------------------影片分类处理----------------------------------------------------
 
-// FilmClassTree 影片分类树数据
+// FilmClassTree 影片分类树数据。scoped=1 时只返回指定采集站的分类，并带上站点选项。
 func (h *FilmHandler) FilmClassTree(c *gin.Context) {
-	tree := service.FilmSvc.GetFilmClassTree()
-	dto.Success(tree, "影片分类信息获取成功", c)
-}
-
-// FindFilmClass 获取指定ID对应的影片分类信息
-func (h *FilmHandler) FindFilmClass(c *gin.Context) {
-	idStr := c.DefaultQuery("id", "")
-	if idStr == "" {
-		dto.Failed("影片分类信息获取失败, 分类Id不能为空", c)
+	if c.Query("scoped") != "1" {
+		tree := service.FilmSvc.GetFilmClassTree()
+		dto.Success(tree, "影片分类信息获取成功", c)
 		return
 	}
-	id, err := strconv.ParseInt(idStr, 10, 64)
+	view, err := service.FilmSvc.GetScopedClassTree(c.Query("sourceId"))
 	if err != nil {
-		dto.Failed("影片分类信息获取失败, 参数分类Id格式异常", c)
-		return
-	}
-	class := service.FilmSvc.GetFilmClassById(id)
-	if class == nil {
-		dto.Failed("影片分类信息获取失败, 分类信息不存在", c)
-		return
-	}
-	dto.Success(class, "分类信息查找成功", c)
-}
-
-// UpdateFilmClass 更新指定分类的显示状态
-func (h *FilmHandler) UpdateFilmClass(c *gin.Context) {
-	var class = model.CategoryTree{}
-	if err := c.ShouldBindJSON(&class); err != nil {
-		dto.Failed("更新失败, 请求参数异常", c)
-		return
-	}
-	if class.Id == 0 {
-		dto.Failed("更新失败, 分类Id缺失", c)
-		return
-	}
-	if err := service.FilmSvc.UpdateClass(class); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.SuccessOnlyMsg("影片分类状态更新成功", c)
+	sources := make([]gin.H, 0, len(view.Sources))
+	for _, source := range view.Sources {
+		sources = append(sources, gin.H{"id": source.Id, "name": source.Name, "state": source.State})
+	}
+	dto.Success(gin.H{
+		"id":              view.Tree.Id,
+		"pid":             view.Tree.Pid,
+		"name":            view.Tree.Name,
+		"show":            view.Tree.Show,
+		"children":        view.Tree.Children,
+		"sources":         sources,
+		"defaultSourceId": view.DefaultSourceId,
+		"currentSourceId": view.CurrentSourceId,
+	}, "影片分类信息获取成功", c)
+}
+
+// FilmRefresh 批量重新采集指定影片
+func (h *FilmHandler) FilmRefresh(c *gin.Context) {
+	var req struct {
+		Ids []int64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数格式异常", c)
+		return
+	}
+	cleanIds := make([]int64, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id > 0 {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
+		dto.Failed("缺少影片 ID", c)
+		return
+	}
+	service.SpiderSvc.CollectFilms(cleanIds)
+	dto.SuccessOnlyMsg("更新任务已开启", c)
 }
 
 func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 	var req struct {
 		Children []*model.CategoryTree `json:"children"`
+		SourceId string                `json:"sourceId"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("保存失败, 请求参数异常", c)
@@ -179,18 +196,15 @@ func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 		dto.Failed("保存失败, 分类结构不能为空", c)
 		return
 	}
-	if err := service.FilmSvc.SaveClassTree(req.Children); err != nil {
+	var err error
+	if strings.TrimSpace(req.SourceId) != "" {
+		err = service.FilmSvc.SaveSourceClassTree(req.SourceId, req.Children)
+	} else {
+		err = service.FilmSvc.SaveClassTree(req.Children)
+	}
+	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.SuccessOnlyMsg("分类排序与层级已更新", c)
-}
-
-// CollectFilmClass 重置当前分类并重新获取主站原始分类
-func (h *FilmHandler) CollectFilmClass(c *gin.Context) {
-	if err := service.SpiderSvc.FilmClassCollect(); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("分类已重置为主站原始分类", c)
+	dto.SuccessOnlyMsg("分类变更已保存", c)
 }

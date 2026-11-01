@@ -1,8 +1,9 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net/url"
@@ -19,8 +20,9 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/utils"
+	"server/internal/repository/support"
 )
 
 type ProvideService struct{}
@@ -30,68 +32,19 @@ var (
 	tvboxListSfGroup singleflight.Group
 )
 
-// GetVodDirectBySource 获取指定采集站直连原始数据(MacCMS 兼容)
-func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int, wd string, h int, ids string, year int, area, lang, plot, sort string) ([]byte, error) {
-	if sourceId == "" {
-		return nil, errors.New("source is required")
-	}
-	s := repository.FindCollectSourceById(sourceId)
-	if s == nil || !s.State {
-		return nil, errors.New("collect source not found or disabled")
-	}
-
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, ProxyURL: sourceProxyURL(s.Id)}
-	if ac == "" {
-		ac = "list"
-	}
-	r.Params.Set("ac", ac)
-	if t > 0 {
-		r.Params.Set("t", strconv.Itoa(t))
-	}
-	if pg > 0 {
-		r.Params.Set("pg", strconv.Itoa(pg))
-	}
-	if wd != "" {
-		r.Params.Set("wd", wd)
-	}
-	if h > 0 {
-		r.Params.Set("h", strconv.Itoa(h))
-	}
-	if ids != "" {
-		r.Params.Set("ids", ids)
-	}
-	if year > 0 {
-		r.Params.Set("year", strconv.Itoa(year))
-	}
-	if area != "" {
-		r.Params.Set("area", area)
-	}
-	if lang != "" {
-		r.Params.Set("lang", lang)
-		r.Params.Set("language", lang)
-	}
-	if plot != "" {
-		r.Params.Set("plot", plot)
-	}
-	if sort != "" {
-		r.Params.Set("sort", sort)
-	}
-
-	utils.ApiGet(&r)
-	if len(r.Resp) > 0 {
-		return r.Resp, nil
-	}
-	if r.Err != "" {
-		return nil, errors.New(r.Err)
-	}
-	return nil, errors.New("empty response from collect source")
-}
-
 // GetClassList 获取格式化的分类列表和筛选条件
-func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[string]any) {
+func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass, map[string][]map[string]any, error) {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = sourceIdOpt[0]
+	}
+	sourceId = resolveProvideSourceID(sourceId)
 	// 1. 尝试从 Redis 获取缓存 (TVBox 配置缓存 5 分钟)
 	categoryVersion := repository.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s", config.TVBoxConfigCacheKey, categoryVersion)
+	if sourceId != "" {
+		cacheKey = fmt.Sprintf("%s:src_%s:v%s", config.TVBoxConfigCacheKey, sourceId, categoryVersion)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var res struct {
@@ -99,7 +52,7 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 				Filters   map[string][]map[string]any
 			}
 			if json.Unmarshal([]byte(data), &res) == nil {
-				return res.ClassList, res.Filters
+				return res.ClassList, res.Filters, nil
 			}
 		}
 	}
@@ -107,7 +60,10 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 	var classList []model.FilmClass
 	filters := make(map[string][]map[string]any)
 
-	tree := repository.GetActiveCategoryTree()
+	tree, err := repository.GetActiveCategoryTree(sourceId)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	type categoryResult struct {
 		index   int
@@ -117,6 +73,8 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 
 	resultChan := make(chan categoryResult, len(tree.Children))
 	var wg sync.WaitGroup
+	var filterErr error
+	var errMu sync.Mutex
 
 	for i, c := range tree.Children {
 		if !c.Show {
@@ -126,7 +84,15 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		go func(index int, category *model.CategoryTree) {
 			defer wg.Done()
 
-			searchTags := filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), category.Id)
+			searchTags, tagErr := filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), category.Id, sourceId)
+			if tagErr != nil {
+				errMu.Lock()
+				if filterErr == nil {
+					filterErr = tagErr
+				}
+				errMu.Unlock()
+				return
+			}
 			tvboxFilters := make([]map[string]any, 0)
 
 			// Robustly get metadata from searchTags
@@ -232,6 +198,9 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		classList = append(classList, f.item)
 		filters[strconv.FormatInt(f.item.ID, 10)] = f.filters
 	}
+	if filterErr != nil {
+		return nil, nil, filterErr
+	}
 
 	// 写入 Redis 缓存 (5 分钟)
 	if db.Rdb != nil {
@@ -244,20 +213,26 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		}
 	}
 
-	return classList, filters
+	return classList, filters, nil
 }
 
-// GetVodList 获取视频列表 (支持多维度筛选)
-func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList, error) {
+// GetVodList 获取视频列表 (支持多维度筛选与采集源隔离)
+func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	wd = strings.TrimSpace(wd)
-	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
-		return 1, 1, 0, []model.FilmList{}, nil
-	}
+	sourceId = resolveProvideSourceID(sourceId)
 	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
 	if len([]rune(wd)) > 64 || strings.HasPrefix(wd, "http://") || strings.HasPrefix(wd, "https://") {
+		return 1, 1, 0, []model.FilmList{}, nil
+	}
+
+	pid := int64(t)
+	if pid > 0 && !support.IsCategoryVisible(0, pid) {
+		return 1, 1, 0, []model.FilmList{}, nil
+	}
+	if cid > 0 && !support.IsCategoryVisible(cid, pid) {
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
 	version := filmsnapshot.GetActiveReadModelVersion()
@@ -274,28 +249,35 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
-		cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, t, cid, pg, sort, limit)
+		if sourceId != "" {
+			cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:src_%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, sourceId, t, cid, pg, sort, limit)
+		} else {
+			cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, t, cid, pg, sort, limit)
+		}
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 				var res tvboxListResult
 				if json.Unmarshal([]byte(data), &res) == nil {
-					return res.Current, res.PageCount, res.Total, res.VodList, nil
+					filteredVodList := make([]model.FilmList, 0, len(res.VodList))
+					for _, item := range res.VodList {
+						if support.IsCategoryVisible(int64(item.TypeID), 0) {
+							filteredVodList = append(filteredVodList, item)
+						}
+					}
+					return res.Current, res.PageCount, res.Total, filteredVodList, nil
 				}
 			}
 		}
 	}
 
 	fetchList := func() (tvboxListResult, error) {
+		listGen := filmsnapshot.GetSearchCacheVersion()
 		page := dto.Page{PageSize: limit, Current: pg}
 		if page.Current <= 0 {
 			page.Current = 1
 		}
 
 		pid := int64(t)
-		pid = repository.ResolveCategoryID(pid)
-		if cid > 0 {
-			cid = repository.ResolveCategoryID(cid)
-		}
 		if cid == model.TagUncategorizedValue && pid <= 0 {
 			return tvboxListResult{Current: 1, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, nil
 		}
@@ -308,15 +290,26 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 			Plot:     strings.TrimSpace(plot),
 			Year:     strings.TrimSpace(year),
 			Sort:     strings.TrimSpace(sort),
+			SourceId: strings.TrimSpace(sourceId),
 		}
 		if err := validateReadModelSearchTags(searchTags); err != nil {
 			return tvboxListResult{Current: page.Current, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, err
 		}
-		sl := filmsnapshot.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
+		sl, err := filmsnapshot.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
+		if err != nil {
+			return tvboxListResult{}, err
+		}
+		sl = filmshared.ApplyPosterSourcePictures(sl)
 
 		var vodList []model.FilmList
 		for _, s := range sl {
-			typeID, typeName := resolveProvideTypeFromSnapshot(s)
+			if !support.IsCategoryVisible(s.Cid, s.Pid) {
+				continue
+			}
+			typeID, typeName, err := resolveProvideListedType(s, sourceId)
+			if err != nil {
+				return tvboxListResult{}, err
+			}
 			vodList = append(vodList, model.FilmList{
 				VodID:       s.Mid,
 				VodName:     s.Name,
@@ -326,7 +319,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 				VodTime:     resolveProvideSnapshotVodTime(s),
 				VodRemarks:  s.Remarks,
 				VodPlayFrom: resolveProvideSnapshotPlayFromSummary(s),
-				VodPic:      s.Picture,
+				VodPic:      s.DisplayPicture(),
 			})
 		}
 
@@ -345,7 +338,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 				if res.Total == 0 || len(res.VodList) == 0 {
 					ttl = time.Minute
 				}
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(data), ttl).Err()
+				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), ttl, listGen)
 			}
 		}
 
@@ -374,4 +367,84 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 
 	res, err := fetchList()
 	return res.Current, res.PageCount, res.Total, res.VodList, err
+}
+
+// GetTVBoxConfig 获取 TVBox 网络配置（sites 源站列表，支持缓存）
+func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, error) {
+	baseURL = strings.TrimRight(baseURL, "/")
+	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
+	if key != "" {
+		sum := sha256.Sum256([]byte(key))
+		cacheKey += ":" + hex.EncodeToString(sum[:])
+	}
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached map[string]any
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached, nil
+			}
+		}
+	}
+
+	apiPath := baseURL + "/api/provide/vod"
+	sites := make([]map[string]any, 0)
+	enabledSources, err := repository.GetEnabledCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
+	for _, source := range enabledSources {
+		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
+		if key != "" {
+			sourceApi += "&key=" + url.QueryEscape(key)
+		}
+		sites = append(sites, map[string]any{
+			"key":         "source_" + source.Id,
+			"name":        "📡 " + source.Name,
+			"type":        1,
+			"api":         sourceApi,
+			"searchable":  1,
+			"quickSearch": 1,
+			"filterable":  1,
+		})
+	}
+
+	configJson := map[string]any{
+		"spider":    "",
+		"wallpaper": "",
+		"logo":      "",
+		"sites":     sites,
+	}
+	if db.Rdb != nil {
+		if data, err := json.Marshal(configJson); err == nil {
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
+		}
+	}
+
+	return configJson, nil
+}
+
+// GetAppSourceConfig 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置
+func (p *ProvideService) GetAppSourceConfig(baseURL string) (map[string]any, error) {
+	baseURL = strings.TrimRight(baseURL, "/")
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		return nil, err
+	}
+	siteName := strings.TrimSpace(basic.SiteName)
+	if siteName == "" {
+		siteName = "EcoHub"
+	}
+
+	return map[string]any{
+		"code": 1,
+		"msg":  "EcoHub 客户端软件源在线",
+		"data": map[string]any{
+			"site_name":      siteName,
+			"site_url":       baseURL,
+			"api_base":       baseURL + "/api",
+			"version":        config.Version,
+			"private_access": basic.PrivateAccess,
+			"status":         "online",
+		},
+	}, nil
 }

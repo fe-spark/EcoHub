@@ -19,6 +19,13 @@
 
 </div>
 
+> [!WARNING]
+> ### ⚠️ v3.0 Major Release Notice (Clean Deployment Required)
+> **EcoHub v3.0 is a complete architectural rewrite that is NOT backward-compatible with v2.x historical data or database schemas. No migration path is provided.**
+> - **Do NOT upgrade in-place**: Do not mount or reuse v2.x database volumes/directories (such as `./data/mysql`). Reusing legacy databases will cause schema conflicts and service crashes.
+> - **Deployment Guide**: Upgrading to v3.0 **requires deploying from scratch in a fresh directory** (or completely clearing legacy MySQL/Redis data volumes), then re-configuring sources and running full collection.
+> - See [Release Notes](./RELEASE.md) for details.
+
 > **Notice**  
 > EcoHub does not provide or store media files. Sources originate from collect APIs configured by the operator. Comply with applicable laws and the terms of each source. The operator assumes all related risk. This project is intended for study and technical exchange.
 
@@ -56,7 +63,7 @@ Visitors log in with `guest` / `guest`. This account is read-only and cannot sav
 | --- | --- | --- |
 | LiangXinYun | As low as ¥2/mo <br>New users receive trial traffic | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
 | PeiQian Airport | As low as ¥1.5/mo <br>Suitable for high traffic and backup use | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| iKuuu | Long-running stable airport <br>New users receive trial traffic | [Register](https://ikuuu.top/auth/register?code=Uubm) |
+| DOVE |  | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## Quick start
 
@@ -67,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 cd ~/ecohub
 ```
 
-Edit `.env`: put the output of `openssl rand -hex 32` into `JWT_SECRET`, change the MySQL / Redis passwords, then start:
+Edit `.env`: put the output of `openssl rand -hex 32` into `JWT_SECRET`, customize `ECOHUB_ADMIN_PASSWORD` as needed, update MySQL / Redis passwords, then start:
 
 ```bash
 docker compose up -d
@@ -81,13 +88,11 @@ docker compose up -d
 | `http://<host>:3000/api/provide/tvbox` | TVBox / YingShiCang subscription URL |
 | `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
 
-Default account: `admin` / `admin`. Create other roles in account management. Change the default password before any public deployment.
+Default account: `admin` / `admin` (unless customized via `ECOHUB_ADMIN_PASSWORD` in `.env`). Create other roles in account management. Change the default password before any public deployment.
 
 > **Security & Network**: In production, it is recommended to use Nginx / 1Panel reverse proxy with HTTPS (80/443). To **avoid exposing raw ports to the public internet**, explicitly bind `127.0.0.1:` in `compose.yml` (e.g. `127.0.0.1:3000:3000`), preventing Docker from bypassing system firewalls. If direct player access is not needed, comment out the `18080` port mapping.
 
 An empty public site after installation is expected. Films appear only after a full collect has completed and been published in **Collect**. For 1Panel, an external database, or a reverse proxy, see the [Deploy guide](./README-Deploy_EN.md).
-
-Telegram notifications are configured under **System settings → Notify**. Hosts in mainland China frequently time out when reaching Telegram; set `TG_PROXY=http://host.docker.internal:7890` in `.env`. See [server/docs/notify.md](../server/docs/notify.md).
 
 ## Local development
 

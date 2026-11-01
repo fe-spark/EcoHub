@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -237,7 +237,7 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.FilmListSnapshot{}, &model.MovieDetailInfo{}, &model.Category{}); err != nil {
+	if err := gdb.AutoMigrate(&model.FilmIndex{}, &model.Category{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -248,12 +248,10 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	_ = filmsnapshot.SetActiveSnapshotVersion(testVersion)
 
 	// 库中存在影片 8888888 与分类 555
-	_ = gdb.Create(&model.FilmListSnapshot{
-		SnapshotVersion: testVersion,
-		Mid:             8888888,
-		Name:            "库中影片-流浪地球2",
-		CName:           "科幻",
-		Picture:         "https://cdn.example.com/earth2.jpg",
+	_ = gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 8888888},
+		FilmIndexCategory: model.FilmIndexCategory{CName: "科幻"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "库中影片-流浪地球2", Picture: "https://cdn.example.com/earth2.jpg"},
 	}).Error
 	_ = gdb.Create(&model.Category{
 		Id:   555,
@@ -280,7 +278,10 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	}
 
 	// 2. 验证读取路径（enrichLogEvents）仍可批量懒补齐库中元数据
-	enriched := enrichLogEvents([]AccessEvent{*evtFilm, *evtCat})
+	enriched, err := enrichLogEvents([]AccessEvent{*evtFilm, *evtCat})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(enriched) != 2 {
 		t.Fatalf("expected 2 enriched events, got %d", len(enriched))
 	}

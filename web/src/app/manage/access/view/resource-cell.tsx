@@ -31,7 +31,7 @@ export default function ResourceCell({ record }: ResourceCellProps) {
   if (action === "classify" && resource) {
     const catLabel = resourceCat ? resourceCat : isNumericId ? `分类 #${rawId}` : resource;
     return (
-      <Link href={`/filmClassify?Pid=${encodeURIComponent(rawId || resource)}`} target="_blank">
+      <Link href={`/category?pid=${encodeURIComponent(rawId || resource)}`} target="_blank">
         <Tag icon={<CompassOutlined />} color="purple" style={{ cursor: "pointer" }}>
           {catLabel}
         </Tag>

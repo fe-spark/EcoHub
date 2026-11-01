@@ -1,43 +1,51 @@
 package snapshot
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"gorm.io/gorm"
 	"log"
 	"strings"
+
+	"gorm.io/gorm"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 )
 
-func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
+func GetSnapshotByMid(version string, mid int64) (*model.FilmListSnapshot, error) {
+	if mid <= 0 {
+		return nil, nil
 	}
-	if version == "" || mid <= 0 || db.Mdb == nil {
-		return nil
+	if db.Mdb == nil {
+		return nil, ErrSearchIndexMissing
 	}
-	var snapshot model.FilmListSnapshot
-	if err := db.Mdb.Unscoped().Where("snapshot_version = ? AND mid = ?", version, mid).First(&snapshot).Error; err != nil {
-		return nil
+	var index model.FilmIndex
+	if err := liveFilmQuery().Where("mid = ?", mid).First(&index).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	return &snapshot
+	snap := buildFilmListSnapshot(resolveListVersion(version), index)
+	scrapes := LoadActiveScrapesByMids([]int64{mid})
+	if sc, ok := scrapes[mid]; ok {
+		ApplyTMDBScrapeToSnapshot(&snap, &sc)
+	}
+	return &snap, nil
 }
 
 // GetSnapshotsByMidsOrdered 按 mid 列表顺序取当前版本快照；无快照的 mid 跳过。
-func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
+func GetSnapshotsByMidsOrdered(version string, mids []int64) ([]model.FilmListSnapshot, error) {
+	if len(mids) == 0 {
+		return nil, nil
 	}
-	if version == "" || len(mids) == 0 || db.Mdb == nil {
-		return nil
+	if db.Mdb == nil {
+		return nil, ErrSearchIndexMissing
 	}
 	uniq := make([]int64, 0, len(mids))
 	seen := make(map[int64]struct{}, len(mids))
@@ -52,7 +60,7 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		uniq = append(uniq, mid)
 	}
 	if len(uniq) == 0 {
-		return nil
+		return nil, nil
 	}
 	byMid := make(map[int64]model.FilmListSnapshot, len(uniq))
 	const chunk = 200
@@ -61,13 +69,19 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		if end > len(uniq) {
 			end = len(uniq)
 		}
-		var rows []model.FilmListSnapshot
-		if err := db.Mdb.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, uniq[start:end]).Find(&rows).Error; err != nil {
-			continue
+		chunkMids := uniq[start:end]
+		var rows []model.FilmIndex
+		if err := liveFilmQuery().Select(basicSelectFields+", sub_title, category_key, root_category_key").Where("mid IN ?", chunkMids).Find(&rows).Error; err != nil {
+			return nil, err
 		}
+		scrapes := LoadActiveScrapesByMids(chunkMids)
 		for _, row := range rows {
 			if row.Mid > 0 {
-				byMid[row.Mid] = row
+				snap := buildFilmListSnapshot(resolveListVersion(version), row)
+				if sc, ok := scrapes[row.Mid]; ok {
+					ApplyTMDBScrapeToSnapshot(&snap, &sc)
+				}
+				byMid[row.Mid] = snap
 			}
 		}
 	}
@@ -87,40 +101,31 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		emitted[mid] = struct{}{}
 		out = append(out, snap)
 	}
-	return out
+	return out, nil
 }
 
 func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDetail, int64) {
 	if snapshot.Mid <= 0 {
 		return nil, 0
 	}
-	var movieDetailInfo model.MovieDetailInfo
-	if err := db.Mdb.Where("mid = ?", snapshot.Mid).First(&movieDetailInfo).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Printf("GetMovieDetailBySnapshot Error: %v", err)
-		}
-		return nil, 0
-	}
 	var detail model.MovieDetail
-	if err := json.Unmarshal([]byte(movieDetailInfo.Content), &detail); err != nil {
-		log.Printf("Unmarshal Snapshot MovieDetail Error: %v", err)
-		return nil, 0
-	}
 	shared.ApplyFilmListSnapshot(&detail, snapshot)
 	normalizeMovieDetailLists(&detail)
 	return &detail, snapshot.UpdateStamp
 }
 
-func HasMovieDetail(mid int64) bool {
+func HasMovieDetail(mid int64) (bool, error) {
 	if mid <= 0 {
-		return false
+		return false, nil
+	}
+	if db.Mdb == nil {
+		return false, ErrSearchIndexMissing
 	}
 	var count int64
-	if err := db.Mdb.Model(&model.MovieDetailInfo{}).Where("mid = ?", mid).Limit(1).Count(&count).Error; err != nil {
-		log.Printf("HasMovieDetail Error: %v", err)
-		return false
+	if err := db.Mdb.Model(&model.FilmIndex{}).Where("mid = ?", mid).Limit(1).Count(&count).Error; err != nil {
+		return false, err
 	}
-	return count > 0
+	return count > 0, nil
 }
 
 func normalizeMovieDetailLists(detail *model.MovieDetail) {
@@ -150,20 +155,12 @@ func normalizeMovieDetailLists(detail *model.MovieDetail) {
 	}
 }
 
-func GetSnapshotMovieListByCategory(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	return GetSnapshotMovieListByCategoryReadModel(version, field, id, limit, offset)
+func GetSnapshotHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
+	return GetSnapshotHotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, offset)
 }
 
-func GetSnapshotMovieListByCategoryPage(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
-	return GetSnapshotMovieListByCategoryPageReadModel(version, field, id, page)
-}
-
-func GetSnapshotHotMovieListByCategory(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	return GetSnapshotHotMovieListByCategoryReadModel(version, field, id, limit, offset)
-}
-
-func GetSnapshotDynamicHotMovieListByCategory(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
-	return GetSnapshotDynamicHotMovieListByCategoryReadModel(version, field, id, limit, poolSize)
+func GetSnapshotDynamicHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
+	return GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, poolSize)
 }
 
 func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string {
@@ -171,76 +168,148 @@ func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string 
 	return fmt.Sprintf("%s:v%s:P%d:C%d:S%d", config.FilmClassifyCacheKey, version, pid, page.Current, page.PageSize)
 }
 
-// GetSnapshotBannerCandidates 按排片策略与分类条件获取用于轮播的候选影片快照
-func GetSnapshotBannerCandidates(version string, strategy string, categoryPids []int64, limit int) []model.FilmListSnapshot {
+// GetSnapshotBannerCandidates 按排片策略取该分类的前 limit 部。sourceID 为空时不限站。
+// exclude 中的影片会跳过，便于多个分类名额不重复。
+func GetSnapshotBannerCandidates(version string, strategy string, sourceID string, categoryPids []int64, limit int, exclude []int64) []model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	if version == "" || limit <= 0 || db.Mdb == nil {
+	if limit <= 0 || db.Mdb == nil {
 		return []model.FilmListSnapshot{}
-	}
-
-	query := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
-		Where("snapshot_version = ?", version)
-
-	if len(categoryPids) > 0 {
-		query = query.Where("pid IN ?", categoryPids)
 	}
 
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
 		switch strategy {
 		case "hot_random":
-			return q.Order("hits DESC")
+			q = q.Order("hits DESC, mid DESC")
 		case "score_random":
 			if withScoreFilter {
 				q = q.Where("score >= ?", 6.0)
 			}
-			return q.Order("score DESC, hits DESC")
+			q = q.Order("score DESC, hits DESC, mid DESC")
 		case "latest_random":
-			return q.Order("update_stamp DESC")
+			q = q.Order("update_stamp DESC, mid DESC")
 		default:
-			return q.Order("hits DESC, update_stamp DESC")
+			q = q.Order("hits DESC, update_stamp DESC, mid DESC")
 		}
+		return q
 	}
 
-	var results []model.FilmListSnapshot
-	if err := applyStrategy(query, true).Limit(limit).Find(&results).Error; err != nil {
+	baseQuery := func(skip []int64) *gorm.DB {
+		q := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
+		if len(skip) > 0 {
+			q = q.Where("mid NOT IN ?", skip)
+		}
+		return q
+	}
+
+	results, err := scanListSnapshots(applyStrategy(baseQuery(exclude), true).Limit(limit))
+	if err != nil {
 		log.Println("[Snapshot] 获取轮播候选集异常:", err)
 		return []model.FilmListSnapshot{}
 	}
-	if len(results) == 0 && strategy == "score_random" {
-		log.Printf("[Snapshot] 高分候选池为空，已回退为不加评分过滤的候选池")
-		fallback := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
-			Where("snapshot_version = ?", version)
-		if len(categoryPids) > 0 {
-			fallback = fallback.Where("pid IN ?", categoryPids)
+	if strategy == "score_random" && len(results) < limit {
+		skip := append(append([]int64{}, exclude...), snapshotMids(results)...)
+		more, fillErr := scanListSnapshots(applyStrategy(baseQuery(skip), false).Limit(limit - len(results)))
+		if fillErr != nil {
+			log.Println("[Snapshot] 评分候选补齐异常:", fillErr)
+		} else {
+			results = append(results, more...)
 		}
-		if err := applyStrategy(fallback, false).Limit(limit).Find(&results).Error; err != nil {
-			log.Println("[Snapshot] 获取轮播候选集回退异常:", err)
-			return []model.FilmListSnapshot{}
-		}
+	}
+	if len(results) > limit {
+		return results[:limit]
 	}
 	return results
 }
 
-// GetSnapshotHDBackdropCandidates 获取片库中已拥有高清横屏壁纸或自定义高清海报的优质影片快照（用于轮播优选与兜底）
-func GetSnapshotHDBackdropCandidates(version string, categoryPids []int64, limit int) []model.FilmListSnapshot {
+func snapshotMids(snaps []model.FilmListSnapshot) []int64 {
+	if len(snaps) == 0 {
+		return nil
+	}
+	mids := make([]int64, 0, len(snaps))
+	for _, snap := range snaps {
+		if snap.Mid > 0 {
+			mids = append(mids, snap.Mid)
+		}
+	}
+	return mids
+}
+
+// GetSnapshotHDBackdropCandidates 获取已有高清横图的候选。sourceID 为空时不限站。
+func GetSnapshotHDBackdropCandidates(version string, sourceID string, categoryPids []int64, limit int) []model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	if version == "" || limit <= 0 || db.Mdb == nil {
+	if limit <= 0 || db.Mdb == nil {
 		return []model.FilmListSnapshot{}
 	}
-	var results []model.FilmListSnapshot
-	query := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
-		Where("snapshot_version = ? AND (picture_slide != '' OR custom_picture_slide != '' OR is_custom_picture = 1)", version)
-	if len(categoryPids) > 0 {
-		query = query.Where("pid IN ?", categoryPids)
-	}
-	_ = query.Order("hits DESC, update_stamp DESC").
-		Limit(limit).
-		Find(&results).Error
+	query := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids).
+		Where("picture_slide != '' OR custom_picture_slide != '' OR is_custom_picture = 1")
+	results, _ := scanListSnapshots(query.Order("hits DESC, update_stamp DESC").Limit(limit))
 	return results
+}
+
+// applyBannerCategories 有采集站时按该站 type_id 匹配分类键。没有采集站时仍按展示分类 pid。
+func applyBannerCategories(query *gorm.DB, sourceID string, categoryIDs []int64) *gorm.DB {
+	if query == nil || len(categoryIDs) == 0 {
+		return query
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return query.Where("pid IN ?", categoryIDs)
+	}
+	typeIDs := make([]int64, 0, len(categoryIDs))
+	seen := make(map[int64]struct{}, len(categoryIDs))
+	for _, id := range categoryIDs {
+		for _, typeID := range repository.PublicSourceTypeIDs(sourceID, "pid", id) {
+			if typeID <= 0 {
+				continue
+			}
+			if _, ok := seen[typeID]; ok {
+				continue
+			}
+			seen[typeID] = struct{}{}
+			typeIDs = append(typeIDs, typeID)
+		}
+	}
+	if len(typeIDs) == 0 {
+		return query.Where("1 = 0")
+	}
+	return filmquery.ApplySourceTypeMatchIDs(query, sourceID, "pid", typeIDs)
+}
+
+// FilterSnapshotsByPlaySource 只保留指定采集站有播放线路的影片。sourceID 为空时原样返回。
+func FilterSnapshotsByPlaySource(sourceID string, snaps []model.FilmListSnapshot) []model.FilmListSnapshot {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || len(snaps) == 0 || db.Mdb == nil {
+		return snaps
+	}
+	mids := make([]int64, 0, len(snaps))
+	for _, snap := range snaps {
+		if snap.Mid > 0 {
+			mids = append(mids, snap.Mid)
+		}
+	}
+	if len(mids) == 0 {
+		return []model.FilmListSnapshot{}
+	}
+	var owned []int64
+	if err := liveFilmQuery().Where("mid IN ?", mids).Where(model.FilmHasPlaySourceSQL(), sourceID, "play").Pluck("mid", &owned).Error; err != nil {
+		log.Println("[Snapshot] 按采集站过滤轮播影片失败:", err)
+		return []model.FilmListSnapshot{}
+	}
+	keep := make(map[int64]struct{}, len(owned))
+	for _, mid := range owned {
+		keep[mid] = struct{}{}
+	}
+	out := make([]model.FilmListSnapshot, 0, len(owned))
+	for _, snap := range snaps {
+		if _, ok := keep[snap.Mid]; ok {
+			out = append(out, snap)
+		}
+	}
+	return out
 }

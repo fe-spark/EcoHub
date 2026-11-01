@@ -17,6 +17,10 @@ type UserClaims struct {
 
 // GenToken 生成token
 func GenToken(userId uint, userName string, role int) (string, error) {
+	tokenID, err := GenerateSalt()
+	if err != nil {
+		return "", err
+	}
 	uc := UserClaims{
 		UserID:   userId,
 		UserName: userName,
@@ -28,7 +32,7 @@ func GenToken(userId uint, userName string, role int) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(config.AuthTokenExpires * time.Hour)),
 			NotBefore: jwt.NewNumericDate(time.Now().Add(-10 * time.Second)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			ID:        GenerateSalt(),
+			ID:        tokenID,
 		},
 	}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, uc).SignedString([]byte(config.JwtSecret))

@@ -5,10 +5,7 @@ package model
 const (
 	TableUser               = "user"
 	TableFilmIndex          = "film_index"
-	TableFilmListSnapshot   = "film_list_snapshot"
-	TableMovieDetail        = "movie_detail_info"
-	TableSlaveMoviePlaylist = "slave_movie_playlists"
-	TableMoviePoster        = "movie_poster"
+	TableFilmSourcePlaylist = "film_source_playlists"
 	TableMovieMatchKey      = "movie_match_key"
 	TableMovieSourceMapping = "movie_source_mapping"
 	TableCollectSourceStats = "collect_source_stats"
@@ -18,11 +15,9 @@ const (
 	TableMappingRule        = "mapping_rules"
 	TableSearchTag          = "search_tag_item"
 	TableCrontabRecord      = "crontab_record"
-	TableCronSourceRel      = "cron_source_rel"
 	TableSiteConfig         = "site_config_record"
 	TableBanners            = "banners_record"
 	TableFileInfo           = "files"
-	TableNotifyConfig       = "notify_config"
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
 	TableFailureRecord      = "failure_records"
@@ -30,19 +25,27 @@ const (
 	TableTMDBConfig         = "tmdb_config"
 	TableBannerConfig       = "banner_config"
 	TableProxyConfig        = "proxy_config"
+	TableNotifyConfig       = "notify_config"
 	TableFilmSource         = "film_sources"
+	TableFilmTMDBScrape     = "film_tmdb_scrapes"
+	TableAnalyticsConfig    = "analytics_config_records"
+	TableDanmakuRecord      = "danmaku_record"
 )
 
-// AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
+// FilmHasPlaySourceSQL 判断 film_index 当前行是否有指定采集源的播放线路。
+// 探测走 film_source_playlists 主键 (mid, source_id, line_kind)。
+// 占位符依次是 source_id、line_kind。不要改成 DISTINCT mid 子查询，那会先扫完整站线路。
+func FilmHasPlaySourceSQL() string {
+	return "EXISTS (SELECT 1 FROM " + TableFilmSourcePlaylist + " AS p WHERE p.mid = " + TableFilmIndex + ".mid AND p.source_id = ? AND p.line_kind = ?)"
+}
+
+// AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 按当前模型建表）
 var AllModels = []any{
 	&User{},
 	&FilmIndex{},
-	&FilmListSnapshot{},
 	&FileInfo{},
-	&MovieDetailInfo{},
+	&FilmSourcePlaylist{},
 	&Category{},
-	&SlaveMoviePlaylist{},
-	&MoviePoster{},
 	&MovieMatchKey{},
 	&FilmSource{},
 	&CollectSourceStats{},
@@ -51,11 +54,9 @@ var AllModels = []any{
 	&SiteConfigRecord{},
 	&MovieSourceMapping{},
 	&Banner{},
-	&CronSourceRel{},
 	&MappingRule{},
 	&CategoryMapping{},
 	&SourceCategory{},
-	&NotifyConfigRecord{},
 	&AccessDailyStats{},
 	&AccessDailyTop{},
 	&FailureRecord{},
@@ -63,4 +64,8 @@ var AllModels = []any{
 	&TMDBConfigRecord{},
 	&BannerConfigRecord{},
 	&ProxyConfigRecord{},
+	&NotifyConfigRecord{},
+	&FilmTMDBScrape{},
+	&DanmakuRecord{},
+	&AnalyticsConfigRecord{},
 }

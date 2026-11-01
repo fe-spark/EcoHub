@@ -1,116 +1,66 @@
 package middleware
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
+	"server/internal/service"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/sync/singleflight"
 )
 
-var sfGroup singleflight.Group
-
-func useSecureCookie(c *gin.Context) bool {
-	return c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
-}
-
-func setAuthCookie(c *gin.Context, token string) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(config.AuthCookieName, token, config.AuthTokenExpires*3600, "/", "", useSecureCookie(c), true)
-}
-
-func clearAuthCookie(c *gin.Context) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(config.AuthCookieName, "", -1, "/", "", useSecureCookie(c), true)
-}
-
-// AuthToken 用户登录Token拦截
+// AuthToken 用户登录Token拦截（单点登录校验）
 func AuthToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authToken, _ := c.Cookie(config.AuthCookieName)
+		authToken := ReadAuthToken(c)
 		if authToken == "" {
-			authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-				authToken = strings.TrimSpace(authHeader[7:])
-			} else if authHeader != "" {
-				authToken = authHeader
-			}
-			if authToken == "" {
-				authToken = strings.TrimSpace(c.GetHeader("Token"))
-			}
-		}
-		// 如果没有登录信息则直接清退
-		if authToken == "" {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "用户未授权,请先登录", c)
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "用户未授权,请先登录", c)
 			c.Abort()
 			return
 		}
-		// 解析token中的信息
 		uc, err := utils.ParseToken(authToken)
-		if err != nil && !errors.Is(err, jwt.ErrTokenExpired) {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "无效的口令,请重新登录!!!", c)
-			c.Abort()
-			return
-		}
-		if uc == nil {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "无效的口令,请重新登录!!!", c)
+		if err != nil || uc == nil {
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}
 
-		// 处理 token 刷新逻辑（针对过期但 Redis 中有效的 token）
-		if err != nil && errors.Is(err, jwt.ErrTokenExpired) {
-			// 使用 singleflight 防止并发刷新
-			key := fmt.Sprintf("refresh:%d", uc.UserID)
-			val, _, _ := sfGroup.Do(key, func() (any, error) {
-				// 再次检查 Redis 中的 token
-				t := repository.GetUserTokenById(uc.UserID)
-				if len(t) <= 0 || t != authToken {
-					return nil, errors.New("invalid or expired token in redis")
-				}
-				// 生成新token
-				newToken, _ := utils.GenToken(uc.UserID, uc.UserName, uc.Role)
-				_ = repository.SaveUserToken(newToken, uc.UserID)
-				return newToken, nil
-			})
-
-			if val == nil {
-				clearAuthCookie(c)
-				dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
-				c.Abort()
-				return
-			}
-			newToken := val.(string)
-			// 解析出新的 UserClaims
-			uc, _ = utils.ParseToken(newToken)
-			setAuthCookie(c, newToken)
-		} else {
-			// 未过期的情况，仅校验 Redis 一致性
-			t := repository.GetUserTokenById(uc.UserID)
-			if len(t) <= 0 {
-				clearAuthCookie(c)
-				dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
-				c.Abort()
-				return
-			}
-			if t != authToken {
-				clearAuthCookie(c)
-				dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
-				c.Abort()
-				return
-			}
+		storedToken, err := service.UserSvc.StoredToken(uc.UserID)
+		if err != nil {
+			dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
+			c.Abort()
+			return
 		}
+		if storedToken == "" {
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
+			c.Abort()
+			return
+		}
+		if storedToken != authToken {
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
+			c.Abort()
+			return
+		}
+		status, role, err := service.UserSvc.AccountGate(uc.UserID)
+		if err != nil {
+			dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
+			c.Abort()
+			return
+		}
+		if status != 0 {
+			_ = service.UserSvc.UserLogout(uc.UserID)
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号已被禁用", c)
+			c.Abort()
+			return
+		}
+		uc.Role = role
 
 		// 将UserClaims存放到context中
 		c.Set(config.AuthUserClaims, uc)

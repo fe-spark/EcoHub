@@ -3,7 +3,6 @@ package snapshot
 import (
 	"golang.org/x/sync/singleflight"
 	"log"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -13,118 +12,52 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
 type FilmSearchMeta struct {
-	Mid  int64
-	Pid  int64
-	Cid  int64
-	Item utils.FilmSearchItem
+	Mid             int64
+	Pid             int64
+	Cid             int64
+	FirstSourceId   string
+	PlaySources     []string
+	Area            string
+	Language        string
+	ClassTag        string
+	CategoryKey     string
+	RootCategoryKey string
+	Item            utils.FilmSearchItem
 }
 
 type filmSearchMetaIndex struct {
-	Version string
-	Items   []FilmSearchMeta
+	Version             string
+	Items               []FilmSearchMeta
+	ByUpdate            []int
+	Pos                 map[int64]int
+	FilmsBySource       map[string]int64
+	MultiSourceBySource map[string]int64
+	HotPools            map[string][]int64
+	YearPools           map[string][]int64
+	RecentPools         map[string][]int64
+	SourceHot           map[string][]int64
+	ByCategory          map[string][]int
+	SearchPosts         *searchPostings
 }
 
 var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
 var activeFilmSearchMetasMu sync.Mutex
 var searchMetaBuildSf singleflight.Group
 var searchMetaBuildWg sync.WaitGroup
+var isSearchIndexBuilding atomic.Bool
+
+// IsSearchIndexBuilding 返回当前是否正在加载或重建检索倒排索引
+func IsSearchIndexBuilding() bool {
+	return isSearchIndexBuilding.Load()
+}
 
 func WaitActiveFilmSearchIndexBuilt() {
 	searchMetaBuildWg.Wait()
-}
-
-func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
-	version = strings.TrimSpace(version)
-	if version == "" || db.Mdb == nil {
-		return nil
-	}
-	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
-		return cur
-	}
-	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
-		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
-			return cur, nil
-		}
-		type dbMetaRow struct {
-			Mid         int64
-			Pid         int64
-			Cid         int64
-			Name        string
-			Hits        int64
-			Score       float64
-			Year        int64
-			UpdateStamp int64
-		}
-		var rows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-			Select("mid, pid, cid, name, hits, score, year, update_stamp").
-			Where("snapshot_version = ?", version).
-			Find(&rows).Error; err != nil {
-			return nil, err
-		}
-		items := make([]FilmSearchMeta, len(rows))
-		numWorkers := runtime.GOMAXPROCS(0)
-		if numWorkers < 1 {
-			numWorkers = 1
-		}
-		if numWorkers > 8 {
-			numWorkers = 8
-		}
-		if len(rows) < 200 {
-			numWorkers = 1
-		}
-		chunkSize := (len(rows) + numWorkers - 1) / numWorkers
-		var wg sync.WaitGroup
-		for w := 0; w < numWorkers; w++ {
-			startIdx := w * chunkSize
-			endIdx := startIdx + chunkSize
-			if startIdx >= len(rows) {
-				break
-			}
-			if endIdx > len(rows) {
-				endIdx = len(rows)
-			}
-			wg.Add(1)
-			go func(s, e int) {
-				defer wg.Done()
-				for i := s; i < e; i++ {
-					r := rows[i]
-					item := utils.FilmSearchItem{
-						Mid:         r.Mid,
-						Name:        r.Name,
-						Hits:        r.Hits,
-						Score:       r.Score,
-						Year:        r.Year,
-						UpdateStamp: r.UpdateStamp,
-					}
-					utils.FillSearchDerivedFields(&item)
-					items[i] = FilmSearchMeta{
-						Mid:  r.Mid,
-						Pid:  r.Pid,
-						Cid:  r.Cid,
-						Item: item,
-					}
-				}
-			}(startIdx, endIdx)
-		}
-		wg.Wait()
-		idx := &filmSearchMetaIndex{
-			Version: version,
-			Items:   items,
-		}
-		activeFilmSearchMetasMu.Lock()
-		activeFilmSearchMetas.Store(idx)
-		activeFilmSearchMetasMu.Unlock()
-		return idx, nil
-	})
-	if err != nil || val == nil {
-		return nil
-	}
-	return val.(*filmSearchMetaIndex)
 }
 
 type scoredMetaHit struct {
@@ -141,18 +74,21 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, c
 		return nil
 	}
 	q := utils.BuildQueryContext(keyword)
+	positions, narrowed := idx.SearchPosts.lookup(q)
 	matches := make([]scoredMetaHit, 0, 64)
-	for i := range idx.Items {
-		meta := &idx.Items[i]
+	visit := func(meta *FilmSearchMeta) {
+		if !support.IsCategoryVisible(meta.Cid, meta.Pid) {
+			return
+		}
 		if pid > 0 && meta.Pid != pid {
-			continue
+			return
 		}
 		if cid > 0 && meta.Cid != cid {
-			continue
+			return
 		}
 		score := utils.ScoreFilmMatch(meta.Item, q)
 		if score <= 0 {
-			continue
+			return
 		}
 		matches = append(matches, scoredMetaHit{
 			mid:         meta.Mid,
@@ -162,6 +98,18 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, c
 			year:        meta.Item.Year,
 			updateStamp: meta.Item.UpdateStamp,
 		})
+	}
+	if narrowed {
+		for _, pos := range positions {
+			if pos < 0 || int(pos) >= len(idx.Items) {
+				continue
+			}
+			visit(&idx.Items[pos])
+		}
+	} else {
+		for i := range idx.Items {
+			visit(&idx.Items[i])
+		}
 	}
 	if len(matches) == 0 {
 		return matches
@@ -263,7 +211,10 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 	cur := activeFilmSearchMetas.Load()
 	if cur == nil || cur.Version != version {
 		activeFilmSearchMetasMu.Unlock()
-		loadFilmSearchMetaIndex(version)
+		if _, err := loadFilmSearchMetaIndex(version); err != nil {
+			log.Printf("[ActiveReadModel] 检索索引加载失败 version=%s: %v", version, err)
+			return
+		}
 		activeFilmSearchMetasMu.Lock()
 		cur = activeFilmSearchMetas.Load()
 	}
@@ -283,10 +234,7 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 		newItems = append(newItems, item)
 	}
 	if removed > 0 {
-		activeFilmSearchMetas.Store(&filmSearchMetaIndex{
-			Version: version,
-			Items:   newItems,
-		})
+		activeFilmSearchMetas.Store(sealSearchMetaIndex(version, newItems))
 		log.Printf("[ActiveReadModel] 内存索引增量剔除 mids=%d removed=%d remaining=%d", len(mids), removed, len(newItems))
 	}
 }
@@ -315,58 +263,14 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		return
 	}
 
-	type dbMetaRow struct {
-		Mid         int64
-		Pid         int64
-		Cid         int64
-		Name        string
-		Hits        int64
-		Score       float64
-		Year        int64
-		UpdateStamp int64
-	}
-	const batchSize = 500
-	var allRows []dbMetaRow
-	for i := 0; i < len(cleanMids); i += batchSize {
-		end := i + batchSize
-		if end > len(cleanMids) {
-			end = len(cleanMids)
-		}
-		var batchRows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-			Select("mid, pid, cid, name, hits, score, year, update_stamp").
-			Where("snapshot_version = ? AND mid IN ?", version, cleanMids[i:end]).
-			Find(&batchRows).Error; err != nil {
-			log.Printf("[ActiveReadModel] UpsertMidsToActiveFilmSearchIndex 查询快照失败 version=%s: %v", version, err)
-			return
-		}
-		allRows = append(allRows, batchRows...)
-	}
-
-	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
-	for _, r := range allRows {
-		item := utils.FilmSearchItem{
-			Mid:         r.Mid,
-			Name:        r.Name,
-			Hits:        r.Hits,
-			Score:       r.Score,
-			Year:        r.Year,
-			UpdateStamp: r.UpdateStamp,
-		}
-		utils.FillSearchDerivedFields(&item)
-		upsertMap[r.Mid] = FilmSearchMeta{
-			Mid:  r.Mid,
-			Pid:  r.Pid,
-			Cid:  r.Cid,
-			Item: item,
-		}
-	}
-
 	activeFilmSearchMetasMu.Lock()
 	cur := activeFilmSearchMetas.Load()
 	if cur == nil || cur.Version != version {
 		activeFilmSearchMetasMu.Unlock()
-		loadFilmSearchMetaIndex(version)
+		if _, err := loadFilmSearchMetaIndex(version); err != nil {
+			log.Printf("[ActiveReadModel] 检索索引加载失败 version=%s: %v", version, err)
+			return
+		}
 		activeFilmSearchMetasMu.Lock()
 		cur = activeFilmSearchMetas.Load()
 	}
@@ -376,6 +280,42 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		return
 	}
 
+	// 拿锁后再读库。重建扫描持有同一把锁，过期预读不能在 Store 之后把已删片子写回去。
+	const batchSize = 500
+	var allRows []dbMetaRow
+	for i := 0; i < len(cleanMids); i += batchSize {
+		end := i + batchSize
+		if end > len(cleanMids) {
+			end = len(cleanMids)
+		}
+		var batchRows []dbMetaRow
+		if err := db.Mdb.Model(&model.FilmIndex{}).
+			Select(filmMetaSelect).
+			Where("mid IN ?", cleanMids[i:end]).
+			Find(&batchRows).Error; err != nil {
+			log.Printf("[ActiveReadModel] UpsertMidsToActiveFilmSearchIndex 查询 film_index 失败: %v", err)
+			return
+		}
+		allRows = append(allRows, batchRows...)
+	}
+
+	plays, err := loadPlaySources(cleanMids)
+	if err != nil {
+		log.Printf("[ActiveReadModel] 播放源加载失败: %v", err)
+		return
+	}
+	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
+	for _, r := range allRows {
+		meta := metaFromRow(r)
+		meta.PlaySources = plays[r.Mid]
+		upsertMap[r.Mid] = meta
+	}
+
+	if len(cleanMids) > 0 && len(midSet) == len(upsertMap) && len(cur.Items) > 0 {
+		activeFilmSearchMetas.Store(updateSearchMetaIndexIncremental(cur, version, upsertMap))
+		log.Printf("[ActiveReadModel] 内存索引快速增量更新 mids=%d snapshot_found=%d", len(cleanMids), len(upsertMap))
+		return
+	}
 	newItems := make([]FilmSearchMeta, 0, len(cur.Items)+len(upsertMap))
 	seenMids := make(map[int64]struct{}, len(upsertMap))
 	for _, it := range cur.Items {
@@ -395,9 +335,6 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		}
 	}
 
-	activeFilmSearchMetas.Store(&filmSearchMetaIndex{
-		Version: version,
-		Items:   newItems,
-	})
+	activeFilmSearchMetas.Store(sealSearchMetaIndex(version, newItems))
 	log.Printf("[ActiveReadModel] 内存索引增量更新/剔除 mids=%d snapshot_found=%d total=%d", len(cleanMids), len(upsertMap), len(newItems))
 }

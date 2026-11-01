@@ -21,14 +21,24 @@ func resolveClassifyMember(evt *AccessEvent) string {
 			if _, ok := parseFilmID(res); ok {
 				return res
 			}
-			if catId, found := resolveCategoryIDByName(res); found {
+			catId, found, err := resolveCategoryIDByName(res)
+			if err != nil {
+				syslog.Errorf("[Access] 分类查询失败: %v", err)
+				return res
+			}
+			if found {
 				return strconv.FormatInt(catId, 10)
 			}
 			return res
 		}
 		if evt.ResourceCat != "" {
 			trimmedCat := strings.TrimSpace(evt.ResourceCat)
-			if catId, found := resolveCategoryIDByName(trimmedCat); found {
+			catId, found, err := resolveCategoryIDByName(trimmedCat)
+			if err != nil {
+				syslog.Errorf("[Access] 分类查询失败: %v", err)
+				return trimmedCat
+			}
+			if found {
 				return strconv.FormatInt(catId, 10)
 			}
 			return trimmedCat
@@ -47,7 +57,12 @@ func resolveClassifyMember(evt *AccessEvent) string {
 			}
 		}
 		if cat != "" {
-			if catId, found := resolveCategoryIDByName(cat); found {
+			catId, found, err := resolveCategoryIDByName(cat)
+			if err != nil {
+				syslog.Errorf("[Access] 分类查询失败: %v", err)
+				return cat
+			}
+			if found {
 				return strconv.FormatInt(catId, 10)
 			}
 			return cat
@@ -76,6 +91,7 @@ func writeEvent(evt *AccessEvent) {
 	ts = ts.In(time.Local)
 	day := ts.Format("20060102")
 	pipe := db.Rdb.Pipeline()
+	countCollectSource(pipe, ctx, day, evt.CollectSourceId)
 
 	mk := minKey(ts)
 	dk := dayAggKey(day)
@@ -167,17 +183,19 @@ func writeEvent(evt *AccessEvent) {
 	pipe.ExpireNX(ctx, mk, ttlMinute)
 	pipe.ExpireNX(ctx, dk, ttlDay)
 
-	if n := takeUnsyncedDropped(); n > 0 {
+	dropped := takeUnsyncedDropped()
+	if dropped > 0 {
 		dk := droppedKey()
-		pipe.IncrBy(ctx, dk, n)
+		pipe.IncrBy(ctx, dk, dropped)
 		pipe.ExpireNX(ctx, dk, ttlDay)
 
 		dkDay := droppedDayKey(day)
-		pipe.IncrBy(ctx, dkDay, n)
+		pipe.IncrBy(ctx, dkDay, dropped)
 		pipe.ExpireNX(ctx, dkDay, ttlDay)
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
+		restoreUnsyncedDropped(dropped)
 		syslog.Errorf("[Access] Redis 写入失败: %v", err)
 	}
 }
@@ -191,6 +209,7 @@ func writePageView(evt *AccessEvent) {
 	ts = ts.In(time.Local)
 	day := ts.Format("20060102")
 	pipe := db.Rdb.Pipeline()
+	countCollectSource(pipe, ctx, day, evt.CollectSourceId)
 	mk := minKey(ts)
 	dk := dayAggKey(day)
 	pipe.HIncrBy(ctx, mk, "pv", 1)
@@ -423,16 +442,18 @@ func writePageView(evt *AccessEvent) {
 		pipe.PFAdd(ctx, uk, uvIdentity)
 		pipe.ExpireNX(ctx, uk, ttlDay)
 	}
-	if n := takeUnsyncedDropped(); n > 0 {
+	dropped := takeUnsyncedDropped()
+	if dropped > 0 {
 		dk := droppedKey()
-		pipe.IncrBy(ctx, dk, n)
+		pipe.IncrBy(ctx, dk, dropped)
 		pipe.ExpireNX(ctx, dk, ttlDay)
 
 		dkDay := droppedDayKey(day)
-		pipe.IncrBy(ctx, dkDay, n)
+		pipe.IncrBy(ctx, dkDay, dropped)
 		pipe.ExpireNX(ctx, dkDay, ttlDay)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
+		restoreUnsyncedDropped(dropped)
 		syslog.Errorf("[Access] 页面埋点写入失败: %v", err)
 	}
 }

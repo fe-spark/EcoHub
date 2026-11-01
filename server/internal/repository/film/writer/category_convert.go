@@ -1,18 +1,30 @@
 package writer
 
 import (
+	"errors"
+	"fmt"
 	"log"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 	"server/internal/utils"
 )
+
+var (
+	ErrCategoryNotMapped = errors.New("影片未映射到分类")
+	ErrCategoryDisabled  = errors.New("影片分类已停用")
+)
+
+func IsCategoryNotMapped(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, ErrCategoryNotMapped) || errors.Is(err, ErrCategoryDisabled) ||
+		strings.Contains(err.Error(), "影片未映射到分类") || strings.Contains(err.Error(), "影片分类已停用")
+}
 
 type resolvedSearchCategory struct {
 	Pid              int64
@@ -34,6 +46,9 @@ func resolveLocalCategory(pid int64, cid int64, cName string) resolvedSearchCate
 	if result.Pid == 0 && pid > 0 {
 		result.Pid = pid
 	}
+	if result.Pid == 0 && result.CName != "" {
+		result.Pid = support.ResolveRootCategoryIDByCName(result.CName)
+	}
 	if result.Pid > 0 && result.Cid > 0 && result.CName == "" {
 		result.CName = support.GetCategoryNameById(result.Cid)
 	}
@@ -52,19 +67,8 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 		return fallback
 	}
 
-	if sourcePid > 0 {
-		var root model.SourceCategory
-		if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, sourcePid).First(&root).Error; err == nil {
-			name := strings.TrimSpace(root.RawName)
-			if name != "" {
-				return name
-			}
-		}
-	}
-
 	if sourceCid > 0 {
-		var row model.SourceCategory
-		if err := db.Mdb.Select("raw_name", "parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, sourceCid).First(&row).Error; err == nil {
+		if row, ok := support.GetSourceCategoryInfo(sourceId, sourceCid); ok {
 			if row.ParentSourceTypeId == 0 {
 				name := strings.TrimSpace(row.RawName)
 				if name != "" {
@@ -72,13 +76,21 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 				}
 			}
 			if row.ParentSourceTypeId > 0 {
-				var parent model.SourceCategory
-				if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, row.ParentSourceTypeId).First(&parent).Error; err == nil {
+				if parent, ok := support.GetSourceCategoryInfo(sourceId, row.ParentSourceTypeId); ok {
 					name := strings.TrimSpace(parent.RawName)
 					if name != "" {
 						return name
 					}
 				}
+			}
+		}
+	}
+
+	if sourcePid > 0 {
+		if root, ok := support.GetSourceCategoryInfo(sourceId, sourcePid); ok {
+			name := strings.TrimSpace(root.RawName)
+			if name != "" {
+				return name
 			}
 		}
 	}
@@ -90,25 +102,27 @@ func resolveSourceRootTypeID(sourceId string, sourcePid int64, sourceCid int64) 
 	if strings.TrimSpace(sourceId) == "" {
 		return 0
 	}
+	if sourceCid > 0 {
+		current := sourceCid
+		for step := range [5]int{} {
+			row, ok := support.GetSourceCategoryInfo(sourceId, current)
+			if !ok {
+				if step == 0 && sourcePid > 0 {
+					return sourcePid
+				}
+				return current
+			}
+			if row.ParentSourceTypeId <= 0 {
+				return current
+			}
+			current = row.ParentSourceTypeId
+		}
+		return current
+	}
 	if sourcePid > 0 {
 		return sourcePid
 	}
-	if sourceCid <= 0 {
-		return 0
-	}
-
-	current := sourceCid
-	for range [5]int{} {
-		var row model.SourceCategory
-		if err := db.Mdb.Select("parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, current).First(&row).Error; err != nil {
-			return current
-		}
-		if row.ParentSourceTypeId <= 0 {
-			return current
-		}
-		current = row.ParentSourceTypeId
-	}
-	return current
+	return sourceCid
 }
 
 type normalizedSearchMeta struct {
@@ -136,6 +150,9 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	if detail.RawPid > 0 {
 		sourcePid = detail.RawPid
 	}
+	if sourceCid <= 0 && sourcePid > 0 {
+		sourceCid = sourcePid
+	}
 
 	result := resolvedSearchCategory{CName: strings.TrimSpace(detail.CName)}
 	result.OriginalCategory = resolveOriginalCategoryName(sourceId, sourcePid, sourceCid, detail.CName)
@@ -149,11 +166,11 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	if result.Pid == 0 {
 		result.Pid = support.GetRootId(support.GetLocalCategoryId(sourceId, sourcePid))
 	}
-	if result.Pid > 0 && result.Cid == 0 && result.CName != "" {
-		var category model.Category
-		if err := db.Mdb.Where("pid = ? AND name = ?", result.Pid, result.CName).First(&category).Error; err == nil {
-			result.Cid = category.Id
-		}
+	if result.Pid == 0 && detail.Pid > 0 {
+		result.Pid = support.GetRootId(detail.Pid)
+	}
+	if result.Pid == 0 && detail.CName != "" {
+		result.Pid = support.ResolveRootCategoryIDByCName(detail.CName)
 	}
 	if result.Pid > 0 && result.CName == "" {
 		result.CName = support.GetCategoryNameById(result.Pid)
@@ -169,9 +186,9 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 
 func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category resolvedSearchCategory) (normalizedSearchMeta, error) {
 	score, _ := strconv.ParseFloat(detail.DbScore, 64)
-	year, err := strconv.ParseInt(regexp.MustCompile(`[1-9][0-9]{3}`).FindString(detail.ReleaseDate), 10, 64)
-	if err != nil {
-		year = 0
+	year := parseYear(detail.ReleaseDate)
+	if year == 0 {
+		year = parseYear(detail.Year)
 	}
 	updateStamp, err := utils.ParseCollectUpdateTime(detail.UpdateTime)
 	if err != nil {
@@ -204,11 +221,11 @@ func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category
 
 func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolvedSearchCategory, meta normalizedSearchMeta, categoryVersion string, ruleVersion string) model.FilmIndex {
 	return model.FilmIndex{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 		FilmIndexIdentity: model.FilmIndexIdentity{
-			Mid:        detail.Id,
-			ContentKey: shared.BuildContentKey(detail),
-			SourceId:   sourceId,
-			DbId:       detail.DbId,
+			FirstSourceId: sourceId,
+			DbId:          detail.DbId,
 		},
 		FilmIndexCategory: model.FilmIndexCategory{
 			Cid:              category.Cid,
@@ -240,7 +257,10 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 			IsCustomPicture:    detail.IsCustomPicture,
 			Actor:              detail.Actor,
 			Director:           detail.Director,
+			Writer:             detail.Writer,
 			Blurb:              detail.Blurb,
+			Content:            detail.Content,
+			ReleaseDate:        firstISOReleaseDate(detail.ReleaseDate),
 		},
 		FilmIndexVersion: model.FilmIndexVersion{
 			CollectStamp:    detail.AddTime,
@@ -252,6 +272,12 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 
 func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) (model.FilmIndex, error) {
 	category := resolveSearchCategory(sourceId, detail)
+	if category.Pid <= 0 {
+		return model.FilmIndex{}, fmt.Errorf("%w: %s", ErrCategoryNotMapped, strings.TrimSpace(detail.Name))
+	}
+	if !support.IsCategoryVisible(category.Cid, category.Pid) {
+		return model.FilmIndex{}, fmt.Errorf("%w: %s", ErrCategoryDisabled, strings.TrimSpace(detail.Name))
+	}
 	meta, err := normalizeSearchMetadata(sourceId, detail, category)
 	if err != nil {
 		return model.FilmIndex{}, err

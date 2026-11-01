@@ -33,17 +33,15 @@ export const weekOptions = [
 export function getTaskActionText(model: number) {
   switch (model) {
     case 0:
-      return "定时采集";
+      return "采集已启用站点的更新";
     case 1:
-      return "定时采集";
+      return "重试待处理的失败记录";
     case 2:
-      return "定时采集重试";
+      return "清理片库冗余和孤儿数据";
     case 3:
-      return "定时孤儿清理";
+      return "清理过期运行日志";
     case 4:
-      return "定时日志清理";
-    case 5:
-      return "轮播排片";
+      return "清理已成功记录及超过 7 天的失败记录";
     default:
       return "计划任务";
   }
@@ -52,17 +50,15 @@ export function getTaskActionText(model: number) {
 export function getTaskTypeText(model: number) {
   switch (model) {
     case 0:
-      return "自动更新";
+      return "自动采集";
     case 1:
-      return "自定义更新";
+      return "失败重试";
     case 2:
-      return "采集重试";
+      return "片库清理";
     case 3:
-      return "孤儿清理";
-    case 4:
       return "日志清理";
-    case 5:
-      return "自动排片";
+    case 4:
+      return "记录清理";
     default:
       return "计划任务";
   }

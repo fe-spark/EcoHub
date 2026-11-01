@@ -32,17 +32,14 @@ func LoadActiveFilmReadModel(version string) error {
 	activeFilmReadModelMu.Lock()
 	defer activeFilmReadModelMu.Unlock()
 	activeFilmReadModel.Store(&FilmReadModel{Version: version})
-	activeFilmSearchMetasMu.Lock()
-	activeFilmSearchMetas.Store(nil)
-	activeFilmSearchMetasMu.Unlock()
-	if version != "" {
-		searchMetaBuildWg.Add(1)
-		go func(ver string) {
-			defer searchMetaBuildWg.Done()
-			_ = loadFilmSearchMetaIndex(ver)
-		}(version)
+	if version == "" {
+		log.Printf("[ActiveReadModel] 检索索引开始加载 version=%s", version)
+		return nil
 	}
-	log.Printf("[ActiveReadModel] 活跃读模型已就绪 version=%s", version)
+	if _, err := buildAndStoreFilmSearchMetaIndex(version); err != nil {
+		return err
+	}
+	log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s", version)
 	return nil
 }
 
@@ -60,11 +57,9 @@ func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmLis
 	activeFilmSearchMetas.Store(nil)
 	activeFilmSearchMetasMu.Unlock()
 	if version != "" {
-		searchMetaBuildWg.Add(1)
-		go func(ver string) {
-			defer searchMetaBuildWg.Done()
-			_ = loadFilmSearchMetaIndex(ver)
-		}(version)
+		if err := LoadActiveFilmReadModel(version); err != nil {
+			return err
+		}
 	}
 	RefreshAccessDataCaches()
 	return nil
@@ -148,6 +143,6 @@ func GetActiveFilmReadModel() *FilmReadModel {
 	return activeFilmReadModel.Load()
 }
 
-func GetProjectedSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
+func GetProjectedSnapshotsByMidsOrdered(version string, mids []int64) ([]model.FilmListSnapshot, error) {
 	return GetSnapshotsByMidsOrdered(version, mids)
 }

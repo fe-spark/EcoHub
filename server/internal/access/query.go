@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 
 	"github.com/redis/go-redis/v9"
@@ -33,16 +32,32 @@ func loadOverviewCache(key string) (*Overview, bool) {
 	}
 	ent, ok := val.(overviewCacheEntry)
 	if !ok || time.Since(ent.at) >= overviewCacheTTL || ent.ov == nil {
+		overviewCache.Delete(key)
 		return nil, false
 	}
 	return ent.ov, true
 }
+
+const overviewCacheMax = 64
 
 func storeOverviewCache(key string, ov *Overview) {
 	if ov == nil {
 		return
 	}
 	overviewCache.Store(key, overviewCacheEntry{at: time.Now(), ov: ov})
+	kept := 0
+	overviewCache.Range(func(k, v any) bool {
+		ent, ok := v.(overviewCacheEntry)
+		if !ok || time.Since(ent.at) >= overviewCacheTTL {
+			overviewCache.Delete(k)
+			return true
+		}
+		kept++
+		if kept > overviewCacheMax {
+			overviewCache.Delete(k)
+		}
+		return true
+	})
 }
 
 type Overview struct {
@@ -93,10 +108,6 @@ type TopItem struct {
 	Year     int64  `json:"year,omitempty"`
 }
 
-func QueryOverview(day string) (*Overview, error) {
-	return QueryOverviewScope(day, "", "")
-}
-
 func QueryOverviewScope(day, module, platform string) (*Overview, error) {
 	now := time.Now().In(time.Local)
 	target, err := parseDay(day, now)
@@ -122,19 +133,30 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 		return nil, err
 	}
 	if !isLocalToday(target, now) {
-		if row, ok := loadDailyStats(target.Format("2006-01-02")); ok {
-			out := overviewFromDailyScope(row, module, platform)
+		row, ok, err := loadDailyStats(target.Format("2006-01-02"))
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out, err := overviewFromDailyScope(row, module, platform)
+			if err != nil {
+				return nil, err
+			}
 			if len(out.Series) == 0 {
-				out.Series = collectMinuteSeries(target, now)
+				series, err := collectMinuteSeries(target, now)
+				if err != nil {
+					return nil, err
+				}
+				out.Series = series
 			}
 			return out, nil
 		}
 		if db.Rdb == nil {
-			return emptyOverview(target), nil
+			return nil, fmt.Errorf("redis unavailable")
 		}
 	}
 	if db.Rdb == nil {
-		if !config.AccessLogEnabled {
+		if !IsEnabled() {
 			return emptyOverview(target), nil
 		}
 		return nil, fmt.Errorf("redis unavailable")

@@ -24,14 +24,14 @@ type GuideStep = {
   /** 批量弹窗里的确认按钮，需在 requireClick 之后再点 */
   submitClick?: string;
   /** 进度条采集结束后才能下一步 */
-  waitMasterDone?: boolean;
+  waitCollectDone?: boolean;
 };
 
 const GUIDE_STEPS: GuideStep[] = [
   {
     title: "先把采集走通",
     description:
-      "首次启动已内置主站和多个附属站。片库要自己采：主站和附属站可同时采，发布会等主站采完；然后检查分类/规则，再打开自动更新。",
+      "首次启动已内置多个采集站。片库由各站共同沉淀：各站均可贡献片子与聚合补充线路；然后检查分类/规则，再打开自动更新。",
     route: "/manage/collect",
     target: "[data-tour='menu-collect']",
     placement: "right",
@@ -39,7 +39,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "全选采集站",
     description:
-      "把内置主站和附属站都勾上。后面批量启用、批量采集都基于这次选择。",
+      "把内置采集站都勾上。后面批量启用、批量采集都基于这次选择。",
     route: "/manage/collect",
     target: "[data-tour='collect-select-all']",
     placement: "bottom",
@@ -57,13 +57,13 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "批量采集",
     description:
-      "主站和附属站可同时采，发布会等主站采完。开始后可看进度和终止。",
+      "所有采集站可同时采，各站点片子与播放线路自动聚合入库。开始后可看进度和终止。",
     route: "/manage/collect",
     target: "[data-tour='collect-batch']",
     placement: "bottom",
     requireClick: "[data-tour='collect-batch']",
     submitClick: "[data-tour='collect-batch-submit']",
-    waitMasterDone: true,
+    waitCollectDone: true,
   },
   {
     title: "分类管理",
@@ -188,7 +188,7 @@ export default function ManageTour({
   const step = GUIDE_STEPS[current];
   const needClick = Boolean(step?.requireClick);
   const needSubmit = Boolean(step?.submitClick);
-  const needWait = Boolean(step?.waitMasterDone);
+  const needWait = Boolean(step?.waitCollectDone);
   const skipActions = !canWrite;
   const canNext = skipActions
     ? true
@@ -326,14 +326,15 @@ export default function ManageTour({
     let prev = `${selectors.map((item) => Boolean(queryTarget(item))).join(",")},${readProgressPhase()}`;
     const check = () => {
       const phase = readProgressPhase();
-      setModalOpen(Boolean(step?.submitClick && queryTarget(step.submitClick)));
+      const hasSubmit = Boolean(step?.submitClick && queryTarget(step.submitClick));
+      setModalOpen(hasSubmit);
       setProgressPhase(phase);
       const next = `${selectors.map((item) => Boolean(queryTarget(item))).join(",")},${phase}`;
       if (next !== prev) {
         prev = next;
         setTargetTick((n) => n + 1);
       }
-      if (!submitted || !step?.waitMasterDone) {
+      if (!submitted || !step?.waitCollectDone) {
         return;
       }
       if (phase === "running") {
@@ -356,9 +357,10 @@ export default function ManageTour({
       attributeFilter: ["data-tour-progress"],
     });
     check();
-    return () => obs.disconnect();
+    return () => {
+      obs.disconnect();
+    };
   }, [open, step, submitted]);
-
   useEffect(() => {
     const hold = Boolean(open && needWait && submitted);
     if (hold) {
@@ -385,33 +387,35 @@ export default function ManageTour({
       : (step?.target ?? null);
 
   const currentStep: NonNullable<TourProps["steps"]>[number] = {
-    title: step?.title,
-    placement: watchingProgress && !modalOpen ? "top" : step?.placement,
+    title: modalOpen ? "开始采集" : step?.title,
+    placement: modalOpen ? "bottomRight" : watchingProgress ? "top" : step?.placement,
     target: () => queryTarget(liveTarget),
-    description: watchingProgress
-      ? collectWaitDescription(progressPhase, progressEnded)
-      : step?.description,
+    arrow: { pointAtCenter: true },
+    description: modalOpen
+      ? "确认采集范围后，点击「开始采集」启动多源聚合入库。"
+      : watchingProgress
+        ? collectWaitDescription(progressPhase, progressEnded)
+        : step?.description,
   };
 
   const last = current >= GUIDE_STEPS.length - 1;
 
   return (
     <Tour
-      key={`${pathname}-${current}-${modalOpen ? "modal" : watchingProgress ? "progress" : "page"}-${targetTick}`}
+      key={`${pathname}-${current}-${modalOpen ? "modal" : watchingProgress ? "progress" : "page"}`}
       open={open}
       current={0}
       onClose={closeTour}
       steps={[currentStep]}
-      zIndex={1100}
+      arrow={{ pointAtCenter: true }}
+      zIndex={modalOpen ? 2000 : 1100}
       classNames={{ section: styles.panel }}
       styles={{
-        section: {
-          border: "1px solid var(--ant-color-primary)",
-          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)",
-          background: "var(--ant-color-bg-layout)",
-        },
+        root: {
+          "--ant-tooltip-arrow-background-color": "var(--ant-color-bg-layout)",
+        } as React.CSSProperties,
       }}
-      mask={watchingProgress && !modalOpen ? false : { color: "rgba(0,0,0,0.45)" }}
+      mask={watchingProgress || modalOpen ? false : { color: "rgba(0,0,0,0.45)" }}
       actionsRender={() => [
         <Button key="skip" size="small" onClick={closeTour}>
           跳过

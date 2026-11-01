@@ -29,7 +29,7 @@ const (
 
 // shouldCatchUpCollectHours 仅定时增量补窗；手动采集保持调用方选择的 h。
 func shouldCatchUpCollectHours(trigger string, requested int) bool {
-	return requested > 0 && trigger == model.NotifyTriggerCron
+	return requested > 0 && trigger == model.CollectTriggerCron
 }
 
 // resolveCollectHours 定时增量时长：max(配置 h, 距上次成功小时数+重叠)，并封顶。

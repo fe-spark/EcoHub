@@ -90,7 +90,7 @@ export default function HistoryPageView() {
               </div>
 
               <Popconfirm
-                title="确定删除这条历史记录吗？"
+                title="删除这条记录？"
                 onConfirm={() => handleDelete(item.id)}
                 okText="确定"
                 cancelText="取消"

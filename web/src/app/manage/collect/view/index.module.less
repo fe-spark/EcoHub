@@ -50,74 +50,6 @@
   color: var(--ant-color-text-tertiary);
 }
 
-/* ===== 采集队列进度（一条队列一条） ===== */
-.batchProgressList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.batchProgressBar {
-  display: flex;
-  align-items: center;
-  gap: 12px 16px;
-  min-width: 0;
-  padding: 12px 16px;
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 10px;
-}
-
-.batchProgressMain {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.batchProgressRow {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.batchProgressFill {
-  flex: 1;
-  min-width: 0;
-}
-
-.batchProgressHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-bottom: 6px;
-}
-
-.batchProgressHeadRight {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.batchProgressTitle {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
-  color: var(--ant-color-text);
-}
-
-.batchProgressStats {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--ant-color-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.batchStopBtn {
-  flex: none;
-}
 
 /* 网格末尾的「新增」占位瓦片 */
 .addSourceTile {
@@ -237,7 +169,7 @@
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 10px;
-  cursor: pointer;
+  cursor: default;
   transition: all 0.2s ease;
 }
 
@@ -250,6 +182,7 @@
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--card-accent);
+  z-index: 2;
   transition: background 0.2s ease, opacity 0.2s ease;
 }
 
@@ -318,12 +251,57 @@
   --card-accent: #ff4d4f;
 }
 
-/* 头部 */
+/* 删除中 */
+.toneDeleting {
+  --card-accent: #ff4d4f;
+  border-color: rgba(255, 77, 79, 0.45);
+}
+
+/* 头部：可拖拽区域，增加背景色标识 */
 .cardHead {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   min-width: 0;
+  margin: -16px -16px 14px -16px;
+  padding: 12px 14px;
+  background: var(--ant-color-fill-quaternary);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  border-radius: 9px 9px 0 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--ant-color-fill-tertiary);
+  }
+
+  &:active {
+    cursor: grabbing;
+    background: var(--ant-color-fill-secondary);
+  }
+}
+
+/* 拖拽原位占位符：虚线边框与半透明度，视觉指示明确 */
+.dragSourcePlaceholder {
+  opacity: 0.35;
+  border-radius: 10px;
+  outline: 2px dashed var(--ant-color-primary, #fa8c16);
+  outline-offset: -2px;
+  filter: grayscale(0.4);
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+/* 拖拽悬浮抓取预览卡片：深立体投影与微仰角，随光标移动 */
+.dragOverlayCard {
+  cursor: grabbing;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.12);
+  transform: scale(1.02);
+  border-radius: 10px;
+  pointer-events: none;
+  background: var(--ant-color-bg-container);
 }
 
 .cardHeadMain {
@@ -380,43 +358,9 @@
   --card-accent: #faad14;
 }
 
-/* 右上角斜向彩带角标 */
-.masterRibbon {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 2;
-  width: 68px;
-  height: 68px;
-  overflow: hidden;
-  pointer-events: none;
-  border-radius: 0 10px 0 0;
-}
 
-.masterRibbonText {
-  position: absolute;
-  top: 10px;
-  right: -24px;
-  width: 96px;
-  padding: 2px 0;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 14px;
-  letter-spacing: 0.1em;
-  text-align: center;
-  color: #5c3b00;
-  background: linear-gradient(180deg, #ffd666 0%, #faad14 55%, #d48806 100%);
-  transform: rotate(45deg);
-  transform-origin: center;
-}
 
-.sourceCardMaster .cardHead {
-  padding-right: 24px;
-}
 
-.sourceCardMaster .statusPill {
-  margin-right: 4px;
-}
 
 .cardUri {
   display: block;
@@ -486,6 +430,16 @@
 .statusFailed {
   color: #ff4d4f;
   background: rgba(255, 77, 79, 0.1);
+}
+
+.statusDeleting {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.12);
+  border: 1px solid rgba(255, 77, 79, 0.25);
+}
+
+.statusDeleting .statusDot {
+  animation: statusPulse 0.8s ease-in-out infinite;
 }
 
 @keyframes statusPulse {
@@ -562,11 +516,6 @@
   line-height: 1;
 }
 
-.progressInlineBar :global(.ant-progress-outer) {
-  margin-inline-end: 0 !important;
-  padding-inline-end: 0 !important;
-}
-
 .progressInline .progressMetaText {
   flex: none;
   margin-top: 0;
@@ -589,8 +538,9 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
+  cursor: default;
 }
 
 .metaCol {
@@ -653,6 +603,7 @@
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--ant-color-border-secondary);
+  cursor: default;
 }
 
 .actionGroup {
@@ -686,10 +637,6 @@
 
   .toolbar > button {
     width: 100%;
-  }
-
-  .batchProgressBar {
-    flex-wrap: wrap;
   }
 }
 

@@ -95,3 +95,4 @@ func tvboxTopClassifyKey(day string) string {
 }
 func tvboxActionKey(day string) string    { return config.AccessKeyPrefix + "tvbox:action:" + day }
 func tvboxRecentDayKey(day string) string { return config.AccessKeyPrefix + "tvbox:recent:" + day }
+func collectSourceKey(day string) string  { return config.AccessKeyPrefix + "collect_source:" + day }

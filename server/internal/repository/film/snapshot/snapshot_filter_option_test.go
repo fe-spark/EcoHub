@@ -7,7 +7,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -57,7 +57,10 @@ func TestGetFilterOptionSnapshotDirectMetadata(t *testing.T) {
 		t.Fatalf("create tag: %v", err)
 	}
 
-	res := GetFilterOptionSnapshot("test_v1", 1)
+	res, err := GetFilterOptionSnapshot("test_v1", 1)
+	if err != nil {
+		t.Fatalf("GetFilterOptionSnapshot: %v", err)
+	}
 	if res == nil {
 		t.Fatal("expected non-nil response")
 	}

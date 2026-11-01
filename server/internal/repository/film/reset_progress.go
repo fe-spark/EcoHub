@@ -1,13 +1,8 @@
 package film
 
-import (
-	"sync"
+import "sync"
 
-	"server/internal/infra/db"
-	"server/internal/model"
-)
-
-// ResetProgress 数据重置实时进度（前端轮询展示真实进度）
+// ResetProgress 数据重置实时进度，由 SSE 推给页面。
 type ResetProgress struct {
 	Running bool   `json:"running"` // 重置是否仍在进行
 	Percent int    `json:"percent"` // 0-100 真实完成百分比
@@ -15,34 +10,50 @@ type ResetProgress struct {
 	Error   string `json:"error"`   // 失败原因（失败时非空）
 }
 
-// ResetImpactStats 数据重置影响面统计（将清空的数据量）
-type ResetImpactStats struct {
-	Films      int64 `json:"films"`      // 影视库存
-	Snapshots  int64 `json:"snapshots"`  // 列表快照
-	Categories int64 `json:"categories"` // 分类
-	Failures   int64 `json:"failures"`   // 失败记录
-}
-
-// GetResetImpactStats 统计将被数据重置清空的数据量，用于重置前展示影响面
-func GetResetImpactStats() ResetImpactStats {
-	var stats ResetImpactStats
-	if db.Mdb == nil {
-		return stats
-	}
-	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&stats.Films).Error
-	_ = db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Count(&stats.Snapshots).Error
-	_ = db.Mdb.Model(&model.Category{}).Count(&stats.Categories).Error
-	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&stats.Failures).Error
-	return stats
-}
-
 var resetProg = struct {
-	mu      sync.RWMutex
-	running bool
-	percent int
-	stage   string
-	errMsg  string
-}{}
+	mu       sync.Mutex
+	running  bool
+	percent  int
+	stage    string
+	errMsg   string
+	nextID   int
+	watchers map[int]func(ResetProgress)
+}{watchers: map[int]func(ResetProgress){}}
+
+// WatchResetProgress 订阅后续进度。取消订阅后不再收到事件。
+func WatchResetProgress(fn func(ResetProgress)) func() {
+	if fn == nil {
+		return func() {}
+	}
+	resetProg.mu.Lock()
+	resetProg.nextID++
+	id := resetProg.nextID
+	resetProg.watchers[id] = fn
+	resetProg.mu.Unlock()
+	return func() {
+		resetProg.mu.Lock()
+		delete(resetProg.watchers, id)
+		resetProg.mu.Unlock()
+	}
+}
+
+func publishResetProgress() {
+	resetProg.mu.Lock()
+	snap := ResetProgress{
+		Running: resetProg.running,
+		Percent: resetProg.percent,
+		Stage:   resetProg.stage,
+		Error:   resetProg.errMsg,
+	}
+	watchers := make([]func(ResetProgress), 0, len(resetProg.watchers))
+	for _, fn := range resetProg.watchers {
+		watchers = append(watchers, fn)
+	}
+	resetProg.mu.Unlock()
+	for _, fn := range watchers {
+		fn(snap)
+	}
+}
 
 // StartResetProgress 标记一次重置开始
 func StartResetProgress() {
@@ -52,6 +63,7 @@ func StartResetProgress() {
 	resetProg.stage = "正在启动重置"
 	resetProg.errMsg = ""
 	resetProg.mu.Unlock()
+	publishResetProgress()
 }
 
 // ReportResetProgress 更新重置进度
@@ -62,6 +74,7 @@ func ReportResetProgress(percent int, stage string) {
 		resetProg.stage = stage
 	}
 	resetProg.mu.Unlock()
+	publishResetProgress()
 }
 
 // FinishResetProgress 结束重置：成功置 100%，失败记录错误信息
@@ -76,12 +89,13 @@ func FinishResetProgress(err error) {
 		resetProg.errMsg = ""
 	}
 	resetProg.mu.Unlock()
+	publishResetProgress()
 }
 
 // GetResetProgress 获取当前重置进度
 func GetResetProgress() ResetProgress {
-	resetProg.mu.RLock()
-	defer resetProg.mu.RUnlock()
+	resetProg.mu.Lock()
+	defer resetProg.mu.Unlock()
 	return ResetProgress{
 		Running: resetProg.running,
 		Percent: resetProg.percent,

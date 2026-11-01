@@ -1,14 +1,15 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -31,7 +32,6 @@ type AdminNotice struct {
 }
 
 func (h *ManageHandler) ManageIndex(c *gin.Context) {
-	// notices 预留后台顶部公告；ContentKey 已改为写路径懒兼容，不再在启动时 bulk 迁移。
 	dto.Success(gin.H{"notices": []AdminNotice{}}, "后台管理中心", c)
 }
 
@@ -67,29 +67,49 @@ func (h *ManageHandler) UpgradeApp(c *gin.Context) {
 
 // SiteBasicConfig 网站基本配置
 func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
-	cfg := service.ManageSvc.GetSiteBasicConfig()
+	cfg, err := service.ManageSvc.GetSiteBasicConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	// 若非超级管理员（如公开未登录接口或访客），清空 ProvideKey 防止敏感密钥泄露
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
-	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
 		cfg.ProvideKey = ""
+		cfg.Danmaku.AppID = ""
+		cfg.Danmaku.AppSecret = ""
 	}
 	dto.Success(cfg, "网站基本信息获取成功", c)
 }
 
 // UpdateSiteBasic 更新网站配置信息
 func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
-	bc := model.BasicConfig{}
-	if err := c.ShouldBindJSON(&bc); err == nil {
-		if len(strings.TrimSpace(bc.SiteName)) <= 0 {
-			dto.Failed("网站名称不能为空", c)
-			return
-		}
-	} else {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
 		dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
 		return
 	}
-
+	var bc model.BasicConfig
+	if err := json.Unmarshal(body, &bc); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
+		return
+	}
+	if len(strings.TrimSpace(bc.SiteName)) <= 0 {
+		dto.Failed("网站名称不能为空", c)
+		return
+	}
+	var probe struct {
+		Danmaku json.RawMessage `json:"danmaku"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
+		return
+	}
+	if raw := bytes.TrimSpace(probe.Danmaku); len(raw) > 0 && string(raw) != "null" {
+		dto.Failed("弹幕配置请使用弹幕接口更新", c)
+		return
+	}
 	if err := service.ManageSvc.UpdateSiteBasic(bc); err != nil {
 		dto.Failed(fmt.Sprint("网站配置更新失败:  ", err), c)
 		return
@@ -99,11 +119,15 @@ func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 
 // SiteAccessConfig 网站访问控制配置
 func (h *ManageHandler) SiteAccessConfig(c *gin.Context) {
-	cfg := service.ManageSvc.GetSiteAccessConfig()
+	cfg, err := service.ManageSvc.GetSiteAccessConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	// 若非超级管理员（如只读访客账号），清空 ProvideKey 防止敏感密钥泄露
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
-	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
 		cfg.ProvideKey = ""
 	}
 	dto.Success(cfg, "访问控制配置获取成功", c)
@@ -127,9 +151,44 @@ func (h *ManageHandler) UpdateSiteAccess(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
+// SiteDanmakuConfig 网站弹幕系统配置
+func (h *ManageHandler) SiteDanmakuConfig(c *gin.Context) {
+	cfg, err := service.ManageSvc.GetSiteDanmakuConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	v, ok := c.Get(config.AuthUserClaims)
+	uc, isUser := v.(*utils.UserClaims)
+	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		cfg.AppID = ""
+		cfg.AppSecret = ""
+	}
+	dto.Success(cfg, "弹幕系统配置获取成功", c)
+}
+
+// UpdateSiteDanmaku 更新网站弹幕系统配置
+func (h *ManageHandler) UpdateSiteDanmaku(c *gin.Context) {
+	var cfg model.DanmakuConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
+		return
+	}
+	if err := service.ManageSvc.UpdateSiteDanmakuConfig(cfg); err != nil {
+		dto.Failed(fmt.Sprint("弹幕系统配置更新失败: ", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("更新成功", c)
+}
+
 // SiteTipConfig 获取赞赏配置
 func (h *ManageHandler) SiteTipConfig(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetSiteTipConfig(), "赞赏配置获取成功", c)
+	tip, err := service.ManageSvc.GetSiteTipConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(tip, "赞赏配置获取成功", c)
 }
 
 // UpdateSiteTip 更新赞赏配置
@@ -148,7 +207,12 @@ func (h *ManageHandler) UpdateSiteTip(c *gin.Context) {
 
 // SiteNoticeConfig 获取公告配置
 func (h *ManageHandler) SiteNoticeConfig(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetSiteNoticeConfig(), "公告配置获取成功", c)
+	notice, err := service.ManageSvc.GetSiteNoticeConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(notice, "公告配置获取成功", c)
 }
 
 // UpdateSiteNotice 更新公告配置
@@ -167,7 +231,7 @@ func (h *ManageHandler) UpdateSiteNotice(c *gin.Context) {
 
 // ------------------------------------------------------ 配置备份导入/导出 ------------------------------------------------------
 
-// ExportConfigBackup 导出站点配置备份（不含影视库存与账号，仅超级管理员）
+// ExportConfigBackup 导出站点配置备份（需管理密码，不含影视库存与账号，仅超级管理员）
 func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
 	if !ok {
@@ -179,9 +243,22 @@ func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
 		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导出配置备份", c)
 		return
 	}
-	dto.Success(service.BackupSvc.ExportConfig(), "配置备份导出成功", c)
+	var req model.ConfigBackupExportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if strings.TrimSpace(req.Password) == "" || !verifyManagePassword(c, req.Password) {
+		dto.Failed("导出失败, 密钥校验失败!!!", c)
+		return
+	}
+	backup, err := service.BackupSvc.ExportConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(backup, "配置备份导出成功", c)
 }
-
 // ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）
 func (h *ManageHandler) ImportConfigBackup(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
@@ -219,138 +296,7 @@ func verifyManagePassword(c *gin.Context, password string) bool {
 	if !ok || uc == nil {
 		return false
 	}
-	if db.Mdb == nil {
-		return false
-	}
 	return service.UserSvc.VerifyUserPassword(uc.UserID, password)
-}
-
-// ------------------------------------------------------ 轮播数据配置 ------------------------------------------------------
-
-// BannerList 获取轮播图数据
-func (h *ManageHandler) BannerList(c *gin.Context) {
-	bl := service.ManageSvc.GetBanners()
-	dto.Success(bl, "配置信息获取成功", c)
-}
-
-// BannerFind 返回ID对应的横幅信息
-func (h *ManageHandler) BannerFind(c *gin.Context) {
-	id := c.Query("id")
-	if id == "" {
-		dto.Failed("Banner信息获取失败, ID信息异常", c)
-		return
-	}
-	bl := service.ManageSvc.GetBanners()
-	for _, b := range bl {
-		if b.Id == id {
-			dto.Success(b, "Banner信息获取成功", c)
-			return
-		}
-	}
-	dto.Failed("Banner信息获取失败", c)
-}
-
-// BannerAdd  添加海报数据
-func (h *ManageHandler) BannerAdd(c *gin.Context) {
-	var b model.Banner
-	if err := c.ShouldBindJSON(&b); err != nil {
-		dto.Failed("Banner参数提交异常", c)
-		return
-	}
-	b.Id = utils.GenerateSalt()
-	bl := service.ManageSvc.GetBanners()
-	if len(bl) >= model.MaxBannerCount {
-		dto.Failed(fmt.Sprintf("已达上限（%d部）", model.MaxBannerCount), c)
-		return
-	}
-	bl = append(bl, b)
-	if err := service.ManageSvc.SaveBanners(bl); err != nil {
-		dto.Failed(fmt.Sprintln("Banners信息添加失败,", err), c)
-		return
-	}
-	dto.SuccessOnlyMsg("海报信息添加成功", c)
-}
-
-// BannerUpdate  更新海报数据
-func (h *ManageHandler) BannerUpdate(c *gin.Context) {
-	var banner model.Banner
-	if err := c.ShouldBindJSON(&banner); err != nil {
-		dto.Failed("Banner参数提交异常", c)
-		return
-	}
-	bl := service.ManageSvc.GetBanners()
-	for i, b := range bl {
-		if b.Id == banner.Id {
-			bl[i] = banner
-			if err := service.ManageSvc.SaveBanners(bl); err != nil {
-				dto.Failed("海报信息更新失败", c)
-			} else {
-				dto.SuccessOnlyMsg("海报信息更新成功", c)
-				return
-			}
-		}
-	}
-	dto.Failed("海报信息更新失败, 未匹配对应Banner信息", c)
-}
-
-// BannerDel 删除海报数据
-func (h *ManageHandler) BannerDel(c *gin.Context) {
-	var req struct {
-		Id string `json:"id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("Banner信息获取失败, 请求参数异常", c)
-		return
-	}
-	id := strings.TrimSpace(req.Id)
-	if id == "" {
-		dto.Failed("Banner信息获取失败, ID信息异常", c)
-		return
-	}
-	bl := service.ManageSvc.GetBanners()
-	for i, b := range bl {
-		if b.Id == id {
-			bl = append(bl[:i], bl[i+1:]...)
-			_ = service.ManageSvc.SaveBanners(bl)
-			dto.SuccessOnlyMsg("海报信息删除成功", c)
-			return
-		}
-	}
-	dto.Failed("海报信息删除失败", c)
-}
-
-// BannerConfigGet 获取首页轮播自动排片配置
-func (h *ManageHandler) BannerConfigGet(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetBannerConfig(), "轮播配置获取成功", c)
-}
-
-// BannerConfigUpdate 更新首页轮播自动排片配置
-func (h *ManageHandler) BannerConfigUpdate(c *gin.Context) {
-	var cfg model.BannerConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		dto.Failed(fmt.Sprintf("轮播配置解析失败: %v", err), c)
-		return
-	}
-	if err := service.ManageSvc.UpdateBannerConfig(cfg); err != nil {
-		dto.Failed(fmt.Sprintf("轮播配置更新失败: %v", err), c)
-		return
-	}
-	dto.SuccessOnlyMsg("轮播配置更新成功", c)
-}
-
-// BannerGenerate 依据当前策略手动立即异步启动轮播生成任务（避免 Nginx 504 超时，前台通过轮询获取真实进度）
-func (h *ManageHandler) BannerGenerate(c *gin.Context) {
-	progress, err := service.ManageSvc.StartBannerGenerateTask("manual_trigger")
-	if err != nil {
-		dto.Failed(fmt.Sprintf("启动自动生成轮播失败: %v", err), c)
-		return
-	}
-	dto.Success(progress, "排片任务已启动", c)
-}
-
-// BannerGenerateProgress 查询首页轮播自动生成任务的实时进度
-func (h *ManageHandler) BannerGenerateProgress(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetBannerGenerateProgress(), "获取排片进度成功", c)
 }
 
 // ------------------------------------------------------ 映射规则管理 ------------------------------------------------------
@@ -395,11 +341,19 @@ func (h *ManageHandler) MappingRuleCheck(c *gin.Context) {
 	dto.Success(result, "映射规则冲突检查成功", c)
 }
 
-// MappingRuleAdd 新增映射规则
-func (h *ManageHandler) MappingRuleAdd(c *gin.Context) {
+// MappingRuleSave 保存映射规则（支持新增或更新）
+func (h *ManageHandler) MappingRuleSave(c *gin.Context) {
 	var rule model.MappingRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
 		dto.Failed("映射规则参数异常", c)
+		return
+	}
+	if rule.ID > 0 {
+		if err := service.ManageSvc.UpdateMappingRule(rule); err != nil {
+			dto.Failed(fmt.Sprintf("映射规则更新失败: %v", err), c)
+			return
+		}
+		dto.SuccessOnlyMsg("映射规则更新成功", c)
 		return
 	}
 	if err := service.ManageSvc.CreateMappingRule(rule); err != nil {
@@ -409,41 +363,30 @@ func (h *ManageHandler) MappingRuleAdd(c *gin.Context) {
 	dto.SuccessOnlyMsg("映射规则新增成功", c)
 }
 
-// MappingRuleUpdate 更新映射规则
-func (h *ManageHandler) MappingRuleUpdate(c *gin.Context) {
-	var rule model.MappingRule
-	if err := c.ShouldBindJSON(&rule); err != nil {
-		dto.Failed("映射规则参数异常", c)
-		return
-	}
-	if err := service.ManageSvc.UpdateMappingRule(rule); err != nil {
-		dto.Failed(fmt.Sprintf("映射规则更新失败: %v", err), c)
-		return
-	}
-	dto.SuccessOnlyMsg("映射规则更新成功", c)
-}
-
-// MappingRuleDel 删除映射规则
-func (h *ManageHandler) MappingRuleDel(c *gin.Context) {
+// MappingRuleDelete 批量删除映射规则
+func (h *ManageHandler) MappingRuleDelete(c *gin.Context) {
 	var req struct {
-		ID uint `json:"id"`
+		Ids []uint `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("映射规则删除参数异常", c)
 		return
 	}
-	if req.ID == 0 {
-		idStr := strings.TrimSpace(c.DefaultQuery("id", ""))
-		if idStr != "" {
-			id, _ := strconv.Atoi(idStr)
-			if id > 0 {
-				req.ID = uint(id)
-			}
+	cleanIds := make([]uint, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id > 0 {
+			cleanIds = append(cleanIds, id)
 		}
 	}
-	if err := service.ManageSvc.DeleteMappingRule(req.ID); err != nil {
-		dto.Failed(fmt.Sprintf("映射规则删除失败: %v", err), c)
+	if len(cleanIds) == 0 {
+		dto.Failed("缺少需要删除的规则标识", c)
 		return
+	}
+	for _, id := range cleanIds {
+		if err := service.ManageSvc.DeleteMappingRule(id); err != nil {
+			dto.Failed(fmt.Sprintf("映射规则删除失败: %v", err), c)
+			return
+		}
 	}
 	dto.SuccessOnlyMsg("映射规则删除成功", c)
 }

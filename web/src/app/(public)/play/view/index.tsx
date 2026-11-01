@@ -7,61 +7,19 @@ import VideoPlayer from "@/components/public/VideoPlayer";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 import { buildPlayPath } from "@/lib/playNavigation";
+import { trackPageView } from "@/lib/track-page-view";
 import RelatedFilmsSection from "./RelatedFilmsSection";
 import PlayHeaderCard from "./PlayHeaderCard";
+import PlaySidebar from "./PlaySidebar";
+import {
+  formatLocalUpdateTime,
+  formatActorNames,
+  resolveFilmScore,
+  makeEpisodeKey,
+  buildPlayLink,
+  buildInitialPlaybackState,
+} from "./formatters";
 import styles from "./index.module.less";
-
-function parseInitialTimeParam(value?: string): number {
-  if (!value) return 0;
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function makeEpisodeKey(sourceId: string, episodeIndex: number) {
-  return `${sourceId}:${episodeIndex}`;
-}
-
-function buildPlayLink(
-  filmId: string | number,
-  sourceId: string,
-  episodeIndex: number,
-  currentTime = 0,
-) {
-  return buildPlayPath(String(filmId), sourceId, episodeIndex, currentTime);
-}
-
-function buildInitialPlaybackState(data: any, initialTime?: string) {
-  const playingSourceId = data?.currentPlayFrom || "";
-  const episodeIndex = data?.currentEpisode ?? 0;
-
-  return {
-    playingSourceId,
-    viewingSourceId: playingSourceId,
-    current: data?.current ? { index: episodeIndex, ...data.current } : null,
-    playInitialTime: parseInitialTimeParam(initialTime),
-  };
-}
-
-function formatLocalUpdateTime(value?: string | number | null) {
-  const stamp = Number(value);
-  if (!Number.isFinite(stamp) || stamp <= 0) return "";
-
-  const date = new Date(stamp * 1000);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function formatActorNames(value?: string) {
-  const raw = String(value || "").trim();
-  if (!raw) return "暂无";
-  return raw.replace(/\s*[，,、]\s*/g, " / ");
-}
-
-function resolveFilmScore(descriptor?: { score?: string; dbScore?: string }) {
-  return String(descriptor?.score || descriptor?.dbScore || "").trim() || "9.0";
-}
 
 interface PlayPageViewProps {
   data: any;
@@ -102,6 +60,11 @@ export default function PlayPageView({
   const sourceMenuRef = useRef<HTMLDivElement>(null);
 
   const currentFilm = data?.detail;
+  const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
+  const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
+
+  const reportedPlaybackKeys = useRef<Set<string>>(new Set());
+  const failedSourcesRef = useRef<Set<string>>(new Set());
 
   const applyPlaybackSelection = useCallback(
     (nextSourceId: string, episodeIndex: number, currentPlay: any, nextInitialTime = 0) => {
@@ -114,8 +77,84 @@ export default function PlayPageView({
     [],
   );
 
-  const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
-  const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
+  const handlePlayStart = useCallback(() => {
+    setPlayerError(false);
+    if (!currentFilm || !playingSourceId) return;
+    const epIdx = current?.index ?? 0;
+    const key = `${filmId}:${playingSourceId}:${epIdx}`;
+    if (reportedPlaybackKeys.current.has(key)) {
+      return;
+    }
+    reportedPlaybackKeys.current.add(key);
+    trackPageView({
+      action: "play",
+      resource: String(filmId),
+      collect_source: playingSourceId,
+      resource_title: currentFilm.name || "",
+      resource_poster: currentFilm.picture || "",
+      resource_cat: currentFilm.descriptor?.cName || "",
+      path: buildPlayPath(String(filmId), playingSourceId, epIdx),
+    });
+  }, [currentFilm, playingSourceId, filmId, current]);
+
+  const handlePlayerError = useCallback(
+    (err?: any) => {
+      console.warn("Playback error encountered on source:", playingSourceId, err);
+      if (!playingSourceId || !currentFilm?.list || currentFilm.list.length === 0) {
+        setPlayerError(true);
+        message.error("该视频源加载失败，请尝试重新加载。");
+        return;
+      }
+
+      failedSourcesRef.current.add(playingSourceId);
+
+      // 寻找下一个未失败且包含播放地址的备用线路
+      const nextSource = currentFilm.list.find(
+        (item: any) =>
+          item.id !== playingSourceId &&
+          !failedSourcesRef.current.has(item.id) &&
+          Array.isArray(item.linkList) &&
+          item.linkList.length > 0,
+      );
+
+      if (nextSource) {
+        const targetEpisodeIndex =
+          current?.index !== undefined &&
+          current.index >= 0 &&
+          current.index < nextSource.linkList.length
+            ? current.index
+            : 0;
+        const targetPlay = nextSource.linkList[targetEpisodeIndex];
+        if (targetPlay) {
+          message.warning(
+            `播放源【${playingSource?.name || "当前源"}】连接失败，正在自动切换至【${nextSource.name}】...`,
+          );
+          applyPlaybackSelection(nextSource.id, targetEpisodeIndex, targetPlay, playInitialTime);
+          router.replace(
+            buildPlayPath(String(filmId), nextSource.id, targetEpisodeIndex),
+            { scroll: false },
+          );
+          return;
+        }
+      }
+
+      // 所有播放源均失败，展示播放器错误视图
+      setPlayerError(true);
+      message.error("该视频源加载失败，暂无其他可用播放源。");
+    },
+    [
+      playingSourceId,
+      currentFilm,
+      current,
+      playInitialTime,
+      playingSource,
+      applyPlaybackSelection,
+      router,
+      filmId,
+      message,
+    ],
+  );
+
   const currentEpisodeKey =
     current && playingSourceId ? makeEpisodeKey(playingSourceId, current.index) : "";
   const visibleActiveEpisodeKey =
@@ -294,8 +333,10 @@ export default function PlayPageView({
       )}
       <div className={styles.bgWrapper}>
         {/* 播放页背景图来自动态视频资源，当前不走 next/image 优化链路 */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={currentFilm.picture} className={styles.bgPoster} alt="background" />
+        {currentFilm.picture ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={currentFilm.picture} className={styles.bgPoster} alt="background" />
+        ) : null}
         <div className={styles.mask} />
       </div>
 
@@ -316,163 +357,56 @@ export default function PlayPageView({
           <div className={`${styles.playerWrapper} ${playerError ? styles.isPlayerError : ""}`}>
             {current?.link && (
               <VideoPlayer
-                key={current.link}
+                key={`${playingSourceId}-${current.index}-${current.link}`}
                 src={current.link}
+                filmId={currentFilm?.id}
+                filmTitle={currentFilm?.name}
+                episode={typeof current.index === "number" ? current.index + 1 : 1}
                 initialTime={playInitialTime}
                 autoplay={autoplay}
                 onEnded={() => autoplay && handlePlayNext()}
                 onTimeUpdate={handleTimeUpdate}
-                onError={() => {
-                  setPlayerError(true);
-                  message.error("该视频源加载失败，请尝试切换播放源。");
-                }}
+                onPlayStart={handlePlayStart}
+                onError={handlePlayerError}
               />
             )}
           </div>
         </div>
 
-        <div className={styles.sidebarWrapper}>
-          <div className={styles.sidebar}>
-            <div className={styles.sideHeader}>
-              <div className={styles.title}>正在播放</div>
-              <div className={styles.subtitle}>
-                {currentFilm.name} - {current?.episode}
-              </div>
-            </div>
-
-            <div className={styles.sourcePicker} ref={sourceMenuRef}>
-              <button
-                type="button"
-                className={`${styles.sourcePickerTrigger} ${isSourceMenuOpen ? styles.open : ""}`}
-                aria-expanded={isSourceMenuOpen}
-                onClick={() => setIsSourceMenuOpen((prev) => !prev)}
-              >
-                <div className={styles.sourcePickerMeta}>
-                  <span className={styles.sourcePickerLabel}>播放源</span>
-                  <span className={styles.sourcePickerValue}>
-                    {viewingSource?.name || "选择播放源"}
-                  </span>
-                </div>
-                <span className={styles.sourcePickerArrow} aria-hidden="true" />
-              </button>
-
-              {isSourceMenuOpen && (
-                <div className={styles.sourcePickerMenu}>
-                  {currentFilm?.list?.map((item: any) => {
-                    const isViewing = viewingSourceId === item.id;
-                    const isPlaying = playingSourceId === item.id;
-                    const episodeCount = item.linkList?.length ?? 0;
-
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className={`${styles.sourcePickerOption} ${isViewing ? styles.active : ""}`}
-                        onClick={() => {
-                          if (viewingSourceId === item.id) {
-                            setIsSourceMenuOpen(false);
-                            return;
-                          }
-
-                          setViewingSourceId(item.id);
-                          setIsSourceMenuOpen(false);
-                        }}
-                      >
-                        <span className={styles.sourcePickerOptionMain}>{item.name}</span>
-                        <span className={styles.sourcePickerOptionMeta}>
-                          {isPlaying ? "当前播放" : `${episodeCount} 集`}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className={styles.sourceTabs} ref={sourceTabsRef}>
-              {currentFilm?.list?.map((item: any) => {
-                const isActive = viewingSourceId === item.id;
-                return (
-                  <div
-                    key={item.id}
-                    ref={isActive ? activeTabRef : null}
-                    className={`${styles.tab} ${isActive ? styles.active : ""}`}
-                    onClick={() => {
-                      if (viewingSourceId === item.id) return;
-                      setViewingSourceId(item.id);
-                      setIsSourceMenuOpen(false);
-                    }}
-                  >
-                    {item.name}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className={styles.episodeList} ref={episodeListRef}>
-              {viewingSource?.linkList?.map((item: any, index: number) => {
-                const episodeKey = makeEpisodeKey(viewingSourceId, index);
-                const isActive = visibleActiveEpisodeKey === episodeKey;
-                return (
-                  <div
-                    key={index}
-                    ref={isActive ? activeEpRef : undefined}
-                    className={`${styles.epItem} ${isActive ? styles.active : ""}`}
-                    title={item.episode}
-                    onClick={() => {
-                      if (currentEpisodeKey === episodeKey) return;
-
-                      applyPlaybackSelection(viewingSourceId, index, item);
-                      router.replace(buildPlayPath(String(filmId), viewingSourceId, index), {
-                        scroll: false,
-                      });
-                    }}
-                    onMouseEnter={(event) => {
-                      const span = event.currentTarget.querySelector<HTMLSpanElement>(
-                        `.${styles.epText}`,
-                      );
-                      if (span && span.scrollWidth > span.clientWidth) {
-                        const overflow = span.scrollWidth - span.clientWidth;
-                        const duration = overflow / 50 / 0.6;
-                        span.style.setProperty("--scroll-distance", `-${overflow}px`);
-                        span.style.setProperty("--scroll-duration", `${duration.toFixed(2)}s`);
-                        span.classList.add(styles.marquee);
-                      }
-                    }}
-                    onMouseLeave={(event) => {
-                      const span = event.currentTarget.querySelector<HTMLSpanElement>(
-                        `.${styles.epText}`,
-                      );
-                      if (span) {
-                        span.classList.remove(styles.marquee);
-                        span.style.removeProperty("--scroll-distance");
-                        span.style.removeProperty("--scroll-duration");
-                      }
-                    }}
-                  >
-                    <span className={styles.epText}>{item.episode}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className={styles.sideFooter}>
-              <div
-                className={`${styles.footerBtn} ${autoplay ? styles.active : ""}`}
-                onClick={() => setAutoplay(!autoplay)}
-              >
-                <PlayCircleOutlined />
-                <span>{autoplay ? "自动播放 开" : "自动播放 关"}</span>
-              </div>
-              {hasNext && (
-                <div className={styles.footerBtn} onClick={handlePlayNext}>
-                  <StepForwardOutlined />
-                  <span>下一集</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <PlaySidebar
+          filmName={currentFilm.name}
+          currentEpisodeName={current?.episode}
+          sources={currentFilm?.list}
+          viewingSourceId={viewingSourceId}
+          playingSourceId={playingSourceId}
+          viewingSource={viewingSource}
+          isSourceMenuOpen={isSourceMenuOpen}
+          visibleActiveEpisodeKey={visibleActiveEpisodeKey}
+          currentEpisodeKey={currentEpisodeKey}
+          autoplay={autoplay}
+          hasNext={hasNext}
+          sourceMenuRef={sourceMenuRef}
+          sourceTabsRef={sourceTabsRef}
+          activeTabRef={activeTabRef}
+          episodeListRef={episodeListRef}
+          activeEpRef={activeEpRef}
+          onToggleSourceMenu={() => setIsSourceMenuOpen((prev) => !prev)}
+          onSelectViewingSource={(id) => {
+            if (viewingSourceId !== id) {
+              setViewingSourceId(id);
+            }
+            setIsSourceMenuOpen(false);
+          }}
+          onSelectEpisode={(sourceId, index, item) => {
+            failedSourcesRef.current.delete(sourceId);
+            applyPlaybackSelection(sourceId, index, item);
+            router.replace(buildPlayPath(String(filmId), sourceId, index), {
+              scroll: false,
+            });
+          }}
+          onToggleAutoplay={() => setAutoplay(!autoplay)}
+          onPlayNext={handlePlayNext}
+        />
       </div>
 
       <div className={styles.infoArea}>

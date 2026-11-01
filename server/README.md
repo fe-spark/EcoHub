@@ -5,8 +5,7 @@
 ## 职责边界
 
 - 采集源管理与 Spider 调度。
-- 主站影片主数据入库。
-- 附属站播放列表补源。
+- 各采集站写入影片档案、线路和匹配键。主站是启用站里排序最前的一座，前台片单和分类跟它走。
 - 影片搜索、详情聚合、播放源聚合。
 - 分类映射、筛选标签、列表快照和倒排索引。
 - 管理后台 API、登录态、访客只读权限。
@@ -113,50 +112,6 @@ go run ./cmd/server
 
 `REDIS_HOST` / `REDIS_PORT` 为空会启动 panic。
 
-### 采集档位
-
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `COLLECT_PROFILE` | 否 | `auto` | 采集写阀与并发档位：`auto` / `light` / `standard` / `high` |
-
-- `auto` 或未设置：按 CPU 核数自动选档（≤2 → `light`，3–7 → `standard`，≥8 → `high`）
-- `light`：保守（约 2C2G）
-- `standard`：中档
-- `high`：高并发（约 8C+）
-- 非法值会打日志并回退自动选档
-- 写阀、分页 worker、源站并发等由档位内置表决定，**无需**再配其它采集并发环境变量
-
-### Telegram 与代理（可选）
-
-Bot Token / Chat ID / 路由策略在**管理后台**配置，不通过环境变量。进程环境仅控制出网代理（发送时读取，优先级从上到下）：
-
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `TG_PROXY` | 否 | Telegram **专用**代理，优先于通用代理；支持 `http://` / `https://` / `socks5://` / `socks5h://` |
-| `HTTPS_PROXY` / `https_proxy` | 否 | 通用 HTTPS 代理（Telegram 次选） |
-| `HTTP_PROXY` / `http_proxy` | 否 | 通用 HTTP 代理 |
-| `ALL_PROXY` / `all_proxy` | 否 | 全局代理兜底 |
-
-示例：
-
-```env
-# 本机 Clash / V2Ray
-TG_PROXY=http://127.0.0.1:7890
-# 或
-TG_PROXY=socks5://127.0.0.1:7891
-
-# Docker 内访问宿主机代理（发布版 / 源码版 compose 已配 host.docker.internal）
-# TG_PROXY=http://host.docker.internal:7890
-```
-
-国内直连 `api.telegram.org` 常超时，建议至少配置 `TG_PROXY`。`HTTPS_PROXY` 等也会影响其它依赖系统代理的出站（若业务侧使用）；Telegram 客户端明确按上表解析。
-
-### 数据分析（可选）
-
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 数据分析总开关：开启全站访问量、播放热度与客户端统计（默认关闭以保持最高性能与零开销） |
-
 ### 日志存储（可选）
 
 | 变量 | 必填 | 默认 | 说明 |
@@ -172,7 +127,7 @@ TG_PROXY=socks5://127.0.0.1:7891
 | `WEB_PORT` | 宿主机暴露 Web（Next）访问端口，默认 `3000` |
 | `SERVER_PORT` | 宿主机暴露 API 直连端口，默认 `18080`（映射到容器内 8080） |
 | `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
-| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `TG_PROXY` / `COLLECT_PROFILE` / `ACCESS_ANALYTICS_ENABLED` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
+| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `ECOHUB_ADMIN_PASSWORD` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
 
 完整部署说明见 [部署指南](../docs/README-Deploy.md)。
 
@@ -201,34 +156,29 @@ TG_PROXY=socks5://127.0.0.1:7891
 ```mermaid
 flowchart TD
     Trigger["定时任务 / 手动触发"] --> Spider["Spider"]
-    Spider --> Level{"站点等级"}
-    Level -->|主站| Master["写入影片主数据"]
-    Level -->|附属站| Slave["写入播放列表"]
-    Master --> Snapshot["发布列表快照 / 筛选索引"]
-    Slave --> Aggregate["详情页补充播放源"]
-    Snapshot --> PublicAPI["前台 / 后台 / Provide 接口"]
-    Aggregate --> PublicAPI
+    Spider --> Write["写入 film_index / 线路 / 匹配键"]
+    Write --> Index["增量更新内存检索索引"]
+    Index --> PublicAPI["前台 / 后台 / Provide 接口"]
 ```
 
 核心约束：
 
-- 任意时刻只允许一个主站。
-- 主站负责影片主数据和检索入口。
-- 附属站只补充播放列表。
-- **主站身份键**（`film_index.content_key`）：优先 `vod_{源站vod_id}`，无 ID 时回退 `name_{hash}`。
-- **跨站匹配**（`movie_match_key`）：豆瓣 ID+片名 / 片名#大类 / 纯片名回退，用于附属站播放源对齐。豆瓣相同但片名不同不算同一部；片名去掉更新至/完结/语种/清晰度片尾，保留剧场版、3D、动态漫画。规范化片名全等才绑；豆瓣/年份/导演/剧集两边都有值且冲突则否决，空值跳过。主站同名多部时按豆瓣 → 大类 → 年份选一部。分类是 `film_index` 字段，不编进 mid；匹配键带大类以隔离同名跨类。
-- 主站切换或主站 URI 变更会停止采集并重建主数据。
+- 启用站里 `sort` 最小的是主站。前台首页、分类、搜索、每日更新只展示该站自己的档案和分类。切换主站立刻换成新主站已采集的数据，不重采、不删片。
+- 各站各有一份 `film_index`。播放线路挂在自己的 `mid` 上。播放页按匹配键补其他已启用站的线路，线路按站分开。
+- **站内身份**：`movie_source_mapping`（采集站 + 源站 `vod_id`）。再次采集只更新自己的档案。
+- **跨站匹配**（`movie_match_key`）：只在播放页查找。豆瓣 ID+片名 / 片名#大类 / 纯片名。不合并档案。
+- 前台封面读取时用海报源那部影片的当前展示图。不另存海报表。影片刮削直接改本片选中的列，片名和分类不改，没有还原。词条只留在 `film_tmdb_scrapes`。
+- 首页轮播刮削写在 `banners_record` 本行，不改影片，没有轮播刮削表。首页用本行的图和简介，更新状态跟片库。
+- 删除或更换地址只清这一站，没有线路的档案也删。切换主站只清空轮播和排片规则。采集中可以切换。
 - 后台支持对单部影片触发全部站点更新。
 
 ## 快照与缓存
 
-前台列表不直接扫描采集中的临时状态，而是读取发布后的快照和读模型：
+前台列表直接读 `film_index`，成员关系看 `film_source_playlists`：
 
-- `film_index` 保存影片检索入口。
-- `film_list_snapshot` 保存前台列表快照。
-- `film_filter_index_snapshot` 保存筛选倒排索引。
-- 活跃快照版本记录在 Redis。
-- 增量发布按 affected mids 分批处理数据库 SQL，事务成功后一次性刷新内存读模型。
+- `film_index` 保存影片档案与播放摘要。
+- 活跃读版本记录在 Redis，当前固定为 `live`。
+- 采集提交后按 mid 增量更新内存检索索引，并刷新 Redis 列表缓存。
 
 缓存策略：
 
@@ -243,23 +193,22 @@ flowchart TD
 - 分类优先使用来源分类映射。
 - 剧情、地区、语言、年份支持“其他”。
 - 排序包含最近更新、人气、评分、时间。
-- 最近更新只看主站资源更新时间，不受附属播放源同步影响。
+- 最近更新按 `update_stamp`。已入库影片在播放线路内容变化时刷新该时间；新片保留源站时间。
 
 ## 接口分组
 
 公共接口：
 
-- `/api/index`
-- `/api/dailyUpdates`
-- `/api/navCategory`
-- `/api/filmPlayInfo`
-- `/api/filmRelate`
-- `/api/liveFilmPlayInfo`
-- `/api/liveFilmRelate`
-- `/api/searchFilm`
-- `/api/hotKeywords`
-- `/api/filmClassify`
-- `/api/filmClassifySearch`
+- `/api/home` (首页聚合数据)
+- `/api/daily-updates` (每日更新)
+- `/api/categories` (前台分类导航树)
+- `/api/categories/overview` (分类专区精选概览)
+- `/api/films/play-info` (影片播放与线路详情)
+- `/api/films/related` (关联影片推荐)
+- `/api/films/search` (综合影片搜索)
+- `/api/films/filter` (片库多维标签筛选与分页)
+- `/api/search/hot-keywords` (搜索热搜词榜单)
+- `/api/stats/view` (浏览与点播访问埋点)
 - `/api/config/basic` (站点基础信息 / 探活)
 - `/api/provide/app` (EcoHub 客户端软件源)
 - `/api/provide/tvbox` (TVBox / 影视仓配置)
@@ -323,7 +272,7 @@ server/
 │       ├── cache/          # 影片缓存键与失效（检索标签 / TVBox / 提供列表）
 │       ├── query/          # 分类维度过滤与相关性排序
 │       ├── snapshot/       # 前台快照生命周期、活跃读模型与筛选快照
-│       ├── playlist/       # 附属站播放列表：比对去重、优先级排序、孤儿扫描、键迁移
+│       ├── playlist/       # 各站播放列表：比对去重、优先级排序、孤儿扫描、键迁移
 │       ├── poster/         # 海报来源同步与最优匹配
 │       └── writer/         # 采集入库写路径：分类树推导、主从指纹比对、标签聚合与缓存合并失效
 ├── internal/model/         # 数据模型与 DTO
@@ -369,4 +318,3 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 - [部署指南](../docs/README-Deploy.md)
 - [FAQ 与排障](../docs/README-FAQ.md)
 - [版本变更](../docs/RELEASE.md)
-- [Telegram 通知行为](./docs/notify.md)

@@ -19,6 +19,11 @@ export interface SiteConfig {
   hint: string;
   privateAccess?: boolean;
   provideKey?: string;
+  danmaku?: {
+    enabled: boolean;
+    autoSniff: boolean;
+    apiUrl: string;
+  };
   tip?: TipConfig;
   notice?: NoticeConfig;
 }

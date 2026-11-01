@@ -11,32 +11,32 @@ export type BannerRecord = {
   customPicture?: string;
   sort?: number;
   isCustomPic?: boolean;
+  area?: string;
+  score?: number;
+  hits?: number;
+  blurb?: string;
+  actor?: string;
+  director?: string;
+  isScraped?: boolean;
+  tmdbId?: number;
+  mediaType?: string;
+  pendingScrape?: boolean;
+  scrapeState?: "pending" | "scraped" | "miss" | "none";
+  source?: string;
+  isPinned?: boolean;
 };
 
-export const MAX_BANNER_COUNT = 12;
-
-export type BannerConfig = {
-  mode: "manual" | "auto";
-  strategy: "hot_random" | "score_random" | "latest_random" | "smart_mix";
-  count: number;
-  autoTMDB: boolean;
-  refreshCron: string;
-  pinnedMids?: number[];
-  categories?: number[];
-  tmdbReady?: boolean;
-};
+export interface BannerSnapshot {
+  formValues: BannerFormValues;
+  selectedFilm: FilmOption | null;
+}
 
 export type BannerFormValues = {
   mid?: number;
-  name: string;
-  cName: string;
-  year?: number;
   picture?: string;
   pictureSlide?: string;
   customPicture?: string;
-  sort?: number;
   isCustomPic?: boolean;
-  followPosterSource?: boolean;
 };
 
 export type FilmOption = {
@@ -52,6 +52,9 @@ export type FilmOption = {
   actor?: string;
   label: string;
   value: number;
+  isScraped?: boolean;
+  score?: number;
+  hits?: number;
 };
 
 export type EditorMode = "create" | "edit";
@@ -79,10 +82,6 @@ export function resolvePreviewPicture(
 
   if ("poster" in record && record.poster) {
     return record.poster;
-  }
-
-  if ("pictureSlide" in record && record.pictureSlide) {
-    return record.pictureSlide;
   }
 
   return "";

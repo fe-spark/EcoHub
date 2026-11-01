@@ -13,7 +13,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -30,10 +30,10 @@ func setupSnapshotRepoTestDB(t *testing.T) *gorm.DB {
 
 	if err := gdb.AutoMigrate(
 		&model.FilmIndex{},
-		&model.MovieDetailInfo{},
-		&model.FilmListSnapshot{},
+		&model.FilmSourcePlaylist{},
 		&model.Category{},
-		&model.SlaveMoviePlaylist{},
+		&model.CategoryMapping{},
+		&model.SourceCategory{},
 		&model.MovieMatchKey{},
 		&model.FilmSource{},
 	); err != nil {
@@ -66,23 +66,27 @@ func createTestFilm(t *testing.T, gdb *gorm.DB, mid int64, name string, updateSt
 		PlayList: [][]model.MovieUrlInfo{{{Episode: "第1集", Link: "https://test.com/1.m3u8"}}},
 		PlayFrom: []string{"默认主源"},
 	}
-	contentJSON, err := json.Marshal(detail)
+	urlsJSON, err := json.Marshal(detail.PlayList[0])
 	if err != nil {
 		t.Fatalf("marshal detail: %v", err)
 	}
-	detailInfo := model.MovieDetailInfo{
-		Mid:     mid,
-		Content: string(contentJSON),
+	playlist := model.FilmSourcePlaylist{
+		Mid:          mid,
+		SourceId:     "source_master",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail.PlayList[0]),
+		Content:      string(urlsJSON),
 	}
-	if err := gdb.Create(&detailInfo).Error; err != nil {
-		t.Fatalf("create detail: %v", err)
+	if err := gdb.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
 	}
 
 	index := model.FilmIndex{
 		FilmIndexIdentity: model.FilmIndexIdentity{
-			Mid:        mid,
-			ContentKey: fmt.Sprintf("key_%d", mid),
-			SourceId:   "source_master",
+			Mid:           mid,
+			FirstSourceId: "source_master",
 		},
 		FilmIndexCategory: model.FilmIndexCategory{
 			Pid:   1,
@@ -126,12 +130,13 @@ func TestEnsureActiveFilmListSnapshot_InitialBuild(t *testing.T) {
 		t.Fatal("expected non-empty active snapshot version after initial build")
 	}
 
-	var count int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", ver).Count(&count).Error; err != nil {
-		t.Fatalf("count snapshot: %v", err)
+	WaitActiveFilmSearchIndexBuilt()
+	idx, err := loadFilmSearchMetaIndex(ver)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("expected 1 snapshot record, got %d", count)
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
 
 	rm := GetActiveFilmReadModel()
@@ -147,32 +152,20 @@ func TestEnsureActiveFilmListSnapshot_GhostSnapshotSelfHealing(t *testing.T) {
 	const ghostVer = "ghost_ver_999"
 	_ = SetActiveSnapshotVersion(ghostVer)
 
-	var snapCount int64
-	_ = gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", ghostVer).Count(&snapCount)
-	if snapCount != 0 {
-		t.Fatalf("expected 0 snapshots for ghost version, got %d", snapCount)
-	}
-
 	if err := EnsureActiveFilmListSnapshot(); err != nil {
 		t.Fatalf("EnsureActiveFilmListSnapshot: %v", err)
 	}
 
-	newVer := GetActiveSnapshotVersion()
-	if newVer == "" || newVer == ghostVer {
-		t.Fatalf("expected ghost version %q to be replaced by new version, got %q", ghostVer, newVer)
+	WaitActiveFilmSearchIndexBuilt()
+	if got := GetActiveSnapshotVersion(); got != ghostVer {
+		t.Fatalf("live 读模型应沿用已有版本号 %q, got %q", ghostVer, got)
 	}
-
-	var newSnapCount int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", newVer).Count(&newSnapCount).Error; err != nil {
-		t.Fatalf("count new snapshot: %v", err)
+	idx, err := loadFilmSearchMetaIndex(ghostVer)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if newSnapCount != 1 {
-		t.Fatalf("expected 1 snapshot record for new version, got %d", newSnapCount)
-	}
-
-	rm := GetActiveFilmReadModel()
-	if rm == nil || rm.Version != newVer {
-		t.Fatalf("expected read model version %q, got %+v", newVer, rm)
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
 }
 
@@ -181,17 +174,7 @@ func TestEnsureActiveFilmListSnapshot_CountMismatch(t *testing.T) {
 	createTestFilm(t, gdb, 101, "测试影片1", 1000, "默认主源")
 	createTestFilm(t, gdb, 102, "测试影片2", 1000, "默认主源")
 
-	// 模拟上次停机前快照只包含 1 部影片（异常强杀导致快照数量落后）
 	const oldVer = "old_ver_partial"
-	snap1 := model.FilmListSnapshot{
-		SnapshotVersion: oldVer,
-		Mid:             101,
-		Name:            "测试影片1",
-		UpdateStamp:     1000,
-	}
-	if err := gdb.Create(&snap1).Error; err != nil {
-		t.Fatalf("create partial snapshot: %v", err)
-	}
 	_ = SetActiveSnapshotVersion(oldVer)
 
 	// 验证触发前 dbCount(2) != snapshotCount(1)
@@ -199,17 +182,16 @@ func TestEnsureActiveFilmListSnapshot_CountMismatch(t *testing.T) {
 		t.Fatalf("EnsureActiveFilmListSnapshot: %v", err)
 	}
 
-	newVer := GetActiveSnapshotVersion()
-	if newVer == "" || newVer == oldVer {
-		t.Fatalf("expected old partial version %q to be rebuilt, got %q", oldVer, newVer)
+	if got := GetActiveSnapshotVersion(); got != oldVer {
+		t.Fatalf("列表直读 film_index 无需因快照行数不一致重建, got %q", got)
 	}
-
-	var healedCount int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", newVer).Count(&healedCount).Error; err != nil {
-		t.Fatalf("count healed snapshot: %v", err)
+	WaitActiveFilmSearchIndexBuilt()
+	idx, err := loadFilmSearchMetaIndex(oldVer)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if healedCount != 2 {
-		t.Fatalf("expected 2 snapshot records after rebuilding, got %d", healedCount)
+	if idx == nil || len(idx.Items) != 2 {
+		t.Fatalf("expected 2 live search items, got %+v", idx)
 	}
 }
 
@@ -243,16 +225,15 @@ func TestEnsureActiveFilmListSnapshot_ClearOnShutdownAndRebuildOnStartup(t *test
 	WaitActiveFilmSearchIndexBuilt()
 
 	ver2 := GetActiveSnapshotVersion()
-	if ver2 == "" || ver2 == ver1 {
-		t.Fatalf("expected new active snapshot version, got %q", ver2)
+	if ver2 == "" {
+		t.Fatal("expected live version after restart")
 	}
-
-	var totalSnapCount int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", ver2).Count(&totalSnapCount).Error; err != nil {
-		t.Fatalf("count snapshot: %v", err)
+	idx, err := loadFilmSearchMetaIndex(ver2)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if totalSnapCount != 2 {
-		t.Fatalf("expected 2 snapshot records after restart, got %d", totalSnapCount)
+	if idx == nil || len(idx.Items) != 2 {
+		t.Fatalf("expected 2 live search items after restart, got %+v", idx)
 	}
 }
 
@@ -303,18 +284,13 @@ func TestEnsureActiveFilmListSnapshot_PlayFromSummaryHealed(t *testing.T) {
 	if ver == "" {
 		t.Fatal("expected non-empty active version")
 	}
-
-	// 验证 film_index 与快照表中的 play_from_summary 均已自愈刷新
-	var healedIndex model.FilmIndex
-	_ = gdb.Where("mid = ?", 201).First(&healedIndex)
-	if healedIndex.PlayFromSummary == "" {
-		t.Fatal("expected film_index play_from_summary to be refreshed during self-healing")
+	WaitActiveFilmSearchIndexBuilt()
+	idx, err := loadFilmSearchMetaIndex(ver)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	var healedSnap model.FilmListSnapshot
-	_ = gdb.Where("snapshot_version = ? AND mid = ?", ver, 201).First(&healedSnap)
-	if healedSnap.PlayFromSummary == "" {
-		t.Fatal("expected film_list_snapshot play_from_summary to be refreshed during self-healing")
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
 }
 

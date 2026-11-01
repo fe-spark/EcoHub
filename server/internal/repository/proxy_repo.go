@@ -2,7 +2,8 @@ package repository
 
 import (
 	"encoding/json"
-	"log"
+	"errors"
+	"fmt"
 	"strings"
 
 	"server/internal/config"
@@ -15,64 +16,80 @@ import (
 // DefaultProxyConfig 默认代理配置
 func DefaultProxyConfig() model.ProxyConfig {
 	return model.ProxyConfig{
-		Enabled:   false,
-		ProxyURL:  "",
-		Scope:     model.ProxyScopeAll,
-		SourceIds: []string{},
+		Enabled:  false,
+		ProxyURL: "",
+		Modules: model.ProxyModuleScope{
+			Spider:  true,
+			TMDB:    true,
+			Notify:  true,
+			Upgrade: true,
+		},
 	}
+}
+
+func requireProxyModules(raw []byte) error {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return fmt.Errorf("代理配置无法解析: %w", err)
+	}
+	if _, ok := probe["modules"]; !ok {
+		return errors.New("代理配置缺少 modules")
+	}
+	return nil
 }
 
 // NormalizeProxyConfig 规范化代理配置
 func NormalizeProxyConfig(cfg model.ProxyConfig) model.ProxyConfig {
 	cfg.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
-	cfg.Scope = strings.TrimSpace(cfg.Scope)
-	if cfg.Scope != model.ProxyScopeCustom {
-		cfg.Scope = model.ProxyScopeAll
-	}
-
-	seen := make(map[string]struct{}, len(cfg.SourceIds))
-	cleanIds := make([]string, 0, len(cfg.SourceIds))
-	for _, id := range cfg.SourceIds {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
-			cleanIds = append(cleanIds, id)
-		}
-	}
-	cfg.SourceIds = cleanIds
 	return cfg
 }
 
-// GetProxyConfig 获取代理配置（Redis 优先，MySQL 兜底）
-func GetProxyConfig() model.ProxyConfig {
-	cfg := DefaultProxyConfig()
-	if db.Rdb != nil {
-		if data := db.Rdb.Get(db.Cxt, config.ProxyConfigKey).Val(); data != "" {
-			if err := json.Unmarshal([]byte(data), &cfg); err == nil {
-				return NormalizeProxyConfig(cfg)
+// GetProxyConfig 读取代理配置。没有记录时返回默认关闭，不写入缓存。
+func GetProxyConfig() (model.ProxyConfig, error) {
+	if data, ok, err := readCache(config.ProxyConfigKey); err != nil {
+		return model.ProxyConfig{}, err
+	} else if ok && data != "" {
+		cfg, err := decodeProxyConfig([]byte(data))
+		if err != nil {
+			if delErr := dropCache(config.ProxyConfigKey); delErr != nil {
+				return model.ProxyConfig{}, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
 			}
+		} else {
+			return cfg, nil
 		}
 	}
-
 	if db.Mdb == nil {
-		return cfg
+		return model.ProxyConfig{}, errors.New("数据库未连接")
 	}
-
 	var rec model.ProxyConfigRecord
 	if err := db.Mdb.Order("id desc").First(&rec).Error; err != nil {
-		return cfg
+		if recordNotFound(err) {
+			return DefaultProxyConfig(), nil
+		}
+		return model.ProxyConfig{}, err
 	}
-
-	if rec.Payload != "" {
-		_ = json.Unmarshal([]byte(rec.Payload), &cfg)
+	cfg, err := decodeProxyConfig([]byte(rec.Payload))
+	if err != nil {
+		return model.ProxyConfig{}, err
 	}
+	if err := cacheProxyConfig(cfg); err != nil {
+		return model.ProxyConfig{}, err
+	}
+	return cfg, nil
+}
 
-	cfg = NormalizeProxyConfig(cfg)
-	cacheProxyConfig(cfg)
-	return cfg
+func decodeProxyConfig(raw []byte) (model.ProxyConfig, error) {
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return model.ProxyConfig{}, errors.New("代理配置为空")
+	}
+	if err := requireProxyModules(raw); err != nil {
+		return model.ProxyConfig{}, err
+	}
+	var cfg model.ProxyConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return model.ProxyConfig{}, fmt.Errorf("代理配置无法解析: %w", err)
+	}
+	return NormalizeProxyConfig(cfg), nil
 }
 
 // SaveProxyConfig 保存代理配置并刷新缓存
@@ -94,50 +111,86 @@ func SaveProxyConfig(cfg model.ProxyConfig) error {
 		return err
 	}
 
-	cacheProxyConfig(cfg)
-	return nil
+	return cacheProxyConfig(cfg)
 }
 
-func cacheProxyConfig(cfg model.ProxyConfig) {
-	if db.Rdb == nil {
-		return
-	}
+func cacheProxyConfig(cfg model.ProxyConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		return
+		return err
 	}
-	if err := db.Rdb.Set(db.Cxt, config.ProxyConfigKey, data, config.ConfigCacheTTL).Err(); err != nil {
-		log.Println("SaveProxyConfig Redis Error:", err)
-		_ = db.Rdb.Del(db.Cxt, config.ProxyConfigKey).Err()
-	}
+	return writeCache(config.ProxyConfigKey, string(data))
 }
 
-// ResolveSourceProxy 判断指定采集站是否启用代理，返回是否启用及代理地址
-func ResolveSourceProxy(sourceID string) (bool, string) {
-	cfg := GetProxyConfig()
-	if !cfg.Enabled || cfg.ProxyURL == "" {
+func proxyChannel(cfg model.ProxyConfig, enabled bool) (bool, string) {
+	if !cfg.Enabled || cfg.ProxyURL == "" || !enabled {
 		return false, ""
 	}
-	if cfg.Scope == model.ProxyScopeAll {
-		return true, cfg.ProxyURL
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	for _, id := range cfg.SourceIds {
-		if id == sourceID {
-			return true, cfg.ProxyURL
-		}
-	}
-	return false, ""
+	return true, cfg.ProxyURL
 }
 
-// IsSourceProxyConfigured 判断指定采集站是否在代理配置名单中（不论全局总开关是否开启）
-func IsSourceProxyConfigured(sourceID string) bool {
-	cfg := GetProxyConfig()
-	sourceID = strings.TrimSpace(sourceID)
-	for _, id := range cfg.SourceIds {
-		if id == sourceID {
-			return true
-		}
+// ResolveSpiderProxy 全局爬虫代理通道。配置读失败返回错误。
+func ResolveSpiderProxy() (bool, string, error) {
+	cfg, err := GetProxyConfig()
+	if err != nil {
+		return false, "", err
 	}
-	return false
+	ok, proxyURL := proxyChannel(cfg, cfg.Modules.Spider)
+	return ok, proxyURL, nil
+}
+
+// ResolveSourceProxy 指定采集源是否走代理。配置或站点查询失败返回错误。
+func ResolveSourceProxy(sourceID string) (bool, string, error) {
+	ok, proxyURL, err := ResolveSpiderProxy()
+	if err != nil || !ok {
+		return false, "", err
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return false, "", errors.New("采集站 ID 为空")
+	}
+	if db.Mdb == nil {
+		return false, "", errors.New("数据库未连接")
+	}
+	var src model.FilmSource
+	if err := db.Mdb.Select("proxy_collect").Where("id = ?", sourceID).First(&src).Error; err != nil {
+		if recordNotFound(err) {
+			return false, "", nil
+		}
+		return false, "", err
+	}
+	if src.ProxyCollect {
+		return true, proxyURL, nil
+	}
+	return false, "", nil
+}
+
+// ResolveTMDBProxy 判断 TMDB 刮削是否启用代理
+func ResolveTMDBProxy() (bool, string, error) {
+	cfg, err := GetProxyConfig()
+	if err != nil {
+		return false, "", err
+	}
+	ok, proxyURL := proxyChannel(cfg, cfg.Modules.TMDB)
+	return ok, proxyURL, nil
+}
+
+// ResolveNotifyProxy 判断 Telegram 通知是否启用代理
+func ResolveNotifyProxy() (bool, string, error) {
+	cfg, err := GetProxyConfig()
+	if err != nil {
+		return false, "", err
+	}
+	ok, proxyURL := proxyChannel(cfg, cfg.Modules.Notify)
+	return ok, proxyURL, nil
+}
+
+// ResolveUpgradeProxy 判断 GitHub 版本更新检查是否启用代理
+func ResolveUpgradeProxy() (bool, string, error) {
+	cfg, err := GetProxyConfig()
+	if err != nil {
+		return false, "", err
+	}
+	ok, proxyURL := proxyChannel(cfg, cfg.Modules.Upgrade)
+	return ok, proxyURL, nil
 }

@@ -2,25 +2,24 @@ import SearchPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 
-async function getSearchData(keyword: string, current: string, sort?: string, source?: string) {
+async function getSearchData(keyword: string, sort?: string) {
   if (!keyword) {
     return null;
   }
 
   try {
-    const response = await serverGet<any>("/searchFilm", {
+    const response = await serverGet<any>("/films/search", {
       keyword,
-      current,
+      current: "1",
       pageSize: 12,
-      sort: source ? "" : sort || "",
-      source: source || "",
+      sort: sort || "",
     });
 
     if (response.code === 0) {
       return response.data;
     }
-  } catch (error) {
-    console.error("fetch search data error:", error);
+  } catch {
+    // 后端未就绪时走空结果
   }
 
   return null;
@@ -28,12 +27,12 @@ async function getSearchData(keyword: string, current: string, sort?: string, so
 
 async function getHotKeywordsData(): Promise<string[]> {
   try {
-    const response = await serverGet<string[]>("/hotKeywords", { limit: 8 });
+    const response = await serverGet<string[]>("/search/hot-keywords", { limit: 8 });
     if (response.code === 0 && Array.isArray(response.data)) {
       return response.data;
     }
-  } catch (error) {
-    console.error("fetch hot keywords error:", error);
+  } catch {
+    // 热词失败时用空列表
   }
   return [];
 }
@@ -45,16 +44,12 @@ export default async function SearchPage({
 }) {
   const resolvedSearchParams = await searchParams;
   const search = resolvedSearchParams.search;
-  const current = resolvedSearchParams.current;
   const sortParam = resolvedSearchParams.sort;
-  const sourceParam = resolvedSearchParams.source;
   const keyword = Array.isArray(search) ? search[0] : (search ?? "");
-  const currentPage = Array.isArray(current) ? current[0] : (current ?? "1");
   const currentSort = Array.isArray(sortParam) ? sortParam[0] : (sortParam ?? "");
-  const currentSource = Array.isArray(sourceParam) ? sourceParam[0] : (sourceParam ?? "");
 
   const [data, hotKeywords] = await Promise.all([
-    getSearchData(keyword, currentPage, currentSort, currentSource),
+    getSearchData(keyword, currentSort),
     getHotKeywordsData(),
   ]);
 
@@ -64,9 +59,7 @@ export default async function SearchPage({
       <SearchPageView
         data={data}
         keyword={keyword}
-        current={currentPage}
         sort={currentSort}
-        source={currentSource}
         hotKeywords={hotKeywords}
       />
     </>
