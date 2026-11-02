@@ -113,32 +113,28 @@ func TestSaveCollectedPeerDetails_PageCommit(t *testing.T) {
 		t.Fatalf("own film playlists=%d", playCount)
 	}
 
-	merged, err := SaveCollectedPeerDetails(context.Background(), sourceA, 4, []model.MovieDetail{
+	separate, err := SaveCollectedPeerDetails(context.Background(), sourceA, 4, []model.MovieDetail{
 		testPeerDetail(31, "同名片", "第1集"),
 		testPeerDetail(32, "同名片", "第9集"),
 	})
 	if err != nil {
-		t.Fatalf("merge: %v", err)
+		t.Fatalf("same title: %v", err)
 	}
-	if len(merged.Affected) != 1 {
-		t.Fatalf("same title should be one film, affected=%v", merged.Affected)
+	if len(separate.Affected) != 2 {
+		t.Fatalf("same title must stay two films, affected=%v", separate.Affected)
 	}
-	if countRows(t, gdb, &model.FilmIndex{}) != 4 {
-		t.Fatal("same-page title was not merged")
+	if countRows(t, gdb, &model.FilmIndex{}) != 5 {
+		t.Fatal("same-page title was merged")
 	}
-	var mergedMaps int64
-	if err := gdb.Model(&model.MovieSourceMapping{}).Where("global_mid = ?", merged.Affected[0]).Count(&mergedMaps).Error; err != nil {
+	var episodes []string
+	if err = gdb.Model(&model.FilmSourcePlaylist{}).
+		Where("source_id = ? AND mid IN ?", sourceA.Id, separate.Affected).
+		Order("last_episode").
+		Pluck("last_episode", &episodes).Error; err != nil {
 		t.Fatal(err)
 	}
-	if mergedMaps != 2 {
-		t.Fatalf("merged mappings=%d", mergedMaps)
-	}
-	var mergedLines model.FilmSourcePlaylist
-	if err := gdb.Where("source_id = ? AND mid = ?", sourceA.Id, merged.Affected[0]).First(&mergedLines).Error; err != nil {
-		t.Fatal(err)
-	}
-	if mergedLines.LastEpisode != "第9集" {
-		t.Fatalf("last detail should win, episode=%q", mergedLines.LastEpisode)
+	if len(episodes) != 2 || episodes[0] != "第1集" || episodes[1] != "第9集" {
+		t.Fatalf("each vod should keep its own playlist, got %v", episodes)
 	}
 
 	updated, err := SaveCollectedPeerDetails(context.Background(), sourceA, 5, []model.MovieDetail{

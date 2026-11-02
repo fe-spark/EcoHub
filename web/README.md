@@ -111,7 +111,7 @@ sequenceDiagram
     participant Next as Next.js
     participant API as Go API
 
-    Browser->>Next: GET /api/index
+    Browser->>Next: GET /api/home
     Next->>API: 转发到后端对应接口
     API-->>Next: JSON
     Next-->>Browser: JSON
@@ -171,3 +171,4 @@ npm run lint
 - [服务端说明](../server/README.md)
 - [部署指南](../docs/README-Deploy.md)
 - [FAQ 与排障](../docs/README-FAQ.md)
+- [版本变更](../docs/RELEASE.md)

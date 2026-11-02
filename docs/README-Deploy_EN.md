@@ -90,7 +90,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Pin a specific image version by setting `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-beta.0` in `.env` or in compose. Formal release tags overwrite `:latest`.
+Pin a formal tag with `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1` in `.env` or compose. A formal release deletes every beta tag and image, so do not pin a beta tag. `:latest` follows formal releases only.
 
 > [!WARNING]
 > **Notice on Upgrading from v2.x to v3.0**: v3.0 is a major architectural rewrite and is completely incompatible with v2.x legacy databases. Do NOT upgrade by simply running `docker compose pull` on an existing `./data/mysql` directory. v2.x operators must deploy in a brand new directory from scratch and re-run full collection.
@@ -320,7 +320,7 @@ All environment variables supported via `.env`, Docker Compose, or container run
 
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
-| `ECOHUB_IMAGE` | No | `ghcr.io/fe-spark/ecohub:latest` | Docker image repository and tag. Set to a specific version or pre-release tag as needed. |
+| `ECOHUB_IMAGE` | No | `ghcr.io/fe-spark/ecohub:latest` | Image repository and tag. Default is latest. Pin a formal tag only. A formal release deletes every beta tag and image. |
 | `WEB_PORT` | No | `3000` | Host Web access entrance port (serves both web frontend and `/manage` admin panel). |
 | `SERVER_PORT` | No | `18080` | Host backend API direct access port (optional, for TVBox or external players; recommended unmapped or bound to `127.0.0.1` in production). |
 

@@ -402,6 +402,7 @@ type FilmDetailVo struct {
 	Hits               int64    `json:"hits"`                        // 影片热度
 	Content            string   `json:"content"`                     // 内容简介
 }
+
 func (fd *FilmDetailVo) UnmarshalJSON(data []byte) error {
 	type Alias FilmDetailVo
 	aux := struct {
@@ -452,7 +453,6 @@ func (fd *FilmDetailVo) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
-
 
 // PlayLinkVo 多站点播放链接数据列表
 type PlayLinkVo struct {

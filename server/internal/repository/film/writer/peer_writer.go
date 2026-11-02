@@ -316,21 +316,14 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			mid = 0
 		}
 
-		if filmIndex == nil {
-			claimedMid, claimedFilm, err := claimPeerFilmByMatchKeysTx(tx, source, detail)
+		if filmIndex != nil {
+			keep, err := vodKeepsMappedFilmTx(tx, source.Id, detail.Id, filmIndex.Mid)
 			if err != nil {
 				return err
 			}
-			if claimedFilm != nil {
-				if !support.IsCategoryVisible(claimedFilm.Cid, claimedFilm.Pid) {
-					mid = 0
-					return nil
-				}
-				mid = claimedMid
-				filmIndex = claimedFilm
-				if err := shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid); err != nil {
-					return err
-				}
+			if !keep {
+				filmIndex = nil
+				mid = 0
 			}
 		}
 
