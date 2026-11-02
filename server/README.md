@@ -26,7 +26,7 @@ flowchart LR
 
 ## 运行要求
 
-- Go 1.24+
+- Go 1.27+
 - MySQL 8+
 - Redis 7+
 

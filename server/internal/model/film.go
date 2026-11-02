@@ -114,14 +114,15 @@ func (d MovieDetail) DisplayPictureSlide() string {
 	return d.PictureSlide
 }
 
-// MovieSourceMapping 影片源站 ID 与全局影片 ID 的最小映射。
-// 主键就是 (source_id, source_mid)，不再使用自增 id 加第二把唯一索引。
+// MovieSourceMapping 影片源站 ID 与全局影片 ID 的映射。
+// 主键就是 (source_id, source_mid)。SourceVodUnix 是已采纳的源站 vod_time，更早的页快照不能覆盖片单。
 type MovieSourceMapping struct {
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	SourceId  string `gorm:"primaryKey;size:32;index:idx_global_source,priority:2"`
-	SourceMid int64  `gorm:"primaryKey;autoIncrement:false"`
-	GlobalMid int64  `gorm:"index:idx_global_source,priority:1"`
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	SourceId      string `gorm:"primaryKey;size:32;index:idx_global_source,priority:2"`
+	SourceMid     int64  `gorm:"primaryKey;autoIncrement:false"`
+	GlobalMid     int64  `gorm:"index:idx_global_source,priority:1"`
+	SourceVodUnix int64  `gorm:"default:0"`
 }
 
 func (MovieSourceMapping) TableName() string {

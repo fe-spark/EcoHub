@@ -5,7 +5,7 @@
 # EcoHub
 
 [![Release](https://img.shields.io/github/v/release/fe-spark/EcoHub)](https://github.com/fe-spark/EcoHub/releases)
-[![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io/)
@@ -25,9 +25,6 @@
 > - **严禁直接挂载旧库升级**：请勿直接挂载 v2.x 历史数据库数据目录（如 `./data/mysql` 或对应 Docker 数据卷）升级运行，否则会导致数据库结构冲突并引发程序异常崩溃。
 > - **全新部署指引**：从旧版本升级至 v3.0 时，**必须使用全新目录重新部署**（或彻底清空旧版 MySQL/Redis 数据卷后从零部署），启动后重新在后台添加站点并执行全量采集。
 > - 详细变更说明请参阅 [版本说明](./docs/RELEASE.md)。
-
-> **使用须知**  
-> EcoHub 不提供、不存储任何影视文件。片源来自使用者自行配置的采集接口。请遵守所在地区的法律法规以及各源站的使用约定，由此产生的风险由使用者自行承担。本项目仅供学习与技术交流。
 
 > **维护说明**  
 > 作者时间有限，更新较慢，请体谅。问题会不定期修复。如果有好的功能可以直接提 [PR](https://github.com/fe-spark/EcoHub/pulls)。
@@ -136,6 +133,9 @@ npm run dev
 ## 交流社区
 
 - Telegram 交流群：[https://t.me/ecohub_club](https://t.me/ecohub_club)
+
+> **使用须知**  
+> EcoHub 不提供、不存储任何影视文件。片源来自使用者自行配置的采集接口。请遵守所在地区的法律法规以及各源站的使用约定，由此产生的风险由使用者自行承担。本项目仅供学习与技术交流。
 
 ---
 

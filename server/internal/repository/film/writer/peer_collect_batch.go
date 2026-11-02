@@ -24,6 +24,7 @@ type peerPageItem struct {
 	playChanged  bool
 	create       bool
 	disabled     bool
+	stale        bool
 }
 
 // filterPeerPageDetails 丢掉无效条目。过滤无片名或无有效播放链接的数据，同一源站 vod_id 在一页里出现多次时保留最后一条。
@@ -94,7 +95,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	}
 	remarkMids, stampMids, affected, notify := make([]int64, 0, len(items)), make(map[int64]struct{}, len(items)), make([]int64, 0, len(items)), make([]int64, 0, len(items))
 	for i := range items {
-		if items[i].mid <= 0 {
+		if items[i].mid <= 0 || items[i].stale {
 			continue
 		}
 		affected = append(affected, items[i].mid)
@@ -286,9 +287,10 @@ func upsertPageMappingsTx(tx *gorm.DB, sourceID string, items []peerPageItem, ma
 func syncPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem) error {
 	order := make([]int, 0, len(items))
 	for i := range items {
-		if !items[i].isNew && items[i].film != nil {
-			order = append(order, i)
+		if items[i].stale || items[i].isNew || items[i].film == nil {
+			continue
 		}
+		order = append(order, i)
 	}
 	sort.Slice(order, func(i, j int) bool {
 		if items[order[i]].mid == items[order[j]].mid {

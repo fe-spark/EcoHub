@@ -2,8 +2,10 @@ package writer
 
 import (
 	"sort"
+	"time"
 
 	"server/internal/model"
+	"server/internal/utils"
 
 	"gorm.io/gorm"
 )
@@ -58,6 +60,14 @@ func savePagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) err
 	vanished := make([]model.FilmSourcePlaylist, 0)
 	upserts := make([]model.FilmSourcePlaylist, 0)
 	for _, idx := range writers {
+		won, err := claimSourceVodTimeTx(tx, sourceID, items[idx].detail.Id, items[idx].detail.UpdateTime)
+		if err != nil {
+			return err
+		}
+		if !won {
+			items[idx].stale = true
+			continue
+		}
 		newLines := buildPlaylistsFromDetail(items[idx].mid, sourceID, items[idx].detail)
 		old := oldByMid[items[idx].mid]
 		if isPlaylistSignatureIdentical(old, newLines) {
@@ -79,4 +89,37 @@ func savePagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) err
 	}
 	sortPlaylists(upserts)
 	return tx.Clauses(playlistUpsertClause()).CreateInBatches(&upserts, peerPagePlaylistBatch).Error
+}
+
+// claimSourceVodTimeTx 采纳不早于已存档的源站 vod_time。小时列表会把同一 vod 的旧页再交来一次，旧页不能覆盖新片单。
+func claimSourceVodTimeTx(tx *gorm.DB, sourceID string, sourceMid int64, updateTime string) (bool, error) {
+	if sourceMid <= 0 {
+		return true, nil
+	}
+	var stored int64
+	if err := tx.Model(&model.MovieSourceMapping{}).
+		Where("source_id = ? AND source_mid = ?", sourceID, sourceMid).
+		Pluck("source_vod_unix", &stored).Error; err != nil {
+		return false, err
+	}
+	incoming, err := utils.ParseCollectUpdateTime(updateTime)
+	if err != nil {
+		return stored == 0, nil
+	}
+	if incoming < stored {
+		return false, nil
+	}
+	if incoming == stored {
+		return true, nil
+	}
+	res := tx.Model(&model.MovieSourceMapping{}).
+		Where("source_id = ? AND source_mid = ? AND source_vod_unix < ?", sourceID, sourceMid, incoming).
+		Updates(map[string]any{
+			"source_vod_unix": incoming,
+			"updated_at":      time.Now(),
+		})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected > 0, nil
 }

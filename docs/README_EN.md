@@ -5,7 +5,7 @@
 # EcoHub
 
 [![Release](https://img.shields.io/github/v/release/fe-spark/EcoHub)](https://github.com/fe-spark/EcoHub/releases)
-[![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io/)
@@ -25,9 +25,6 @@
 > - **Do NOT upgrade in-place**: Do not mount or reuse v2.x database volumes/directories (such as `./data/mysql`). Reusing legacy databases will cause schema conflicts and service crashes.
 > - **Deployment Guide**: Upgrading to v3.0 **requires deploying from scratch in a fresh directory** (or completely clearing legacy MySQL/Redis data volumes), then re-configuring sources and running full collection.
 > - See [Release Notes](./RELEASE.md) for details.
-
-> **Notice**  
-> EcoHub does not provide or store media files. Sources originate from collect APIs configured by the operator. Comply with applicable laws and the terms of each source. The operator assumes all related risk. This project is intended for study and technical exchange.
 
 > **Maintenance**  
 > The author has limited time, so updates are slow. Please bear with that. Issues are fixed when time allows. Useful features are welcome as [pull requests](https://github.com/fe-spark/EcoHub/pulls).
@@ -135,6 +132,9 @@ Public site: `http://127.0.0.1:3000`. Administration panel: `/manage`. API: `htt
 ## Community
 
 - Telegram Group: [https://t.me/ecohub_club](https://t.me/ecohub_club)
+
+> **Notice**  
+> EcoHub does not provide or store media files. Sources originate from collect APIs configured by the operator. Comply with applicable laws and the terms of each source. The operator assumes all related risk. This project is intended for study and technical exchange.
 
 ---
 
