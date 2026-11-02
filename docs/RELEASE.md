@@ -1,9 +1,13 @@
-测试版 **v3.0.2-beta.2**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v3.0.2-beta.2`。
+测试版 **v3.0.2-beta.3**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v3.0.2-beta.3`。
 
 ### 升级指引
 
 - **从 v3.0.x 升级**：`docker compose pull ecohub && docker compose up -d ecohub`。
 - **v2.x**：不兼容，不迁移。必须全新目录部署，勿挂载旧库。
+
+### v3.0.2-beta.3 变更
+
+- 修复采集记录页类型检查：异常站点的原因列不再把可选参数放在必填参数前面，镜像可以完成前端构建。
 
 ### v3.0.2-beta.2 变更
 
