@@ -28,7 +28,6 @@ func setupCategoryChangeTestDB(t *testing.T) *gorm.DB {
 		&model.MovieSourceMapping{},
 		&model.Banner{},
 		&model.FilmTMDBScrape{},
-		&model.FailureRecord{},
 	)
 	if err != nil {
 		t.Fatalf("migrate: %v", err)

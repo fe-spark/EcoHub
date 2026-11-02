@@ -4,20 +4,7 @@
   gap: 16px;
 }
 
-.panelCard {
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 12px;
-  background: var(--ant-color-bg-container);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 
-  :global(.ant-card-body) {
-    padding: 16px;
-  }
-}
-
-html[data-theme="dark"] .panelCard {
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
-}
 
 .filterBar {
   display: flex;
@@ -96,4 +83,21 @@ html[data-theme="dark"] .panelCard {
   .pagination {
     justify-content: flex-start;
   }
+}
+
+.failedRowHighlight {
+  background-color: rgba(255, 77, 79, 0.06);
+}
+
+.incidentTable {
+  width: 100%;
+}
+
+.incidentSourceId {
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+.retryLink {
+  padding: 0;
 }

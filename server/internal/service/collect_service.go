@@ -334,7 +334,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 		return fmt.Errorf("采集站「%s」当前有采集任务正在运行或正在停止退出中，请稍候几秒后再修改地址或协议", name)
 	}
 
-	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged, isUriChanged || isFormatChanged)
+	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged)
 	if len(orphanMids) > 0 {
 		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
 	}
@@ -343,7 +343,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	}
 
 	if isUriChanged {
-		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据、失败记录和分类，删除档案 %d 部", source.Name, source.Id, len(orphanMids))
+		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据和分类，删除档案 %d 部", source.Name, source.Id, len(orphanMids))
 		repository.MarkCategoryChanged()
 		progress.BroadcastCategoryReady(source.Id, false)
 	}
@@ -422,65 +422,4 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	return nil
 }
 
-// PrepareRecordQuery 未指定采集源时落到首选站。没有站点时保持空条件。
-func (s *CollectService) PrepareRecordQuery(params model.RecordRequestVo) model.RecordRequestVo {
-	params.OriginId = strings.TrimSpace(params.OriginId)
-	if params.OriginId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
-			params.OriginId = active.Id
-		}
-	}
-	return params
-}
 
-func (s *CollectService) GetRecordList(params model.RecordRequestVo) ([]model.FailureRecord, error) {
-	params = s.PrepareRecordQuery(params)
-	return repository.FailureRecordList(params)
-}
-
-func (s *CollectService) GetRecordOptions() (map[string]any, error) {
-	sources, err := repository.GetCollectSourceList()
-	if err != nil {
-		return nil, err
-	}
-	defaultSourceId := ""
-	if active := repository.GetActiveCollectSource(); active != nil {
-		defaultSourceId = active.Id
-	} else if len(sources) > 0 {
-		defaultSourceId = sources[0].Id
-	}
-	originOptions := make([]model.Option, 0, len(sources))
-	for _, v := range sources {
-		name := v.Name
-		if !v.State {
-			name += " (已停用)"
-		}
-		originOptions = append(originOptions, model.Option{Name: name, Value: v.Id})
-	}
-	return map[string]any{
-		"status": []model.Option{
-			{Name: "全部", Value: -1},
-			{Name: "待重试", Value: model.FailureRecordStatusPending},
-			{Name: "重试成功", Value: model.FailureRecordStatusSuccess},
-			{Name: "重试失败", Value: model.FailureRecordStatusFailed},
-		},
-		"origin":          originOptions,
-		"defaultSourceId": defaultSourceId,
-	}, nil
-}
-
-func (s *CollectService) CollectRecover(id int) error {
-	return spider.AcceptFailureRecover(repository.FindRecordById(uint(id)))
-}
-
-func (s *CollectService) RecoverAll() (spider.FailureRecoverOutcome, error) {
-	return spider.EnqueuePendingFailureRecovers()
-}
-
-func (s *CollectService) ClearRetriedRecords() error {
-	return repository.DeleteRetriedRecords()
-}
-
-func (s *CollectService) ClearAllRecord() error {
-	return repository.TruncateRecordTable()
-}

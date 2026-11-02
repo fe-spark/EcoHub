@@ -167,7 +167,7 @@ func FilmZero() error {
 	for _, t := range []string{
 		model.TableCollectSourceStats,
 		model.TableSearchTag,
-		model.TableFailureRecord,
+		model.TableCollectRecord,
 		model.TableBanners,
 	} {
 		if err := truncateTable(db.Mdb, t); err != nil {

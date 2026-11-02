@@ -78,7 +78,7 @@ func init() {
 		WaitTurn:           waitSourceRequestTurn,
 		LiveTaskCount:      countLiveCollectTasks,
 		SavePage:           saveCollectedFilmForCollect,
-		SavePageFailure:    saveFilmPageFailure,
+
 		SkipPublishOnError: shouldSkipCollectPublishOnError,
 		ResolveSpiderProxy: repository.ResolveSpiderProxy,
 		ResolveSourceProxy:     repository.ResolveSourceProxy,
@@ -151,11 +151,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		return err
 	}
 	if isStandalone {
-		batchCtx = newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{*s}, time.Now(), true)
+		batchCtx = newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{*s}, time.Now(), true).withHour(h)
+		if err := batchCtx.recordStart(); err != nil {
+			log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", batchCtx.batchID, err)
+		}
 	}
 	defer func() {
 		originalErr := retErr
-		if originalErr != nil && batchCtx != nil {
+		if originalErr != nil && batchCtx != nil && !errors.Is(originalErr, context.Canceled) {
 			batchCtx.RecordSourceError(s.Id, originalErr.Error())
 		}
 		runOK := shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id)
@@ -311,5 +314,22 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 		trigger = model.CollectTriggerManual
 	}
 	runSourcesWithLimitCore(sources, h, "Batch-Collect", trigger)
+}
+
+// StartBatchCollectRetry 先写入 running 批次，再异步执行失败站点重试。
+func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.FilmSource) (string, error) {
+	if len(sources) == 0 {
+		return "", errors.New("没有可重试的站点")
+	}
+	sources = prioritizeCollectSources(sources)
+	startedAt := time.Now()
+	batchCtx := newCollectBatchContext(model.CollectTriggerRetry, "失败重试", sources, startedAt).
+		withHour(hour).withParentBatchID(parentBatchID)
+	if err := batchCtx.recordStart(); err != nil {
+		batchCtx.close()
+		return "", err
+	}
+	go runPreparedBatch(batchCtx, hour, "失败重试")
+	return batchCtx.batchID, nil
 }
 
