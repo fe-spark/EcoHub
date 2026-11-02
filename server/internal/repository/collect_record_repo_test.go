@@ -125,11 +125,12 @@ func TestCleanOldCollectRecords(t *testing.T) {
 func TestMarkInterruptedCollectRecords(t *testing.T) {
 	setupTestDB(t)
 
+	started := time.Now().Add(-2 * time.Minute)
 	_ = CreateCollectRecord(&model.CollectRecord{
 		BatchID:   "batch-running",
 		Trigger:   model.CollectTriggerManual,
 		Status:    model.CollectRecordStatusRunning,
-		StartedAt: time.Now(),
+		StartedAt: started,
 	})
 
 	if err := MarkInterruptedCollectRecords(); err != nil {
@@ -143,6 +144,12 @@ func TestMarkInterruptedCollectRecords(t *testing.T) {
 	if list[0].Status != model.CollectRecordStatusInterrupted {
 		t.Fatalf("expected status interrupted, got %s", list[0].Status)
 	}
+	if list[0].DurationMs < int64(time.Minute/time.Millisecond) {
+		t.Fatalf("expected duration from started_at, got %d", list[0].DurationMs)
+	}
+	if list[0].FinishedAt == nil {
+		t.Fatal("expected finished_at")
+	}
 }
 
 func TestCompleteCollectRecordMissing(t *testing.T) {
@@ -154,5 +161,103 @@ func TestCompleteCollectRecordMissing(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "采集记录不存在") {
 		t.Fatalf("expected 采集记录不存在, got %v", err)
+	}
+}
+
+func TestCompleteCollectRecordIdempotentAndExcludeRunning(t *testing.T) {
+	setupTestDB(t)
+
+	rec := &model.CollectRecord{
+		BatchID:   "batch-running-protect",
+		Trigger:   model.CollectTriggerManual,
+		Status:    model.CollectRecordStatusRunning,
+		StartedAt: time.Now(),
+	}
+	if err := CreateCollectRecord(rec); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// 运行中记录不可被批量删除或清空
+	if err := DeleteCollectRecords([]uint{rec.ID}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	_, total, err := GetCollectRecordList(model.CollectRecordQuery{})
+	if err != nil || total != 1 {
+		t.Fatalf("running record should not be deleted, total=%d", total)
+	}
+
+	if err := ClearCollectRecords(); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	_, total, err = GetCollectRecordList(model.CollectRecordQuery{})
+	if err != nil || total != 1 {
+		t.Fatalf("running record should not be cleared, total=%d", total)
+	}
+
+	// 正常完成
+	comp := model.CollectRecordCompletion{
+		Status:     model.CollectRecordStatusSuccess,
+		FinishedAt: time.Now(),
+	}
+	if err := CompleteCollectRecord("batch-running-protect", comp); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	got, _ := GetCollectRecordByBatchID("batch-running-protect")
+	if got.Status != model.CollectRecordStatusSuccess {
+		t.Fatalf("expected success, got %s", got.Status)
+	}
+
+	// 二次完成保持幂等，不会被后来的调用覆盖
+	compFailed := model.CollectRecordCompletion{
+		Status:     model.CollectRecordStatusFailed,
+		FinishedAt: time.Now(),
+	}
+	if err := CompleteCollectRecord("batch-running-protect", compFailed); err != nil {
+		t.Fatalf("second complete: %v", err)
+	}
+	gotAgain, _ := GetCollectRecordByBatchID("batch-running-protect")
+	if gotAgain.Status != model.CollectRecordStatusSuccess {
+		t.Fatalf("status should stay success, got %s", gotAgain.Status)
+	}
+}
+
+func TestGetCollectRecordListQuickFilters(t *testing.T) {
+	setupTestDB(t)
+
+	now := time.Now()
+	rows := []model.CollectRecord{
+		{BatchID: "ok-empty", Trigger: model.CollectTriggerManual, Status: model.CollectRecordStatusSuccess, FilmCount: 0, StartedAt: now},
+		{BatchID: "ok-films", Trigger: model.CollectTriggerManual, Status: model.CollectRecordStatusSuccess, FilmCount: 25, StartedAt: now.Add(-time.Minute)},
+		{BatchID: "partial", Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusPartial, FilmCount: 3, FailedSources: 1, StartedAt: now.Add(-2 * time.Minute)},
+		{BatchID: "interrupted", Trigger: model.CollectTriggerManual, Status: model.CollectRecordStatusInterrupted, StartedAt: now.Add(-3 * time.Minute)},
+	}
+	for i := range rows {
+		if err := CreateCollectRecord(&rows[i]); err != nil {
+			t.Fatalf("create %s: %v", rows[i].BatchID, err)
+		}
+	}
+
+	updated, total, err := GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10, UpdatedOnly: true})
+	if err != nil {
+		t.Fatalf("updated filter: %v", err)
+	}
+	if total != 2 || len(updated) != 2 {
+		t.Fatalf("updated filter expected 2, total=%d len=%d", total, len(updated))
+	}
+
+	failed, total, err := GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10, FailedOnly: true})
+	if err != nil {
+		t.Fatalf("failed filter: %v", err)
+	}
+	if total != 2 || len(failed) != 2 {
+		t.Fatalf("failed filter expected 2, total=%d len=%d", total, len(failed))
+	}
+
+	both, total, err := GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10, UpdatedOnly: true, FailedOnly: true})
+	if err != nil {
+		t.Fatalf("both filters: %v", err)
+	}
+	if total != 1 || len(both) != 1 || both[0].BatchID != "partial" {
+		t.Fatalf("both filters expected partial, total=%d list=%v", total, both)
 	}
 }

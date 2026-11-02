@@ -3,7 +3,6 @@ package repository
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -22,7 +21,7 @@ func ListCollectRecordsSince(since time.Time) ([]model.CollectRecord, error) {
 	}
 	var list []model.CollectRecord
 	err := db.Mdb.Select("batch_id", "started_at", "detail_json").
-		Where("started_at >= ?", since).
+		Where("started_at >= ? AND `trigger` != ?", since, model.CollectTriggerSingleUpdate).
 		Order("started_at DESC, id DESC").
 		Find(&list).Error
 	if err != nil {
@@ -81,7 +80,7 @@ func foldSourceIncidents(rows []model.CollectRecord) ([]model.SourceIncident, er
 		}
 		var details []model.CollectRecordSourceDetail
 		if err := json.Unmarshal([]byte(raw), &details); err != nil {
-			return nil, fmt.Errorf("批次 %s 明细损坏: %w", rec.BatchID, err)
+			continue
 		}
 		for _, d := range details {
 			id := strings.TrimSpace(d.SourceID)

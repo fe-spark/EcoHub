@@ -15,8 +15,33 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider/fetcher"
+	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
 )
+
+func singleFilmSourceDetail(src model.FilmSource, changed int, errMsg string) model.CollectRecordSourceDetail {
+	detail := model.CollectRecordSourceDetail{
+		SourceID:    src.Id,
+		SourceName:  strings.TrimSpace(src.Name),
+		Status:      progress.StatusDone,
+		PageTotal:   1,
+		PageCurrent: 1,
+		SuccessCnt:  1,
+		FilmsTotal:  changed,
+	}
+	if errMsg != "" {
+		detail.Status = progress.StatusFailed
+		detail.PageCurrent = 0
+		detail.SuccessCnt = 0
+		detail.FailedCnt = 1
+		detail.FilmsTotal = 0
+		detail.Error = errMsg
+	}
+	if detail.SourceName == "" {
+		detail.SourceName = src.Id
+	}
+	return detail
+}
 
 func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
 	if s == nil {
@@ -116,7 +141,8 @@ func CollectSingleFilm(ids string) {
 	}
 
 	startedAt := time.Now()
-	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, "单片更新", targets, startedAt)
+	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, model.CollectTagSingleUpdate, targets, startedAt).
+		withReplayFilmIDs([]int64{globalMid})
 	defer batchCtx.close()
 
 	var wg sync.WaitGroup
@@ -130,12 +156,14 @@ func CollectSingleFilm(ids string) {
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
 			defer batchCtx.releaseSourceOccupy(src.Id)
-			_, err := collectFilmById(sourceMid, &src, batchCtx)
+			changed, err := collectFilmById(sourceMid, &src, batchCtx)
 			if err != nil {
+				batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, 0, err.Error()))
 				batchCtx.RecordSourceError(src.Id, err.Error())
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
 				return
 			}
+			batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, len(changed), ""))
 			if isPreferredCollectSource(src.Id) {
 				if err := batchCtx.finalizePrimarySource(src.Id); err != nil {
 					syslog.Errorf("[CollectSingleFilm] 首选站 %s 缓存刷新失败: %v", src.Name, err)

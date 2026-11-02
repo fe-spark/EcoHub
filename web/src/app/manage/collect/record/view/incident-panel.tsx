@@ -1,9 +1,11 @@
 "use client";
 
 import { Button, Popconfirm, Table, Tag, Typography } from "antd";
+import { ClockCircleOutlined, CloseCircleOutlined, CloudServerOutlined, EyeOutlined, ReloadOutlined, StopOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { SourceIncident } from "./types";
+import { ErrorDetailButton } from "./error-detail-button";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -27,39 +29,64 @@ export function IncidentPanel({
 
   const columns: ColumnsType<SourceIncident> = [
     {
-      title: "站点",
+      title: (
+        <span className={styles.withIcon}>
+          <CloudServerOutlined />
+          站点
+        </span>
+      ),
       dataIndex: "sourceName",
       key: "sourceName",
       width: 180,
       render: (name: string, item) => (
-        <span>
+        <span className={styles.withIcon}>
+          <CloudServerOutlined />
           {name || item.sourceId}
           <Text type="secondary" className={styles.incidentSourceId}>
-            ({item.sourceId})
+            {item.sourceId}
           </Text>
         </span>
       ),
     },
     {
-      title: "连续失败",
+      title: (
+        <span className={styles.withIcon}>
+          <CloseCircleOutlined />
+          连续失败
+        </span>
+      ),
       dataIndex: "consecutiveFailures",
       key: "consecutiveFailures",
       width: 100,
       align: "center",
     },
     {
-      title: "最近时间",
+      title: (
+        <span className={styles.withIcon}>
+          <ClockCircleOutlined />
+          最近时间
+        </span>
+      ),
       dataIndex: "latestFailedAt",
       key: "latestFailedAt",
       width: 180,
-      render: (val: string) => (val ? dayjs(val).format("YYYY-MM-DD HH:mm:ss") : "-"),
+      render: (val: string) =>
+        val ? (
+          <span className={styles.withIcon}>
+            <ClockCircleOutlined />
+            {dayjs(val).format("YYYY-MM-DD HH:mm:ss")}
+          </span>
+        ) : (
+          "-"
+        ),
     },
     {
       title: "原因",
       dataIndex: "latestError",
       key: "latestError",
       ellipsis: true,
-      render: (msg?: string) => msg || <Text type="secondary">-</Text>,
+      render: (msg?: string, item) =>
+        msg ? <ErrorDetailButton text={msg} title={item.sourceName ? `${item.sourceName} 异常原因` : "异常原因"} /> : null,
     },
     {
       title: "熔断",
@@ -67,7 +94,16 @@ export function IncidentPanel({
       key: "tripped",
       width: 90,
       align: "center",
-      render: (tripped: boolean) => (tripped ? <Tag color="error">已熔断</Tag> : <Text type="secondary">-</Text>),
+      render: (tripped: boolean) =>
+        tripped ? (
+          <Tag color="error" icon={<StopOutlined />}>
+            已熔断
+          </Tag>
+        ) : (
+          <Tag color="warning" icon={<EyeOutlined />}>
+            观察中
+          </Tag>
+        ),
     },
     {
       title: "操作",
@@ -86,7 +122,14 @@ export function IncidentPanel({
             onConfirm={() => onRetry(item.latestBatchId, item.sourceId)}
             disabled={!canWrite || loading}
           >
-            <Button type="link" size="small" loading={loading} disabled={!canWrite} className={styles.retryLink}>
+            <Button
+              type="text"
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={loading}
+              disabled={!canWrite}
+              className={styles.actionButton}
+            >
               重试该站
             </Button>
           </Popconfirm>

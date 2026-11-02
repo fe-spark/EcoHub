@@ -50,6 +50,14 @@ func TestRunAutoMigrations_EmptyBaselineIdempotent(t *testing.T) {
 	if countAfter != 3 {
 		t.Fatalf("expected count to stay 3, got %d", countAfter)
 	}
+
+	var clean model.CrontabRecord
+	if err := testDB.Where("task_id = ?", model.TaskIDCollectClean).First(&clean).Error; err != nil {
+		t.Fatalf("default collect clean: %v", err)
+	}
+	if !clean.State || clean.Spec != "0 30 3 * * *" || clean.TaskModel != model.TaskModelCollectClean {
+		t.Fatalf("default collect clean = %+v", clean)
+	}
 }
 
 func TestRunAutoMigrations_NilDB(t *testing.T) {
@@ -70,8 +78,14 @@ func TestRunAutoMigrations_CollectRecordsRefactor(t *testing.T) {
 	_ = testDB.AutoMigrate(&model.CrontabRecord{})
 	_ = testDB.Table(model.TableFailureRecord).Exec("CREATE TABLE " + model.TableFailureRecord + " (id integer primary key)").Error
 	_ = testDB.Create(&model.CrontabRecord{TaskId: "sys_cron_recover_collect", TaskModel: 1, Spec: "0 0 2 * * *"}).Error
-	_ = testDB.Create(&model.CrontabRecord{TaskId: model.TaskIDFailureClean, TaskModel: 4, Spec: "0 30 3 * * *"}).Error
-
+	_ = testDB.Create(&model.CrontabRecord{TaskId: "user_custom_task", TaskModel: 1, Spec: "0 12 * * *"}).Error
+	_ = testDB.Create(&model.CrontabRecord{
+		TaskId:    model.TaskIDFailureClean,
+		TaskModel: 4,
+		Spec:      "0 15 4 * * *",
+		State:     false,
+		Remark:    "old",
+	}).Error
 	// 执行版本迁移
 	if err := RunAutoMigrations(testDB); err != nil {
 		t.Fatalf("RunAutoMigrations failed: %v", err)
@@ -88,6 +102,11 @@ func TestRunAutoMigrations_CollectRecordsRefactor(t *testing.T) {
 	if countFailureClean != 0 {
 		t.Fatalf("expected sys_cron_failure_clean to be deleted, got %d", countFailureClean)
 	}
+	var countCustom int64
+	_ = testDB.Model(&model.CrontabRecord{}).Where("task_id = ?", "user_custom_task").Count(&countCustom)
+	if countCustom != 1 {
+		t.Fatalf("user_custom_task should not be deleted, got count %d", countCustom)
+	}
 
 	// 验证新任务已创建
 	var newCleanTask model.CrontabRecord
@@ -96,6 +115,15 @@ func TestRunAutoMigrations_CollectRecordsRefactor(t *testing.T) {
 	}
 	if newCleanTask.TaskModel != model.TaskModelCollectClean {
 		t.Fatalf("expected model %d, got %d", model.TaskModelCollectClean, newCleanTask.TaskModel)
+	}
+	if newCleanTask.State {
+		t.Fatal("disabled cleanup job was turned back on")
+	}
+	if newCleanTask.Spec != "0 15 4 * * *" {
+		t.Fatalf("spec changed: %s", newCleanTask.Spec)
+	}
+	if newCleanTask.Remark != "定期清理超过 30 天的采集运行记录与快照" {
+		t.Fatalf("remark = %s", newCleanTask.Remark)
 	}
 
 	// 验证新表已创建

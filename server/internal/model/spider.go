@@ -11,7 +11,7 @@ const (
 	TaskModelAutoCollect  = 0 // 采集已启用站点
 	TaskModelOrphanClean  = 2 // 清理片库冗余和孤儿数据
 	TaskModelLogClean     = 3 // 清理过期运行日志
-	TaskModelCollectClean = 4 // 定期清理超过 30 天的采集运行记录
+	TaskModelCollectClean = 5 // 定期清理超过 30 天的采集运行记录
 )
 
 // 采集触发方式常量。

@@ -46,31 +46,47 @@ func migrateCollectRecordsRefactor(db *gorm.DB) error {
 	if err := db.AutoMigrate(&model.CollectRecord{}, &model.CrontabRecord{}); err != nil {
 		return fmt.Errorf("migrate tables failed: %w", err)
 	}
-	// 2. 废弃：从计划任务表中物理删除已下线的旧重试任务与旧清理任务
-	if err := db.Unscoped().Where("task_id = ? OR task_model = ?", "sys_cron_recover_collect", 1).
+	// 旧的独立重试任务下线。失败记录清理改成采集记录清理时保留开关和 cron。
+	if err := db.Unscoped().Where("task_id = ?", "sys_cron_recover_collect").
 		Delete(&model.CrontabRecord{}).Error; err != nil {
-		return fmt.Errorf("cleanup deprecated recover cron task failed: %w", err)
-	}
-	if err := db.Unscoped().Where("task_id = ?", model.TaskIDFailureClean).
-		Delete(&model.CrontabRecord{}).Error; err != nil {
-		return fmt.Errorf("cleanup deprecated failure clean cron task failed: %w", err)
+		return fmt.Errorf("cleanup deprecated cron tasks failed: %w", err)
 	}
 
-	// 3. 新建：初始化 30 天采集记录清理任务
+	const collectCleanRemark = "定期清理超过 30 天的采集运行记录与快照"
+	var collectCleanCount int64
+	if err := db.Model(&model.CrontabRecord{}).Where("task_id = ?", model.TaskIDCollectClean).Count(&collectCleanCount).Error; err != nil {
+		return fmt.Errorf("query collect clean cron task failed: %w", err)
+	}
+	if collectCleanCount > 0 {
+		if err := db.Unscoped().Where("task_id = ?", model.TaskIDFailureClean).Delete(&model.CrontabRecord{}).Error; err != nil {
+			return fmt.Errorf("cleanup deprecated cron tasks failed: %w", err)
+		}
+		return nil
+	}
+
+	renamed := db.Model(&model.CrontabRecord{}).Where("task_id = ?", model.TaskIDFailureClean).Updates(map[string]any{
+		"task_id":    model.TaskIDCollectClean,
+		"task_model": model.TaskModelCollectClean,
+		"remark":     collectCleanRemark,
+	})
+	if renamed.Error != nil {
+		return fmt.Errorf("rename collect clean cron task failed: %w", renamed.Error)
+	}
+	if renamed.RowsAffected > 0 {
+		return nil
+	}
+
 	collectCleanTask := model.CrontabRecord{
 		TaskId:    model.TaskIDCollectClean,
 		Time:      0,
 		Spec:      "0 30 3 * * *",
 		TaskModel: model.TaskModelCollectClean,
 		State:     true,
-		Remark:    "定期清理超过 30 天的采集运行记录与快照",
+		Remark:    collectCleanRemark,
 	}
-	if err := db.Where("task_id = ?", model.TaskIDCollectClean).First(&model.CrontabRecord{}).Error; err != nil {
-		if err := db.Create(&collectCleanTask).Error; err != nil {
-			return fmt.Errorf("init collect clean cron task failed: %w", err)
-		}
+	if err := db.Create(&collectCleanTask).Error; err != nil {
+		return fmt.Errorf("init collect clean cron task failed: %w", err)
 	}
-
 	return nil
 }
 
