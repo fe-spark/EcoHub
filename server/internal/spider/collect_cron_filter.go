@@ -2,6 +2,7 @@ package spider
 
 import (
 	"log"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -28,8 +29,26 @@ func AutoCollectTriggered(trigger string, h int) {
 			ids = append(ids, s.Id)
 		}
 	}
+	if trigger == model.CollectTriggerCron {
+		skip, err := repository.TrippedSourceIDsToday(time.Now())
+		if err != nil {
+			log.Printf("[Spider] 自动采集：读取熔断站点失败: %v", err)
+			return
+		}
+		if len(skip) > 0 {
+			kept := make([]string, 0, len(ids))
+			for _, id := range ids {
+				if _, ok := skip[id]; ok {
+					log.Printf("[Spider] 自动采集降频跳过熔断站点: id=%s", id)
+					continue
+				}
+				kept = append(kept, id)
+			}
+			ids = kept
+		}
+	}
 	if len(ids) == 0 {
-		log.Println("[Spider] 自动采集：未找到任何启用的站点")
+		log.Println("[Spider] 自动采集：没有需要采集的启用站点")
 		return
 	}
 

@@ -98,17 +98,30 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string)
 	runSourcesWithLimitCore(sources, h, tag, trigger)
 }
 
-func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger string) {
+func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger string, parentBatchID ...string) {
 	if len(sources) == 0 {
 		return
 	}
 
 	sources = prioritizeCollectSources(sources)
 	startedAt := time.Now()
-	runVersion := stopAllVersion.Load()
-	batchCtx := newCollectBatchContext(trigger, tag, sources, startedAt)
+	batchCtx := newCollectBatchContext(trigger, tag, sources, startedAt).withHour(h)
+	if len(parentBatchID) > 0 && parentBatchID[0] != "" {
+		batchCtx.withParentBatchID(parentBatchID[0])
+	}
+	if err := batchCtx.recordStart(); err != nil {
+		log.Printf("[%s] 初始采集记录写入失败 batchID=%s: %v", tag, batchCtx.batchID, err)
+	}
+	runPreparedBatch(batchCtx, h, tag)
+}
+
+func runPreparedBatch(batchCtx *collectBatchContext, h int, tag string) {
+	if batchCtx == nil {
+		return
+	}
 	defer batchCtx.close()
 
+	runVersion := stopAllVersion.Load()
 	sourceLimit := config.CollectSourceConcurrency
 	if sourceLimit < 0 {
 		sourceLimit = 0
@@ -118,9 +131,9 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 		limitDesc = fmt.Sprintf("%d", sourceLimit)
 	}
 	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 取数在途=%d 写阀 inflight=%d pages/s=%d",
-		tag, len(sources), limitDesc, config.CollectPageWorkers, config.CollectFetchInFlight,
+		tag, len(batchCtx.sources), limitDesc, config.CollectPageWorkers, config.CollectFetchInFlight,
 		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
-	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batchCtx)
+	runSourcesGroupWithLimit(batchCtx.sources, h, tag, sourceLimit, runVersion, batchCtx)
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[%s] 批量采集缓存刷新失败: %v", tag, err)
 	}

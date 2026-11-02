@@ -1,0 +1,166 @@
+package spider
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"server/internal/infra/db"
+	"server/internal/infra/syslog"
+	"server/internal/model"
+	"server/internal/repository"
+	"server/internal/spider/fetcher"
+	"server/internal/spider/scheduler"
+)
+
+func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
+	if s == nil {
+		return nil, errors.New("采集站信息不存在")
+	}
+	if err := collectLifecycle.beginSource(s.Id); err != nil {
+		log.Printf("[Spider] 站点 %s 无法启动单片采集: %v\n", s.Id, err)
+		return nil, err
+	}
+	defer collectLifecycle.endSource(s.Id)
+
+	written, err := collectFilmIDs(context.Background(), ids, s, batchCtx)
+	if err != nil {
+		return nil, err
+	}
+	return written.Notify, nil
+}
+
+func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchCtx *collectBatchContext) (scheduler.Mids, error) {
+	if s == nil {
+		return scheduler.Mids{}, errors.New("采集站信息不存在")
+	}
+	ids = strings.TrimSpace(ids)
+	if ids == "" {
+		return scheduler.Mids{}, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	r, err := requestForSource(s)
+	if err != nil {
+		return scheduler.Mids{}, err
+	}
+	r.Params.Set("pg", "1")
+	r.Params.Set("ids", ids)
+	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
+	if err != nil {
+		return scheduler.Mids{}, fmt.Errorf("get movie detail failed: %w", err)
+	}
+	if len(list) <= 0 {
+		return scheduler.Mids{}, errors.New("get movie detail failed: response list is empty")
+	}
+
+	written, err := saveCollectedFilmForCollect(ctx, s, 1, list)
+	if err != nil {
+		return scheduler.Mids{}, err
+	}
+	if batchCtx != nil {
+		batchCtx.markSourceFinished(*s)
+		batchCtx.addAffectedMIDs(s, 1, written.Affected)
+		batchCtx.AddNotifyMIDs(s.Id, written.Notify)
+	}
+	return written, nil
+}
+
+func CollectFilms(mids []int64) {
+	for _, id := range mids {
+		if id > 0 {
+			CollectSingleFilm(strconv.FormatInt(id, 10))
+		}
+	}
+}
+
+func CollectSingleFilm(ids string) {
+	globalMid, err := strconv.ParseInt(strings.TrimSpace(ids), 10, 64)
+	if err != nil || globalMid <= 0 {
+		log.Printf("[Spider] CollectSingleFilm: 非法影片 ID %q\n", ids)
+		return
+	}
+
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		log.Printf("[Spider] CollectSingleFilm 读取采集站失败: %v", err)
+		return
+	}
+	enabled := filterEnabledSources(sources)
+	if len(enabled) == 0 {
+		log.Println("[Spider] CollectSingleFilm: 未找到任何启用的站点")
+		return
+	}
+
+	targets := make([]model.FilmSource, 0, len(enabled))
+	sourceMids := make(map[string]string, len(enabled))
+	for _, source := range enabled {
+		requestID := resolveSingleCollectSourceMid(globalMid, source)
+		if requestID == "" {
+			continue
+		}
+		targets = append(targets, source)
+		sourceMids[source.Id] = requestID
+	}
+	targets = filterCollectableSources(targets, "单片更新")
+	if len(targets) == 0 {
+		log.Println("[Spider] CollectSingleFilm: 匹配站点均已在正采集队列中，跳过")
+		return
+	}
+
+	startedAt := time.Now()
+	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, "单片更新", targets, startedAt)
+	defer batchCtx.close()
+
+	var wg sync.WaitGroup
+	for _, source := range targets {
+		requestID := sourceMids[source.Id]
+		if requestID == "" {
+			continue
+		}
+
+		wg.Add(1)
+		go func(src model.FilmSource, sourceMid string) {
+			defer wg.Done()
+			defer batchCtx.releaseSourceOccupy(src.Id)
+			_, err := collectFilmById(sourceMid, &src, batchCtx)
+			if err != nil {
+				batchCtx.RecordSourceError(src.Id, err.Error())
+				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
+				return
+			}
+			if isPreferredCollectSource(src.Id) {
+				if err := batchCtx.finalizePrimarySource(src.Id); err != nil {
+					syslog.Errorf("[CollectSingleFilm] 首选站 %s 缓存刷新失败: %v", src.Name, err)
+				}
+			}
+		}(source, requestID)
+	}
+	wg.Wait()
+
+	if err := batchCtx.flushAndFinalize(); err != nil {
+		syslog.Errorf("[CollectSingleFilm] 缓存刷新失败: %v", err)
+	}
+	batchCtx.emitSummary()
+}
+
+func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) string {
+	if globalMid <= 0 {
+		return ""
+	}
+	var sourceMid int64
+	if err := db.Mdb.Model(&model.MovieSourceMapping{}).
+		Where("global_mid = ? AND source_id = ?", globalMid, source.Id).
+		Select("source_mid").
+		First(&sourceMid).Error; err == nil && sourceMid > 0 {
+		return strconv.FormatInt(sourceMid, 10)
+	}
+	return ""
+}

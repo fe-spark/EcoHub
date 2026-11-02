@@ -180,6 +180,9 @@ func isOccupiedCollectSource(sourceID string) bool {
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
 type collectBatchContext struct {
 	mu                 sync.Mutex
+	batchID            string
+	parentBatchID      string
+	hour               int
 	trigger            string
 	tag                string
 	sources            []model.FilmSource
@@ -193,6 +196,7 @@ type collectBatchContext struct {
 	finishedSources    map[string]model.FilmSource
 	occupyTokens       map[string]uint64
 	runNoted           atomic.Bool
+	recordStarted      bool
 }
 
 func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
@@ -204,6 +208,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		standalone = isStandalone[0]
 	}
 	b := &collectBatchContext{
+		batchID:            generateBatchID(startedAt),
 		trigger:            trigger,
 		tag:                tag,
 		sources:            sources,
@@ -216,6 +221,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		finishedSources:    make(map[string]model.FilmSource),
 		occupyTokens:       snapshotOccupyTokens(sources),
 	}
+
 	registerActiveBatch(b)
 	return b
 }

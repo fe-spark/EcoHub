@@ -15,6 +15,7 @@ type CollectBatchSkip struct {
 
 // CollectBatchResult 批量动作的开始与跳过名单。
 type CollectBatchResult struct {
+	BatchID string             `json:"batchId,omitempty"`
 	Started []CollectBatchItem `json:"started"`
 	Skipped []CollectBatchSkip `json:"skipped"`
 }

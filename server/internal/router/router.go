@@ -159,10 +159,13 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/category/sync`, handler.CollectHd.FilmSourceSyncCategory)
 			collect.POST(`/page-total`, handler.CollectHd.RefreshSitePageTotal)
 
-			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
-			collect.GET(`/record/stream`, handler.CollectHd.RecordStream)
-			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)
-			collect.POST(`/record/clear`, handler.CollectHd.ClearRecords)
+
+
+			collect.GET(`/history/list`, handler.CollectRecordHd.HistoryList)
+			collect.GET(`/history/incidents`, handler.CollectRecordHd.HistoryIncidents)
+			collect.POST(`/history/delete`, handler.CollectRecordHd.HistoryDelete)
+			collect.POST(`/history/clear`, handler.CollectRecordHd.HistoryClear)
+			collect.POST(`/history/retry`, handler.CollectRecordHd.HistoryRetry)
 		}
 
 		// 定时任务相关

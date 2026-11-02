@@ -2,6 +2,7 @@ package film
 
 import (
 	"strings"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -66,9 +67,11 @@ func GetLibraryInventory() (LibraryInventory, error) {
 		library.Films = films[primaryID]
 		library.MultiSource = multiSource[primaryID]
 	}
-	if err := db.Mdb.Model(&model.FailureRecord{}).Count(&library.Failures).Error; err != nil {
+	incidents, err := repository.ListOpenSourceIncidents(time.Now())
+	if err != nil {
 		return library, err
 	}
+	library.Failures = int64(len(incidents))
 	return library, nil
 }
 
@@ -94,12 +97,12 @@ func GetSourceInventories() ([]SourceInventory, error) {
 	if err != nil {
 		return nil, err
 	}
-	failureRows, err := countFailuresBySource()
+	incidents, err := repository.ListOpenSourceIncidents(time.Now())
 	if err != nil {
 		return nil, err
 	}
 	categoryCounts := indexCounts(categoryRows)
-	failureCounts := indexCounts(failureRows)
+	failureCounts := incidentCounts(incidents)
 	primaryID := activePrimaryID()
 	sourceList, err := repository.GetCollectSourceList()
 	if err != nil {
@@ -135,13 +138,12 @@ func countCategoriesBySource() ([]sourceCount, error) {
 	return rows, err
 }
 
-func countFailuresBySource() ([]sourceCount, error) {
-	var rows []sourceCount
-	err := db.Mdb.Model(&model.FailureRecord{}).
-		Select("origin_id AS source_id, COUNT(*) AS n").
-		Group("origin_id").
-		Scan(&rows).Error
-	return rows, err
+func incidentCounts(incidents []model.SourceIncident) map[string]int64 {
+	out := make(map[string]int64, len(incidents))
+	for _, inc := range incidents {
+		out[inc.SourceID] = int64(inc.ConsecutiveFailures)
+	}
+	return out
 }
 
 func indexCounts(rows []sourceCount) map[string]int64 {
