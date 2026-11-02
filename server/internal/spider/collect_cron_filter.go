@@ -32,10 +32,8 @@ func AutoCollectTriggered(trigger string, h int) {
 	if trigger == model.CollectTriggerCron {
 		skip, err := repository.TrippedSourceIDsToday(time.Now())
 		if err != nil {
-			log.Printf("[Spider] 自动采集：读取熔断站点失败: %v", err)
-			return
-		}
-		if len(skip) > 0 {
+			log.Printf("[Spider] 自动采集：读取熔断站点失败 (fail-open 降级全量): %v", err)
+		} else if len(skip) > 0 {
 			kept := make([]string, 0, len(ids))
 			for _, id := range ids {
 				if _, ok := skip[id]; ok {

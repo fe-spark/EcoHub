@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"strings"
+	"fmt"
 	"testing"
 	"time"
 
@@ -112,7 +112,7 @@ func TestListOpenSourceIncidents(t *testing.T) {
 	}
 }
 
-func TestListOpenSourceIncidentsCorruptDetail(t *testing.T) {
+func TestListOpenSourceIncidentsCorruptDetailFailOpen(t *testing.T) {
 	setupTestDB(t)
 	now := time.Date(2026, 11, 2, 15, 0, 0, 0, time.Local)
 	if err := CreateCollectRecord(&model.CollectRecord{
@@ -121,8 +121,38 @@ func TestListOpenSourceIncidentsCorruptDetail(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ListOpenSourceIncidents(now)
-	if err == nil || !strings.Contains(err.Error(), "批次 bad-json 明细损坏") {
-		t.Fatalf("expected corrupt detail error, got %v", err)
+	list, err := ListOpenSourceIncidents(now)
+	if err != nil {
+		t.Fatalf("corrupt detail should fail-open and not return error, got %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("corrupt row should be skipped, got %d items", len(list))
+	}
+}
+
+func TestListOpenSourceIncidentsExcludesSingleUpdate(t *testing.T) {
+	setupTestDB(t)
+	now := time.Date(2026, 11, 2, 15, 0, 0, 0, time.Local)
+	// 单片更新失败 3 次不应计入 incident
+	raw := `[{"sourceId":"src-single","sourceName":"单片源","status":"failed","error":"empty"}]`
+	for i := range 3 {
+		if err := CreateCollectRecord(&model.CollectRecord{
+			BatchID: fmt.Sprintf("single-%d", i),
+			Trigger: model.CollectTriggerSingleUpdate,
+			Status:  model.CollectRecordStatusFailed,
+			StartedAt: now.Add(time.Duration(-i) * time.Minute),
+			DetailJson: raw,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := ListOpenSourceIncidents(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, inc := range list {
+		if inc.SourceID == "src-single" {
+			t.Fatalf("single_update should not appear in incidents: %+v", inc)
+		}
 	}
 }

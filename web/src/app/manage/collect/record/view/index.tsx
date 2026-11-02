@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
+  ConfigProvider,
   Table,
   Button,
   Space,
@@ -10,12 +11,15 @@ import {
   Popconfirm,
   Pagination,
   Tooltip,
+  theme,
 } from "antd";
 import {
   SearchOutlined,
   ReloadOutlined,
   DeleteOutlined,
   ClearOutlined,
+  VideoCameraOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -26,6 +30,7 @@ import { CollectHistoryRecord, SourceIncident } from "./types";
 import { BatchDetailExpanded } from "./batch-detail-expanded";
 import { getHistoryColumns } from "./history-columns";
 import { IncidentPanel } from "./incident-panel";
+import { useRecordStream } from "./use-record-stream";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -44,6 +49,8 @@ export default function CollectRecordPageView() {
     status: "",
     beginTime: "",
     endTime: "",
+    updated: "",
+    failed: "",
   });
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
 
@@ -54,6 +61,20 @@ export default function CollectRecordPageView() {
 
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
+  const { token } = theme.useToken();
+  const historyTableTheme = useMemo(
+    () => ({
+      components: {
+        Table: {
+          rowHoverBg: token.colorFillQuaternary,
+          rowSelectedBg: token.colorFillTertiary,
+          rowSelectedHoverBg: token.colorFillTertiary,
+          rowExpandedBg: token.colorBgContainer,
+        },
+      },
+    }),
+    [token.colorBgContainer, token.colorFillQuaternary, token.colorFillTertiary],
+  );
 
   const getRecords = useCallback(async (p?: { current: number; pageSize: number }, overrideParams?: typeof params) => {
     setSelectedRowKeys([]);
@@ -101,6 +122,55 @@ export default function CollectRecordPageView() {
     void getIncidents();
   }, [getRecords, getIncidents]);
 
+  const currentBatchIds = useMemo(
+    () => records.map((r) => r.batchId).filter(Boolean),
+    [records],
+  );
+
+  useRecordStream(currentBatchIds, {
+    onProgress: (payload) => {
+      setRecords((prev) =>
+        prev.map((r) => {
+          if (r.batchId !== payload.batchId) return r;
+          return {
+            ...r,
+            status: payload.status || r.status,
+            durationMs: payload.durationMs ?? r.durationMs,
+            filmCount: payload.filmCount ?? r.filmCount,
+            pageTotal: payload.pageTotal ?? r.pageTotal,
+            pageSuccess: payload.pageSuccess ?? r.pageSuccess,
+            pageFailed: payload.pageFailed ?? r.pageFailed,
+            successSources: payload.successSources ?? r.successSources,
+            failedSources: payload.failedSources ?? r.failedSources,
+            detailJson: payload.detailJson ?? r.detailJson,
+          };
+        }),
+      );
+    },
+    onFinished: (payload) => {
+      setRecords((prev) =>
+        prev.map((r) => {
+          if (r.batchId !== payload.batchId) return r;
+          return {
+            ...r,
+            status: payload.status || r.status,
+            finishedAt: payload.finishedAt || r.finishedAt,
+            durationMs: payload.durationMs ?? r.durationMs,
+            filmCount: payload.filmCount ?? r.filmCount,
+            pageTotal: payload.pageTotal ?? r.pageTotal,
+            pageSuccess: payload.pageSuccess ?? r.pageSuccess,
+            pageFailed: payload.pageFailed ?? r.pageFailed,
+            successSources: payload.successSources ?? r.successSources,
+            failedSources: payload.failedSources ?? r.failedSources,
+            errorMsg: payload.errorMsg ?? r.errorMsg,
+            detailJson: payload.detailJson ?? r.detailJson,
+          };
+        }),
+      );
+      void getIncidents();
+    },
+  });
+
   const handleRetryBatch = useCallback(
     async (record: CollectHistoryRecord) => {
       setRetryingBatchIds((prev) => new Set(prev).add(record.batchId));
@@ -109,7 +179,7 @@ export default function CollectRecordPageView() {
           batchId: record.batchId,
         });
         if (resp.code === 0) {
-          message.success("已启动失败站点重试");
+          message.success(record.trigger === "single_update" ? "已按原影片重新采集" : "已启动失败站点重试");
           void getRecords();
           void getIncidents();
         } else {
@@ -173,6 +243,14 @@ export default function CollectRecordPageView() {
     }
   };
 
+  const toggleQuick = (key: "updated" | "failed") => {
+    const next = { ...paramsRef.current, [key]: paramsRef.current[key] === "1" ? "" : "1" };
+    setParams(next);
+    const newPage = { ...pageRef.current, current: 1 };
+    setPage(newPage);
+    void getRecords(newPage, next);
+  };
+
   const handleClearAll = async () => {
     const resp = await ApiPost("/manage/collect/history/clear");
     if (resp.code === 0) {
@@ -223,6 +301,7 @@ export default function CollectRecordPageView() {
             { label: "手动采集", value: "manual" },
             { label: "定时任务", value: "cron" },
             { label: "失败重试", value: "retry" },
+            { label: "单片更新", value: "single_update" },
           ]}
           className={styles.filterSelect}
         />
@@ -242,6 +321,21 @@ export default function CollectRecordPageView() {
           ]}
           className={styles.statusSelect}
         />
+        <Button
+          icon={<VideoCameraOutlined />}
+          type={params.updated === "1" ? "primary" : "default"}
+          onClick={() => toggleQuick("updated")}
+        >
+          有入库
+        </Button>
+        <Button
+          icon={<WarningOutlined />}
+          danger={params.failed === "1"}
+          type={params.failed === "1" ? "primary" : "default"}
+          onClick={() => toggleQuick("failed")}
+        >
+          有失败
+        </Button>
         <RangePicker
           showTime
           value={dateRange}
@@ -274,7 +368,7 @@ export default function CollectRecordPageView() {
         <Button
           icon={<ReloadOutlined />}
           onClick={() => {
-            const defaultParams = { trigger: "", status: "", beginTime: "", endTime: "" };
+            const defaultParams = { trigger: "", status: "", beginTime: "", endTime: "", updated: "", failed: "" };
             setParams(defaultParams);
             setDateRange(null);
             const newPage = { ...pageRef.current, current: 1 };
@@ -286,6 +380,7 @@ export default function CollectRecordPageView() {
         </Button>
       </Space>
 
+      <ConfigProvider theme={historyTableTheme}>
       <Table
         columns={columns}
         dataSource={records}
@@ -293,7 +388,7 @@ export default function CollectRecordPageView() {
         loading={loading}
         size="middle"
         pagination={false}
-        scroll={{ x: "max-content" }}
+        tableLayout="fixed"
         expandable={{
           expandedRowRender: (record) => (
             <BatchDetailExpanded
@@ -310,6 +405,9 @@ export default function CollectRecordPageView() {
             ? {
                 selectedRowKeys,
                 onChange: (keys) => setSelectedRowKeys(keys),
+                getCheckboxProps: (record: CollectHistoryRecord) => ({
+                  disabled: record.status === "running",
+                }),
               }
             : undefined
         }
@@ -336,20 +434,6 @@ export default function CollectRecordPageView() {
                 </Popconfirm>
               )}
 
-              <Tooltip title="安全清理：清空所有采集运行历史（自动保留策略为 30 天）">
-                <Popconfirm
-                  title="清空全部历史记录？"
-                  description="此操作不可恢复，确认清空全部采集历史？"
-                  okType="danger"
-                  onConfirm={handleClearAll}
-                  disabled={!canWrite}
-                >
-                  <Button icon={<ClearOutlined />} disabled={!canWrite}>
-                    清空历史
-                  </Button>
-                </Popconfirm>
-              </Tooltip>
-
               <Button
                 icon={<ReloadOutlined />}
                 onClick={() => {
@@ -359,6 +443,20 @@ export default function CollectRecordPageView() {
               >
                 刷新
               </Button>
+
+              <Tooltip title="清空所有采集运行历史。自动保留策略为 30 天">
+                <Popconfirm
+                  title="清空全部历史记录？"
+                  description="此操作不可恢复，确认清空全部采集历史？"
+                  okType="danger"
+                  onConfirm={handleClearAll}
+                  disabled={!canWrite}
+                >
+                  <Button type="text" icon={<ClearOutlined />} disabled={!canWrite}>
+                    清空历史
+                  </Button>
+                </Popconfirm>
+              </Tooltip>
             </Space>
           </div>
         )}
@@ -381,6 +479,7 @@ export default function CollectRecordPageView() {
           </div>
         )}
       />
+      </ConfigProvider>
     </div>
   );
 }

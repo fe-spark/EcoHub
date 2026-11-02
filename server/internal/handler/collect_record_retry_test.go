@@ -43,6 +43,7 @@ func TestCollectRecordHandler_HistoryRetry(t *testing.T) {
 	rec := &model.CollectRecord{
 		BatchID:     "b-orig-1",
 		Trigger:     model.CollectTriggerManual,
+		Hour:        24,
 		Status:      model.CollectRecordStatusFailed,
 		StartedAt:   time.Now(),
 		DetailJson:  detailJson,
@@ -84,7 +85,7 @@ func TestCollectRecordHandler_HistoryRetry(t *testing.T) {
 	if err != nil || saved == nil {
 		t.Fatalf("retry record missing: %v", err)
 	}
-	if saved.ParentBatchID != "b-orig-1" || saved.Trigger != model.CollectTriggerRetry {
+	if saved.ParentBatchID != "b-orig-1" || saved.Trigger != model.CollectTriggerRetry || saved.Hour != 24 {
 		t.Fatalf("unexpected retry record: %+v", saved)
 	}
 

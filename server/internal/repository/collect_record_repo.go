@@ -12,6 +12,34 @@ import (
 	"gorm.io/gorm"
 )
 
+// FilmNamesByIDs 按全局影片编号读取片名。已删除的影片仍返回原名，供采集记录展示。
+func FilmNamesByIDs(ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string)
+	if len(ids) == 0 {
+		return out, nil
+	}
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
+	}
+	var rows []struct {
+		Mid  int64
+		Name string
+	}
+	if err := db.Mdb.Unscoped().Model(&model.FilmIndex{}).
+		Select("mid", "name").
+		Where("mid IN ?", ids).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Name)
+		if row.Mid > 0 && name != "" {
+			out[row.Mid] = name
+		}
+	}
+	return out, nil
+}
+
 // CreateCollectRecord 创建采集运行记录（初始状态一般为 running）
 func CreateCollectRecord(rec *model.CollectRecord) error {
 	if db.Mdb == nil {
@@ -56,15 +84,18 @@ func CompleteCollectRecord(batchID string, c model.CollectRecordCompletion) erro
 		"detail_json":     c.DetailJson,
 	}
 
-	var n int64
-	if err := db.Mdb.Model(&model.CollectRecord{}).Where("batch_id = ?", batchID).Count(&n).Error; err != nil {
+	var rec model.CollectRecord
+	if err := db.Mdb.Select("id", "status").Where("batch_id = ?", batchID).First(&rec).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("采集记录不存在: %s", batchID)
+		}
 		return err
 	}
-	if n == 0 {
-		return fmt.Errorf("采集记录不存在: %s", batchID)
+	if rec.Status != model.CollectRecordStatusRunning {
+		return nil
 	}
 	return db.Mdb.Model(&model.CollectRecord{}).
-		Where("batch_id = ?", batchID).
+		Where("batch_id = ? AND status = ?", batchID, model.CollectRecordStatusRunning).
 		Updates(updates).Error
 }
 
@@ -92,7 +123,7 @@ func GetCollectRecordList(q model.CollectRecordQuery) ([]model.CollectRecord, in
 
 	tx := db.Mdb.Model(&model.CollectRecord{})
 	if trig := strings.TrimSpace(q.Trigger); trig != "" {
-		tx = tx.Where("trigger = ?", trig)
+		tx = tx.Where("`trigger` = ?", trig)
 	}
 	if st := strings.TrimSpace(q.Status); st != "" {
 		tx = tx.Where("status = ?", st)
@@ -102,6 +133,16 @@ func GetCollectRecordList(q model.CollectRecordQuery) ([]model.CollectRecord, in
 	}
 	if !q.EndTime.IsZero() {
 		tx = tx.Where("started_at <= ?", q.EndTime)
+	}
+	if q.UpdatedOnly {
+		tx = tx.Where("film_count > 0")
+	}
+	if q.FailedOnly {
+		tx = tx.Where("(status IN ? OR failed_sources > 0)", []string{
+			model.CollectRecordStatusFailed,
+			model.CollectRecordStatusPartial,
+			model.CollectRecordStatusInterrupted,
+		})
 	}
 
 	var total int64
@@ -139,7 +180,7 @@ func DeleteCollectRecords(ids []uint) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return db.Mdb.Where("id IN ?", ids).Delete(&model.CollectRecord{}).Error
+	return db.Mdb.Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).Delete(&model.CollectRecord{}).Error
 }
 
 // ClearCollectRecords 清空全部采集记录
@@ -147,7 +188,9 @@ func ClearCollectRecords() error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
-	return db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CollectRecord{}).Error
+	return db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Where("status != ?", model.CollectRecordStatusRunning).
+		Delete(&model.CollectRecord{}).Error
 }
 
 // CleanOldCollectRecords 清理超过指定天数的历史采集记录（防数据库膨胀）
@@ -167,12 +210,26 @@ func MarkInterruptedCollectRecords() error {
 	if db.Mdb == nil {
 		return nil
 	}
+	var rows []model.CollectRecord
+	if err := db.Mdb.Where("status = ?", model.CollectRecordStatusRunning).Find(&rows).Error; err != nil {
+		return err
+	}
 	now := time.Now()
-	return db.Mdb.Model(&model.CollectRecord{}).
-		Where("status = ?", model.CollectRecordStatusRunning).
-		Updates(map[string]any{
-			"status":      model.CollectRecordStatusInterrupted,
-			"finished_at": now,
-			"error_msg":   "服务重启，任务异常中断",
-		}).Error
+	for _, rec := range rows {
+		duration := now.Sub(rec.StartedAt).Milliseconds()
+		if duration < 0 {
+			duration = 0
+		}
+		if err := db.Mdb.Model(&model.CollectRecord{}).
+			Where("id = ? AND status = ?", rec.ID, model.CollectRecordStatusRunning).
+			Updates(map[string]any{
+				"status":      model.CollectRecordStatusInterrupted,
+				"finished_at": now,
+				"duration_ms": duration,
+				"error_msg":   "服务重启，任务异常中断",
+			}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

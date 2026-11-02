@@ -2,10 +2,12 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,5 +124,45 @@ func TestCollectRecordHandler_DeleteAndClear(t *testing.T) {
 	_, totalAfterClear, _ := repository.GetCollectRecordList(model.CollectRecordQuery{})
 	if totalAfterClear != 0 {
 		t.Fatalf("expected 0 after clear, got %d", totalAfterClear)
+	}
+}
+
+func TestCollectRecordHandler_HistoryStream(t *testing.T) {
+	setupHandlerTestDB(t)
+
+	r := gin.New()
+	r.GET("/history/stream", CollectRecordHd.HistoryStream)
+
+	// 1. 缺少 batchIds 返回错误
+	wErr := httptest.NewRecorder()
+	reqErr, _ := http.NewRequest("GET", "/history/stream", nil)
+	r.ServeHTTP(wErr, reqErr)
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	_ = json.Unmarshal(wErr.Body.Bytes(), &resp)
+	if resp.Code == 0 || !strings.Contains(resp.Msg, "缺少批次标识参数") {
+		t.Fatalf("expected error when batchIds missing, got code=%d, msg=%s", resp.Code, resp.Msg)
+	}
+
+	// 2. 带 batchIds 正常建立 SSE 流
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/history/stream?batchIds=b-stream-1,b-stream-2", nil)
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.ServeHTTP(w, req)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	if ct := w.Header().Get("Content-Type"); ct != "text/event-stream" {
+		t.Fatalf("expected text/event-stream, got %s", ct)
+	}
+	if !strings.Contains(w.Body.String(), "record_snapshot") {
+		t.Fatalf("expected record_snapshot event, got: %s", w.Body.String())
 	}
 }

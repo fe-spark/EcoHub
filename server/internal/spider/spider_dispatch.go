@@ -111,6 +111,11 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	}
 	if err := batchCtx.recordStart(); err != nil {
 		log.Printf("[%s] 初始采集记录写入失败 batchID=%s: %v", tag, batchCtx.batchID, err)
+		for _, s := range sources {
+			abandonQueuedCollectSource(s, batchCtx)
+		}
+		batchCtx.close()
+		return
 	}
 	runPreparedBatch(batchCtx, h, tag)
 }

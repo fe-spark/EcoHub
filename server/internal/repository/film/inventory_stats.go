@@ -10,7 +10,7 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
-// LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。失败记录是全库。
+// LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。失败数是仍未恢复的采集站个数。
 type LibraryInventory struct {
 	Films       int64 `json:"films"`
 	MultiSource int64 `json:"multiSource"`
@@ -67,10 +67,7 @@ func GetLibraryInventory() (LibraryInventory, error) {
 		library.Films = films[primaryID]
 		library.MultiSource = multiSource[primaryID]
 	}
-	incidents, err := repository.ListOpenSourceIncidents(time.Now())
-	if err != nil {
-		return library, err
-	}
+	incidents, _ := repository.ListOpenSourceIncidents(time.Now())
 	library.Failures = int64(len(incidents))
 	return library, nil
 }
@@ -97,10 +94,7 @@ func GetSourceInventories() ([]SourceInventory, error) {
 	if err != nil {
 		return nil, err
 	}
-	incidents, err := repository.ListOpenSourceIncidents(time.Now())
-	if err != nil {
-		return nil, err
-	}
+	incidents, _ := repository.ListOpenSourceIncidents(time.Now())
 	categoryCounts := indexCounts(categoryRows)
 	failureCounts := incidentCounts(incidents)
 	primaryID := activePrimaryID()
@@ -141,7 +135,11 @@ func countCategoriesBySource() ([]sourceCount, error) {
 func incidentCounts(incidents []model.SourceIncident) map[string]int64 {
 	out := make(map[string]int64, len(incidents))
 	for _, inc := range incidents {
-		out[inc.SourceID] = int64(inc.ConsecutiveFailures)
+		id := strings.TrimSpace(inc.SourceID)
+		if id == "" {
+			continue
+		}
+		out[id] = 1
 	}
 	return out
 }

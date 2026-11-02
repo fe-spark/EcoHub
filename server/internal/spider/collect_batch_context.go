@@ -183,6 +183,7 @@ type collectBatchContext struct {
 	batchID            string
 	parentBatchID      string
 	hour               int
+	replayFilmIDs      []int64
 	trigger            string
 	tag                string
 	sources            []model.FilmSource
@@ -194,6 +195,7 @@ type collectBatchContext struct {
 	sourceNotifyMIDs   map[string]map[int64]struct{}
 	sourceErrors       map[string]string
 	finishedSources    map[string]model.FilmSource
+	sourceSnapshots    map[string]model.CollectRecordSourceDetail
 	occupyTokens       map[string]uint64
 	runNoted           atomic.Bool
 	recordStarted      bool
@@ -219,6 +221,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		sourceNotifyMIDs:   make(map[string]map[int64]struct{}, len(sources)),
 		sourceErrors:       make(map[string]string),
 		finishedSources:    make(map[string]model.FilmSource),
+		sourceSnapshots:    make(map[string]model.CollectRecordSourceDetail),
 		occupyTokens:       snapshotOccupyTokens(sources),
 	}
 
@@ -415,6 +418,25 @@ func (b *collectBatchContext) markSourceFinished(source model.FilmSource) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.finishedSources[source.Id] = source
+}
+
+func (b *collectBatchContext) recordSourceSnapshot(detail model.CollectRecordSourceDetail) {
+	if b == nil || strings.TrimSpace(detail.SourceID) == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sourceSnapshots[detail.SourceID] = detail
+}
+
+func (b *collectBatchContext) getSourceSnapshot(sourceID string) (model.CollectRecordSourceDetail, bool) {
+	if b == nil {
+		return model.CollectRecordSourceDetail{}, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	d, ok := b.sourceSnapshots[sourceID]
+	return d, ok
 }
 
 // finalizePrimarySource 首选采集站完成时立即刷窗并触发首页缓存预热，无需等待同批其余慢速非首选站。

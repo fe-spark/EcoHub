@@ -85,35 +85,53 @@ func emitBatchNotify(b *collectBatchContext) {
 
 	results := make([]model.SourceNotifyResult, 0, len(sources))
 	for _, src := range sources {
-		snap, ok := progress.Snapshot(src.Id)
-		status := snap.Status
-		errMsg := strings.TrimSpace(errBySource[src.Id])
-		if !ok {
-			if errMsg != "" {
-				status = progress.StatusFailed
-			} else {
-				status = progress.StatusDone
+		detail, hasDetail := b.getSourceSnapshot(src.Id)
+		if !hasDetail {
+			snap, ok := progress.Snapshot(src.Id)
+			status := snap.Status
+			errMsg := strings.TrimSpace(errBySource[src.Id])
+			if !ok {
+				if errMsg != "" {
+					status = progress.StatusFailed
+				} else {
+					status = progress.StatusDone
+				}
+			}
+			status, errMsg = settleSourceStatus(status, errMsg, snap.Success)
+			name := strings.TrimSpace(src.Name)
+			if name == "" {
+				name = strings.TrimSpace(snap.Name)
+			}
+			if name == "" {
+				name = src.Id
+			}
+			detail = model.CollectRecordSourceDetail{
+				SourceID:    src.Id,
+				SourceName:  name,
+				Status:      status,
+				PageTotal:   snap.Total,
+				PageCurrent: snap.Current,
+				SuccessCnt:  snap.Success,
+				FailedCnt:   snap.Failed,
+				FilmsTotal:  countBySource[src.Id],
+				Error:       errMsg,
+			}
+		} else {
+			if count, ok := countBySource[src.Id]; ok && count > detail.FilmsTotal {
+				detail.FilmsTotal = count
 			}
 		}
-		status, errMsg = settleSourceStatus(status, errMsg)
-		name := strings.TrimSpace(src.Name)
-		if name == "" {
-			name = strings.TrimSpace(snap.Name)
-		}
-		if name == "" {
-			name = src.Id
-		}
 		results = append(results, model.SourceNotifyResult{
-			SourceID:    src.Id,
-			SourceName:  name,
+			SourceID:    detail.SourceID,
+			SourceName:  detail.SourceName,
 			Sort:        src.Sort,
-			Status:      status,
-			Error:       errMsg,
-			PageTotal:   snap.Total,
-			PageCurrent: snap.Current,
-			SuccessCnt:  snap.Success,
-			FailedCnt:   snap.Failed,
-			FilmsTotal:  countBySource[src.Id],
+			Status:      detail.Status,
+			Error:       detail.Error,
+			PageTotal:   detail.PageTotal,
+			PageCurrent: detail.PageCurrent,
+			SuccessCnt:  detail.SuccessCnt,
+			FailedCnt:   detail.FailedCnt,
+			FilmsTotal:  detail.FilmsTotal,
 		})
 	}
 	persistCollectRecord(b, results, mids, errBySource)
@@ -122,7 +140,6 @@ func emitBatchNotify(b *collectBatchContext) {
 	if d.OnBatchSummary == nil {
 		return
 	}
-
 
 	d.OnBatchSummary(model.CollectBatchNotifyPayload{
 		Trigger:    trigger,
@@ -133,7 +150,27 @@ func emitBatchNotify(b *collectBatchContext) {
 	})
 }
 
-func settleSourceStatus(status, errMsg string) (string, string) {
+// 没有失败、但有站点被用户停止时，整批仍是停止。部分失败只留给确实失败的站点。
+func batchCollectStatus(doneCount, failedCount, stoppedCount, total int) string {
+	if total <= 0 || (failedCount == 0 && stoppedCount == 0 && doneCount == total) {
+		return model.CollectRecordStatusSuccess
+	}
+	if failedCount == 0 && stoppedCount > 0 {
+		return model.CollectRecordStatusStopped
+	}
+	if failedCount > 0 && doneCount > 0 {
+		return model.CollectRecordStatusPartial
+	}
+	if failedCount > 0 {
+		return model.CollectRecordStatusFailed
+	}
+	if doneCount == total {
+		return model.CollectRecordStatusSuccess
+	}
+	return model.CollectRecordStatusFailed
+}
+
+func settleSourceStatus(status, errMsg string, successCnt ...int) (string, string) {
 	if status == progress.StatusStopping {
 		status = progress.StatusStopped
 	}
@@ -141,6 +178,9 @@ func settleSourceStatus(status, errMsg string) (string, string) {
 		return status, ""
 	}
 	if strings.TrimSpace(errMsg) != "" {
+		if len(successCnt) > 0 && successCnt[0] > 0 {
+			return model.CollectRecordStatusPartial, errMsg
+		}
 		return progress.StatusFailed, errMsg
 	}
 	return status, errMsg
@@ -169,9 +209,9 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		failPage += r.FailedCnt
 
 		switch r.Status {
-		case progress.StatusDone:
+		case progress.StatusDone, model.CollectRecordStatusSuccess:
 			doneCount++
-		case progress.StatusFailed:
+		case progress.StatusFailed, model.CollectRecordStatusPartial:
 			failedCount++
 		case progress.StatusStopped:
 			stoppedCount++
@@ -190,20 +230,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		})
 	}
 
-	status := model.CollectRecordStatusSuccess
-	if len(results) > 0 {
-		if doneCount == len(results) {
-			status = model.CollectRecordStatusSuccess
-		} else if stoppedCount == len(results) {
-			status = model.CollectRecordStatusStopped
-		} else if failedCount == len(results) {
-			status = model.CollectRecordStatusFailed
-		} else if doneCount > 0 {
-			status = model.CollectRecordStatusPartial
-		} else {
-			status = model.CollectRecordStatusFailed
-		}
-	}
+	status := batchCollectStatus(doneCount, failedCount, stoppedCount, len(results))
 
 	detailBytes, err := json.Marshal(details)
 	if err != nil {
@@ -248,4 +275,18 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	if err := repository.CompleteCollectRecord(b.batchID, comp); err != nil {
 		log.Printf("[Spider] 结算采集记录失败 batchID=%s: %v", b.batchID, err)
 	}
+	BroadcastRecordCompletion(&model.CollectRecordProgressPayload{
+		BatchID:        b.batchID,
+		Status:         status,
+		FinishedAt:     &now,
+		DurationMs:     duration,
+		FilmCount:      len(mids),
+		PageTotal:      totalPage,
+		PageSuccess:    succPage,
+		PageFailed:     failPage,
+		SuccessSources: doneCount,
+		FailedSources:  failedCount,
+		ErrorMsg:       errSummary.String(),
+		DetailJson:     string(detailBytes),
+	})
 }
