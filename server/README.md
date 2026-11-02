@@ -80,14 +80,15 @@ go run ./cmd/server
 
 ## 环境变量
 
-本地 `go run` 使用 `server/.env`（见 [server/.env.example](./.env.example)）。Docker / 1Panel 使用仓库根目录 [.env.example](../.env.example)；compose 会把 `SERVER_PORT` 注入为进程内的 `PORT`。
+本地 `go run` 使用 `server/.env`（见 [server/.env.example](./.env.example)）。Docker / 1Panel 使用仓库根目录 [.env.example](../.env.example)；发布版 compose 将宿主机 `SERVER_PORT` 映射到容器内固定的 `8080` 端口。
 
 ### 服务与鉴权
 
 | 变量 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `PORT` | 是 | 无 | API 监听端口；未设置启动 panic。Docker 发布版由 compose 的 `SERVER_PORT`（默认 `8080`）注入 |
+| `PORT` | 否 | `8080` | API 监听端口；未设置时默认回退 `8080`。发布版容器内固定监听 8080 |
 | `JWT_SECRET` | 是 | 无 | JWT 签名密钥；未设置启动 panic。生产必须用高强度随机串 |
+| `ECOHUB_ADMIN_PASSWORD` | 否 | `admin` | 首次初始化超级管理员密码（仅在首次建库无 admin 账号时生效） |
 
 ### MySQL
 
@@ -209,10 +210,12 @@ flowchart TD
 - `/api/films/filter` (片库多维标签筛选与分页)
 - `/api/search/hot-keywords` (搜索热搜词榜单)
 - `/api/stats/view` (浏览与点播访问埋点)
+- `/api/film/danmaku` (弹幕列表获取与发送，GET / POST)
 - `/api/config/basic` (站点基础信息 / 探活)
 - `/api/provide/app` (EcoHub 客户端软件源)
 - `/api/provide/tvbox` (TVBox / 影视仓配置)
 - `/api/provide/vod` (MacCMS 兼容接口)
+- `/api/upload/pic/poster/*name` (海报与图库静态素材访问)
 
 登录接口：
 
@@ -268,20 +271,21 @@ server/
 ├── internal/service/       # 业务逻辑
 ├── internal/repository/    # 数据访问层
 │   └── film/               # 影片领域仓储（根包为统一门面）
-│       ├── shared/         # 跨域共享原语（匹配键读写与派生 / 实体投影 / 分页 / 分类根解析）
+│       ├── shared/         # 跨域共享原语（匹配键读写与派生 / 海报展示与匹配 / 分页 / 分类根解析）
 │       ├── cache/          # 影片缓存键与失效（检索标签 / TVBox / 提供列表）
 │       ├── query/          # 分类维度过滤与相关性排序
-│       ├── snapshot/       # 前台快照生命周期、活跃读模型与筛选快照
-│       ├── playlist/       # 各站播放列表：比对去重、优先级排序、孤儿扫描、键迁移
-│       ├── poster/         # 海报来源同步与最优匹配
-│       └── writer/         # 采集入库写路径：分类树推导、主从指纹比对、标签聚合与缓存合并失效
+│       ├── snapshot/       # 前台快照生命周期、活跃读模型、筛选快照与播放列表摘要
+│       └── writer/         # 采集入库写路径：分类树推导、主从指纹比对、播放列表分页写与标签聚合
 ├── internal/model/         # 数据模型与 DTO
 ├── internal/spider/        # 采集编排与对外 API
 │   ├── converter/          # 三方接口数据转换
 │   ├── fetcher/            # 分页取数：页数探测、限流退避重试、页并发与连续失败停抓
 │   ├── progress/           # 采集进度状态机、超时清理与活跃任务注册表
 │   └── scheduler/          # 采集写库调度（限速 / 反压 / 跨站轮转）
-├── internal/infra/db/      # MySQL / Redis 初始化
+├── internal/migration/     # 数据库结构版本迁移与更新检查
+├── internal/infra/         # 基础设施
+│   ├── db/                 # MySQL / Redis 客户端初始化与健康探测
+│   └── syslog/             # 系统运行与调试日志
 ├── internal/utils/         # 工具函数
 └── test/                   # 独立测试工程（集成 / 压测）
 ```

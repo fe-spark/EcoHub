@@ -21,6 +21,8 @@ jobs:
   build-and-push:
     name: Build and push all-in-one image
     runs-on: ubuntu-latest
+    outputs:
+      stable: ${{ steps.meta.outputs.stable }}
 
     steps:
       - name: Checkout
@@ -47,14 +49,17 @@ jobs:
 
           image_base="${REGISTRY}/${owner}/ecohub"
           tags="${image_base}:${version}"
+          stable=false
           # Only promote formal releases to :latest (never overwrite with beta/rc).
           if [[ ! "$version" =~ - ]]; then
+            stable=true
             tags+=$'\n'"${image_base}:latest"
           fi
 
           {
             echo "owner=$owner"
             echo "version=$version"
+            echo "stable=$stable"
             echo "tags<<EOF"
             echo "$tags"
             echo "EOF"
@@ -84,3 +89,23 @@ jobs:
           cache-from: type=gha,scope=all-in-one
           cache-to: type=gha,mode=max,scope=all-in-one
 
+
+  # 正式版镜像推成功后再删 beta。镜像还没上去时不删，避免只剩被清掉的 beta。
+  delete-beta:
+    name: Delete beta releases and images
+    needs: build-and-push
+    if: needs.build-and-push.outputs.stable == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: true
+
+      - name: Delete beta releases, tags, and images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/delete-beta.sh

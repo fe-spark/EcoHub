@@ -90,7 +90,7 @@ docker compose pull
 docker compose up -d
 ```
 
-固定版本：可在 `.env` 中指定 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-beta.0` 或在 compose 中修改。正式版 tag 会覆盖 `:latest`。
+固定版本：在 `.env` 指定 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1`。正式版发布会删除全部 beta tag 和镜像，不要固定 beta。`:latest` 只跟正式版。
 
 > [!WARNING]
 > **v2.x 升级至 v3.0 注意事项**：v3.0 为底层架构重大重构版本，完全不兼容 v2.x 历史数据库。禁止在现有 `./data/mysql` 目录下直接 pull 升级；v2.x 用户必须使用全新目录从零部署并重新全量采集。
@@ -320,7 +320,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
-| `ECOHUB_IMAGE` | 否 | `ghcr.io/fe-spark/ecohub:latest` | Docker 镜像地址及版本 Tag，可指定固定版本或预发布版本。 |
+| `ECOHUB_IMAGE` | 否 | `ghcr.io/fe-spark/ecohub:latest` | 镜像地址。默认为 latest；固定版本只写正式版 tag。正式版发布会删除全部 beta tag 和镜像。 |
 | `WEB_PORT` | 否 | `3000` | 宿主机 Web 访问入口端口（包含前台页面与 `/manage` 管理后台）。 |
 | `SERVER_PORT` | 否 | `18080` | 宿主机后端 API 直连端口（供 TVBox 或外部播放器直连；生产环境建议不映射或绑定 `127.0.0.1`）。 |
 

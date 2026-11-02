@@ -29,6 +29,9 @@
 > **Notice**  
 > EcoHub does not provide or store media files. Sources originate from collect APIs configured by the operator. Comply with applicable laws and the terms of each source. The operator assumes all related risk. This project is intended for study and technical exchange.
 
+> **Maintenance**  
+> The author has limited time, so updates are slow. Please bear with that. Issues are fixed when time allows. Useful features are welcome as [pull requests](https://github.com/fe-spark/EcoHub/pulls).
+
 ## Overview
 
 EcoHub is a high-performance, modern full-stack multi-source media aggregation system. It delivers a smooth web viewing experience and includes automated collection plus an admin panel, so developers and enthusiasts can quickly set up a private media library.
@@ -65,7 +68,7 @@ Visitors log in with `guest` / `guest`. This account is read-only and cannot sav
 | --- | --- | --- |
 | LiangXinYun | As low as ¥2/mo <br>New users receive trial traffic | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
 | PeiQian Airport | As low as ¥1.5/mo <br>Suitable for high traffic and backup use | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| DOVE |  | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
+| DOVE | Suitable for long-term stability | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## Quick start
 
@@ -92,7 +95,7 @@ docker compose up -d
 
 Default account: `admin` / `admin` (unless customized via `ECOHUB_ADMIN_PASSWORD` in `.env`). Create other roles in account management. Change the default password before any public deployment.
 
-> **Security & Network**: In production, it is recommended to use Nginx / 1Panel reverse proxy with HTTPS (80/443). To **avoid exposing raw ports to the public internet**, explicitly bind `127.0.0.1:` in `compose.yml` (e.g. `127.0.0.1:3000:3000`), preventing Docker from bypassing system firewalls. If direct player access is not needed, comment out the `18080` port mapping.
+> **Security & Network**: In production, it is recommended to use Nginx / 1Panel reverse proxy with HTTPS (80/443). To **avoid exposing raw ports to the public internet**, explicitly bind `127.0.0.1:` in `docker-compose.yml` (or `compose.yml`) (e.g. `127.0.0.1:3000:3000`), preventing Docker from bypassing system firewalls. If direct player access is not needed, comment out the `18080` port mapping.
 
 An empty public site after installation is expected. Films appear only after a full collect has completed and been published in **Collect**. For 1Panel, an external database, or a reverse proxy, see the [Deploy guide](./README-Deploy_EN.md).
 
@@ -131,8 +134,8 @@ Public site: `http://127.0.0.1:3000`. Administration panel: `/manage`. API: `htt
 
 ## Community
 
-- Telegram Group: [https://t.me/+6O6MiUdVSOplNjQ0](https://t.me/+6O6MiUdVSOplNjQ0)
+- Telegram Group: [https://t.me/ecohub_club](https://t.me/ecohub_club)
 
 ---
 
-[PolyForm Noncommercial 1.0.0](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram Group](https://t.me/+6O6MiUdVSOplNjQ0)
+[PolyForm Noncommercial 1.0.0](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram Group](https://t.me/ecohub_club)
