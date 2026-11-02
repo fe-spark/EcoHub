@@ -85,7 +85,7 @@ export function IncidentPanel({
       dataIndex: "latestError",
       key: "latestError",
       ellipsis: true,
-      render: (msg?: string, item) =>
+      render: (msg: string | undefined, item: SourceIncident) =>
         msg ? <ErrorDetailButton text={msg} title={item.sourceName ? `${item.sourceName} 异常原因` : "异常原因"} /> : null,
     },
     {
