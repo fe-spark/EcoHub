@@ -346,7 +346,15 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 				return err
 			}
 		}
-
+		won, err := claimSourceVodTimeTx(tx, source.Id, detail.Id, detail.UpdateTime)
+		if err != nil {
+			return err
+		}
+		if !won {
+			mid = 0
+			isNew = false
+			return nil
+		}
 		newLines := buildPlaylistsFromDetail(mid, source.Id, detail)
 		linesChanged, playChanged, err := saveStationPlaylistsTx(tx, mid, source.Id, newLines)
 		if err != nil {
