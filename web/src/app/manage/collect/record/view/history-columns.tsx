@@ -364,7 +364,17 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
         }
         const hasFailed = details.some((d) => d.status === "failed");
         const hasPartial = details.some((d) => d.status === "partial");
-        const hasAbnormal = hasFailed || hasPartial || record.failedSources > 0 || record.pageFailed > 0;
+        const stoppedCount = details.filter((d) => d.status === "stopped").length;
+        const batchStatus = resolveBatchStatus(record);
+        const hasAbnormal =
+          hasFailed ||
+          hasPartial ||
+          stoppedCount > 0 ||
+          batchStatus === "stopped" ||
+          batchStatus === "interrupted" ||
+          batchStatus === "running" ||
+          record.failedSources > 0 ||
+          record.pageFailed > 0;
 
         if (!hasAbnormal) {
           return (
@@ -381,17 +391,24 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
         const allFailed = resolveBatchStatus(record) === "failed";
 
         if (total === 1) {
+          const singleLabel = allFailed
+            ? "1 站失败"
+            : batchStatus === "stopped" || batchStatus === "interrupted"
+              ? "1 站已停止"
+              : batchStatus === "running"
+                ? "1 站采集中"
+                : "1 站未完成";
           return (
             <div className={styles.statCell}>
               {allFailed ? (
                 <span className={`${styles.statRow} ${styles.statFail}`}>
                   <CloseCircleOutlined />
-                  1 站失败
+                  {singleLabel}
                 </span>
               ) : (
                 <span className={`${styles.statRow} ${styles.statWarn}`}>
                   <ExclamationCircleOutlined />
-                  1 站未完成
+                  {singleLabel}
                 </span>
               )}
             </div>
@@ -405,13 +422,22 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
         const successCount =
           details.length > 0
             ? details.filter((d) => d.status === "done" || d.status === "success").length
-            : Math.max(0, total - failedCount);
+            : Math.max(0, total - failedCount - stoppedCount);
+        // 只有停止、没有失败时，按停止数展示，避免把用户主动停止说成未完成。
+        const shownCount = failedCount > 0 ? failedCount : stoppedCount || (batchStatus === "running" ? total : 0);
+        const shownLabel = allFailed
+          ? "失败"
+          : failedCount > 0
+            ? "未完成"
+            : batchStatus === "running"
+              ? "采集中"
+              : "已停止";
 
         return (
           <div className={styles.statCell}>
             <span className={`${styles.statRow} ${allFailed ? styles.statFail : styles.statWarn}`}>
               {allFailed ? <CloseCircleOutlined /> : <ExclamationCircleOutlined />}
-              {failedCount} 站{allFailed ? "失败" : "未完成"}
+              {shownCount} 站{shownLabel}
             </span>
             <span className={`${styles.statRow} ${styles.statTotal}`}>
               （{successCount} / {total} 站成功）

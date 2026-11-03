@@ -48,10 +48,11 @@ type CollectRecord struct {
 	DetailJson     string              `gorm:"type:text" json:"detailJson,omitempty"`    // 站点明细 JSON
 }
 
-// CollectRecordFilm 单片更新记录上可定位的影片。
+// CollectRecordFilm 采集批次清单里的一部影片。SourceID 只在跨站汇总时回填，单站清单留空。
 type CollectRecordFilm struct {
-	Mid  int64  `json:"mid"`
-	Name string `json:"name"`
+	Mid      int64  `json:"mid"`
+	Name     string `json:"name"`
+	SourceID string `json:"sourceId,omitempty"`
 }
 
 func (CollectRecord) TableName() string {
@@ -134,12 +135,13 @@ type CollectRecordQuery struct {
 	FailedOnly  bool      `json:"failedOnly"`  // 只看有失败或中断
 }
 
-// CollectRecordFilmItem 采集批次入库/更新影片关联记录
+// CollectRecordFilmItem 采集批次入库/更新影片关联记录。
+// 同一批次、同一站点、同一影片只保留一行，重复结算时覆盖而不是累加。
 type CollectRecordFilmItem struct {
 	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
-	BatchID   string    `gorm:"index:idx_crf_batch_source,priority:1;size:64;not null" json:"batchId"`
-	SourceID  string    `gorm:"index:idx_crf_batch_source,priority:2;size:32;not null" json:"sourceId"`
-	Mid       int64     `gorm:"index;not null" json:"mid"`
+	BatchID   string    `gorm:"uniqueIndex:uk_crf_batch_source_mid,priority:1;index:idx_crf_batch_source,priority:1;size:64;not null" json:"batchId"`
+	SourceID  string    `gorm:"uniqueIndex:uk_crf_batch_source_mid,priority:2;index:idx_crf_batch_source,priority:2;size:32;not null" json:"sourceId"`
+	Mid       int64     `gorm:"uniqueIndex:uk_crf_batch_source_mid,priority:3;not null" json:"mid"`
 	CreatedAt time.Time `gorm:"index;not null" json:"createdAt"`
 }
 

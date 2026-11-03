@@ -8,11 +8,9 @@ import {
   Space,
   Popconfirm,
   Pagination,
-  Tooltip,
   theme,
 } from "antd";
 import {
-  ReloadOutlined,
   DeleteOutlined,
   ClearOutlined,
 } from "@ant-design/icons";
@@ -378,19 +376,19 @@ export default function CollectRecordPageView() {
                   </Popconfirm>
                 )}
 
-                <Tooltip title="清空所有采集运行历史。自动保留策略为 30 天">
-                  <Popconfirm
-                    title="清空全部历史记录？"
-                    description="此操作不可恢复，确认清空全部采集历史？"
-                    okType="danger"
-                    onConfirm={handleClearAll}
-                    disabled={!canWrite}
-                  >
-                    <Button type="text" icon={<ClearOutlined />} disabled={!canWrite}>
-                      清空历史
-                    </Button>
-                  </Popconfirm>
-                </Tooltip>
+                <Popconfirm
+                  title="清空全部历史记录？"
+                  description="进行中的批次会保留，其余采集历史删除后不可恢复。"
+                  okText="清空"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  onConfirm={handleClearAll}
+                  disabled={!canWrite}
+                >
+                  <Button danger icon={<ClearOutlined />} disabled={!canWrite}>
+                    清空历史
+                  </Button>
+                </Popconfirm>
               </Space>
             </div>
           )}

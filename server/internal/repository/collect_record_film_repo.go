@@ -8,6 +8,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+
+	"gorm.io/gorm/clause"
 )
 
 // BatchSaveCollectRecordFilms 批量落库采集批次入库的影片编号清单
@@ -40,7 +42,10 @@ func BatchSaveCollectRecordFilms(batchID string, itemsBySource map[string][]int6
 	if len(records) == 0 {
 		return nil
 	}
-	return db.Mdb.CreateInBatches(records, 1000).Error
+	return db.Mdb.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "batch_id"}, {Name: "source_id"}, {Name: "mid"}},
+		DoNothing: true,
+	}).CreateInBatches(records, 1000).Error
 }
 
 // GetCollectRecordFilms 分页查询某批次指定站点的影片列表（并回填片名）
@@ -61,7 +66,8 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 
 	keyword := strings.TrimSpace(q.Keyword)
 	if keyword != "" {
-		tx = tx.Where("mid IN (SELECT mid FROM "+model.TableFilmIndex+" WHERE name LIKE ?)", "%"+keyword+"%")
+		pattern := "%" + escapeLikePattern(keyword) + "%"
+		tx = tx.Where("mid IN (SELECT mid FROM "+model.TableFilmIndex+" WHERE name LIKE ?)", pattern)
 	}
 
 	var total int64
@@ -104,12 +110,22 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 		if name == "" {
 			name = fmt.Sprintf("影片 #%d", r.Mid)
 		}
-		out = append(out, model.CollectRecordFilm{
-			Mid:  r.Mid,
-			Name: name,
-		})
+		film := model.CollectRecordFilm{Mid: r.Mid, Name: name}
+		// 跨站汇总时同一影片会在多个站各有一行，调用方靠 sourceId 区分来源。
+		if sourceID == "" {
+			film.SourceID = r.SourceID
+		}
+		out = append(out, film)
 	}
 	return out, total, nil
+}
+
+// escapeLikePattern 转义 LIKE 通配符，避免用户输入的 % 和 _ 被当成模式。
+func escapeLikePattern(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
 }
 
 // DeleteCollectRecordFilmsByBatchIDs 批量删除指定批次的影片关联记录

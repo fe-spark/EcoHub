@@ -207,7 +207,9 @@ func ClearCollectRecords() error {
 		Delete(&model.CollectRecord{}).Error; err != nil {
 		return err
 	}
-	_ = db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CollectRecordFilmItem{}).Error
+	// 只删已结束批次的影片行。进行中的批次要到收尾才落清单，整表删除会把它提前清掉。
+	running := db.Mdb.Model(&model.CollectRecord{}).Select("batch_id")
+	_ = db.Mdb.Where("batch_id NOT IN (?)", running).Delete(&model.CollectRecordFilmItem{}).Error
 	return nil
 }
 

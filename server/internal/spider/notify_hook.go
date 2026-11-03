@@ -153,11 +153,11 @@ func emitBatchNotify(b *collectBatchContext) {
 
 // batchCollectStatus 判定批次最终状态。
 // 规则：
-// 1. 全部成功 (success)：所有站点无失败、无停止、无异常，且完成站数等于总站数，无失败页。
-// 2. 已终止 (stopped)：没有失败或部分失败的站点，仅存在用户手动停止的站点。
-//    停止前已抓取的失败页不计为失败，避免用户主动停止被误判为部分失败。
-// 3. 部分失败 (partial)：存在失败或异常（页失败或站点失败），且同时存在有效成功产出（成功页或成功站）。
-// 4. 采集失败 (failed)：存在失败且完全无任何成功产出（零页成功、零站成功）。
+//  1. 全部成功 (success)：所有站点无失败、无停止、无异常，且完成站数等于总站数，无失败页。
+//  2. 已终止 (stopped)：没有失败或部分失败的站点，仅存在用户手动停止的站点。
+//     停止前已抓取的失败页不计为失败，避免用户主动停止被误判为部分失败。
+//  3. 部分失败 (partial)：存在失败或异常（页失败或站点失败），且同时存在有效成功产出（成功页或成功站）。
+//  4. 采集失败 (failed)：存在失败且完全无任何成功产出（零页成功、零站成功）。
 func batchCollectStatus(doneCount, partialCount, failedCount, stoppedCount, total int, succPages, failPages int) string {
 	if total <= 0 || (failedCount == 0 && partialCount == 0 && stoppedCount == 0 && doneCount == total && failPages == 0) {
 		return model.CollectRecordStatusSuccess
@@ -304,11 +304,18 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		log.Printf("[Spider] 结算采集记录失败 batchID=%s: %v", b.batchID, err)
 	}
 
-	// 异步持久化各站本次更新影片全量清单，供明细按需分页检索（轻量整数批量写入，防大表查库）
+	// 单片重放没有分站入库明细。只给确实采集成功、但没有登记到 mid 的站补上重放影片，
+	// 失败站和无变更的站不进清单。
 	if len(b.replayFilmIDs) > 0 {
+		doneSources := make(map[string]struct{}, len(results))
 		for _, r := range results {
-			if len(midsBySource[r.SourceID]) == 0 {
-				midsBySource[r.SourceID] = b.replayFilmIDs
+			if r.Status == progress.StatusDone || r.Status == model.CollectRecordStatusSuccess {
+				doneSources[r.SourceID] = struct{}{}
+			}
+		}
+		for sourceID := range doneSources {
+			if _, recorded := midsBySource[sourceID]; !recorded {
+				midsBySource[sourceID] = b.replayFilmIDs
 			}
 		}
 	}

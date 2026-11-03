@@ -27,6 +27,7 @@ export interface BatchFilmsModalProps {
 interface FilmItem {
   mid: number;
   name: string;
+  sourceId?: string;
 }
 
 export function BatchFilmsModal({
@@ -193,7 +194,7 @@ export function BatchFilmsModal({
         </div>
 
         <Table<FilmItem>
-          rowKey="mid"
+          rowKey={(record) => `${record.sourceId ?? sourceId}-${record.mid}`}
           size="small"
           loading={loading}
           columns={columns}
