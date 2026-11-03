@@ -25,9 +25,78 @@ var migrations = []Migration{
 		Name:    "当前版本基线，无结构变更",
 		Run:     migrateBaseline,
 	},
+	{
+		Version: "20261102_collect_records_refactor",
+		Name:    "采集记录体系重构：创建 collect_records 表，废除旧重试任务并初始化采集记录清理任务",
+		Run:     migrateCollectRecordsRefactor,
+	},
+	{
+		Version: "20261102_drop_failure_records",
+		Name:    "删除 failure_records",
+		Run:     migrateDropFailureRecords,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {
+	return nil
+}
+
+func migrateCollectRecordsRefactor(db *gorm.DB) error {
+	// 1. 改表：确保 collect_records 与 crontab_records 表就绪
+	if err := db.AutoMigrate(&model.CollectRecord{}, &model.CrontabRecord{}); err != nil {
+		return fmt.Errorf("migrate tables failed: %w", err)
+	}
+	// 旧的独立重试任务下线。失败记录清理改成采集记录清理时保留开关和 cron。
+	if err := db.Unscoped().Where("task_id = ?", "sys_cron_recover_collect").
+		Delete(&model.CrontabRecord{}).Error; err != nil {
+		return fmt.Errorf("cleanup deprecated cron tasks failed: %w", err)
+	}
+
+	const collectCleanRemark = "定期清理超过 30 天的采集运行记录与快照"
+	var collectCleanCount int64
+	if err := db.Model(&model.CrontabRecord{}).Where("task_id = ?", model.TaskIDCollectClean).Count(&collectCleanCount).Error; err != nil {
+		return fmt.Errorf("query collect clean cron task failed: %w", err)
+	}
+	if collectCleanCount > 0 {
+		if err := db.Unscoped().Where("task_id = ?", model.TaskIDFailureClean).Delete(&model.CrontabRecord{}).Error; err != nil {
+			return fmt.Errorf("cleanup deprecated cron tasks failed: %w", err)
+		}
+		return nil
+	}
+
+	renamed := db.Model(&model.CrontabRecord{}).Where("task_id = ?", model.TaskIDFailureClean).Updates(map[string]any{
+		"task_id":    model.TaskIDCollectClean,
+		"task_model": model.TaskModelCollectClean,
+		"remark":     collectCleanRemark,
+	})
+	if renamed.Error != nil {
+		return fmt.Errorf("rename collect clean cron task failed: %w", renamed.Error)
+	}
+	if renamed.RowsAffected > 0 {
+		return nil
+	}
+
+	collectCleanTask := model.CrontabRecord{
+		TaskId:    model.TaskIDCollectClean,
+		Time:      0,
+		Spec:      "0 30 3 * * *",
+		TaskModel: model.TaskModelCollectClean,
+		State:     true,
+		Remark:    collectCleanRemark,
+	}
+	if err := db.Create(&collectCleanTask).Error; err != nil {
+		return fmt.Errorf("init collect clean cron task failed: %w", err)
+	}
+	return nil
+}
+
+func migrateDropFailureRecords(db *gorm.DB) error {
+	if !db.Migrator().HasTable(model.TableFailureRecord) {
+		return nil
+	}
+	if err := db.Migrator().DropTable(model.TableFailureRecord); err != nil {
+		return fmt.Errorf("drop failure_records failed: %w", err)
+	}
 	return nil
 }
 

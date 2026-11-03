@@ -274,14 +274,9 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 			"ids": []string{srcID},
 		}), "POST collect delete batch")
 
-		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/record/retry", token, map[string]any{
-			"ids": []uint{},
-			"all": true,
-		}), "POST collect record retry")
+		assertSuccess(t, doJSONRequest(r, http.MethodGet, "/api/manage/collect/history/list", token, nil), "GET collect history list")
 
-		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/record/clear", token, map[string]any{
-			"scope": "retried",
-		}), "POST collect record clear")
+		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/history/clear", token, nil), "POST collect history clear")
 	})
 
 	// 6. 定时任务模块（/cron/save 保存 + /cron/state 批量启停）

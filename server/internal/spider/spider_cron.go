@@ -79,22 +79,7 @@ func AddAutoUpdateCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
-// AddFilmRecoverCron 失败采集记录处理
-func AddFilmRecoverCron(id, spec string) (cron.EntryID, error) {
-	// 校验 spec 表达式的有效性
-	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
-	}
-	return CronCollect.AddFunc(spec, func() {
-		// 通过 Id 获取任务相关数据
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Println("FilmRecoverCron Exec Failed: ", err)
-			return
-		}
-		executeTask(ft)
-	})
-}
+
 
 // ValidSpec 校验cron表达式是否有效
 func ValidSpec(spec string) error {
@@ -118,15 +103,15 @@ func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
-// AddFailureRecordCleanCron 清理超过保留期的成功和最终失败记录。
-func AddFailureRecordCleanCron(id, spec string) (cron.EntryID, error) {
+// AddCollectRecordCleanCron 定期清理超过 30 天的采集运行记录与快照。
+func AddCollectRecordCleanCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
 		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
 	}
 	return CronCollect.AddFunc(spec, func() {
 		ft, err := repository.GetFilmTaskById(id)
 		if err != nil {
-			log.Println("FailureRecordCleanCron Exec Failed: ", err)
+			log.Println("CollectRecordCleanCron Exec Failed: ", err)
 			return
 		}
 		executeTask(ft)
@@ -167,14 +152,12 @@ func ReloadCronTask(id string) error {
 	switch ft.Model {
 	case model.TaskModelAutoCollect:
 		cid, err = AddAutoUpdateCron(ft.Id, ft.Spec)
-	case model.TaskModelRetryCollect:
-		cid, err = AddFilmRecoverCron(ft.Id, ft.Spec)
 	case model.TaskModelOrphanClean:
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
 	case model.TaskModelLogClean:
 		cid, err = AddLogCleanCron(ft.Id, ft.Spec)
-	case model.TaskModelFailureClean:
-		cid, err = AddFailureRecordCleanCron(ft.Id, ft.Spec)
+	case model.TaskModelCollectClean:
+		cid, err = AddCollectRecordCleanCron(ft.Id, ft.Spec)
 	default:
 		return fmt.Errorf("不支持的定时任务类型: %d", ft.Model)
 	}
@@ -210,17 +193,14 @@ func runTaskBody(ft model.FilmCollectTask) {
 	case model.TaskModelAutoCollect:
 		AutoCollectTriggered(model.CollectTriggerCron, ft.Time)
 		log.Println("执行一次已启用站点采集")
-	case model.TaskModelRetryCollect:
-		FullRecoverSpider()
-		log.Println("执行一次失败记录重试")
 	case model.TaskModelOrphanClean:
 		executeOrphanCleanTask(ft)
 		return
 	case model.TaskModelLogClean:
 		executeLogCleanTask(ft)
 		return
-	case model.TaskModelFailureClean:
-		executeFailureRecordCleanTask(ft)
+	case model.TaskModelCollectClean:
+		executeCollectRecordCleanTask(ft)
 		return
 	default:
 		errMsg := fmt.Sprintf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
@@ -319,15 +299,20 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 	log.Printf("定时任务完成: %s，清理过期日志 %d 个，耗时 %s", remark, n, time.Since(startedAt))
 }
 
-func executeFailureRecordCleanTask(ft model.FilmCollectTask) {
+func executeCollectRecordCleanTask(ft model.FilmCollectTask) {
 	noteTaskRan(ft.Id, time.Now())
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
-		remark = "清理已成功记录及超过 7 天的失败记录"
+		remark = "定期清理超过 30 天的采集运行记录与快照"
 	}
-	pruned := repository.PruneExpiredFailureRecords(failureRecordRetention)
-	log.Printf("定时任务完成: %s，清理 %d 条，耗时 %s", remark, pruned, time.Since(startedAt))
+	err := repository.CleanOldCollectRecords(30)
+	if err != nil {
+		log.Printf("定时任务失败: %s，err=%v，耗时 %s", remark, err, time.Since(startedAt))
+		emitCronFailedNotify(ft.Id, remark, err.Error())
+	} else {
+		log.Printf("定时任务完成: %s，耗时 %s", remark, time.Since(startedAt))
+	}
 }
 
 // RunTaskOnce 立即手动执行一次任务

@@ -149,22 +149,13 @@ func clearChangedSourceDataTx(tx *gorm.DB, sourceId string, _ []model.CategoryTr
 	if err := tx.Model(&model.MovieSourceMapping{}).Where("source_id = ?", sourceId).Count(&hasMapping).Error; err != nil {
 		return CategoryApplyResult{}, err
 	}
-	var hasFailures int64
-	if err := tx.Model(&model.FailureRecord{}).Where("origin_id = ?", sourceId).Count(&hasFailures).Error; err != nil {
-		return CategoryApplyResult{}, err
-	}
-
 	orphanMids, err := CascadeCleanSourceDataTx(tx, sourceId)
 	if err != nil {
 		return CategoryApplyResult{}, err
 	}
 
-	if err := DeleteFailureRecordsByOriginIdTx(tx, sourceId); err != nil {
-		return CategoryApplyResult{}, err
-	}
-
 	return CategoryApplyResult{
-		DataCleared: hasPlaylist > 0 || hasMapping > 0 || hasFailures > 0 || len(orphanMids) > 0,
+		DataCleared: hasPlaylist > 0 || hasMapping > 0 || len(orphanMids) > 0,
 		OrphanMids:  orphanMids,
 	}, nil
 }

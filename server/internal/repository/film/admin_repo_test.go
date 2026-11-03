@@ -59,13 +59,12 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "动作"})
 	gdb.Create(&fileDummy{Id: 1})
 	gdb.Create(&model.Banner{Id: "b1", Mid: 200, Name: "测试轮播"})
-	gdb.Create(&model.FailureRecord{OriginId: "src1", Uri: "http://test", Cause: "err"})
 
 	if err := FilmZero(); err != nil {
 		t.Fatalf("FilmZero failed: %v", err)
 	}
 
-	var playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, bannerCount, failureCount int64
+	var playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, bannerCount int64
 	gdb.Model(&model.FilmSourcePlaylist{}).Count(&playlistCount)
 	gdb.Model(&model.Category{}).Count(&catCount)
 	gdb.Model(&fileDummy{}).Count(&fileCount)
@@ -73,11 +72,10 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	gdb.Unscoped().Model(&model.CategoryMapping{}).Count(&catMapCount)
 	gdb.Unscoped().Model(&model.SourceCategory{}).Count(&srcCatCount)
 	gdb.Model(&model.Banner{}).Count(&bannerCount)
-	gdb.Model(&model.FailureRecord{}).Count(&failureCount)
 
-	if playlistCount != 0 || fileCount != 0 || mappingCount != 0 || bannerCount != 0 || failureCount != 0 {
-		t.Fatalf("expected inventory tables physically cleared, got playlists=%d files=%d mapping=%d banners=%d failures=%d",
-			playlistCount, fileCount, mappingCount, bannerCount, failureCount)
+	if playlistCount != 0 || fileCount != 0 || mappingCount != 0 || bannerCount != 0 {
+		t.Fatalf("expected inventory tables physically cleared, got playlists=%d files=%d mapping=%d banners=%d",
+			playlistCount, fileCount, mappingCount, bannerCount)
 	}
 	if catCount == 0 || catMapCount == 0 || srcCatCount == 0 {
 		t.Fatalf("expected category structures to be preserved, got cats=%d catMap=%d srcCat=%d",

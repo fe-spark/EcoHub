@@ -3,30 +3,29 @@ package model
 import (
 	"time"
 
-	"server/internal/model/dto"
-
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
 
 const (
-	TaskModelAutoCollect   = 0 // 采集已启用站点
-	TaskModelRetryCollect  = 1 // 重试待处理的失败记录
-	TaskModelOrphanClean   = 2 // 清理片库冗余和孤儿数据
-	TaskModelLogClean      = 3 // 清理过期运行日志
-	TaskModelFailureClean  = 4 // 清理已成功记录及超过 7 天的失败记录
+	TaskModelAutoCollect  = 0 // 采集已启用站点
+	TaskModelOrphanClean  = 2 // 清理片库冗余和孤儿数据
+	TaskModelLogClean     = 3 // 清理过期运行日志
+	TaskModelCollectClean = 5 // 定期清理超过 30 天的采集运行记录
 )
 
 // 采集触发方式常量。
 const (
 	CollectTriggerManual       = "manual"
 	CollectTriggerCron         = "cron"
+	CollectTriggerRetry        = "retry"
 	CollectTriggerSingleUpdate = "single_update"
 	CollectTriggerRecover      = "recover"
 )
 
 const (
 	TaskIDFailureClean = "sys_cron_failure_clean"
+	TaskIDCollectClean = "sys_cron_collect_clean"
 )
 
 // FilmCollectTask 影视采集任务
@@ -102,43 +101,6 @@ type CollectSourceStats struct {
 
 func (CollectSourceStats) TableName() string {
 	return TableCollectSourceStats
-}
-
-// FailureRecord 失败采集记录信息结构体
-type FailureRecord struct {
-	gorm.Model
-	OriginId   string `json:"originId"`   // 采集站唯一ID
-	OriginName string `json:"originName"` // 采集站唯一ID
-	Uri        string `json:"uri"`        // 采集源链接
-	PageNumber int    `json:"pageNumber"` // 页码
-	Hour       int    `json:"hour"`       // 采集参数 h 时长
-	Cause      string `json:"cause"`      // 失败原因
-	Status     int    `json:"status"`     // 重试状态
-	RetryCount int    `json:"retryCount"` // 重试累计次数
-}
-
-const (
-	// FailureRecordStatusPending 等待后续定时重试。
-	FailureRecordStatusPending = 1
-	// FailureRecordStatusSuccess 本次重试已成功，不再进入后续定时队列。
-	FailureRecordStatusSuccess = 0
-	// FailureRecordStatusFailed 本次重试已失败，不再进入后续定时队列。
-	FailureRecordStatusFailed = 2
-
-	MaxFailureRetryCount = 5
-)
-
-func (FailureRecord) TableName() string {
-	return TableFailureRecord
-}
-
-type RecordRequestVo struct {
-	OriginId  string    `json:"originId"`  // 源站点ID
-	Hour      int       `json:"hour"`      // 采集时长
-	Status    int       `json:"status"`    // 状态
-	BeginTime time.Time `json:"beginTime"` // 起始时间
-	EndTime   time.Time `json:"endTime"`   // 结束时间
-	Paging    *dto.Page `json:"paging"`    // 分页参数
 }
 
 // CronTaskVo 定时任务数据response

@@ -232,7 +232,6 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 				cur.Current = page
 			}
 		})
-		deps.SavePageFailure(s, h, page, stage, err)
 		if shouldLogFailure(snapshot.failed) {
 			syslog.Warnf("[Spider] 站点 %s 采集失败累计=%d，最近失败 page=%d stage=%s err=%v", s.Name, snapshot.failed, page, stage, err)
 		}

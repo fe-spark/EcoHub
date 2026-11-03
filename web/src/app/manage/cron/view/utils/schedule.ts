@@ -30,18 +30,22 @@ export const weekOptions = [
   { value: 6, label: "周六" },
 ];
 
+const staleTaskRemarks = new Set([
+  "重试待处理的失败记录",
+  "清理已成功记录及超过 7 天的失败记录",
+  "计划任务",
+]);
+
 export function getTaskActionText(model: number) {
   switch (model) {
     case 0:
       return "采集已启用站点的更新";
-    case 1:
-      return "重试待处理的失败记录";
     case 2:
       return "清理片库冗余和孤儿数据";
     case 3:
       return "清理过期运行日志";
-    case 4:
-      return "清理已成功记录及超过 7 天的失败记录";
+    case 5:
+      return "定期清理超过 30 天的采集运行记录与快照";
     default:
       return "计划任务";
   }
@@ -51,17 +55,23 @@ export function getTaskTypeText(model: number) {
   switch (model) {
     case 0:
       return "自动采集";
-    case 1:
-      return "失败重试";
     case 2:
       return "片库清理";
     case 3:
       return "日志清理";
-    case 4:
+    case 5:
       return "记录清理";
     default:
       return "计划任务";
   }
+}
+
+function resolveTaskRemark(remark: string | undefined, model: number) {
+  const text = String(remark ?? "").trim();
+  if (!text || staleTaskRemarks.has(text)) {
+    return getTaskActionText(model);
+  }
+  return text;
 }
 
 export function parseCronSpec(spec: string) {
@@ -175,9 +185,9 @@ export function getTaskScheduleText(task: CronTask) {
 }
 
 export function getTaskDescription(task: CronTask) {
-  return getTaskActionText(task.model);
+  return resolveTaskRemark(task.remark, task.model);
 }
 
-export function buildTaskDescription(values: any) {
-  return getTaskActionText(Number(values.model));
+export function buildTaskDescription(values: { model?: number; remark?: string }) {
+  return resolveTaskRemark(values.remark, Number(values.model));
 }

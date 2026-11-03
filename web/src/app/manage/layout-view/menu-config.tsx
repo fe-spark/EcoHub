@@ -28,7 +28,7 @@ export const menuItems: MenuItem[] = [
     label: "采集管理",
     children: [
       { key: "/manage/collect", label: <span data-tour="menu-collect">采集中心</span> },
-      { key: "/manage/collect/record", label: <span data-tour="menu-record">失败记录</span> },
+      { key: "/manage/collect/record", label: <span data-tour="menu-record">采集记录</span> },
       { key: "/manage/cron", label: <span data-tour="menu-cron">计划任务</span> },
     ],
   },

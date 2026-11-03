@@ -60,15 +60,15 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureDefaultTasks: %v", err)
 	}
-	if len(tasks) != 5 {
-		t.Fatalf("expected 5 default tasks, got %d", len(tasks))
+	if len(tasks) != 4 {
+		t.Fatalf("expected 4 default tasks, got %d", len(tasks))
 	}
-	failureClean, err := repository.GetFilmTaskById(model.TaskIDFailureClean)
+	collectClean, err := repository.GetFilmTaskById(model.TaskIDCollectClean)
 	if err != nil {
-		t.Fatalf("failure record clean cron: %v", err)
+		t.Fatalf("collect record clean cron: %v", err)
 	}
-	if failureClean.Model != model.TaskModelFailureClean || failureClean.Spec != "0 30 3 * * *" || !failureClean.State {
-		t.Fatalf("unexpected failure clean task: %+v", failureClean)
+	if collectClean.Model != model.TaskModelCollectClean || collectClean.Spec != "0 30 3 * * *" || !collectClean.State {
+		t.Fatalf("unexpected collect clean task: %+v", collectClean)
 	}
 	task, err := repository.GetFilmTaskById("sys_cron_log_clean")
 	if err != nil {

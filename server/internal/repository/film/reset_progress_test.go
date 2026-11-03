@@ -3,6 +3,7 @@ package film
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -27,7 +28,7 @@ func setupResetStatsDB(t *testing.T) *gorm.DB {
 		&model.FilmSourcePlaylist{},
 		&model.Category{},
 		&model.CategoryMapping{},
-		&model.FailureRecord{},
+		&model.CollectRecord{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -75,17 +76,23 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 9, CategoryId: 999})
 	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 1, CategoryId: 1})
 
-	gdb.Create(&model.FailureRecord{OriginId: "src_a", OriginName: "首选站A", Cause: "a"})
-	gdb.Create(&model.FailureRecord{OriginId: "src_b", OriginName: "备用站B", Cause: "b"})
-	gdb.Create(&model.FailureRecord{OriginId: "src_b", OriginName: "备用站B", Cause: "b2"})
-	gdb.Create(&model.FailureRecord{OriginId: "gone", OriginName: "已删站", Cause: "gone"})
+	now := time.Now()
+	for i, id := range []string{"fail-1", "fail-2", "fail-3"} {
+		gdb.Create(&model.CollectRecord{
+			BatchID:    id,
+			Trigger:    model.CollectTriggerCron,
+			Status:     model.CollectRecordStatusFailed,
+			StartedAt:  now.Add(-time.Duration(i) * time.Hour),
+			DetailJson: `[{"sourceId":"src_a","sourceName":"首选站A","status":"failed","error":"timeout"}]`,
+		})
+	}
 
 	filmsnapshot.ClearActiveFilmReadModel()
 	stats, err := GetInventoryStats()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 4 {
+	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 1 {
 		t.Fatalf("library = %+v", stats.Library)
 	}
 	if len(stats.Sources) != 3 {
@@ -100,7 +107,7 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 		t.Fatalf("src_a = %+v", primary)
 	}
 	other := byID["src_b"]
-	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 2 {
+	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 0 {
 		t.Fatalf("src_b = %+v", other)
 	}
 	off := byID["src_off"]

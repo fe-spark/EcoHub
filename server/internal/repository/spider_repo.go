@@ -220,9 +220,6 @@ func DelCollectResource(id string) ([]int64, error) {
 		if err != nil {
 			return err
 		}
-		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
-			return err
-		}
 		if err := ClearSourceCategoryDataTx(tx, id); err != nil {
 			return err
 		}
@@ -242,7 +239,7 @@ func DelCollectResource(id string) ([]int64, error) {
 }
 
 // UpdateCollectSourceReplacingData 更换地址或协议时，清数据和更新配置在同一个事务里提交。
-func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData, cleanFailures bool) ([]int64, error) {
+func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData bool) ([]int64, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("数据库未连接")
 	}
@@ -255,11 +252,6 @@ func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData, cleanF
 				return err
 			}
 			if err := ClearSourceCategoryDataTx(tx, source.Id); err != nil {
-				return err
-			}
-		}
-		if cleanFailures {
-			if err := DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
 				return err
 			}
 		}
@@ -276,14 +268,7 @@ func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData, cleanF
 
 // CleanCollectSourceData 清空该站已采集数据（保留采集站配置本身）。
 func CleanCollectSourceData(id string) ([]int64, error) {
-	orphanMids, err := CascadeCleanSourceData(id)
-	if err != nil {
-		return orphanMids, err
-	}
-	if err := DeleteFailureRecordsByOriginIdTx(db.Mdb, id); err != nil {
-		return orphanMids, err
-	}
-	return orphanMids, nil
+	return CascadeCleanSourceData(id)
 }
 
 // AddCollectSource 添加采集站信息

@@ -9,7 +9,6 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/model/dto"
 	"server/internal/repository"
 	"server/internal/spider/progress"
 
@@ -35,7 +34,6 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 		&model.Category{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
-		&model.FailureRecord{},
 		&model.ProxyConfigRecord{},
 		&model.BannerConfigRecord{},
 		&model.NotifyConfigRecord{},
@@ -251,146 +249,6 @@ func TestCollectService_UpdateFilmSource_NameChange(t *testing.T) {
 	}
 }
 
-func TestCollectService_FailureRecords(t *testing.T) {
-	gdb := setupCollectServiceTestDB(t)
-	srv := &CollectService{}
-
-	// 1. 插入测试失败记录
-	rec1 := model.FailureRecord{
-		OriginId:   "src_1",
-		OriginName: "源站1",
-		Uri:        "http://src1/api",
-		PageNumber: 1,
-		Hour:       24,
-		Cause:      "timeout",
-		Status:     model.FailureRecordStatusPending,
-		RetryCount: 1,
-	}
-	rec2 := model.FailureRecord{
-		OriginId:   "src_1",
-		OriginName: "源站1",
-		Uri:        "http://src1/api",
-		PageNumber: 2,
-		Hour:       24,
-		Cause:      "rate limit",
-		Status:     model.FailureRecordStatusSuccess,
-		RetryCount: 2,
-	}
-	rec3 := model.FailureRecord{
-		OriginId:   "src_2",
-		OriginName: "源站2",
-		Uri:        "http://src2/api",
-		PageNumber: 3,
-		Hour:       24,
-		Cause:      "server error",
-		Status:     model.FailureRecordStatusFailed,
-		RetryCount: 5,
-	}
-	gdb.Create(&rec1)
-	gdb.Create(&rec2)
-	gdb.Create(&rec3)
-
-	// 2. 测试 GetRecordList
-	params := model.RecordRequestVo{
-		Paging: &dto.Page{Current: 1, PageSize: 10},
-		Status: -1,
-	}
-	list, err := srv.GetRecordList(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 3 {
-		t.Fatalf("expected 3 failure records, got %d", len(list))
-	}
-
-	// 3. 测试 GetRecordOptions
-	opts, err := srv.GetRecordOptions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	status, _ := opts["status"].([]model.Option)
-	if len(status) == 0 {
-		t.Fatalf("expected non-empty status options")
-	}
-
-	// 4. 测试 ClearRetriedRecords (应清理 success 和 failed，保留 pending)
-	srv.ClearRetriedRecords()
-	listAfterClear, err := srv.GetRecordList(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(listAfterClear) != 1 {
-		t.Fatalf("expected 1 record after ClearRetriedRecords, got %d", len(listAfterClear))
-	}
-	if listAfterClear[0].Status != model.FailureRecordStatusPending {
-		t.Fatalf("expected remaining record to be pending, got %d", listAfterClear[0].Status)
-	}
-
-	// 5. 测试 ClearAllRecord (truncate table)
-	srv.ClearAllRecord()
-	listAfterTruncate, err := srv.GetRecordList(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(listAfterTruncate) != 0 {
-		t.Fatalf("expected 0 records after ClearAllRecord, got %d", len(listAfterTruncate))
-	}
-}
-
-func TestGetRecordList_DefaultsToPrimarySource(t *testing.T) {
-	gdb := setupCollectServiceTestDB(t)
-	if err := gdb.Create(&model.FilmSource{Id: "src_b", Name: "站点B", Uri: "http://b", State: true, Sort: 2}).Error; err != nil {
-		t.Fatalf("create src_b: %v", err)
-	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
-		t.Fatalf("create src_a: %v", err)
-	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_off", Name: "停用站", Uri: "http://off", State: false, Sort: 1}).Error; err != nil {
-		t.Fatalf("create src_off: %v", err)
-	}
-	gdb.Create(&model.FailureRecord{OriginId: "src_a", OriginName: "站点A", PageNumber: 1, Status: model.FailureRecordStatusPending})
-	gdb.Create(&model.FailureRecord{OriginId: "src_b", OriginName: "站点B", PageNumber: 2, Status: model.FailureRecordStatusPending})
-
-	srv := &CollectService{}
-	params := srv.PrepareRecordQuery(model.RecordRequestVo{
-		Paging: &dto.Page{Current: 1, PageSize: 10},
-		Status: -1,
-	})
-	if params.OriginId != "src_a" {
-		t.Fatalf("empty origin should fall back to primary src_a, got %q", params.OriginId)
-	}
-	list, err := srv.GetRecordList(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0].OriginId != "src_a" {
-		t.Fatalf("expected only primary source records, got %+v", list)
-	}
-
-	opts, err := srv.GetRecordOptions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if opts["defaultSourceId"] != "src_a" {
-		t.Fatalf("defaultSourceId = %v, want src_a", opts["defaultSourceId"])
-	}
-	origins, ok := opts["origin"].([]model.Option)
-	if !ok {
-		t.Fatalf("origin options type %T", opts["origin"])
-	}
-	if len(origins) != 3 {
-		t.Fatalf("expected 3 total sources, got %d", len(origins))
-	}
-	for _, item := range origins {
-		if item.Name == "全部" || item.Value == "" {
-			t.Fatalf("origin options must not include 全部: %+v", item)
-		}
-	}
-	if origins[0].Value != "src_a" {
-		t.Fatalf("first origin should be primary src_a, got %v", origins[0].Value)
-	}
-}
-
 func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 	srv := &CollectService{}
@@ -405,27 +263,17 @@ func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 	}
 	gdb.Create(&s)
 
-	// 添加一条该源的失败记录
-	fr := model.FailureRecord{
-		OriginId:   s.Id,
-		OriginName: s.Name,
-		PageNumber: 1,
-		Status:     model.FailureRecordStatusPending,
-	}
-	gdb.Create(&fr)
-
-	// 更新为 XML 格式
 	sUpdate := s
 	sUpdate.Format = model.SourceFormatXML
 	if err := srv.UpdateFilmSource(sUpdate); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
-
-	// 验证失败记录已被清空
-	var remainingFrCount int64
-	gdb.Model(&model.FailureRecord{}).Where("origin_id = ?", s.Id).Count(&remainingFrCount)
-	if remainingFrCount != 0 {
-		t.Fatalf("expected failure records to be cleaned after format change, got %d", remainingFrCount)
+	var updated model.FilmSource
+	if err := gdb.First(&updated, "id = ?", s.Id).Error; err != nil {
+		t.Fatalf("query updated: %v", err)
+	}
+	if updated.Format != model.SourceFormatXML {
+		t.Fatalf("expected xml format, got %s", updated.Format)
 	}
 }
 
