@@ -268,3 +268,85 @@ func TestStartBatchCollectRetry_RollbackOccupyOnRecordStartError(t *testing.T) {
 		t.Fatalf("expected progress status stopped, got ok=%v, status=%s", ok, snap.Status)
 	}
 }
+
+func TestSingleFilmBatch_RecordStartCreatesRunning(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.CollectRecord{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "single-record-s1", Name: "单片记账源"}
+	batch := newCollectBatchContext(
+		model.CollectTriggerSingleUpdate,
+		model.CollectTagSingleUpdate,
+		[]model.FilmSource{src},
+		time.Now(),
+	).withReplayFilmIDs([]int64{42})
+	defer batch.close()
+
+	if err := batch.recordStart(); err != nil {
+		t.Fatalf("recordStart: %v", err)
+	}
+
+	list, total, err := repository.GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if total != 1 || len(list) != 1 {
+		t.Fatalf("expected 1 running record, got total=%d len=%d", total, len(list))
+	}
+	rec := list[0]
+	if rec.Status != model.CollectRecordStatusRunning {
+		t.Fatalf("expected running, got %s", rec.Status)
+	}
+	if rec.Trigger != model.CollectTriggerSingleUpdate {
+		t.Fatalf("trigger %s", rec.Trigger)
+	}
+	if rec.FilmIDs != "42" {
+		t.Fatalf("film ids %q", rec.FilmIDs)
+	}
+	if rec.SourceCount != 1 {
+		t.Fatalf("source count %d", rec.SourceCount)
+	}
+}
+
+func TestSingleFilmBatch_RecordStartErrorReleasesOccupy(t *testing.T) {
+	prev := db.Mdb
+	db.Mdb = nil // 模拟数据库未连接导致 recordStart 失败
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "single-rollback-s1", Name: "单片回滚源"}
+	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "单片更新")
+	if err != nil || len(occupied) != 1 {
+		t.Fatalf("occupy failed: %v", err)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should be occupied initially")
+	}
+
+	batch := newCollectBatchContext(
+		model.CollectTriggerSingleUpdate,
+		model.CollectTagSingleUpdate,
+		occupied,
+		time.Now(),
+	).withReplayFilmIDs([]int64{99})
+	err = batch.recordStart()
+	if err == nil {
+		t.Fatal("expected error when db is nil")
+	}
+	// 模拟 CollectSingleFilm 在 recordStart 失败后 return，由 defer close 释放占用
+	batch.close()
+
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should NOT be occupied after recordStart failure + close")
+	}
+}
