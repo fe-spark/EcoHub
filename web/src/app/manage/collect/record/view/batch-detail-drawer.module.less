@@ -1,0 +1,343 @@
+.drawerTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.withIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.drawerContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.drawerOverviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+}
+
+.drawerMetaStrip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.drawerMetaItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.drawerMetaLabel {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.drawerMetaValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metaIcon {
+  color: var(--ant-color-text-tertiary);
+  font-size: 13px;
+}
+
+.drawerKpiRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.drawerKpiCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 6px;
+}
+
+.drawerKpiHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.kpiIcon {
+  font-size: 12px;
+}
+
+.drawerKpiBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 42px;
+  justify-content: center;
+}
+
+.kpiValueOk {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-success);
+}
+
+.kpiValueFail {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-error);
+}
+
+.kpiValueHighlight {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ant-color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpiValueDefault {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+}
+
+.kpiValueMuted {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+}
+
+.kpiSub {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drawerAlert {
+  margin-bottom: 4px;
+}
+
+.drawerSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.tableTitle {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 32px;
+  color: var(--ant-color-text);
+}
+
+.sourceCardList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sourceCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  background: var(--ant-color-bg-container);
+  transition: border-color 0.2s, box-shadow 0.2s;
+
+  &:hover {
+    border-color: var(--ant-color-primary-border);
+    box-shadow: var(--ant-box-shadow-tertiary);
+  }
+}
+
+.sourceCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sourceCardTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.sourceCardName {
+  font-size: 14px;
+}
+
+.sourceCardId {
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.sourceCardStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sourceCardStats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+}
+
+.metricFail {
+  color: var(--ant-color-error);
+}
+
+.filmCount {
+  font-weight: 600;
+  color: var(--ant-color-primary);
+}
+
+.filmCountEmpty {
+  font-weight: 400;
+  color: var(--ant-color-text-secondary);
+}
+
+.sourceCardError {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--ant-color-error-bg);
+  border: 1px solid var(--ant-color-error-border);
+  border-radius: 6px;
+  color: var(--ant-color-error-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sourceFilmsContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--ant-color-border-secondary);
+}
+
+.sourceFilmsTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+}
+
+.filmTagGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.filmTagLink {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.filmTag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sourceNoFilms {
+  font-size: 12px;
+  font-style: italic;
+}
+
+.sourceMoreFilms {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.sourceMoreTip {
+  font-size: 12px;
+}
+
+.viewInFilmManageLink {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-primary);
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.detailEmpty {
+  padding: 8px 16px;
+  color: var(--ant-color-text-secondary);
+}
+
+@media (max-width: 768px) {
+  .drawerMetaStrip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .drawerKpiRow {
+    grid-template-columns: 1fr;
+  }
+}

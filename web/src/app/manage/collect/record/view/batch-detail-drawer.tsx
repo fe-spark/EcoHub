@@ -35,7 +35,7 @@ import {
   renderHourTag,
   renderTriggerTag,
 } from "./history-columns";
-import styles from "./index.module.less";
+import styles from "./batch-detail-drawer.module.less";
 
 const { Text } = Typography;
 
@@ -97,44 +97,115 @@ export function BatchDetailDrawer({
       styles={{ body: { padding: "16px 20px" } }}
     >
       <div className={styles.drawerContent}>
-        <div className={styles.drawerMetaGrid}>
-          <div className={styles.drawerMetaItem}>
-            <span className={styles.drawerMetaLabel}>采集方式</span>
-            <div className={styles.drawerMetaValue}>
-              {renderTriggerTag(record.trigger, record.tag)}
+        <div className={styles.drawerOverviewCard}>
+          <div className={styles.drawerMetaStrip}>
+            <div className={styles.drawerMetaItem}>
+              <span className={styles.drawerMetaLabel}>执行时间</span>
+              <span className={styles.drawerMetaValue}>
+                <ClockCircleOutlined className={styles.metaIcon} />
+                {record.startedAt ? dayjs(record.startedAt).format("YYYY-MM-DD HH:mm:ss") : "-"}
+              </span>
+            </div>
+            <div className={styles.drawerMetaItem}>
+              <span className={styles.drawerMetaLabel}>采集方式</span>
+              <div className={styles.drawerMetaValue}>
+                {renderTriggerTag(record.trigger, record.tag)}
+              </div>
+            </div>
+            <div className={styles.drawerMetaItem}>
+              <span className={styles.drawerMetaLabel}>采集跨度</span>
+              <div className={styles.drawerMetaValue}>
+                {renderHourTag(record.hour, record)}
+              </div>
+            </div>
+            <div className={styles.drawerMetaItem}>
+              <span className={styles.drawerMetaLabel}>运行耗时</span>
+              <span className={styles.drawerMetaValue}>
+                <FieldTimeOutlined className={styles.metaIcon} />
+                {formatDuration(effectiveMs)}
+              </span>
             </div>
           </div>
-          <div className={styles.drawerMetaItem}>
-            <span className={styles.drawerMetaLabel}>采集时间</span>
-            <div className={styles.drawerMetaValue}>
-              {renderHourTag(record.hour, record)}
+
+          <div className={styles.drawerKpiRow}>
+            <div className={styles.drawerKpiCard}>
+              <div className={styles.drawerKpiHeader}>
+                <CloudServerOutlined className={styles.kpiIcon} />
+                <span>覆盖站点</span>
+              </div>
+              <div className={styles.drawerKpiBody}>
+                {record.failedSources > 0 ? (
+                  <>
+                    <span className={styles.kpiValueFail}>
+                      <CloseCircleOutlined /> {record.failedSources} 站失败
+                    </span>
+                    <span className={styles.kpiSub}>
+                      （{record.successSources} 站成功 / 共 {record.sourceCount} 站）
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className={styles.kpiValueOk}>
+                      <CheckCircleOutlined /> {record.sourceCount} 站全成功
+                    </span>
+                    <span className={styles.kpiSub}>所有站点正常完成</span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className={styles.drawerMetaItem}>
-            <span className={styles.drawerMetaLabel}>运行耗时</span>
-            <span className={styles.drawerMetaValue}>
-              <ClockCircleOutlined />
-              {formatDuration(effectiveMs)}
-            </span>
-          </div>
-          <div className={styles.drawerMetaItem}>
-            <span className={styles.drawerMetaLabel}>总入库影片</span>
-            <span className={`${styles.drawerMetaValue} ${record.filmCount > 0 ? styles.filmCount : styles.filmCountEmpty}`}>
-              <VideoCameraOutlined />
-              {record.filmCount > 0 ? `${record.filmCount} 部` : "无变更"}
-            </span>
-          </div>
-          <div className={styles.drawerMetaItem}>
-            <span className={styles.drawerMetaLabel}>站点完成度</span>
-            <span className={styles.drawerMetaValue}>
-              <CheckCircleOutlined className={styles.statusOk} />
-              {record.successSources}/{record.sourceCount} 成功
-              {record.failedSources > 0 && (
-                <span className={styles.metricFail}>
-                  （{record.failedSources} 失败）
-                </span>
-              )}
-            </span>
+
+            <div className={styles.drawerKpiCard}>
+              <div className={styles.drawerKpiHeader}>
+                <FileTextOutlined className={styles.kpiIcon} />
+                <span>拉取页码</span>
+              </div>
+              <div className={styles.drawerKpiBody}>
+                {isSingleFilmRecord(record) ? (
+                  <>
+                    <span className={styles.kpiValueDefault}>单片重放</span>
+                    <span className={styles.kpiSub}>按原影片重新拉取</span>
+                  </>
+                ) : record.pageFailed > 0 ? (
+                  <>
+                    <span className={styles.kpiValueFail}>
+                      <CloseCircleOutlined /> {record.pageFailed} 页失败
+                    </span>
+                    <span className={styles.kpiSub}>
+                      （成功 {record.pageSuccess} / 共 {record.pageTotal} 页）
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className={styles.kpiValueOk}>
+                      <CheckCircleOutlined /> 共 {record.pageTotal} 页
+                    </span>
+                    <span className={styles.kpiSub}>所有分页全部拉取完成</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className={styles.drawerKpiCard}>
+              <div className={styles.drawerKpiHeader}>
+                <VideoCameraOutlined className={styles.kpiIcon} />
+                <span>入库影片</span>
+              </div>
+              <div className={styles.drawerKpiBody}>
+                {record.filmCount > 0 ? (
+                  <>
+                    <span className={styles.kpiValueHighlight}>
+                      +{record.filmCount.toLocaleString("zh-CN")} 部
+                    </span>
+                    <span className={styles.kpiSub}>产生新增或更新</span>
+                  </>
+                ) : (
+                  <>
+                    <span className={styles.kpiValueMuted}>无变更</span>
+                    <span className={styles.kpiSub}>各站内容无更新</span>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
