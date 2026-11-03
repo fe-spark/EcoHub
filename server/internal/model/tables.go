@@ -30,6 +30,7 @@ const (
 	TableFilmTMDBScrape     = "film_tmdb_scrapes"
 	TableAnalyticsConfig    = "analytics_config_records"
 	TableDanmakuRecord      = "danmaku_record"
+	TableCollectRecord      = "collect_records"
 )
 
 // FilmHasPlaySourceSQL 判断 film_index 当前行是否有指定采集源的播放线路。
@@ -59,7 +60,6 @@ var AllModels = []any{
 	&SourceCategory{},
 	&AccessDailyStats{},
 	&AccessDailyTop{},
-	&FailureRecord{},
 	&SchemaMigration{},
 	&TMDBConfigRecord{},
 	&BannerConfigRecord{},
@@ -68,4 +68,5 @@ var AllModels = []any{
 	&FilmTMDBScrape{},
 	&DanmakuRecord{},
 	&AnalyticsConfigRecord{},
+	&CollectRecord{},
 }

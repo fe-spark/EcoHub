@@ -34,7 +34,6 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 		&model.Category{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
-		&model.FailureRecord{},
 		&model.MovieSourceMapping{},
 		&model.FilmIndex{},
 	); err != nil {
@@ -216,41 +215,5 @@ func TestCollectHandler_StateBatchAndRecordOperations(t *testing.T) {
 	gdb.First(&s1, "id = ?", "src_s1")
 	if !s1.State {
 		t.Fatalf("expected src_s1 state to be true")
-	}
-
-	// 2. 异常记录测试: 写入测试记录
-	rec1 := model.FailureRecord{OriginId: "src_s1", Status: model.FailureRecordStatusFailed, OriginName: "测试站1"}
-	rec2 := model.FailureRecord{OriginId: "src_s1", Status: model.FailureRecordStatusSuccess, OriginName: "测试站1"}
-	gdb.Create(&rec1)
-	gdb.Create(&rec2)
-
-	// 3. 测试清理范围 scope="retried"
-	clearReq := map[string]string{"scope": "retried"}
-	bodyBytes, _ = json.Marshal(clearReq)
-	c, w = testContext(http.MethodPost, "/api/manage/collect/record/clear")
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/record/clear", bytes.NewReader(bodyBytes))
-	c.Request.Header.Set("Content-Type", "application/json")
-	h.ClearRecords(c)
-	resp = decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("expected clear retried success, got code=%d msg=%s", resp.Code, resp.Msg)
-	}
-
-	// 4. 测试清理范围 scope="all"
-	clearAllReq := map[string]string{"scope": "all"}
-	bodyBytes, _ = json.Marshal(clearAllReq)
-	c, w = testContext(http.MethodPost, "/api/manage/collect/record/clear")
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/record/clear", bytes.NewReader(bodyBytes))
-	c.Request.Header.Set("Content-Type", "application/json")
-	h.ClearRecords(c)
-	resp = decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("expected clear all success, got code=%d msg=%s", resp.Code, resp.Msg)
-	}
-
-	var recCount int64
-	gdb.Model(&model.FailureRecord{}).Count(&recCount)
-	if recCount != 0 {
-		t.Fatalf("expected 0 failure records, got %d", recCount)
 	}
 }

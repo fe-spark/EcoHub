@@ -4,20 +4,7 @@
   gap: 16px;
 }
 
-.panelCard {
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 12px;
-  background: var(--ant-color-bg-container);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 
-  :global(.ant-card-body) {
-    padding: 16px;
-  }
-}
-
-html[data-theme="dark"] .panelCard {
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
-}
 
 .filterBar {
   display: flex;
@@ -97,3 +84,217 @@ html[data-theme="dark"] .panelCard {
     justify-content: flex-start;
   }
 }
+
+.withIcon,
+.collectCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.timeCell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.3;
+}
+
+.timePrimary {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  white-space: nowrap;
+}
+
+.timeMeta,
+.modeText {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.statCell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.statRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.statOk {
+  color: var(--ant-color-success);
+}
+
+.statFail {
+  color: var(--ant-color-error);
+  font-weight: 500;
+}
+
+.statTotal {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+}
+
+.collectStack {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.collectMain {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.filmTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filmTagLink {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.filmTag {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.timePrimary {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.timeMeta,
+.modeText {
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.metric {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.metricFail {
+  color: var(--ant-color-error);
+}
+
+.errorDetail {
+  color: var(--ant-color-text);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.filmCount,
+.filmCountEmpty {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.filmCount {
+  font-weight: 600;
+  color: var(--ant-color-primary);
+}
+
+.filmCountEmpty {
+  font-weight: 400;
+  color: var(--ant-color-text-secondary);
+}
+
+.statusOk {
+  color: var(--ant-color-success);
+}
+
+.detailMuted {
+  color: var(--ant-color-text-secondary);
+}
+
+.detailFail {
+  color: var(--ant-color-error);
+}
+
+.detailWarn {
+  color: var(--ant-color-warning);
+}
+
+.detailRun {
+  color: var(--ant-color-primary);
+}
+
+.detailActions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.actionButton {
+  height: 28px;
+  padding-inline: 6px;
+}
+
+.detailEmpty {
+  padding: 8px 16px;
+  color: var(--ant-color-text-secondary);
+}
+
+.incidentTable {
+  width: 100%;
+}
+
+.incidentSourceId {
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+.filterBarWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filterBarLeft {
+  display: flex;
+  align-items: center;
+}
+
+.filterBarRight {
+  display: flex;
+  align-items: center;
+}
+

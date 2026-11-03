@@ -148,6 +148,12 @@ func (s *InitService) AnalyticsConfigInit() error {
 }
 
 func (s *InitService) SpiderInit() error {
+	if err := repository.MarkInterruptedCollectRecords(); err != nil {
+		syslog.Warnf("[Init] 标记中断采集记录失败: %v", err)
+	}
+	if err := repository.CleanOldCollectRecords(30); err != nil {
+		syslog.Warnf("[Init] 清理过期采集记录失败: %v", err)
+	}
 	if err := s.FilmSourceInit(); err != nil {
 		return err
 	}
@@ -207,12 +213,32 @@ func (s *InitService) CollectCrontabInit() error {
 	return nil
 }
 
-// ensureDefaultTasks 已有任务保持原样。某个任务类型还没有记录时，补一条默认任务。
+// ensureDefaultTasks 已有任务保持原样。清理已废弃任务，补齐新任务。
 func (s *InitService) ensureDefaultTasks() ([]model.FilmCollectTask, error) {
 	existing, err := repository.GetAllFilmTask()
 	if err != nil {
 		return nil, fmt.Errorf("读取定时任务失败: %w", err)
 	}
+
+	// 清理已废除的独立重试任务 sys_cron_recover_collect
+	filtered := make([]model.FilmCollectTask, 0, len(existing))
+	for _, t := range existing {
+		if t.Id == "sys_cron_recover_collect" || t.Model == 1 {
+			_ = repository.DeleteFilmTask(t.Id)
+			continue
+		}
+		// 将旧的 failure_clean 迁移升级为 collect_clean
+		if t.Id == model.TaskIDFailureClean {
+			t.Id = model.TaskIDCollectClean
+			t.Model = model.TaskModelCollectClean
+			t.Remark = "定期清理超过 30 天的采集运行记录与快照"
+			_ = repository.DeleteFilmTask(model.TaskIDFailureClean)
+			_ = repository.SaveFilmTask(t)
+		}
+		filtered = append(filtered, t)
+	}
+	existing = filtered
+
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
 		existingModels[t.Model] = true
@@ -220,12 +246,6 @@ func (s *InitService) ensureDefaultTasks() ([]model.FilmCollectTask, error) {
 
 	for _, dt := range defaultFilmTasks() {
 		if existingModels[dt.Model] {
-			if dt.Model == model.TaskModelFailureClean {
-				if t, err := repository.GetFilmTaskById(model.TaskIDFailureClean); err == nil && t.Remark == "清理超过 7 天的成功和最终失败记录" {
-					t.Remark = dt.Remark
-					_ = repository.UpdateFilmTask(t)
-				}
-			}
 			continue
 		}
 		if err := repository.SaveFilmTask(dt); err != nil {
@@ -250,14 +270,12 @@ func (s *InitService) registerTask(task model.FilmCollectTask) error {
 	switch task.Model {
 	case model.TaskModelAutoCollect:
 		cid, err = spider.AddAutoUpdateCron(task.Id, task.Spec)
-	case model.TaskModelRetryCollect:
-		cid, err = spider.AddFilmRecoverCron(task.Id, task.Spec)
 	case model.TaskModelOrphanClean:
 		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
 	case model.TaskModelLogClean:
 		cid, err = spider.AddLogCleanCron(task.Id, task.Spec)
-	case model.TaskModelFailureClean:
-		cid, err = spider.AddFailureRecordCleanCron(task.Id, task.Spec)
+	case model.TaskModelCollectClean:
+		cid, err = spider.AddCollectRecordCleanCron(task.Id, task.Spec)
 	default:
 		return nil
 	}
@@ -274,11 +292,6 @@ func defaultFilmTasks() []model.FilmCollectTask {
 		Model: model.TaskModelAutoCollect, State: true, Remark: "采集已启用站点的更新",
 	}
 
-	recoverTask := model.FilmCollectTask{
-		Id: "sys_cron_recover_collect", Time: 0, Spec: config.EveryDaySpec,
-		Model: model.TaskModelRetryCollect, State: true, Remark: "重试待处理的失败记录",
-	}
-
 	orphanTask := model.FilmCollectTask{
 		Id: "sys_cron_orphan_clean", Time: 0, Spec: config.OrphanCleanSpec,
 		Model: model.TaskModelOrphanClean, State: true, Remark: "清理片库冗余和孤儿数据",
@@ -289,10 +302,10 @@ func defaultFilmTasks() []model.FilmCollectTask {
 		Model: model.TaskModelLogClean, State: true, Remark: "清理过期运行日志",
 	}
 
-	failureCleanTask := model.FilmCollectTask{
-		Id: model.TaskIDFailureClean, Time: 0, Spec: "0 30 3 * * *",
-		Model: model.TaskModelFailureClean, State: true, Remark: "清理已成功记录及超过 7 天的失败记录",
+	collectCleanTask := model.FilmCollectTask{
+		Id: model.TaskIDCollectClean, Time: 0, Spec: "0 30 3 * * *",
+		Model: model.TaskModelCollectClean, State: true, Remark: "定期清理超过 30 天的采集运行记录与快照",
 	}
 
-	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask, failureCleanTask}
+	return []model.FilmCollectTask{task, orphanTask, logCleanTask, collectCleanTask}
 }

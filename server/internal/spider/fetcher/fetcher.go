@@ -42,8 +42,6 @@ type Deps struct {
 	LiveTaskCount func() int
 	// SavePage 单页落库（由写调度器串行化后调用）。
 	SavePage func(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (scheduler.Mids, error)
-	// SavePageFailure 记录失败页现场，供后续重试。
-	SavePageFailure func(s *model.FilmSource, h, page int, stage string, err error)
 	// SkipPublishOnError 该站该采集窗口出错时是否跳过发布。
 	SkipPublishOnError func(s model.FilmSource, h int) bool
 	// ResolveSpiderProxy 获取全局爬虫通道代理配置（纯内存读取，避免逐页查库）。

@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/utils"
 )
@@ -119,11 +118,6 @@ func DropSourceRuntime(sourceID string) {
 		return
 	}
 	ClearLimiter(sourceID)
-	if failureRecoverLaneBusy(sourceID) {
-		syslog.Errorf("[Spider] 采集站 %s 已删除，重试队列仍在运行", sourceID)
-	} else {
-		failureRecoverLanes.Delete(sourceID)
-	}
 	sourceExclusive.Delete(sourceID)
 }
 

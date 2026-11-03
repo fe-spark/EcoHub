@@ -78,7 +78,7 @@ func init() {
 		WaitTurn:           waitSourceRequestTurn,
 		LiveTaskCount:      countLiveCollectTasks,
 		SavePage:           saveCollectedFilmForCollect,
-		SavePageFailure:    saveFilmPageFailure,
+
 		SkipPublishOnError: shouldSkipCollectPublishOnError,
 		ResolveSpiderProxy: repository.ResolveSpiderProxy,
 		ResolveSourceProxy:     repository.ResolveSourceProxy,
@@ -100,6 +100,7 @@ func HandlePreparedCollect(id string, h int) error {
 func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStandalone bool, allowPreparedStart bool, batchCtx *collectBatchContext) (retErr error) {
 	hadWrites := false
 	successPagesCount := 0
+	pageCount := 0
 	var collectCtx context.Context
 	statsOwned := false
 	releasedPreparedOccupy := false
@@ -151,11 +152,15 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		return err
 	}
 	if isStandalone {
-		batchCtx = newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{*s}, time.Now(), true)
+		batchCtx = newCollectBatchContext(model.CollectTriggerManual, model.CollectTagSingleCollect, []model.FilmSource{*s}, time.Now(), true).withHour(h)
+		if err := batchCtx.recordStart(); err != nil {
+			log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", batchCtx.batchID, err)
+			return err
+		}
 	}
 	defer func() {
 		originalErr := retErr
-		if originalErr != nil && batchCtx != nil {
+		if originalErr != nil && batchCtx != nil && !errors.Is(originalErr, context.Canceled) {
 			batchCtx.RecordSourceError(s.Id, originalErr.Error())
 		}
 		runOK := shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id)
@@ -179,6 +184,53 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			return
 		}
 		if batchCtx != nil {
+			snap, _ := progress.Snapshot(s.Id)
+			status := snap.Status
+			errMsg := ""
+			if originalErr != nil && !errors.Is(originalErr, context.Canceled) {
+				errMsg = originalErr.Error()
+			}
+			if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
+				if originalErr != nil {
+					if successPagesCount > 0 {
+						status = model.CollectRecordStatusPartial
+					} else {
+						status = progress.StatusFailed
+					}
+				} else {
+					status = progress.StatusDone
+				}
+			}
+			status, errMsg = settleSourceStatus(status, errMsg, successPagesCount)
+
+			totalP := pageCount
+			if totalP <= 0 {
+				totalP = snap.Total
+			}
+			currP := snap.Current
+			if currP < successPagesCount {
+				currP = successPagesCount
+			}
+			succP := successPagesCount
+			if succP <= 0 {
+				succP = snap.Success
+			}
+			failP := snap.Failed
+			if totalP > 0 && succP > 0 && succP < totalP && failP == 0 && originalErr != nil {
+				failP = totalP - succP
+			}
+
+			batchCtx.recordSourceSnapshot(model.CollectRecordSourceDetail{
+				SourceID:    s.Id,
+				SourceName:  s.Name,
+				Status:      status,
+				PageTotal:   totalP,
+				PageCurrent: currP,
+				SuccessCnt:  succP,
+				FailedCnt:   failP,
+				FilmsTotal:  len(batchCtx.sourceNotifyMIDs[s.Id]),
+				Error:       errMsg,
+			})
 			batchCtx.markSourceFinished(*s)
 			if !isStandalone && isPreferredCollectSource(s.Id) && originalErr == nil && !progress.IsStopped(s.Id) && !progress.IsStopping(s.Id) {
 				if err := batchCtx.finalizePrimarySource(s.Id); err != nil {
@@ -255,7 +307,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			log.Printf("[Spider] 站点 %s 定时采集窗口补齐 %dh → %dh（距上次成功采集）\n", s.Name, origH, h)
 		}
 	}
-	pageCount := progress.PageTotal(id)
+	pageCount = progress.PageTotal(id)
 	if pageCount < 0 {
 		if err := probeSourcePageCount(s, h, trigger); err != nil {
 			return err
@@ -310,6 +362,30 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 	if trigger == "" {
 		trigger = model.CollectTriggerManual
 	}
-	runSourcesWithLimitCore(sources, h, "Batch-Collect", trigger)
+	tag := model.CollectTagBatchCollect
+	if trigger == model.CollectTriggerCron {
+		tag = model.CollectTagCronCollect
+	}
+	runSourcesWithLimitCore(sources, h, tag, trigger)
+}
+
+// StartBatchCollectRetry 先写入 running 批次，再异步执行失败站点重试。
+func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.FilmSource) (string, error) {
+	if len(sources) == 0 {
+		return "", errors.New("没有可重试的站点")
+	}
+	sources = prioritizeCollectSources(sources)
+	startedAt := time.Now()
+	batchCtx := newCollectBatchContext(model.CollectTriggerRetry, model.CollectTagRetryCollect, sources, startedAt).
+		withHour(hour).withParentBatchID(parentBatchID)
+	if err := batchCtx.recordStart(); err != nil {
+		for _, s := range sources {
+			abandonQueuedCollectSource(s, batchCtx)
+		}
+		batchCtx.close()
+		return "", err
+	}
+	go runPreparedBatch(batchCtx, hour, "失败重试")
+	return batchCtx.batchID, nil
 }
 

@@ -76,6 +76,14 @@ func UpdateFilmTask(t model.FilmCollectTask) error {
 	return SaveFilmTask(t)
 }
 
+// DeleteFilmTask 物理删除定时任务，避免 task_id 唯一索引冲突。
+func DeleteFilmTask(id string) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	return db.Mdb.Unscoped().Where("task_id = ?", id).Delete(&model.CrontabRecord{}).Error
+}
+
 func ResetFilmTasks(tasks []model.FilmCollectTask) error {
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CrontabRecord{}).Error; err != nil {

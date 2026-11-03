@@ -31,7 +31,6 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.MovieSourceMapping{},
 		&model.Banner{},
 		&model.FilmTMDBScrape{},
-		&model.FailureRecord{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.Category{},
@@ -205,7 +204,6 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "旧分类"})
 	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 8})
 	gdb.Create(&model.CategoryMapping{SourceId: "src2", SourceTypeId: 1, CategoryId: 9})
-	gdb.Create(&model.FailureRecord{OriginId: "src1", OriginName: "旧源", PageNumber: 3, Status: model.FailureRecordStatusPending})
 
 	srv := new(CollectService)
 	updateReq := model.FilmSource{
@@ -239,12 +237,10 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 
 	var src1Raw int64
 	var src1Map int64
-	var failures int64
 	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src1").Count(&src1Raw)
 	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src1").Count(&src1Map)
-	gdb.Model(&model.FailureRecord{}).Where("origin_id = ?", "src1").Count(&failures)
-	if src1Raw != 0 || src1Map != 0 || failures != 0 {
-		t.Fatalf("expected source data cleared, raw=%d map=%d failures=%d", src1Raw, src1Map, failures)
+	if src1Raw != 0 || src1Map != 0 {
+		t.Fatalf("expected source data cleared, raw=%d map=%d", src1Raw, src1Map)
 	}
 	var exclusive model.Category
 	if err := gdb.First(&exclusive, 8).Error; err == nil {
