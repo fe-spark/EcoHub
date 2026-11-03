@@ -73,7 +73,9 @@ export function BatchDetailDrawer({
 
   const failedSources = details.filter((d) => d.status === "failed");
   const partialSources = details.filter((d) => d.status === "partial");
+  const stoppedSources = details.filter((d) => d.status === "stopped");
   const doneSources = details.filter((d) => d.status === "done" || d.status === "success");
+  const abnormalCount = failedSources.length + partialSources.length;
 
   const filmRetry = record.trigger === "single_update";
   const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
@@ -138,7 +140,7 @@ export function BatchDetailDrawer({
                 <span>覆盖站点</span>
               </div>
               <div className={styles.drawerKpiBody}>
-                {failedSources.length === 0 && partialSources.length === 0 && record.failedSources === 0 && record.pageFailed === 0 ? (
+                {abnormalCount === 0 && stoppedSources.length === 0 && record.failedSources === 0 && record.pageFailed === 0 && record.status !== "running" && record.status !== "stopped" && record.status !== "interrupted" ? (
                   <>
                     <span className={styles.kpiValueOk}>
                       <CheckCircleOutlined /> {record.sourceCount} 站成功
@@ -148,9 +150,25 @@ export function BatchDetailDrawer({
                 ) : resolveBatchStatus(record) === "failed" ? (
                   <>
                     <span className={styles.kpiValueFail}>
-                      <CloseCircleOutlined /> {failedSources.length + partialSources.length || record.failedSources || record.sourceCount} 站失败
+                      <CloseCircleOutlined /> {abnormalCount || record.failedSources || record.sourceCount} 站失败
                     </span>
                     <span className={styles.kpiSub}>未能采集</span>
+                  </>
+                ) : abnormalCount === 0 && record.status === "running" ? (
+                  <>
+                    <span className={styles.kpiValueWarn}>
+                      <ExclamationCircleOutlined /> {record.sourceCount} 站采集中
+                    </span>
+                    <span className={styles.kpiSub}>尚未结算</span>
+                  </>
+                ) : abnormalCount === 0 ? (
+                  <>
+                    <span className={styles.kpiValueWarn}>
+                      <ExclamationCircleOutlined /> {stoppedSources.length || record.sourceCount} 站已停止
+                    </span>
+                    <span className={styles.kpiSub}>
+                      （{doneSources.length} / {record.sourceCount} 站成功）
+                    </span>
                   </>
                 ) : record.sourceCount === 1 ? (
                   <>
@@ -163,7 +181,7 @@ export function BatchDetailDrawer({
                   <>
                     <span className={styles.kpiValueWarn}>
                       <ExclamationCircleOutlined />
-                      {failedSources.length + partialSources.length || record.failedSources || 1} 站未完成
+                      {abnormalCount || record.failedSources || 1} 站未完成
                     </span>
                     <span className={styles.kpiSub}>
                       （{doneSources.length} / {record.sourceCount} 站成功）

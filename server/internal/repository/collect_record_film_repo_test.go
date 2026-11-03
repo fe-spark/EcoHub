@@ -84,6 +84,28 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 		t.Fatalf("unexpected filtered result: %+v", listFiltered)
 	}
 
+	// 同一批次重复结算不累加行数
+	if err := BatchSaveCollectRecordFilms(batchID, items); err != nil {
+		t.Fatalf("repeated save failed: %v", err)
+	}
+	var saved int64
+	if err := testDB.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID).Count(&saved).Error; err != nil {
+		t.Fatalf("count saved rows failed: %v", err)
+	}
+	if saved != 3 {
+		t.Fatalf("expected 3 rows after repeated save, got %d", saved)
+	}
+
+	// 全部站点汇总：跨站同一影片各占一行，并带来源站
+	allQuery := model.CollectRecordFilmQuery{BatchID: batchID, Page: 1, PageSize: 10}
+	all, allTotal, err := GetCollectRecordFilms(allQuery)
+	if err != nil {
+		t.Fatalf("all-source query failed: %v", err)
+	}
+	if allTotal != 3 || len(all) != 3 || all[0].SourceID == "" {
+		t.Fatalf("expected 3 rows with source, got total=%d list=%+v", allTotal, all)
+	}
+
 	// 清理
 	if err := DeleteCollectRecordFilmsByBatchIDs([]string{batchID}); err != nil {
 		t.Fatalf("delete failed: %v", err)
