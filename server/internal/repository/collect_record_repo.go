@@ -39,7 +39,7 @@ func removeRecordsAndFilms(tx *gorm.DB, rows []model.CollectRecord) error {
 	if len(batchIDs) == 0 {
 		return nil
 	}
-	alive := tx.Model(&model.CollectRecord{}).Select("batch_id")
+	alive := tx.Model(&model.CollectRecord{}).Where("batch_id IN ? AND batch_id != ''", batchIDs).Select("batch_id")
 	return tx.Where("batch_id IN ? AND batch_id NOT IN (?)", batchIDs, alive).
 		Delete(&model.CollectRecordFilmItem{}).Error
 }
@@ -68,7 +68,9 @@ func purgeSourceCollectHistoryTx(tx *gorm.DB, sourceID string) error {
 		}
 	}
 	var rows []model.CollectRecord
-	if err := tx.Select("id", "batch_id", "detail_json").Find(&rows).Error; err != nil {
+	if err := tx.Select("id", "batch_id", "detail_json").
+		Where("detail_json LIKE ?", "%"+sourceID+"%").
+		Find(&rows).Error; err != nil {
 		return err
 	}
 	drop := make([]model.CollectRecord, 0)
@@ -423,7 +425,7 @@ func CleanOldCollectRecords(days int) error {
 			return err
 		}
 		// 只清没有记录的旧影片行。仍在库里的批次，包括进行中的，清单保留。
-		alive := tx.Model(&model.CollectRecord{}).Select("batch_id")
+		alive := tx.Model(&model.CollectRecord{}).Where("batch_id != ''").Select("batch_id")
 		return tx.Where("created_at < ? AND batch_id NOT IN (?)", threshold, alive).
 			Delete(&model.CollectRecordFilmItem{}).Error
 	})

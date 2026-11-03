@@ -141,22 +141,3 @@ func escapeLikePattern(s string) string {
 	return s
 }
 
-// DeleteCollectRecordFilmsByBatchIDs 批量删除指定批次的影片关联记录
-func DeleteCollectRecordFilmsByBatchIDs(batchIDs []string) error {
-	if db.Mdb == nil || len(batchIDs) == 0 {
-		return nil
-	}
-	return db.Mdb.Where("batch_id IN ?", batchIDs).Delete(&model.CollectRecordFilmItem{}).Error
-}
-
-// CleanOldCollectRecordFilms 清理指定天数前的采集批次影片关联记录
-func CleanOldCollectRecordFilms(days int) error {
-	if db.Mdb == nil {
-		return nil
-	}
-	if days <= 0 {
-		days = 30
-	}
-	threshold := time.Now().AddDate(0, 0, -days)
-	return db.Mdb.Where("created_at < ?", threshold).Delete(&model.CollectRecordFilmItem{}).Error
-}

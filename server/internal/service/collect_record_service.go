@@ -86,6 +86,7 @@ func (s *CollectRecordService) ListOpenIncidents(now time.Time) ([]model.SourceI
 // GetBatchFilms 分页获取某采集批次的影片清单。
 // 第三个返回值表示结果来自 detail_json 里的历史样例，不是全量清单。
 func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, bool, error) {
+	q.Page, q.PageSize = normalizeFilmPage(q.Page, q.PageSize)
 	list, total, err := repository.GetCollectRecordFilms(q)
 	if err != nil {
 		return nil, 0, false, err

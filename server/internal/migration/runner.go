@@ -40,11 +40,6 @@ var migrations = []Migration{
 		Name:    "创建 collect_record_films 表，支持采集入库影片全量清单与异步分页检索",
 		Run:     migrateCollectRecordFilms,
 	},
-	{
-		Version: "20261104_collect_record_films_unique",
-		Name:    "collect_record_films 加 (batch_id, source_id, mid) 唯一索引，重复结算不再累加",
-		Run:     migrateCollectRecordFilmsUnique,
-	},
 }
 
 func migrateBaseline(*gorm.DB) error {
@@ -117,26 +112,6 @@ func migrateCollectRecordFilms(db *gorm.DB) error {
 	return nil
 }
 
-// migrateCollectRecordFilmsUnique 给已建好的表补唯一索引。
-// 20261103 已登记的库不会重跑 AutoMigrate，索引必须走独立版本。
-func migrateCollectRecordFilmsUnique(db *gorm.DB) error {
-	var keep []uint
-	if err := db.Model(&model.CollectRecordFilmItem{}).
-		Select("MIN(id)").
-		Group("batch_id, source_id, mid").
-		Scan(&keep).Error; err != nil {
-		return fmt.Errorf("dedupe collect_record_films failed: %w", err)
-	}
-	if len(keep) > 0 {
-		if err := db.Where("id NOT IN ?", keep).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
-			return fmt.Errorf("dedupe collect_record_films failed: %w", err)
-		}
-	}
-	if err := db.AutoMigrate(&model.CollectRecordFilmItem{}); err != nil {
-		return fmt.Errorf("migrate collect_record_films unique index failed: %w", err)
-	}
-	return nil
-}
 
 // RunAutoMigrations 顺序执行尚未记录的迁移，并写入 schema_migrations。
 func RunAutoMigrations(db *gorm.DB) error {

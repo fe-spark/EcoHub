@@ -88,6 +88,14 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 	sourceID := strings.TrimSpace(c.Query("sourceId"))
 	page, _ := strconv.Atoi(c.DefaultQuery("current", c.DefaultQuery("page", "1")))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	} else if pageSize > 100 {
+		pageSize = 100
+	}
 	keyword := strings.TrimSpace(c.Query("keyword"))
 
 	q := model.CollectRecordFilmQuery{

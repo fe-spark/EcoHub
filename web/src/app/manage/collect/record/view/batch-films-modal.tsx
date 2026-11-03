@@ -140,7 +140,7 @@ export function BatchFilmsModal({
         key: "name",
         render: (name: string, record) => (
           <Link
-            href={resolvePlayEntryPath(record.mid)}
+            href={resolvePlayEntryPath(record.mid, { sourceId: record.sourceId || sourceId })}
             target="_blank"
             className={styles.filmTitleLink}
           >
@@ -167,7 +167,7 @@ export function BatchFilmsModal({
             type="link"
             size="small"
             icon={<PlayCircleOutlined />}
-            href={resolvePlayEntryPath(record.mid)}
+            href={resolvePlayEntryPath(record.mid, { sourceId: record.sourceId || sourceId })}
             target="_blank"
             className={styles.playActionBtn}
           >
@@ -176,7 +176,7 @@ export function BatchFilmsModal({
         ),
       },
     ],
-    [current, pageSize],
+    [current, pageSize, sourceId],
   );
 
   return (
