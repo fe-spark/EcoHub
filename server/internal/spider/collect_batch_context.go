@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"server/internal/model"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 // publishMu 全局快照发布互斥锁，确保向 MySQL 发布快照时单次只有一个线程在执行
@@ -117,15 +118,9 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids [
 		return
 	}
 	b.mu.Lock()
-	const maxTrackedMIDs = 1500
 	for _, mid := range mids {
 		if mid > 0 {
-			if len(b.masterAffectedMIDs) < maxTrackedMIDs {
-				b.masterAffectedMIDs[mid] = struct{}{}
-			} else {
-				b.masterAffectedMIDs[int64(maxTrackedMIDs+1)] = struct{}{}
-				break
-			}
+			b.masterAffectedMIDs[mid] = struct{}{}
 		}
 	}
 	sourceID := s.Id
@@ -279,7 +274,13 @@ func (b *collectBatchContext) finalizePrimarySource(sourceID string) error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	return finalizeStreamPublish(b.takeAffectedMIDs, true)
+	if err := finalizeStreamPublish(b.takeAffectedMIDs, true); err != nil {
+		return err
+	}
+	if b.hour == 0 {
+		filmsnapshot.RequestActiveFilmSearchIndexRebuild()
+	}
+	return nil
 }
 
 func (b *collectBatchContext) flushAndFinalize() error {
@@ -309,7 +310,13 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	return finalizeStreamPublish(b.takeAffectedMIDs, warmupHome)
+	if err := finalizeStreamPublish(b.takeAffectedMIDs, warmupHome); err != nil {
+		return err
+	}
+	if b.hour == 0 {
+		filmsnapshot.RequestActiveFilmSearchIndexRebuild()
+	}
+	return nil
 }
 
 func (b *collectBatchContext) close() {

@@ -1,20 +1,18 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { Alert, Modal, Input, Table, Typography, Button } from "antd";
+import { Alert, Modal, Input, Button, Tag, Empty, Pagination, Spin, Space } from "antd";
 import {
   VideoCameraOutlined,
   SearchOutlined,
   ExportOutlined,
   PlayCircleOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
-import type { ColumnsType } from "antd/es/table";
 import { ApiGet } from "@/lib/client-api";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./batch-films-modal.module.less";
-
-const { Text } = Typography;
 
 export interface BatchFilmsModalProps {
   open: boolean;
@@ -39,7 +37,7 @@ export function BatchFilmsModal({
 }: BatchFilmsModalProps) {
   const [keyword, setKeyword] = useState("");
   const [current, setCurrent] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(10);
   const [list, setList] = useState<FilmItem[]>([]);
   const [total, setTotal] = useState(0);
   const [sample, setSample] = useState(false);
@@ -97,7 +95,7 @@ export function BatchFilmsModal({
       setCurrent(1);
       setSample(false);
       setErrorText("");
-      void fetchFilms(1, 20, "");
+      void fetchFilms(1, 10, "");
     } else {
       setList([]);
       setTotal(0);
@@ -106,15 +104,18 @@ export function BatchFilmsModal({
     }
   }, [open, fetchFilms]);
 
-  const handleSearch = (val: string) => {
-    const next = val.trim();
-    if (next === appliedKeyword.current) {
-      return;
-    }
+  const handleExecuteSearch = () => {
+    const next = keyword.trim();
     appliedKeyword.current = next;
-    setKeyword(next);
     setCurrent(1);
     void fetchFilms(1, pageSize, next);
+  };
+
+  const handleResetSearch = () => {
+    appliedKeyword.current = "";
+    setKeyword("");
+    setCurrent(1);
+    void fetchFilms(1, pageSize, "");
   };
 
   const handlePageChange = (newPage: number, newSize: number) => {
@@ -123,127 +124,149 @@ export function BatchFilmsModal({
     void fetchFilms(newPage, newSize, appliedKeyword.current);
   };
 
-  const columns: ColumnsType<FilmItem> = useMemo(
-    () => [
-      {
-        title: "#",
-        key: "index",
-        width: 60,
-        align: "center",
-        render: (_, __, index) => (
-          <Text type="secondary">{(current - 1) * pageSize + index + 1}</Text>
-        ),
-      },
-      {
-        title: "影片名称",
-        dataIndex: "name",
-        key: "name",
-        render: (name: string, record) => (
-          <Link
-            href={resolvePlayEntryPath(record.mid, { sourceId: record.sourceId || sourceId })}
-            target="_blank"
-            className={styles.filmTitleLink}
-          >
-            <VideoCameraOutlined className={styles.filmIcon} />
-            <span className={styles.filmNameText}>{name}</span>
-          </Link>
-        ),
-      },
-      {
-        title: "MID",
-        dataIndex: "mid",
-        key: "mid",
-        width: 110,
-        align: "center",
-        render: (mid: number) => <Text type="secondary">#{mid}</Text>,
-      },
-      {
-        title: "操作",
-        key: "action",
-        width: 90,
-        align: "center",
-        render: (_, record) => (
-          <Button
-            type="link"
-            size="small"
-            icon={<PlayCircleOutlined />}
-            href={resolvePlayEntryPath(record.mid, { sourceId: record.sourceId || sourceId })}
-            target="_blank"
-            className={styles.playActionBtn}
-          >
-            播放
-          </Button>
-        ),
-      },
-    ],
-    [current, pageSize, sourceId],
-  );
+  const sourceDesc = sourceName || sourceId ? `来源站点：${sourceName || sourceId}` : "涵盖全部站点";
+  const filmManageUrl = sourceId ? `/manage/film?sourceId=${encodeURIComponent(sourceId)}` : "/manage/film";
 
   return (
     <Modal
       open={open}
       onCancel={onClose}
       footer={null}
-      width={720}
+      width={680}
       title={
         <div className={styles.modalHeader}>
-          <div className={styles.modalTitle}>
-            <VideoCameraOutlined className={styles.titleIcon} />
-            <span>本次入库影片清单</span>
-            <span className={styles.sourceSubtitle}>
-              （{sourceName || sourceId || "全部站点"} · 共 {total.toLocaleString("zh-CN")} 部）
-            </span>
+          <div className={styles.headerIconWrap}>
+            <VideoCameraOutlined />
           </div>
-          <Link
-            href={sourceId ? `/manage/film?sourceId=${encodeURIComponent(sourceId)}` : "/manage/film"}
-            target="_blank"
-            className={styles.jumpLink}
-          >
-            <span>前往影片库</span>
-            <ExportOutlined />
-          </Link>
+          <div className={styles.headerTextGroup}>
+            <div className={styles.headerTitleRow}>
+              <span className={styles.headerTitle}>批次入库影片清单</span>
+              {sample ? (
+                <Tag color="warning" className={styles.sampleTag}>
+                  历史抽样
+                </Tag>
+              ) : null}
+            </div>
+            <div className={styles.headerSubtitle}>
+              {sourceDesc} · 共 {total.toLocaleString("zh-CN")} 部入库影片
+            </div>
+          </div>
         </div>
       }
-      styles={{ body: { padding: "16px 20px" } }}
     >
       <div className={styles.modalBody}>
-        <div className={styles.searchBar}>
-          <Input
-            placeholder="搜索片名..."
-            prefix={<SearchOutlined style={{ color: "var(--ant-color-text-tertiary)" }} />}
-            allowClear
-            value={keyword}
-            onChange={(e) => {
-              const val = e.target.value;
-              setKeyword(val);
-              if (val === "" && appliedKeyword.current !== "") {
-                handleSearch("");
-              }
-            }}
-            onPressEnter={() => handleSearch(keyword)}
+        {sample ? (
+          <Alert
+            type="info"
+            showIcon
+            message="该批次产生于版本升级前，展示的是入库时记录的抽样片单（非全量落库清单）。"
+            className={styles.sampleAlert}
           />
-        </div>
-        {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
-        {sample ? <Text type="secondary" className={styles.sampleHint}>历史样例，不是全量</Text> : null}
+        ) : null}
+        {errorText ? <Alert type="error" showIcon message={errorText} className={styles.errorAlert} /> : null}
 
-        <Table<FilmItem>
-          rowKey={(record) => `${record.sourceId ?? sourceId}-${record.mid}`}
-          size="small"
-          loading={loading}
-          columns={columns}
-          dataSource={list}
-          scroll={{ y: 380 }}
-          pagination={{
-            current,
-            pageSize,
-            total,
-            size: "small",
-            showSizeChanger: true,
-            pageSizeOptions: [10, 20, 50, 100],
-            showTotal: (t) => `共 ${t} 部`,
-            onChange: handlePageChange,
-          }}
-        />
+        <div className={styles.toolbar}>
+          <Space size={8} className={styles.filterGroup}>
+            <Input
+              placeholder="输入片名搜索..."
+              allowClear
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              className={styles.searchInput}
+            />
+            <Button
+              type="primary"
+              icon={<SearchOutlined />}
+              onClick={handleExecuteSearch}
+              loading={loading}
+            >
+              搜索
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={handleResetSearch}
+            >
+              重置
+            </Button>
+          </Space>
+          <Button
+            icon={<ExportOutlined />}
+            href={filmManageUrl}
+            target="_blank"
+            className={styles.jumpBtn}
+          >
+            前往影片库
+          </Button>
+        </div>
+
+        <Spin spinning={loading}>
+          {list.length === 0 && !loading ? (
+            <div className={styles.emptyWrapper}>
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  appliedKeyword.current ? (
+                    <span>
+                      未搜索到与「<strong>{appliedKeyword.current}</strong>」匹配的影片
+                    </span>
+                  ) : (
+                    <span>该站点在本次采集批次中未产生新增或更新影片</span>
+                  )
+                }
+              >
+                {appliedKeyword.current ? (
+                  <Button size="small" icon={<ReloadOutlined />} onClick={handleResetSearch}>
+                    清除搜索条件
+                  </Button>
+                ) : null}
+              </Empty>
+            </div>
+          ) : (
+            <div className={styles.listWrapper}>
+              {list.map((film, index) => {
+                const num = (current - 1) * pageSize + index + 1;
+                const playUrl = resolvePlayEntryPath(film.mid, { sourceId: film.sourceId || sourceId });
+                return (
+                  <div key={`${film.sourceId ?? sourceId}-${film.mid}`} className={styles.listItem}>
+                    <div className={styles.rankBadge}>{num}</div>
+                    <div className={styles.filmInfo}>
+                      <Link href={playUrl} target="_blank" className={styles.filmName} title={film.name}>
+                        {film.name}
+                      </Link>
+                      <span className={styles.midTag}>#{film.mid}</span>
+                    </div>
+                    <Button
+                      type="primary"
+                      ghost
+                      size="small"
+                      icon={<PlayCircleOutlined />}
+                      href={playUrl}
+                      target="_blank"
+                      className={styles.playBtn}
+                    >
+                      播放
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Spin>
+
+        {total > pageSize && (
+          <div className={styles.paginationWrapper}>
+            <Pagination
+              current={current}
+              pageSize={pageSize}
+              total={total}
+              size="small"
+              showSizeChanger
+              pageSizeOptions={[10, 20, 50, 100]}
+              showTotal={(t) => `共 ${t.toLocaleString("zh-CN")} 部`}
+              onChange={handlePageChange}
+            />
+          </div>
+        )}
       </div>
     </Modal>
   );
