@@ -145,6 +145,11 @@ func CollectSingleFilm(ids string) {
 		withReplayFilmIDs([]int64{globalMid})
 	defer batchCtx.close()
 
+	if err := batchCtx.recordStart(); err != nil {
+		log.Printf("[CollectSingleFilm] 初始采集记录写入失败 batchID=%s: %v", batchCtx.batchID, err)
+		return
+	}
+
 	var wg sync.WaitGroup
 	for _, source := range targets {
 		requestID := sourceMids[source.Id]
