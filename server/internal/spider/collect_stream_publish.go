@@ -268,8 +268,11 @@ func publishStreamWindowReal(mids []int64) error {
 	if err := writer.UpsertSearchTagsByMids(mids...); err != nil {
 		log.Printf("[Spider][StreamPublish] 搜索标签增量失败 mids=%d err=%v", len(mids), err)
 	}
-	_, err := publishFilmSnapshot(mids)
-	return err
+	if _, err := publishFilmSnapshot(mids); err != nil {
+		return err
+	}
+	filmsnapshot.ResealSearchIndexMids(mids)
+	return nil
 }
 
 func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
@@ -281,7 +284,16 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 		mids = takeMIDs()
 	}
 	if len(mids) > 0 {
-		go filmsnapshot.ResealSearchIndexMids(mids)
+		go func(all []int64) {
+			const chunkSize = 1000
+			for i := 0; i < len(all); i += chunkSize {
+				end := i + chunkSize
+				if end > len(all) {
+					end = len(all)
+				}
+				filmsnapshot.ResealSearchIndexMids(all[i:end])
+			}
+		}(mids)
 	}
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
