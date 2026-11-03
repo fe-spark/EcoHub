@@ -36,17 +36,6 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 	if sources == nil {
 		sources = []model.FilmSource{}
 	}
-	tasks, err := repository.GetAllFilmTask()
-	if err != nil {
-		return model.ConfigBackup{}, err
-	}
-	if tasks == nil {
-		tasks = []model.FilmCollectTask{}
-	} else {
-		for i := range tasks {
-			tasks[i].Cid = 0
-		}
-	}
 	banners, err := repository.GetBanners()
 	if err != nil {
 		return model.ConfigBackup{}, err
@@ -101,7 +90,6 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 		AppVersion:   config.Version,
 		Site:         &site,
 		FilmSources:  sources,
-		CronTasks:    tasks,
 		Banners:      banners,
 		BannerConfig: &bannerConfig,
 		MappingRules: exports,
@@ -127,8 +115,8 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		return err
 	}
 
-	// 2. 导入采集站或计划任务前，阻断新采集并等待在途写入和发布彻底排空
-	if req.Modules.FilmSources || req.Modules.CronTasks {
+	// 2. 导入采集站前，阻断新采集并等待在途写入和发布彻底排空
+	if req.Modules.FilmSources {
 		if err := spider.StopAllTasksAndWait(0); err != nil {
 			return fmt.Errorf("停止进行中的采集失败: %w", err)
 		}
@@ -163,37 +151,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		needCategoryRefresh = true
 	}
 
-	if req.Modules.CronTasks {
-		tasks := backup.CronTasks
-		// 记录旧任务用于后续卸载运行时
-		oldTasks, err := repository.GetAllFilmTask()
-		if err != nil {
-			return err
-		}
-		// 必须先写库成功，再替换运行时，避免写库失败时运行时已被卸掉
-		if err := repository.ResetFilmTasks(tasks); err != nil {
-			return fmt.Errorf("导入定时任务失败: %w", err)
-		}
-		for _, t := range oldTasks {
-			spider.RemoveCronByTaskId(t.Id)
-		}
-		reloaded, err := repository.GetAllFilmTask()
-		if err != nil {
-			return err
-		}
-		var reloadErr error
-		for _, t := range reloaded {
-			if err := spider.ReloadCronTask(t.Id); err != nil {
-				syslog.Errorf("[Backup] 重载定时任务 %s 失败: %v", t.Id, err)
-				if reloadErr == nil {
-					reloadErr = fmt.Errorf("重载定时任务 %s 失败: %w", t.Id, err)
-				}
-			}
-		}
-		if reloadErr != nil {
-			return reloadErr
-		}
-	}
 
 	if req.Modules.Banners {
 		banners := backup.Banners
@@ -264,9 +221,6 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 	}
 	if req.Modules.FilmSources && b.FilmSources == nil {
 		return errors.New("备份中缺少采集站")
-	}
-	if req.Modules.CronTasks && b.CronTasks == nil {
-		return errors.New("备份中缺少定时任务")
 	}
 	if req.Modules.Banners && b.Banners == nil {
 		return errors.New("备份中缺少首页轮播")

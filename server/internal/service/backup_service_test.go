@@ -87,20 +87,6 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 		t.Fatalf("replace collect sources: %v", err)
 	}
 
-	task := model.FilmCollectTask{
-		Id:     "task_1",
-		Ids:    []string{"src_1"},
-		Cid:    99, // 运行时临时内存 ID
-		Time:   24,
-		Spec:   "0 0 */2 * * *",
-		Model:  0,
-		State:  true,
-		Remark: "定时采集任务",
-	}
-	if err := repository.SaveFilmTask(task); err != nil {
-		t.Fatalf("save film task: %v", err)
-	}
-
 	bannerItems := model.Banners{
 		{
 			Id:   "b1",
@@ -183,13 +169,6 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	}
 	if len(backup.FilmSources) != 1 || backup.FilmSources[0].Id != "src_1" {
 		t.Fatalf("film sources export mismatch: %+v", backup.FilmSources)
-	}
-	if len(backup.CronTasks) != 1 || backup.CronTasks[0].Id != "task_1" {
-		t.Fatalf("cron tasks export mismatch: %+v", backup.CronTasks)
-	}
-	// 验证运行时 Cid 是否已被清零，不污染备份
-	if backup.CronTasks[0].Cid != 0 {
-		t.Fatalf("expected task Cid to be cleared to 0 in export, got %d", backup.CronTasks[0].Cid)
 	}
 	if len(backup.Banners) != 1 || backup.Banners[0].Name != "测试轮播影片" {
 		t.Fatalf("banners export mismatch: %+v", backup.Banners)
