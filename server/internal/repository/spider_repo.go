@@ -223,6 +223,9 @@ func DelCollectResource(id string) ([]int64, error) {
 		if err := ClearSourceCategoryDataTx(tx, id); err != nil {
 			return err
 		}
+		if err := purgeSourceCollectHistoryTx(tx, id); err != nil {
+			return err
+		}
 		if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}

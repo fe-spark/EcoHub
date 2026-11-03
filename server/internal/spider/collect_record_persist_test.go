@@ -105,7 +105,7 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -180,6 +180,63 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 		t.Fatalf("film ids wiped: %q", failed.FilmIDs)
 	}
 	assertSourceDetail(t, failed.DetailJson, progress.StatusFailed, 1, 0, 0, 1, "get movie detail failed")
+
+	var filmRows []model.CollectRecordFilmItem
+	if err := gdb.Order("mid ASC").Find(&filmRows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(filmRows) != 1 || filmRows[0].Mid != 43 || filmRows[0].SourceID != "jy" {
+		t.Fatalf("only the notified mid should be stored, got %+v", filmRows)
+	}
+}
+
+func TestReplayFilmIDsAreNotCopiedToIdleSources(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	srcA := model.FilmSource{Id: "a", Name: "A"}
+	srcB := model.FilmSource{Id: "b", Name: "B"}
+	srcC := model.FilmSource{Id: "c", Name: "C"}
+	batch := newCollectBatchContext(
+		model.CollectTriggerSingleUpdate,
+		model.CollectTagSingleUpdate,
+		[]model.FilmSource{srcA, srcB, srcC},
+		time.Now().Add(-time.Second),
+	).withReplayFilmIDs([]int64{43})
+	defer batch.close()
+	batch.AddNotifyMIDs(srcA.Id, []int64{43})
+	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
+		SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone,
+		PageTotal: 1, PageCurrent: 1, SuccessCnt: 1, FilmsTotal: 1,
+	})
+	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
+		SourceID: srcB.Id, SourceName: srcB.Name, Status: progress.StatusDone,
+		PageTotal: 1, PageCurrent: 1, SuccessCnt: 1, FilmsTotal: 0,
+	})
+	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
+		SourceID: srcC.Id, SourceName: srcC.Name, Status: progress.StatusFailed,
+		PageTotal: 1, PageCurrent: 0, FailedCnt: 1, FilmsTotal: 0, Error: "fail",
+	})
+	batch.emitSummary()
+
+	var rows []model.CollectRecordFilmItem
+	if err := gdb.Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].SourceID != srcA.Id || rows[0].Mid != 43 {
+		t.Fatalf("idle and failed sources must not receive the replay film, got %+v", rows)
+	}
 }
 
 func assertSourceDetail(t *testing.T, raw, status string, pageTotal, pageCurrent, films, failedCnt int, errMsg string) {

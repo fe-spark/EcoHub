@@ -98,7 +98,7 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 		Keyword:  keyword,
 	}
 
-	list, total, err := service.CollectRecordSvc.GetBatchFilms(q)
+	list, total, sample, err := service.CollectRecordSvc.GetBatchFilms(q)
 	if err != nil {
 		dto.Failed("获取批次影片清单失败: "+err.Error(), c)
 		return
@@ -112,6 +112,7 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 		"total":    total,
 		"current":  q.Page,
 		"pageSize": q.PageSize,
+		"sample":   sample,
 	}, "获取批次影片清单成功", c)
 }
 

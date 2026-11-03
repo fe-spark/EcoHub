@@ -20,6 +20,22 @@ func ExistUserTable() bool {
 	return db.Mdb.Migrator().HasTable(&model.User{})
 }
 
+// HasAdminUser 用户表里是否已有 admin。表不存在时返回 false。
+func HasAdminUser() (bool, error) {
+	if db.Mdb == nil {
+		return false, errors.New("数据库未连接")
+	}
+	if !ExistUserTable() {
+		return false, nil
+	}
+	var count int64
+	err := db.Mdb.Model(&model.User{}).Where("user_name = ?", config.DefaultAdminUser).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // InitBuiltinAccounts 初始化内置管理员。已存在则不改密码。
 // 首次创建优先读取 ECOHUB_ADMIN_PASSWORD；未设置时回退至默认密码 admin，密码不写入日志。
 func InitBuiltinAccounts() error {
