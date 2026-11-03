@@ -56,12 +56,15 @@ func attachSingleFilmNames(list []model.CollectRecord) {
 		return
 	}
 	for i := range list {
+		if len(parsed[i]) == 0 {
+			continue
+		}
 		parts := make([]string, 0, len(parsed[i]))
 		films := make([]model.CollectRecordFilm, 0, len(parsed[i]))
 		for _, id := range parsed[i] {
 			name := names[id]
 			if name == "" {
-				continue
+				name = fmt.Sprintf("影片 #%d", id)
 			}
 			parts = append(parts, name)
 			films = append(films, model.CollectRecordFilm{Mid: id, Name: name})

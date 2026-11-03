@@ -83,6 +83,9 @@ func CompleteCollectRecord(batchID string, c model.CollectRecordCompletion) erro
 		"error_msg":       c.ErrorMsg,
 		"detail_json":     c.DetailJson,
 	}
+	if strings.TrimSpace(c.FilmIDs) != "" {
+		updates["film_ids"] = strings.TrimSpace(c.FilmIDs)
+	}
 
 	var rec model.CollectRecord
 	if err := db.Mdb.Select("id", "status").Where("batch_id = ?", batchID).First(&rec).Error; err != nil {

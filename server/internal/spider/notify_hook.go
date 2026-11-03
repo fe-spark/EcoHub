@@ -2,7 +2,9 @@ package spider
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -195,6 +197,46 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		return
 	}
 
+	b.mu.Lock()
+	const maxSampleFilmsPerSource = 20
+	midsBySource := make(map[string][]int64, len(b.sourceNotifyMIDs))
+	sampleMIDs := make(map[int64]struct{}, len(b.sourceNotifyMIDs)*maxSampleFilmsPerSource)
+
+	for sid, set := range b.sourceNotifyMIDs {
+		srcMids := make([]int64, 0, len(set))
+		for m := range set {
+			if m > 0 {
+				srcMids = append(srcMids, m)
+			}
+		}
+		sort.Slice(srcMids, func(i, j int) bool { return srcMids[i] < srcMids[j] })
+		midsBySource[sid] = srcMids
+
+		limit := len(srcMids)
+		if limit > maxSampleFilmsPerSource {
+			limit = maxSampleFilmsPerSource
+		}
+		for _, m := range srcMids[:limit] {
+			sampleMIDs[m] = struct{}{}
+		}
+	}
+	for _, m := range b.replayFilmIDs {
+		if m > 0 {
+			sampleMIDs[m] = struct{}{}
+		}
+	}
+	b.mu.Unlock()
+
+	// 性能安全防线：即便首次全量采集数十万部，也只查询抽样样本的片名（最多百量级），绝不全量查库防 OOM / SQL 超长
+	sampleMIDList := make([]int64, 0, len(sampleMIDs))
+	for m := range sampleMIDs {
+		sampleMIDList = append(sampleMIDList, m)
+	}
+	var filmNames map[int64]string
+	if len(sampleMIDList) > 0 {
+		filmNames, _ = repository.FilmNamesByIDs(sampleMIDList)
+	}
+
 	totalPage := 0
 	succPage := 0
 	failPage := 0
@@ -217,6 +259,36 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 			stoppedCount++
 		}
 
+		var sourceFilms []model.CollectRecordFilm
+		if srcMids, ok := midsBySource[r.SourceID]; ok && len(srcMids) > 0 {
+			limit := len(srcMids)
+			if limit > maxSampleFilmsPerSource {
+				limit = maxSampleFilmsPerSource
+			}
+			sourceFilms = make([]model.CollectRecordFilm, 0, limit)
+			for _, m := range srcMids[:limit] {
+				name := filmNames[m]
+				if name == "" {
+					name = fmt.Sprintf("影片 #%d", m)
+				}
+				sourceFilms = append(sourceFilms, model.CollectRecordFilm{
+					Mid:  m,
+					Name: name,
+				})
+			}
+		} else if len(b.replayFilmIDs) > 0 && (b.trigger == model.CollectTriggerSingleUpdate || b.tag == model.CollectTagSingleUpdate) {
+			for _, m := range b.replayFilmIDs {
+				name := filmNames[m]
+				if name == "" {
+					name = fmt.Sprintf("影片 #%d", m)
+				}
+				sourceFilms = append(sourceFilms, model.CollectRecordFilm{
+					Mid:  m,
+					Name: name,
+				})
+			}
+		}
+
 		details = append(details, model.CollectRecordSourceDetail{
 			SourceID:    r.SourceID,
 			SourceName:  r.SourceName,
@@ -226,6 +298,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 			SuccessCnt:  r.SuccessCnt,
 			FailedCnt:   r.FailedCnt,
 			FilmsTotal:  r.FilmsTotal,
+			Films:       sourceFilms,
 			Error:       r.Error,
 		})
 	}
@@ -257,6 +330,9 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		duration = 0
 	}
 
+	// 单片更新记录影片ID供重放；常规大批量采集不往 film_ids 塞海量字符串防超过字段长度限制
+	batchFilmIDs := formatReplayFilmIDs(b.replayFilmIDs)
+
 	comp := model.CollectRecordCompletion{
 		Status:         status,
 		Hour:           b.hour,
@@ -265,6 +341,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		FinishedAt:     now,
 		DurationMs:     duration,
 		FilmCount:      len(mids),
+		FilmIDs:        batchFilmIDs,
 		PageTotal:      totalPage,
 		PageSuccess:    succPage,
 		PageFailed:     failPage,
