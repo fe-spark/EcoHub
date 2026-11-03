@@ -42,9 +42,9 @@ export interface SourceIncident {
 }
 
 export function canRetryHistoryRecord(record: Pick<CollectHistoryRecord, "status" | "failedSources" | "trigger" | "hour" | "filmIds">) {
-  if (record.status === "running" || record.failedSources <= 0) return false;
+  if (record.status === "running") return false;
   if (record.trigger === "single_update") return Boolean(record.filmIds?.trim());
-  return record.hour !== 0;
+  return record.hour !== 0 && (record.status === "failed" || record.status === "partial" || record.failedSources > 0);
 }
 
 export function canRetryHistorySource(record: Pick<CollectHistoryRecord, "status" | "trigger" | "hour" | "filmIds">) {

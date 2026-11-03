@@ -2,7 +2,6 @@ package spider
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -152,18 +151,24 @@ func emitBatchNotify(b *collectBatchContext) {
 	})
 }
 
-// 没有失败、但有站点被用户停止时，整批仍是停止。部分失败只留给确实失败的站点。
-func batchCollectStatus(doneCount, failedCount, stoppedCount, total int) string {
-	if total <= 0 || (failedCount == 0 && stoppedCount == 0 && doneCount == total) {
+// batchCollectStatus 判定批次最终状态。
+// 规则：
+// 1. 全部成功 (success)：所有站点无失败、无停止、无异常，且完成站数等于总站数，无失败页。
+// 2. 已终止 (stopped)：没有失败或部分失败的站点，仅存在用户手动停止的站点。
+//    停止前已抓取的失败页不计为失败，避免用户主动停止被误判为部分失败。
+// 3. 部分失败 (partial)：存在失败或异常（页失败或站点失败），且同时存在有效成功产出（成功页或成功站）。
+// 4. 采集失败 (failed)：存在失败且完全无任何成功产出（零页成功、零站成功）。
+func batchCollectStatus(doneCount, partialCount, failedCount, stoppedCount, total int, succPages, failPages int) string {
+	if total <= 0 || (failedCount == 0 && partialCount == 0 && stoppedCount == 0 && doneCount == total && failPages == 0) {
 		return model.CollectRecordStatusSuccess
 	}
-	if failedCount == 0 && stoppedCount > 0 {
+	if failedCount == 0 && partialCount == 0 && stoppedCount > 0 {
 		return model.CollectRecordStatusStopped
 	}
-	if failedCount > 0 && doneCount > 0 {
-		return model.CollectRecordStatusPartial
-	}
-	if failedCount > 0 {
+	if failPages > 0 || failedCount > 0 || partialCount > 0 {
+		if succPages > 0 || doneCount > 0 || partialCount > 0 {
+			return model.CollectRecordStatusPartial
+		}
 		return model.CollectRecordStatusFailed
 	}
 	if doneCount == total {
@@ -198,10 +203,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	}
 
 	b.mu.Lock()
-	const maxSampleFilmsPerSource = 20
 	midsBySource := make(map[string][]int64, len(b.sourceNotifyMIDs))
-	sampleMIDs := make(map[int64]struct{}, len(b.sourceNotifyMIDs)*maxSampleFilmsPerSource)
-
 	for sid, set := range b.sourceNotifyMIDs {
 		srcMids := make([]int64, 0, len(set))
 		for m := range set {
@@ -211,36 +213,14 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		}
 		sort.Slice(srcMids, func(i, j int) bool { return srcMids[i] < srcMids[j] })
 		midsBySource[sid] = srcMids
-
-		limit := len(srcMids)
-		if limit > maxSampleFilmsPerSource {
-			limit = maxSampleFilmsPerSource
-		}
-		for _, m := range srcMids[:limit] {
-			sampleMIDs[m] = struct{}{}
-		}
-	}
-	for _, m := range b.replayFilmIDs {
-		if m > 0 {
-			sampleMIDs[m] = struct{}{}
-		}
 	}
 	b.mu.Unlock()
-
-	// 性能安全防线：即便首次全量采集数十万部，也只查询抽样样本的片名（最多百量级），绝不全量查库防 OOM / SQL 超长
-	sampleMIDList := make([]int64, 0, len(sampleMIDs))
-	for m := range sampleMIDs {
-		sampleMIDList = append(sampleMIDList, m)
-	}
-	var filmNames map[int64]string
-	if len(sampleMIDList) > 0 {
-		filmNames, _ = repository.FilmNamesByIDs(sampleMIDList)
-	}
 
 	totalPage := 0
 	succPage := 0
 	failPage := 0
 	doneCount := 0
+	partialCount := 0
 	failedCount := 0
 	stoppedCount := 0
 
@@ -253,40 +233,12 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		switch r.Status {
 		case progress.StatusDone, model.CollectRecordStatusSuccess:
 			doneCount++
-		case progress.StatusFailed, model.CollectRecordStatusPartial:
+		case model.CollectRecordStatusPartial:
+			partialCount++
+		case progress.StatusFailed:
 			failedCount++
 		case progress.StatusStopped:
 			stoppedCount++
-		}
-
-		var sourceFilms []model.CollectRecordFilm
-		if srcMids, ok := midsBySource[r.SourceID]; ok && len(srcMids) > 0 {
-			limit := len(srcMids)
-			if limit > maxSampleFilmsPerSource {
-				limit = maxSampleFilmsPerSource
-			}
-			sourceFilms = make([]model.CollectRecordFilm, 0, limit)
-			for _, m := range srcMids[:limit] {
-				name := filmNames[m]
-				if name == "" {
-					name = fmt.Sprintf("影片 #%d", m)
-				}
-				sourceFilms = append(sourceFilms, model.CollectRecordFilm{
-					Mid:  m,
-					Name: name,
-				})
-			}
-		} else if len(b.replayFilmIDs) > 0 && (b.trigger == model.CollectTriggerSingleUpdate || b.tag == model.CollectTagSingleUpdate) {
-			for _, m := range b.replayFilmIDs {
-				name := filmNames[m]
-				if name == "" {
-					name = fmt.Sprintf("影片 #%d", m)
-				}
-				sourceFilms = append(sourceFilms, model.CollectRecordFilm{
-					Mid:  m,
-					Name: name,
-				})
-			}
 		}
 
 		details = append(details, model.CollectRecordSourceDetail{
@@ -298,12 +250,11 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 			SuccessCnt:  r.SuccessCnt,
 			FailedCnt:   r.FailedCnt,
 			FilmsTotal:  r.FilmsTotal,
-			Films:       sourceFilms,
 			Error:       r.Error,
 		})
 	}
 
-	status := batchCollectStatus(doneCount, failedCount, stoppedCount, len(results))
+	status := batchCollectStatus(doneCount, partialCount, failedCount, stoppedCount, len(results), succPage, failPage)
 
 	detailBytes, err := json.Marshal(details)
 	if err != nil {
@@ -337,7 +288,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		Status:         status,
 		Hour:           b.hour,
 		SuccessSources: doneCount,
-		FailedSources:  failedCount,
+		FailedSources:  failedCount + partialCount,
 		FinishedAt:     now,
 		DurationMs:     duration,
 		FilmCount:      len(mids),
@@ -352,6 +303,21 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	if err := repository.CompleteCollectRecord(b.batchID, comp); err != nil {
 		log.Printf("[Spider] 结算采集记录失败 batchID=%s: %v", b.batchID, err)
 	}
+
+	// 异步持久化各站本次更新影片全量清单，供明细按需分页检索（轻量整数批量写入，防大表查库）
+	if len(b.replayFilmIDs) > 0 {
+		for _, r := range results {
+			if len(midsBySource[r.SourceID]) == 0 {
+				midsBySource[r.SourceID] = b.replayFilmIDs
+			}
+		}
+	}
+	if len(midsBySource) > 0 {
+		if err := repository.BatchSaveCollectRecordFilms(b.batchID, midsBySource); err != nil {
+			log.Printf("[Spider] 保存采集批次影片清单失败 batchID=%s: %v", b.batchID, err)
+		}
+	}
+
 	BroadcastRecordCompletion(&model.CollectRecordProgressPayload{
 		BatchID:        b.batchID,
 		Status:         status,
@@ -362,7 +328,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		PageSuccess:    succPage,
 		PageFailed:     failPage,
 		SuccessSources: doneCount,
-		FailedSources:  failedCount,
+		FailedSources:  failedCount + partialCount,
 		ErrorMsg:       errSummary.String(),
 		DetailJson:     string(detailBytes),
 	})

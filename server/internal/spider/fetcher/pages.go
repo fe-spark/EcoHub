@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,9 +42,11 @@ const (
 )
 
 type pageStats struct {
-	latestPage int
-	success    int
-	failed     int
+	latestPage  int
+	success     int
+	failed      int
+	failedPages []int
+	lastErr     string
 }
 
 func shouldLogProgress(done, total int) bool {
@@ -177,7 +181,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 
 		log.Printf("[Spider] 站点 %s 采集进度 完成=%d/%d，成功=%d，失败=%d，最新页=%d", s.Name, done, pageCount, snapshot.success, snapshot.failed, snapshot.latestPage)
 	}
-	recordPageFinished := func(page int, success bool) pageStats {
+	recordPageFinished := func(page int, success bool, err error) pageStats {
 		statsMu.Lock()
 		if page > stats.latestPage {
 			stats.latestPage = page
@@ -186,6 +190,12 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 			stats.success++
 		} else {
 			stats.failed++
+			if len(stats.failedPages) < 10 {
+				stats.failedPages = append(stats.failedPages, page)
+			}
+			if err != nil {
+				stats.lastErr = err.Error()
+			}
 		}
 		snapshot := stats
 		statsMu.Unlock()
@@ -225,7 +235,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		progress.MarkStopped(s.Id)
 	}
 	recordPageFailure := func(page int, stage string, err error) {
-		snapshot := recordPageFinished(page, false)
+		snapshot := recordPageFinished(page, false, err)
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Failed = snapshot.failed
 			if page > cur.Current {
@@ -239,7 +249,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		logProgress(false)
 	}
 	recordPageSuccess := func(page int, notifyMIDs, affectedMIDs []int64) {
-		snapshot := recordPageFinished(page, true)
+		snapshot := recordPageFinished(page, true, nil)
 		recordSuccess()
 		if batch != nil {
 			batch.AddAffectedMIDs(s, h, affectedMIDs)
@@ -363,7 +373,39 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		return stats.success > 0, stats.success, ctx.Err()
 	}
 	if stats.failed > 0 {
-		return stats.success > 0, stats.success, fmt.Errorf("站点 %s 有 %d 页采集失败", s.Name, stats.failed)
+		errMsg := formatFailedPagesError(stats.failedPages, stats.failed, stats.lastErr)
+		return stats.success > 0, stats.success, fmt.Errorf("站点 %s %s", s.Name, errMsg)
 	}
 	return stats.success > 0, stats.success, nil
+}
+
+func formatFailedPagesError(failedPages []int, totalFailed int, lastErr string) string {
+	if totalFailed <= 0 {
+		return ""
+	}
+	var pagesDesc string
+	if len(failedPages) == 1 {
+		pagesDesc = fmt.Sprintf("第 %d 页", failedPages[0])
+	} else if len(failedPages) > 0 {
+		strPages := make([]string, len(failedPages))
+		for i, p := range failedPages {
+			strPages[i] = strconv.Itoa(p)
+		}
+		if totalFailed > len(failedPages) {
+			pagesDesc = fmt.Sprintf("共 %d 页失败 (第 %s... 页)", totalFailed, strings.Join(strPages, ", "))
+		} else {
+			pagesDesc = fmt.Sprintf("第 %s 页", strings.Join(strPages, ", "))
+		}
+	} else {
+		pagesDesc = fmt.Sprintf("共 %d 页", totalFailed)
+	}
+
+	trimmedErr := strings.TrimSpace(lastErr)
+	if trimmedErr != "" {
+		if len(trimmedErr) > 120 {
+			trimmedErr = trimmedErr[:120] + "..."
+		}
+		return fmt.Sprintf("%s抓取失败: %s", pagesDesc, trimmedErr)
+	}
+	return fmt.Sprintf("%s抓取失败", pagesDesc)
 }

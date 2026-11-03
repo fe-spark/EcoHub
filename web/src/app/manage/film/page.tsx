@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import FilmListPageView from "./view";
 
 export default function FilmListPage() {
-  return <FilmListPageView />;
+  return (
+    <Suspense fallback={null}>
+      <FilmListPageView />
+    </Suspense>
+  );
 }

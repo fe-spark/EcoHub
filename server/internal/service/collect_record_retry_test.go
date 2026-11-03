@@ -24,7 +24,7 @@ func setupRetryRecordDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}, &model.FilmIndex{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -170,5 +170,48 @@ func TestRetryBatchFailedSources_SingleFilmWithoutIDs(t *testing.T) {
 	_, err := CollectRecordSvc.RetryBatchFailedSources(model.CollectRecordRetryReq{BatchID: "film-missing"})
 	if err == nil || !strings.Contains(err.Error(), "缺少影片编号") {
 		t.Fatalf("expected missing film id, got %v", err)
+	}
+}
+
+func TestCollectRecordService_GetBatchFilms(t *testing.T) {
+	setupRetryRecordDB(t)
+
+	// 1. 优先从 collect_record_films 查询
+	db.Mdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001},
+		FilmIndexContent:  model.FilmIndexContent{Name: "星际穿越"},
+	})
+	_ = repository.BatchSaveCollectRecordFilms("batch-films-svc", map[string][]int64{
+		"s1": {1001},
+	})
+
+	q := model.CollectRecordFilmQuery{
+		BatchID:  "batch-films-svc",
+		SourceID: "s1",
+		Page:     1,
+		PageSize: 10,
+	}
+	films, total, err := CollectRecordSvc.GetBatchFilms(q)
+	if err != nil || total != 1 || len(films) != 1 || films[0].Name != "星际穿越" {
+		t.Fatalf("expected 星际穿越, got %+v total=%d err=%v", films, total, err)
+	}
+
+	// 2. 降级从 detail_json 中回填（历史存量批次）
+	_ = repository.CreateCollectRecord(&model.CollectRecord{
+		BatchID:    "batch-legacy-fallback",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		StartedAt:  time.Now(),
+		DetailJson: `[{"sourceId":"s2","status":"success","films":[{"mid":2002,"name":"楚门的世界"}]}]`,
+	})
+	qFallback := model.CollectRecordFilmQuery{
+		BatchID:  "batch-legacy-fallback",
+		SourceID: "s2",
+		Page:     1,
+		PageSize: 10,
+	}
+	legacyFilms, legacyTotal, err := CollectRecordSvc.GetBatchFilms(qFallback)
+	if err != nil || legacyTotal != 1 || len(legacyFilms) != 1 || legacyFilms[0].Name != "楚门的世界" {
+		t.Fatalf("expected 楚门的世界 from detail_json, got %+v total=%d err=%v", legacyFilms, legacyTotal, err)
 	}
 }

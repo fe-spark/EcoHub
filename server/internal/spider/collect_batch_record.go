@@ -154,7 +154,7 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 
 		if detail.Status == progress.StatusDone || detail.Status == model.CollectRecordStatusSuccess {
 			succSources++
-		} else if detail.Status == progress.StatusFailed {
+		} else if detail.Status == progress.StatusFailed || detail.Status == model.CollectRecordStatusPartial {
 			failSources++
 		}
 

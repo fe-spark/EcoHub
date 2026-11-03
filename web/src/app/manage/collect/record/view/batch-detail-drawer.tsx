@@ -1,14 +1,11 @@
 "use client";
 
-import React from "react";
-import Link from "next/link";
+import React, { useState } from "react";
 import {
   Drawer,
-  Tag,
   Button,
   Popconfirm,
   Alert,
-  Tooltip,
   Typography,
 } from "antd";
 import {
@@ -20,8 +17,8 @@ import {
   FieldTimeOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  ExclamationCircleOutlined,
 } from "@ant-design/icons";
-import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import dayjs from "dayjs";
 import {
   CollectHistoryRecord,
@@ -34,7 +31,9 @@ import {
   RecordStatusMark,
   renderHourTag,
   renderTriggerTag,
+  resolveBatchStatus,
 } from "./history-columns";
+import { BatchFilmsModal } from "./batch-films-modal";
 import styles from "./batch-detail-drawer.module.less";
 
 const { Text } = Typography;
@@ -72,7 +71,12 @@ export function BatchDetailDrawer({
     return rank(b.status) - rank(a.status);
   });
 
+  const failedSources = details.filter((d) => d.status === "failed");
+  const partialSources = details.filter((d) => d.status === "partial");
+  const doneSources = details.filter((d) => d.status === "done" || d.status === "success");
+
   const filmRetry = record.trigger === "single_update";
+  const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
   const effectiveMs =
     record.durationMs > 0
       ? record.durationMs
@@ -91,7 +95,7 @@ export function BatchDetailDrawer({
             <CloudServerOutlined />
             <span>批次采集成果明细</span>
           </span>
-          <RecordStatusMark status={record.status} scope="batch" />
+          <RecordStatusMark status={resolveBatchStatus(record)} scope="batch" />
         </div>
       }
       styles={{ body: { padding: "16px 20px" } }}
@@ -134,21 +138,36 @@ export function BatchDetailDrawer({
                 <span>覆盖站点</span>
               </div>
               <div className={styles.drawerKpiBody}>
-                {record.failedSources > 0 ? (
+                {failedSources.length === 0 && partialSources.length === 0 && record.failedSources === 0 && record.pageFailed === 0 ? (
+                  <>
+                    <span className={styles.kpiValueOk}>
+                      <CheckCircleOutlined /> {record.sourceCount} 站成功
+                    </span>
+                    <span className={styles.kpiSub}>全部完成</span>
+                  </>
+                ) : resolveBatchStatus(record) === "failed" ? (
                   <>
                     <span className={styles.kpiValueFail}>
-                      <CloseCircleOutlined /> {record.failedSources} 站失败
+                      <CloseCircleOutlined /> {failedSources.length + partialSources.length || record.failedSources || record.sourceCount} 站失败
                     </span>
-                    <span className={styles.kpiSub}>
-                      （{record.successSources} 站成功 / 共 {record.sourceCount} 站）
+                    <span className={styles.kpiSub}>未能采集</span>
+                  </>
+                ) : record.sourceCount === 1 ? (
+                  <>
+                    <span className={styles.kpiValueWarn}>
+                      <ExclamationCircleOutlined /> 1 站未完成
                     </span>
+                    <span className={styles.kpiSub}>部分受阻</span>
                   </>
                 ) : (
                   <>
-                    <span className={styles.kpiValueOk}>
-                      <CheckCircleOutlined /> {record.sourceCount} 站全成功
+                    <span className={styles.kpiValueWarn}>
+                      <ExclamationCircleOutlined />
+                      {failedSources.length + partialSources.length || record.failedSources || 1} 站未完成
                     </span>
-                    <span className={styles.kpiSub}>所有站点正常完成</span>
+                    <span className={styles.kpiSub}>
+                      （{doneSources.length} / {record.sourceCount} 站成功）
+                    </span>
                   </>
                 )}
               </div>
@@ -163,7 +182,7 @@ export function BatchDetailDrawer({
                 {isSingleFilmRecord(record) ? (
                   <>
                     <span className={styles.kpiValueDefault}>单片重放</span>
-                    <span className={styles.kpiSub}>按原影片重新拉取</span>
+                    <span className={styles.kpiSub}>1 部</span>
                   </>
                 ) : record.pageFailed > 0 ? (
                   <>
@@ -179,7 +198,7 @@ export function BatchDetailDrawer({
                     <span className={styles.kpiValueOk}>
                       <CheckCircleOutlined /> 共 {record.pageTotal} 页
                     </span>
-                    <span className={styles.kpiSub}>所有分页全部拉取完成</span>
+                    <span className={styles.kpiSub}>全部完成</span>
                   </>
                 )}
               </div>
@@ -193,15 +212,24 @@ export function BatchDetailDrawer({
               <div className={styles.drawerKpiBody}>
                 {record.filmCount > 0 ? (
                   <>
-                    <span className={styles.kpiValueHighlight}>
+                    <a
+                      className={styles.kpiValueHighlightLink}
+                      onClick={() =>
+                        setModalSource({
+                          id: "",
+                          name: "全部站点",
+                        })
+                      }
+                      title="点击查看影片清单"
+                    >
                       +{record.filmCount.toLocaleString("zh-CN")} 部
-                    </span>
-                    <span className={styles.kpiSub}>产生新增或更新</span>
+                    </a>
+                    <span className={styles.kpiSub}>点击查看清单</span>
                   </>
                 ) : (
                   <>
                     <span className={styles.kpiValueMuted}>无变更</span>
-                    <span className={styles.kpiSub}>各站内容无更新</span>
+                    <span className={styles.kpiSub}>0 部</span>
                   </>
                 )}
               </div>
@@ -234,7 +262,6 @@ export function BatchDetailDrawer({
               const sourceKey = `${record.batchId}:${item.sourceId}`;
               const isRetrying = retryingSourceKeys.has(sourceKey);
               const retry = (item.status === "failed" || item.status === "partial") && canRetryHistorySource(record);
-              const films = item.films || [];
               const failedPages = item.failedCnt ?? 0;
 
               return (
@@ -281,9 +308,22 @@ export function BatchDetailDrawer({
                     <span className={styles.withIcon}>
                       <VideoCameraOutlined />
                       <span>入库更新：</span>
-                      <span className={item.filmsTotal > 0 ? styles.filmCount : styles.filmCountEmpty}>
-                        {item.filmsTotal > 0 ? `${item.filmsTotal} 部` : "无变更"}
-                      </span>
+                      {item.filmsTotal > 0 ? (
+                        <a
+                          className={styles.filmCountLink}
+                          onClick={() =>
+                            setModalSource({
+                              id: item.sourceId,
+                              name: item.sourceName || item.sourceId,
+                            })
+                          }
+                          title="点击查看本次入库影片清单"
+                        >
+                          +{item.filmsTotal.toLocaleString("zh-CN")} 部
+                        </a>
+                      ) : (
+                        <span className={styles.filmCountEmpty}>无变更</span>
+                      )}
                     </span>
                   </div>
 
@@ -293,82 +333,20 @@ export function BatchDetailDrawer({
                       <span>{item.error}</span>
                     </div>
                   )}
-
-                  <div className={styles.sourceFilmsContainer}>
-                    <div className={styles.sourceFilmsTitle}>
-                      <VideoCameraOutlined />
-                      <span>
-                        本站更新影片（
-                        {item.filmsTotal > 0
-                          ? `${item.filmsTotal.toLocaleString("zh-CN")} 部`
-                          : "0 部"}
-                        ）：
-                      </span>
-                    </div>
-
-                    {films.length > 0 ? (
-                      <>
-                        <div className={styles.filmTagGrid}>
-                          {films.map((film) => (
-                            <Tooltip key={film.mid} title={`点击进入播放页 (MID: ${film.mid})`}>
-                              <Link
-                                href={resolvePlayEntryPath(film.mid)}
-                                target="_blank"
-                                className={styles.filmTagLink}
-                              >
-                                <Tag icon={<VideoCameraOutlined />} className={styles.filmTag}>
-                                  {film.name}
-                                </Tag>
-                              </Link>
-                            </Tooltip>
-                          ))}
-                        </div>
-                        {item.filmsTotal > films.length && (
-                          <div className={styles.sourceMoreFilms}>
-                            <Text type="secondary" className={styles.sourceMoreTip}>
-                              已展示前 {films.length} 部样例，本站共更新{" "}
-                              {item.filmsTotal.toLocaleString("zh-CN")} 部。
-                            </Text>
-                            <Link
-                              href={`/manage/film?sourceId=${encodeURIComponent(item.sourceId)}`}
-                              target="_blank"
-                              className={styles.viewInFilmManageLink}
-                            >
-                              前往影片库分页查看该站全部影片 →
-                            </Link>
-                          </div>
-                        )}
-                      </>
-                    ) : item.filmsTotal > 0 ? (
-                      <div className={styles.sourceMoreFilms}>
-                        <Text type="secondary" className={styles.sourceMoreTip}>
-                          已入库 {item.filmsTotal.toLocaleString("zh-CN")}{" "}
-                          部影片（存量快照未记录影片名称）。
-                        </Text>
-                        <Link
-                          href={`/manage/film?sourceId=${encodeURIComponent(item.sourceId)}`}
-                          target="_blank"
-                          className={styles.viewInFilmManageLink}
-                        >
-                          前往影片库分页查看 →
-                        </Link>
-                      </div>
-                    ) : item.status === "failed" ? (
-                      <Text type="secondary" className={styles.sourceNoFilms}>
-                        采集失败，未采集到影片
-                      </Text>
-                    ) : (
-                      <Text type="secondary" className={styles.sourceNoFilms}>
-                        本轮采集完成，该站未产生新增或更新的影片
-                      </Text>
-                    )}
-                  </div>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      <BatchFilmsModal
+        open={!!modalSource}
+        batchId={record.batchId}
+        sourceId={modalSource?.id || ""}
+        sourceName={modalSource?.name || ""}
+        onClose={() => setModalSource(null)}
+      />
     </Drawer>
   );
 }
