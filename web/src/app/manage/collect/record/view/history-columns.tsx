@@ -23,7 +23,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
-import { canRetryHistoryRecord, CollectHistoryRecord } from "./types";
+import { canRetryHistoryRecord, CollectHistoryRecord, CollectRecordSourceDetail } from "./types";
 import { ErrorDetailButton } from "./error-detail-button";
 import styles from "./index.module.less";
 
@@ -182,6 +182,28 @@ export function formatStartedAt(val: string) {
   return { primary: full, full };
 }
 
+export function resolveBatchStatus(record: {
+  status: string;
+  pageSuccess?: number;
+  pageFailed?: number;
+  failedSources?: number;
+  successSources?: number;
+}): string {
+  if (record.status === "running" || record.status === "stopped" || record.status === "interrupted") {
+    return record.status;
+  }
+  const succ = record.pageSuccess ?? 0;
+  const fail = record.pageFailed ?? 0;
+  const failSrc = record.failedSources ?? 0;
+  const succSrc = record.successSources ?? 0;
+
+  if (fail > 0 || failSrc > 0) {
+    if (succ > 0 || succSrc > 0) return "partial";
+    return "failed";
+  }
+  return record.status || "success";
+}
+
 export function RecordStatusMark({ status, scope }: { status: string; scope: "batch" | "source" }) {
   const batch = scope === "batch";
   let icon = <ExclamationCircleOutlined />;
@@ -324,7 +346,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       dataIndex: "status",
       key: "status",
       width: "10%",
-      render: (status: string) => renderStatusBadge(status),
+      render: (_: string, record) => renderStatusBadge(resolveBatchStatus(record)),
     },
     {
       title: columnTitle(<CloudServerOutlined />, "站点"),
@@ -332,26 +354,68 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       width: "12%",
       render: (_, record) => {
         const total = record.sourceCount;
-        const success = record.successSources;
-        const failed = record.failedSources;
-        return (
-          <div className={styles.statCell}>
-            {failed > 0 ? (
-              <>
-                <span className={`${styles.statRow} ${styles.statFail}`}>
-                  <CloseCircleOutlined />
-                  {failed} 站失败
-                </span>
-                <span className={`${styles.statRow} ${styles.statTotal}`}>
-                  （{success} 站成功 / 共 {total} 站）
-                </span>
-              </>
-            ) : (
+        let details: CollectRecordSourceDetail[] = [];
+        if (record.detailJson) {
+          try {
+            details = JSON.parse(record.detailJson) as CollectRecordSourceDetail[];
+          } catch {
+            details = [];
+          }
+        }
+        const hasFailed = details.some((d) => d.status === "failed");
+        const hasPartial = details.some((d) => d.status === "partial");
+        const hasAbnormal = hasFailed || hasPartial || record.failedSources > 0 || record.pageFailed > 0;
+
+        if (!hasAbnormal) {
+          return (
+            <div className={styles.statCell}>
               <span className={`${styles.statRow} ${styles.statOk}`}>
                 <CheckCircleOutlined />
-                {total} 站全成功
+                {total} 站成功
               </span>
-            )}
+            </div>
+          );
+        }
+
+        // 红/黄与状态列同一口径，避免明细缺失时另算一套把部分失败翻成失败
+        const allFailed = resolveBatchStatus(record) === "failed";
+
+        if (total === 1) {
+          return (
+            <div className={styles.statCell}>
+              {allFailed ? (
+                <span className={`${styles.statRow} ${styles.statFail}`}>
+                  <CloseCircleOutlined />
+                  1 站失败
+                </span>
+              ) : (
+                <span className={`${styles.statRow} ${styles.statWarn}`}>
+                  <ExclamationCircleOutlined />
+                  1 站未完成
+                </span>
+              )}
+            </div>
+          );
+        }
+
+        const failedCount =
+          details.length > 0
+            ? details.filter((d) => d.status === "failed" || d.status === "partial").length
+            : Math.max(1, record.failedSources);
+        const successCount =
+          details.length > 0
+            ? details.filter((d) => d.status === "done" || d.status === "success").length
+            : Math.max(0, total - failedCount);
+
+        return (
+          <div className={styles.statCell}>
+            <span className={`${styles.statRow} ${allFailed ? styles.statFail : styles.statWarn}`}>
+              {allFailed ? <CloseCircleOutlined /> : <ExclamationCircleOutlined />}
+              {failedCount} 站{allFailed ? "失败" : "未完成"}
+            </span>
+            <span className={`${styles.statRow} ${styles.statTotal}`}>
+              （{successCount} / {total} 站成功）
+            </span>
           </div>
         );
       },
@@ -371,7 +435,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
             <div className={styles.statCell}>
               <span className={`${styles.statRow} ${styles.statTotal}`}>
                 <FileTextOutlined />
-                {record.status === "failed" ? "0/1 请求失败" : "1/1 影片重放"}
+                {record.status === "failed" ? "0/1 失败" : "1/1 完成"}
               </span>
             </div>
           );
@@ -392,7 +456,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
             ) : (
               <span className={`${styles.statRow} ${styles.statTotal}`}>
                 <FileTextOutlined />
-                共 {total} 页全拉取
+                共 {total} 页
               </span>
             )}
           </div>
@@ -436,11 +500,11 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
             </Button>
             {canRetry ? (
               <Popconfirm
-                title={filmRetry ? "重试这部影片？" : "重试本次失败的站点？"}
+                title={filmRetry ? "重试这部影片？" : "重试本次未完成的站点？"}
                 description={
                   filmRetry
                     ? "将按原影片重新采集"
-                    : `将重新采集本次失败的 ${record.failedSources} 个站点`
+                    : "将重新采集本次未完成的站点"
                 }
                 onConfirm={() => onRetryBatch(record)}
                 disabled={!canWrite || isRetrying}

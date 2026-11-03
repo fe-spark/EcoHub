@@ -31,6 +31,7 @@ const (
 	TableAnalyticsConfig    = "analytics_config_records"
 	TableDanmakuRecord      = "danmaku_record"
 	TableCollectRecord      = "collect_records"
+	TableCollectRecordFilm  = "collect_record_films"
 )
 
 // FilmHasPlaySourceSQL 判断 film_index 当前行是否有指定采集源的播放线路。
@@ -69,4 +70,5 @@ var AllModels = []any{
 	&DanmakuRecord{},
 	&AnalyticsConfigRecord{},
 	&CollectRecord{},
+	&CollectRecordFilmItem{},
 }

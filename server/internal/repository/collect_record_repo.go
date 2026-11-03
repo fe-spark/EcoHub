@@ -183,7 +183,18 @@ func DeleteCollectRecords(ids []uint) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return db.Mdb.Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).Delete(&model.CollectRecord{}).Error
+	var batchIDs []string
+	_ = db.Mdb.Model(&model.CollectRecord{}).
+		Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).
+		Pluck("batch_id", &batchIDs).Error
+
+	if err := db.Mdb.Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).Delete(&model.CollectRecord{}).Error; err != nil {
+		return err
+	}
+	if len(batchIDs) > 0 {
+		_ = DeleteCollectRecordFilmsByBatchIDs(batchIDs)
+	}
+	return nil
 }
 
 // ClearCollectRecords 清空全部采集记录
@@ -191,9 +202,13 @@ func ClearCollectRecords() error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
-	return db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).
+	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).
 		Where("status != ?", model.CollectRecordStatusRunning).
-		Delete(&model.CollectRecord{}).Error
+		Delete(&model.CollectRecord{}).Error; err != nil {
+		return err
+	}
+	_ = db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CollectRecordFilmItem{}).Error
+	return nil
 }
 
 // CleanOldCollectRecords 清理超过指定天数的历史采集记录（防数据库膨胀）
@@ -205,6 +220,7 @@ func CleanOldCollectRecords(days int) error {
 		days = 30
 	}
 	threshold := time.Now().AddDate(0, 0, -days)
+	_ = CleanOldCollectRecordFilms(days)
 	return db.Mdb.Where("started_at < ?", threshold).Delete(&model.CollectRecord{}).Error
 }
 

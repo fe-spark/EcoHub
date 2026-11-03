@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { Table, Pagination } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -28,6 +29,8 @@ function flattenCategoryNodes(nodes: any[]): any[] {
 
 export default function FilmListPageView() {
   const { canWrite } = useManagePermission();
+  const searchParams = useSearchParams();
+  const urlSourceId = searchParams.get("sourceId")?.trim() || "";
   const [list, setList] = useState<FilmItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
@@ -123,10 +126,10 @@ export default function FilmListPageView() {
     (async () => {
       setCategoryLoading(true);
       try {
-        const resp = await ApiGet("/manage/film/search/options", { sourceId: "" });
+        const resp = await ApiGet("/manage/film/search/options", { sourceId: urlSourceId });
         const nextParams = {
           name: "",
-          sourceId: "",
+          sourceId: urlSourceId,
           pid: 0,
           cid: 0,
           beginTime: "",
@@ -138,9 +141,10 @@ export default function FilmListPageView() {
           return;
         }
         setOptions(resp.data);
-        nextParams.sourceId = resp.data.currentSourceId || resp.data.defaultSourceId || "";
+        const resolvedSourceId = resp.data.currentSourceId || urlSourceId || resp.data.defaultSourceId || "";
+        nextParams.sourceId = resolvedSourceId;
         setParams(nextParams);
-        setTableSourceId(nextParams.sourceId);
+        setTableSourceId(resolvedSourceId);
         await getFilmPage({ current: 1, pageSize: page.pageSize || 10, total: 0 }, nextParams);
       } finally {
         if (!cancelled) setCategoryLoading(false);
@@ -150,7 +154,7 @@ export default function FilmListPageView() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [urlSourceId]);
 
   const handleSourceChange = async (value?: string) => {
     setSelectedRowKeys([]);

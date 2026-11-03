@@ -133,3 +133,25 @@ type CollectRecordQuery struct {
 	UpdatedOnly bool      `json:"updatedOnly"` // 只看有入库
 	FailedOnly  bool      `json:"failedOnly"`  // 只看有失败或中断
 }
+
+// CollectRecordFilmItem 采集批次入库/更新影片关联记录
+type CollectRecordFilmItem struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement" json:"id"`
+	BatchID   string    `gorm:"index:idx_crf_batch_source,priority:1;size:64;not null" json:"batchId"`
+	SourceID  string    `gorm:"index:idx_crf_batch_source,priority:2;size:32;not null" json:"sourceId"`
+	Mid       int64     `gorm:"index;not null" json:"mid"`
+	CreatedAt time.Time `gorm:"index;not null" json:"createdAt"`
+}
+
+func (CollectRecordFilmItem) TableName() string {
+	return TableCollectRecordFilm
+}
+
+// CollectRecordFilmQuery 批次影片清单分页查询入参
+type CollectRecordFilmQuery struct {
+	BatchID  string `json:"batchId"`
+	SourceID string `json:"sourceId"`
+	Page     int    `json:"page"`
+	PageSize int    `json:"pageSize"`
+	Keyword  string `json:"keyword"`
+}

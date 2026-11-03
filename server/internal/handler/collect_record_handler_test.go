@@ -30,7 +30,7 @@ func setupHandlerTestDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}, &model.FilmIndex{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -166,3 +166,51 @@ func TestCollectRecordHandler_HistoryStream(t *testing.T) {
 		t.Fatalf("expected record_snapshot event, got: %s", w.Body.String())
 	}
 }
+
+func TestCollectRecordHandler_HistoryFilms(t *testing.T) {
+	setupHandlerTestDB(t)
+
+	db.Mdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 888},
+		FilmIndexContent:  model.FilmIndexContent{Name: "流浪地球"},
+	})
+	_ = repository.BatchSaveCollectRecordFilms("b-film-1", map[string][]int64{
+		"src_earth": {888},
+	})
+
+	r := gin.New()
+	r.GET("/history/films", CollectRecordHd.HistoryFilms)
+
+	// 缺少批次号
+	wErr := httptest.NewRecorder()
+	reqErr, _ := http.NewRequest("GET", "/history/films", nil)
+	r.ServeHTTP(wErr, reqErr)
+	var respErr struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	_ = json.Unmarshal(wErr.Body.Bytes(), &respErr)
+	if respErr.Code == 0 || !strings.Contains(respErr.Msg, "缺少批次号参数") {
+		t.Fatalf("expected missing batchId error, got code=%d, msg=%s", respErr.Code, respErr.Msg)
+	}
+
+	// 正常查询
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/history/films?batchId=b-film-1&sourceId=src_earth", nil)
+	r.ServeHTTP(w, req)
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			List []model.CollectRecordFilm `json:"list"`
+			Total int64                     `json:"total"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Code != 0 || resp.Data.Total != 1 || len(resp.Data.List) != 1 {
+		t.Fatalf("expected 1 film, got code=%d, data=%+v", resp.Code, resp.Data)
+	}
+	if resp.Data.List[0].Name != "流浪地球" {
+		t.Fatalf("expected 流浪地球, got %s", resp.Data.List[0].Name)
+	}
+}
+

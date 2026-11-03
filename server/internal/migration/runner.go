@@ -35,6 +35,11 @@ var migrations = []Migration{
 		Name:    "删除 failure_records",
 		Run:     migrateDropFailureRecords,
 	},
+	{
+		Version: "20261103_collect_record_films",
+		Name:    "创建 collect_record_films 表，支持采集入库影片全量清单与异步分页检索",
+		Run:     migrateCollectRecordFilms,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {
@@ -96,6 +101,13 @@ func migrateDropFailureRecords(db *gorm.DB) error {
 	}
 	if err := db.Migrator().DropTable(model.TableFailureRecord); err != nil {
 		return fmt.Errorf("drop failure_records failed: %w", err)
+	}
+	return nil
+}
+
+func migrateCollectRecordFilms(db *gorm.DB) error {
+	if err := db.AutoMigrate(&model.CollectRecordFilmItem{}); err != nil {
+		return fmt.Errorf("migrate collect_record_films failed: %w", err)
 	}
 	return nil
 }

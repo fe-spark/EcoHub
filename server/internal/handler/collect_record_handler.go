@@ -78,6 +78,43 @@ func (h *CollectRecordHandler) HistoryIncidents(c *gin.Context) {
 	dto.Success(gin.H{"list": list}, "获取异常站点成功", c)
 }
 
+// HistoryFilms 分页获取某批次某站点入库/更新的全部影片清单
+func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
+	batchID := strings.TrimSpace(c.Query("batchId"))
+	if batchID == "" {
+		dto.Failed("缺少批次号参数", c)
+		return
+	}
+	sourceID := strings.TrimSpace(c.Query("sourceId"))
+	page, _ := strconv.Atoi(c.DefaultQuery("current", c.DefaultQuery("page", "1")))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
+	keyword := strings.TrimSpace(c.Query("keyword"))
+
+	q := model.CollectRecordFilmQuery{
+		BatchID:  batchID,
+		SourceID: sourceID,
+		Page:     page,
+		PageSize: pageSize,
+		Keyword:  keyword,
+	}
+
+	list, total, err := service.CollectRecordSvc.GetBatchFilms(q)
+	if err != nil {
+		dto.Failed("获取批次影片清单失败: "+err.Error(), c)
+		return
+	}
+	if list == nil {
+		list = []model.CollectRecordFilm{}
+	}
+
+	dto.Success(gin.H{
+		"list":     list,
+		"total":    total,
+		"current":  q.Page,
+		"pageSize": q.PageSize,
+	}, "获取批次影片清单成功", c)
+}
+
 // HistoryDelete 批量删除采集历史记录
 func (h *CollectRecordHandler) HistoryDelete(c *gin.Context) {
 	var req struct {

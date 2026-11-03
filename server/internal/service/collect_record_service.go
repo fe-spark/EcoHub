@@ -78,6 +78,65 @@ func (s *CollectRecordService) ListOpenIncidents(now time.Time) ([]model.SourceI
 	return repository.ListOpenSourceIncidents(now)
 }
 
+// GetBatchFilms 分页获取某采集批次某站点入库/更新的全部影片清单
+func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, error) {
+	list, total, err := repository.GetCollectRecordFilms(q)
+	if err == nil && total > 0 {
+		return list, total, nil
+	}
+
+	// 历史批次兜底兼容：若独立影片表尚无数据，从 detail_json 中回填快照影片
+	rec, recErr := repository.GetCollectRecordByBatchID(q.BatchID)
+	if recErr != nil || rec == nil || rec.DetailJson == "" {
+		return list, total, err
+	}
+
+	var details []model.CollectRecordSourceDetail
+	if jsonErr := json.Unmarshal([]byte(rec.DetailJson), &details); jsonErr != nil {
+		return list, total, err
+	}
+
+	var fallbackFilms []model.CollectRecordFilm
+	for _, d := range details {
+		if strings.TrimSpace(d.SourceID) == strings.TrimSpace(q.SourceID) || strings.TrimSpace(q.SourceID) == "" {
+			fallbackFilms = append(fallbackFilms, d.Films...)
+		}
+	}
+	if len(fallbackFilms) == 0 {
+		return list, total, err
+	}
+
+	keyword := strings.TrimSpace(q.Keyword)
+	if keyword != "" {
+		filtered := make([]model.CollectRecordFilm, 0, len(fallbackFilms))
+		for _, f := range fallbackFilms {
+			if strings.Contains(f.Name, keyword) {
+				filtered = append(filtered, f)
+			}
+		}
+		fallbackFilms = filtered
+	}
+
+	totalFallback := int64(len(fallbackFilms))
+	page := q.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := q.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	start := (page - 1) * pageSize
+	if start >= len(fallbackFilms) {
+		return []model.CollectRecordFilm{}, totalFallback, nil
+	}
+	end := start + pageSize
+	if end > len(fallbackFilms) {
+		end = len(fallbackFilms)
+	}
+	return fallbackFilms[start:end], totalFallback, nil
+}
+
 // DeleteHistory 批量删除指定 ID 列表的历史记录
 func (s *CollectRecordService) DeleteHistory(ids []uint) error {
 	return repository.DeleteCollectRecords(ids)

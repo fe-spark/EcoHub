@@ -111,6 +111,15 @@
   color: var(--ant-color-success);
 }
 
+.kpiValueWarn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-warning);
+}
+
 .kpiValueFail {
   display: inline-flex;
   align-items: center;
@@ -123,8 +132,23 @@
 .kpiValueHighlight {
   font-size: 15px;
   font-weight: 600;
-  color: var(--ant-color-primary);
+  color: var(--ant-color-primary, #fa8c16);
   font-variant-numeric: tabular-nums;
+}
+
+.kpiValueHighlightLink {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ant-color-primary, #fa8c16);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--ant-color-primary-hover, #ffa940);
+    text-decoration: underline;
+  }
 }
 
 .kpiValueDefault {
@@ -234,7 +258,21 @@
 
 .filmCount {
   font-weight: 600;
-  color: var(--ant-color-primary);
+  color: var(--ant-color-primary, #fa8c16);
+}
+
+.filmCountLink {
+  font-weight: 600;
+  color: var(--ant-color-primary, #fa8c16);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-bottom: 1px dashed transparent;
+
+  &:hover {
+    color: var(--ant-color-primary-hover, #ffa940);
+    border-bottom-color: var(--ant-color-primary-hover, #ffa940);
+  }
 }
 
 .filmCountEmpty {
@@ -253,79 +291,6 @@
   color: var(--ant-color-error-text);
   font-size: 12px;
   line-height: 1.5;
-}
-
-.sourceFilmsContainer {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--ant-color-border-secondary);
-}
-
-.sourceFilmsTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--ant-color-text-secondary);
-}
-
-.filmTagGrid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-height: 240px;
-  overflow-y: auto;
-  padding: 2px 0;
-}
-
-.filmTagLink {
-  display: inline-flex;
-  max-width: 100%;
-  min-width: 0;
-  color: inherit;
-  text-decoration: none;
-}
-
-.filmTag {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.sourceNoFilms {
-  font-size: 12px;
-  font-style: italic;
-}
-
-.sourceMoreFilms {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 6px 10px;
-  background: var(--ant-color-fill-quaternary);
-  border-radius: 6px;
-  margin-top: 4px;
-}
-
-.sourceMoreTip {
-  font-size: 12px;
-}
-
-.viewInFilmManageLink {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--ant-color-primary);
-  text-decoration: none;
-
-  &:hover {
-    text-decoration: underline;
-  }
 }
 
 .detailEmpty {

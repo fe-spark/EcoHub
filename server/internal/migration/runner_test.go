@@ -28,8 +28,8 @@ func TestRunAutoMigrations_EmptyBaselineIdempotent(t *testing.T) {
 	if err := testDB.Model(&model.SchemaMigration{}).Count(&count).Error; err != nil {
 		t.Fatalf("count failed: %v", err)
 	}
-	if count != 3 {
-		t.Fatalf("expected 3 migrations, got %d", count)
+	if count != int64(len(migrations)) {
+		t.Fatalf("expected %d migrations, got %d", len(migrations), count)
 	}
 
 	var row model.SchemaMigration
@@ -47,8 +47,8 @@ func TestRunAutoMigrations_EmptyBaselineIdempotent(t *testing.T) {
 	if err := testDB.Model(&model.SchemaMigration{}).Count(&countAfter).Error; err != nil {
 		t.Fatalf("count after second run: %v", err)
 	}
-	if countAfter != 3 {
-		t.Fatalf("expected count to stay 3, got %d", countAfter)
+	if countAfter != int64(len(migrations)) {
+		t.Fatalf("expected count to stay %d, got %d", len(migrations), countAfter)
 	}
 
 	var clean model.CrontabRecord

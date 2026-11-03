@@ -1,0 +1,95 @@
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-right: 28px;
+}
+
+.modalTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.titleIcon {
+  color: var(--ant-color-primary, #fa8c16);
+}
+
+.sourceSubtitle {
+  font-size: 13px;
+  font-weight: normal;
+  color: var(--ant-color-text-secondary);
+}
+
+.jumpLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-primary, #fa8c16);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    color: var(--ant-color-primary-hover, #ffa940);
+    text-decoration: underline;
+  }
+}
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.searchBar {
+  margin-bottom: 2px;
+}
+
+.filmTitleLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  color: var(--ant-color-text);
+  text-decoration: none;
+  transition: color 0.2s ease;
+
+  &:hover {
+    color: var(--ant-color-primary, #fa8c16);
+    text-decoration: underline;
+
+    .filmIcon {
+      color: var(--ant-color-primary, #fa8c16);
+    }
+  }
+}
+
+.filmIcon {
+  color: var(--ant-color-text-tertiary);
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+}
+
+.filmNameText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.playActionBtn {
+  padding: 0 4px;
+  color: var(--ant-color-primary, #fa8c16);
+
+  &:hover {
+    color: var(--ant-color-primary-hover, #ffa940);
+  }
+}

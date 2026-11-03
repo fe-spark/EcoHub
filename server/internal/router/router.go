@@ -162,6 +162,7 @@ func SetupRouter() *gin.Engine {
 
 
 			collect.GET(`/history/list`, handler.CollectRecordHd.HistoryList)
+			collect.GET(`/history/films`, handler.CollectRecordHd.HistoryFilms)
 			collect.GET(`/history/stream`, handler.CollectRecordHd.HistoryStream)
 			collect.GET(`/history/incidents`, handler.CollectRecordHd.HistoryIncidents)
 			collect.POST(`/history/delete`, handler.CollectRecordHd.HistoryDelete)
