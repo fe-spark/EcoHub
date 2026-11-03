@@ -41,10 +41,37 @@ export interface SourceIncident {
   tripped: boolean;
 }
 
-export function canRetryHistoryRecord(record: Pick<CollectHistoryRecord, "status" | "failedSources" | "trigger" | "hour" | "filmIds">) {
+export function resolveBatchStatus(record: {
+  status: string;
+  pageSuccess?: number;
+  pageFailed?: number;
+  failedSources?: number;
+  successSources?: number;
+}): string {
+  if (record.status === "running" || record.status === "stopped" || record.status === "interrupted") {
+    return record.status;
+  }
+  const succ = record.pageSuccess ?? 0;
+  const fail = record.pageFailed ?? 0;
+  const failSrc = record.failedSources ?? 0;
+  const succSrc = record.successSources ?? 0;
+
+  if (fail > 0 || failSrc > 0) {
+    if (succ > 0 || succSrc > 0) return "partial";
+    return "failed";
+  }
+  return record.status || "success";
+}
+
+export function canRetryHistoryRecord(record: Pick<CollectHistoryRecord, "status" | "failedSources" | "trigger" | "hour" | "filmIds"> & {
+  pageSuccess?: number;
+  pageFailed?: number;
+  successSources?: number;
+}) {
   if (record.status === "running") return false;
   if (record.trigger === "single_update") return Boolean(record.filmIds?.trim());
-  return record.hour !== 0 && (record.status === "failed" || record.status === "partial" || record.failedSources > 0);
+  const resolved = resolveBatchStatus(record);
+  return record.hour !== 0 && (resolved === "failed" || resolved === "partial");
 }
 
 export function canRetryHistorySource(record: Pick<CollectHistoryRecord, "status" | "trigger" | "hour" | "filmIds">) {

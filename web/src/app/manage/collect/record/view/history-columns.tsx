@@ -23,7 +23,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
-import { canRetryHistoryRecord, CollectHistoryRecord, CollectRecordSourceDetail } from "./types";
+import { canRetryHistoryRecord, CollectHistoryRecord, CollectRecordSourceDetail, resolveBatchStatus } from "./types";
 import { ErrorDetailButton } from "./error-detail-button";
 import styles from "./index.module.less";
 
@@ -182,27 +182,7 @@ export function formatStartedAt(val: string) {
   return { primary: full, full };
 }
 
-export function resolveBatchStatus(record: {
-  status: string;
-  pageSuccess?: number;
-  pageFailed?: number;
-  failedSources?: number;
-  successSources?: number;
-}): string {
-  if (record.status === "running" || record.status === "stopped" || record.status === "interrupted") {
-    return record.status;
-  }
-  const succ = record.pageSuccess ?? 0;
-  const fail = record.pageFailed ?? 0;
-  const failSrc = record.failedSources ?? 0;
-  const succSrc = record.successSources ?? 0;
-
-  if (fail > 0 || failSrc > 0) {
-    if (succ > 0 || succSrc > 0) return "partial";
-    return "failed";
-  }
-  return record.status || "success";
-}
+export { resolveBatchStatus };
 
 export function RecordStatusMark({ status, scope }: { status: string; scope: "batch" | "source" }) {
   const batch = scope === "batch";
@@ -467,6 +447,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
           );
         }
 
+        const batchStatus = resolveBatchStatus(record);
         return (
           <div className={styles.statCell}>
             {fail > 0 ? (
@@ -477,6 +458,16 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
                 </span>
                 <span className={`${styles.statRow} ${styles.statTotal}`}>
                   （成功 {succ} / 共 {total} 页）
+                </span>
+              </>
+            ) : batchStatus === "failed" ? (
+              <>
+                <span className={`${styles.statRow} ${styles.statFail}`}>
+                  <CloseCircleOutlined />
+                  未能拉取
+                </span>
+                <span className={`${styles.statRow} ${styles.statTotal}`}>
+                  {total === 0 ? "（探测失败）" : `（0 / 共 ${total} 页）`}
                 </span>
               </>
             ) : (

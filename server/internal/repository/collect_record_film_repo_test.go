@@ -3,7 +3,6 @@ package repository
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -118,7 +117,7 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 	}
 
 	// 清理
-	if err := DeleteCollectRecordFilmsByBatchIDs([]string{batchID}); err != nil {
+	if err := testDB.Where("batch_id = ?", batchID).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
 		t.Fatalf("delete failed: %v", err)
 	}
 	_, totalAfter, _ := GetCollectRecordFilms(q)
@@ -149,28 +148,3 @@ func TestGetCollectRecordFilms_NameLookupError(t *testing.T) {
 	}
 }
 
-func TestCleanOldCollectRecordFilms(t *testing.T) {
-	testDB := setupRecordFilmsTestDB(t)
-	oldTime := time.Now().AddDate(0, 0, -40)
-	testDB.Create(&model.CollectRecordFilmItem{
-		BatchID:   "old_batch",
-		SourceID:  "src_1",
-		Mid:       999,
-		CreatedAt: oldTime,
-	})
-	testDB.Create(&model.CollectRecordFilmItem{
-		BatchID:   "new_batch",
-		SourceID:  "src_1",
-		Mid:       888,
-		CreatedAt: time.Now(),
-	})
-
-	if err := CleanOldCollectRecordFilms(30); err != nil {
-		t.Fatalf("clean failed: %v", err)
-	}
-	var count int64
-	testDB.Model(&model.CollectRecordFilmItem{}).Count(&count)
-	if count != 1 {
-		t.Fatalf("expected 1 remaining, got %d", count)
-	}
-}

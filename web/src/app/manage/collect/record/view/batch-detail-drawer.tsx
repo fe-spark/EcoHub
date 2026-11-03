@@ -55,6 +55,7 @@ export function BatchDetailDrawer({
   onClose,
   onRetrySingleSource,
 }: BatchDetailDrawerProps) {
+  const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
   if (!record) return null;
 
   let details: CollectRecordSourceDetail[] = [];
@@ -78,7 +79,6 @@ export function BatchDetailDrawer({
   const abnormalCount = failedSources.length + partialSources.length;
 
   const filmRetry = record.trigger === "single_update";
-  const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
   const effectiveMs =
     record.durationMs > 0
       ? record.durationMs
@@ -211,6 +211,29 @@ export function BatchDetailDrawer({
                       （成功 {record.pageSuccess} / 共 {record.pageTotal} 页）
                     </span>
                   </>
+                ) : resolveBatchStatus(record) === "failed" ? (
+                  <>
+                    <span className={styles.kpiValueFail}>
+                      <CloseCircleOutlined /> 未能拉取
+                    </span>
+                    <span className={styles.kpiSub}>
+                      {record.pageTotal === 0 ? "总页探测失败" : "拉取失败"}
+                    </span>
+                  </>
+                ) : resolveBatchStatus(record) === "partial" ? (
+                  <>
+                    <span className={styles.kpiValueWarn}>
+                      <ExclamationCircleOutlined /> 成功 {record.pageSuccess} 页
+                    </span>
+                    <span className={styles.kpiSub}>存在未完成站点</span>
+                  </>
+                ) : record.status === "stopped" || record.status === "interrupted" ? (
+                  <>
+                    <span className={styles.kpiValueWarn}>
+                      <ExclamationCircleOutlined /> 共 {record.pageSuccess} 页
+                    </span>
+                    <span className={styles.kpiSub}>已停止拉取</span>
+                  </>
                 ) : (
                   <>
                     <span className={styles.kpiValueOk}>
@@ -318,7 +341,18 @@ export function BatchDetailDrawer({
                   <div className={styles.sourceCardStats}>
                     <span className={styles.withIcon}>
                       <FileTextOutlined />
-                      <span>页码：{item.pageCurrent}/{item.pageTotal}</span>
+                      <span>
+                        页码：
+                        {item.pageTotal > 0 ? (
+                          `${item.pageCurrent}/${item.pageTotal}`
+                        ) : item.status === "failed" ? (
+                          <span className={styles.metricFail}>探测失败</span>
+                        ) : item.status === "stopped" ? (
+                          <span className={styles.metricWarn}>已停止</span>
+                        ) : (
+                          "0/0"
+                        )}
+                      </span>
                       {failedPages > 0 && (
                         <span className={styles.metricFail}>（失败 {failedPages} 页）</span>
                       )}
