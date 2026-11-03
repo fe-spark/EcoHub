@@ -34,6 +34,9 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.Category{},
+		&model.CollectRecord{},
+		&model.CollectRecordFilmItem{},
+		&model.CollectSourceStats{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}

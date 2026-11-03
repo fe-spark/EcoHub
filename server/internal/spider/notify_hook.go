@@ -304,21 +304,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		log.Printf("[Spider] 结算采集记录失败 batchID=%s: %v", b.batchID, err)
 	}
 
-	// 单片重放没有分站入库明细。只给确实采集成功、但没有登记到 mid 的站补上重放影片，
-	// 失败站和无变更的站不进清单。
-	if len(b.replayFilmIDs) > 0 {
-		doneSources := make(map[string]struct{}, len(results))
-		for _, r := range results {
-			if r.Status == progress.StatusDone || r.Status == model.CollectRecordStatusSuccess {
-				doneSources[r.SourceID] = struct{}{}
-			}
-		}
-		for sourceID := range doneSources {
-			if _, recorded := midsBySource[sourceID]; !recorded {
-				midsBySource[sourceID] = b.replayFilmIDs
-			}
-		}
-	}
+	// 清单只记各站实际入库的 mid。重放影片留在记录的 film_ids 上，供重试和历史跳转。
 	if len(midsBySource) > 0 {
 		if err := repository.BatchSaveCollectRecordFilms(b.batchID, midsBySource); err != nil {
 			log.Printf("[Spider] 保存采集批次影片清单失败 batchID=%s: %v", b.batchID, err)

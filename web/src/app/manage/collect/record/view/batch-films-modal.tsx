@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
-import { Modal, Input, Table, Typography, Button } from "antd";
+import { Alert, Modal, Input, Table, Typography, Button } from "antd";
 import {
   VideoCameraOutlined,
   SearchOutlined,
@@ -42,18 +42,23 @@ export function BatchFilmsModal({
   const [pageSize, setPageSize] = useState(20);
   const [list, setList] = useState<FilmItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [sample, setSample] = useState(false);
+  const [errorText, setErrorText] = useState("");
   const [loading, setLoading] = useState(false);
+  const appliedKeyword = useRef("");
 
   const fetchFilms = useCallback(
     async (pCurrent: number, pPageSize: number, pKeyword: string) => {
       if (!batchId) return;
       setLoading(true);
+      setErrorText("");
       try {
         const resp = await ApiGet<{
           list: FilmItem[];
           total: number;
           current: number;
           pageSize: number;
+          sample?: boolean;
         }>("/manage/collect/history/films", {
           batchId,
           sourceId,
@@ -64,9 +69,20 @@ export function BatchFilmsModal({
         if (resp.code === 0 && resp.data) {
           setList(resp.data.list || []);
           setTotal(resp.data.total || 0);
+          setSample(Boolean(resp.data.sample));
           setCurrent(resp.data.current || pCurrent);
           setPageSize(resp.data.pageSize || pPageSize);
+          return;
         }
+        setList([]);
+        setTotal(0);
+        setSample(false);
+        setErrorText(resp.msg || "获取影片清单失败");
+      } catch (err) {
+        setList([]);
+        setTotal(0);
+        setSample(false);
+        setErrorText(err instanceof Error && err.message ? err.message : "获取影片清单失败");
       } finally {
         setLoading(false);
       }
@@ -76,25 +92,35 @@ export function BatchFilmsModal({
 
   useEffect(() => {
     if (open) {
+      appliedKeyword.current = "";
       setKeyword("");
       setCurrent(1);
+      setSample(false);
+      setErrorText("");
       void fetchFilms(1, 20, "");
     } else {
       setList([]);
       setTotal(0);
+      setSample(false);
+      setErrorText("");
     }
   }, [open, fetchFilms]);
 
   const handleSearch = (val: string) => {
-    setKeyword(val);
+    const next = val.trim();
+    if (next === appliedKeyword.current) {
+      return;
+    }
+    appliedKeyword.current = next;
+    setKeyword(next);
     setCurrent(1);
-    void fetchFilms(1, pageSize, val);
+    void fetchFilms(1, pageSize, next);
   };
 
   const handlePageChange = (newPage: number, newSize: number) => {
     setCurrent(newPage);
     setPageSize(newSize);
-    void fetchFilms(newPage, newSize, keyword);
+    void fetchFilms(newPage, newSize, appliedKeyword.current);
   };
 
   const columns: ColumnsType<FilmItem> = useMemo(
@@ -187,11 +213,18 @@ export function BatchFilmsModal({
             prefix={<SearchOutlined style={{ color: "var(--ant-color-text-tertiary)" }} />}
             allowClear
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setKeyword(val);
+              if (val === "" && appliedKeyword.current !== "") {
+                handleSearch("");
+              }
+            }}
             onPressEnter={() => handleSearch(keyword)}
-            onBlur={() => handleSearch(keyword)}
           />
         </div>
+        {errorText ? <Alert type="error" showIcon message={errorText} /> : null}
+        {sample ? <Text type="secondary" className={styles.sampleHint}>历史样例，不是全量</Text> : null}
 
         <Table<FilmItem>
           rowKey={(record) => `${record.sourceId ?? sourceId}-${record.mid}`}

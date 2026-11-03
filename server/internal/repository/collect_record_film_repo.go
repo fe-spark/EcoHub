@@ -9,6 +9,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -48,7 +49,20 @@ func BatchSaveCollectRecordFilms(batchID string, itemsBySource map[string][]int6
 	}).CreateInBatches(records, 1000).Error
 }
 
-// GetCollectRecordFilms 分页查询某批次指定站点的影片列表（并回填片名）
+func collectRecordFilmScope(batchID, sourceID, keyword string) *gorm.DB {
+	tx := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID)
+	if sourceID != "" {
+		tx = tx.Where("source_id = ?", sourceID)
+	}
+	if keyword != "" {
+		pattern := "%" + escapeLikePattern(keyword) + "%"
+		tx = tx.Where("mid IN (SELECT mid FROM "+model.TableFilmIndex+" WHERE name LIKE ?)", pattern)
+	}
+	return tx
+}
+
+// GetCollectRecordFilms 分页查询某批次的影片列表并回填片名。
+// 指定站点时按该站的行分页；全部站点按 mid 去重，总数与批次 filmCount 对齐。
 func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, error) {
 	if db.Mdb == nil {
 		return nil, 0, errors.New("数据库未连接")
@@ -58,20 +72,14 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 	if batchID == "" {
 		return nil, 0, errors.New("批次号不能为空")
 	}
-
-	tx := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID)
-	if sourceID != "" {
-		tx = tx.Where("source_id = ?", sourceID)
-	}
-
 	keyword := strings.TrimSpace(q.Keyword)
-	if keyword != "" {
-		pattern := "%" + escapeLikePattern(keyword) + "%"
-		tx = tx.Where("mid IN (SELECT mid FROM "+model.TableFilmIndex+" WHERE name LIKE ?)", pattern)
-	}
 
 	var total int64
-	if err := tx.Count(&total).Error; err != nil {
+	countTx := collectRecordFilmScope(batchID, sourceID, keyword)
+	if sourceID == "" {
+		countTx = countTx.Distinct("mid")
+	}
+	if err := countTx.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if total == 0 {
@@ -89,33 +97,38 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 		pageSize = 100
 	}
 
-	var rows []model.CollectRecordFilmItem
-	err := tx.Order("id ASC").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
-		Find(&rows).Error
+	var mids []int64
+	listTx := collectRecordFilmScope(batchID, sourceID, keyword)
+	if sourceID == "" {
+		if err := listTx.Distinct("mid").Order("mid ASC").
+			Offset((page-1)*pageSize).Limit(pageSize).
+			Pluck("mid", &mids).Error; err != nil {
+			return nil, 0, err
+		}
+	} else {
+		var rows []model.CollectRecordFilmItem
+		if err := listTx.Order("id ASC").
+			Offset((page - 1) * pageSize).Limit(pageSize).
+			Find(&rows).Error; err != nil {
+			return nil, 0, err
+		}
+		mids = make([]int64, 0, len(rows))
+		for _, row := range rows {
+			mids = append(mids, row.Mid)
+		}
+	}
+
+	names, err := FilmNamesByIDs(mids)
 	if err != nil {
 		return nil, 0, err
 	}
-
-	mids := make([]int64, 0, len(rows))
-	for _, r := range rows {
-		mids = append(mids, r.Mid)
-	}
-
-	names, _ := FilmNamesByIDs(mids)
-	out := make([]model.CollectRecordFilm, 0, len(rows))
-	for _, r := range rows {
-		name := names[r.Mid]
+	out := make([]model.CollectRecordFilm, 0, len(mids))
+	for _, mid := range mids {
+		name := names[mid]
 		if name == "" {
-			name = fmt.Sprintf("影片 #%d", r.Mid)
+			name = fmt.Sprintf("影片 #%d", mid)
 		}
-		film := model.CollectRecordFilm{Mid: r.Mid, Name: name}
-		// 跨站汇总时同一影片会在多个站各有一行，调用方靠 sourceId 区分来源。
-		if sourceID == "" {
-			film.SourceID = r.SourceID
-		}
-		out = append(out, film)
+		out = append(out, model.CollectRecordFilm{Mid: mid, Name: name})
 	}
 	return out, total, nil
 }

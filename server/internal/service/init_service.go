@@ -23,6 +23,14 @@ var InitSvc = new(InitService)
 
 func (s *InitService) DefaultDataInit() error {
 	isNewDatabase := !repository.ExistUserTable()
+	seedDefaultSources := isNewDatabase
+	if !seedDefaultSources {
+		hasAdmin, err := repository.HasAdminUser()
+		if err != nil {
+			return fmt.Errorf("读取管理员失败: %w", err)
+		}
+		seedDefaultSources = !hasAdmin
+	}
 
 	if err := s.TableInit(); err != nil {
 		return err
@@ -31,6 +39,11 @@ func (s *InitService) DefaultDataInit() error {
 	if isNewDatabase {
 		if err := repository.AlignUserAutoIncrement(); err != nil {
 			return err
+		}
+	}
+	if seedDefaultSources {
+		if err := repository.BatchAddCollectSource(defaultFilmSources()); err != nil {
+			return fmt.Errorf("写入默认采集站失败: %w", err)
 		}
 	}
 
@@ -147,6 +160,29 @@ func (s *InitService) AnalyticsConfigInit() error {
 	return nil
 }
 
+func defaultFilmSources() []model.FilmSource {
+	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	list := []model.FilmSource{
+		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24, IsPosterSource: true},
+		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24},
+		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, State: true, Interval: 50, Cd: 24},
+		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24},
+		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, State: true, Interval: 50, Cd: 24},
+		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, State: true, Interval: 50, Cd: 24},
+		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, State: true, Interval: 50, Cd: 24},
+		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, State: true, Interval: 50, Cd: 24},
+		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24},
+		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, State: true, Interval: 50, Cd: 24},
+		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, State: true, Interval: 50, Cd: 24},
+		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, State: true, Interval: 50, Cd: 24},
+	}
+	for i := range list {
+		list[i].Sort = i
+		list[i].CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
+	}
+	return list
+}
+
 func (s *InitService) SpiderInit() error {
 	if err := repository.MarkInterruptedCollectRecords(); err != nil {
 		syslog.Warnf("[Init] 标记中断采集记录失败: %v", err)
@@ -154,49 +190,8 @@ func (s *InitService) SpiderInit() error {
 	if err := repository.CleanOldCollectRecords(30); err != nil {
 		syslog.Warnf("[Init] 清理过期采集记录失败: %v", err)
 	}
-	if err := s.FilmSourceInit(); err != nil {
-		return err
-	}
 	go SpiderSvc.SyncMissingSourceCategories()
 	return s.CollectCrontabInit()
-}
-
-func (s *InitService) FilmSourceInit() error {
-	exists, err := repository.ExistCollectSourceList()
-	if err != nil {
-		return fmt.Errorf("读取采集站失败: %w", err)
-	}
-	if exists {
-		return nil
-	}
-	if err := repository.BatchAddCollectSource(defaultFilmSources()); err != nil {
-		return fmt.Errorf("写入默认采集站失败: %w", err)
-	}
-	return nil
-}
-
-func defaultFilmSources() []model.FilmSource {
-	// 使用 URI 哈希作为 ID，设置递增初始创建时间以保证默认采集站顺序稳定
-	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	list := []model.FilmSource{
-		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Sort: 0, State: true, Interval: 50, Cd: 24, IsPosterSource: true},
-		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Sort: 1, State: true, Interval: 50, Cd: 24},
-		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Sort: 2, State: true, Interval: 50, Cd: 24},
-		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Sort: 3, State: true, Interval: 50, Cd: 24},
-		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Sort: 4, State: true, Interval: 50, Cd: 24},
-		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Sort: 5, State: true, Interval: 50, Cd: 24},
-		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Sort: 6, State: true, Interval: 50, Cd: 24},
-		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Sort: 7, State: true, Interval: 50, Cd: 24},
-		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, Sort: 8, State: true, Interval: 50, Cd: 24},
-		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Sort: 9, State: true, Interval: 50, Cd: 24},
-		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Sort: 10, State: true, Interval: 50, Cd: 24},
-		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Sort: 11, State: true, Interval: 50, Cd: 24},
-	}
-	for i := range list {
-		list[i].Sort = i
-		list[i].CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
-	}
-	return list
 }
 
 func (s *InitService) CollectCrontabInit() error {

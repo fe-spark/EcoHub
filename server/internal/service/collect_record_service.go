@@ -11,6 +11,8 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider"
+
+	"gorm.io/gorm"
 )
 
 type CollectRecordService struct{}
@@ -26,11 +28,13 @@ func (s *CollectRecordService) GetHistoryList(q model.CollectRecordQuery) ([]mod
 	if err != nil || len(list) == 0 {
 		return list, total, err
 	}
-	attachSingleFilmNames(list)
+	if err := attachSingleFilmNames(list); err != nil {
+		return nil, 0, err
+	}
 	return list, total, nil
 }
 
-func attachSingleFilmNames(list []model.CollectRecord) {
+func attachSingleFilmNames(list []model.CollectRecord) error {
 	ids := make([]int64, 0)
 	seen := make(map[int64]struct{})
 	parsed := make([][]int64, len(list))
@@ -49,11 +53,11 @@ func attachSingleFilmNames(list []model.CollectRecord) {
 		}
 	}
 	if len(ids) == 0 {
-		return
+		return nil
 	}
 	names, err := repository.FilmNamesByIDs(ids)
 	if err != nil {
-		return
+		return err
 	}
 	for i := range list {
 		if len(parsed[i]) == 0 {
@@ -72,69 +76,118 @@ func attachSingleFilmNames(list []model.CollectRecord) {
 		list[i].FilmName = strings.Join(parts, "、")
 		list[i].Films = films
 	}
+	return nil
 }
 
 func (s *CollectRecordService) ListOpenIncidents(now time.Time) ([]model.SourceIncident, error) {
 	return repository.ListOpenSourceIncidents(now)
 }
 
-// GetBatchFilms 分页获取某采集批次某站点入库/更新的全部影片清单
-func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, error) {
+// GetBatchFilms 分页获取某采集批次的影片清单。
+// 第三个返回值表示结果来自 detail_json 里的历史样例，不是全量清单。
+func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, bool, error) {
 	list, total, err := repository.GetCollectRecordFilms(q)
-	if err == nil && total > 0 {
-		return list, total, nil
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if total > 0 {
+		return list, total, false, nil
+	}
+	if strings.TrimSpace(q.Keyword) != "" {
+		_, rawTotal, rawErr := repository.GetCollectRecordFilms(model.CollectRecordFilmQuery{
+			BatchID:  q.BatchID,
+			SourceID: q.SourceID,
+			Page:     1,
+			PageSize: 1,
+		})
+		if rawErr != nil {
+			return nil, 0, false, rawErr
+		}
+		if rawTotal > 0 {
+			return []model.CollectRecordFilm{}, 0, false, nil
+		}
 	}
 
-	// 历史批次兜底兼容：若独立影片表尚无数据，从 detail_json 中回填快照影片
-	rec, recErr := repository.GetCollectRecordByBatchID(q.BatchID)
-	if recErr != nil || rec == nil || rec.DetailJson == "" {
-		return list, total, err
+	samples, err := legacySampleFilms(q)
+	if err != nil {
+		return nil, 0, false, err
 	}
+	if len(samples) == 0 {
+		return []model.CollectRecordFilm{}, 0, false, nil
+	}
+	page, pageSize := normalizeFilmPage(q.Page, q.PageSize)
+	start := (page - 1) * pageSize
+	if start >= len(samples) {
+		return []model.CollectRecordFilm{}, int64(len(samples)), true, nil
+	}
+	end := start + pageSize
+	if end > len(samples) {
+		end = len(samples)
+	}
+	return samples[start:end], int64(len(samples)), true, nil
+}
 
+// legacySampleFilms 只在影片表确实没有该批次记录时读取旧 detail_json 样例。
+func legacySampleFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, error) {
+	rec, err := repository.GetCollectRecordByBatchID(q.BatchID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if rec == nil || strings.TrimSpace(rec.DetailJson) == "" {
+		return nil, nil
+	}
 	var details []model.CollectRecordSourceDetail
-	if jsonErr := json.Unmarshal([]byte(rec.DetailJson), &details); jsonErr != nil {
-		return list, total, err
+	if err := json.Unmarshal([]byte(rec.DetailJson), &details); err != nil {
+		return nil, fmt.Errorf("批次明细损坏: %w", err)
 	}
 
-	var fallbackFilms []model.CollectRecordFilm
-	for _, d := range details {
-		if strings.TrimSpace(d.SourceID) == strings.TrimSpace(q.SourceID) || strings.TrimSpace(q.SourceID) == "" {
-			fallbackFilms = append(fallbackFilms, d.Films...)
+	sourceID := strings.TrimSpace(q.SourceID)
+	seen := make(map[int64]struct{})
+	films := make([]model.CollectRecordFilm, 0)
+	for _, detail := range details {
+		if sourceID != "" && strings.TrimSpace(detail.SourceID) != sourceID {
+			continue
 		}
-	}
-	if len(fallbackFilms) == 0 {
-		return list, total, err
-	}
-
-	keyword := strings.TrimSpace(q.Keyword)
-	if keyword != "" {
-		filtered := make([]model.CollectRecordFilm, 0, len(fallbackFilms))
-		for _, f := range fallbackFilms {
-			if strings.Contains(f.Name, keyword) {
-				filtered = append(filtered, f)
+		for _, film := range detail.Films {
+			if film.Mid <= 0 {
+				continue
 			}
+			if sourceID == "" {
+				if _, ok := seen[film.Mid]; ok {
+					continue
+				}
+				seen[film.Mid] = struct{}{}
+				film.SourceID = ""
+			}
+			films = append(films, film)
 		}
-		fallbackFilms = filtered
 	}
+	keyword := strings.TrimSpace(q.Keyword)
+	if keyword == "" {
+		return films, nil
+	}
+	filtered := make([]model.CollectRecordFilm, 0, len(films))
+	for _, film := range films {
+		if strings.Contains(film.Name, keyword) {
+			filtered = append(filtered, film)
+		}
+	}
+	return filtered, nil
+}
 
-	totalFallback := int64(len(fallbackFilms))
-	page := q.Page
+func normalizeFilmPage(page, pageSize int) (int, int) {
 	if page < 1 {
 		page = 1
 	}
-	pageSize := q.PageSize
 	if pageSize < 1 {
 		pageSize = 20
+	} else if pageSize > 100 {
+		pageSize = 100
 	}
-	start := (page - 1) * pageSize
-	if start >= len(fallbackFilms) {
-		return []model.CollectRecordFilm{}, totalFallback, nil
-	}
-	end := start + pageSize
-	if end > len(fallbackFilms) {
-		end = len(fallbackFilms)
-	}
-	return fallbackFilms[start:end], totalFallback, nil
+	return page, pageSize
 }
 
 // DeleteHistory 批量删除指定 ID 列表的历史记录
