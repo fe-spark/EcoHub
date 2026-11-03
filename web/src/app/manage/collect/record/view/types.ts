@@ -17,6 +17,7 @@ export interface CollectRecordSourceDetail {
   successCnt: number;
   failedCnt: number;
   filmsTotal: number;
+  films?: CollectRecordFilm[];
   error?: string;
 }
 
