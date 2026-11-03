@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync/atomic"
@@ -374,5 +375,72 @@ func TestImportConfig_FilmSources_TriggersCategorySync(t *testing.T) {
 	}
 	if len(sources) != 1 || sources[0].Id != "imp_src_1" {
 		t.Fatalf("imported sources mismatch: %+v", sources)
+	}
+}
+
+func TestImportConfig_IgnoresDeprecatedCronTasks(t *testing.T) {
+	setupBackupTestDB(t)
+
+	// 准备当前系统的内置定时任务
+	builtinTask := model.FilmCollectTask{
+		Id:     model.TaskIDCollectClean,
+		Spec:   "0 30 3 * * *",
+		Model:  model.TaskModelCollectClean,
+		State:  true,
+		Remark: "系统内置清理任务",
+	}
+	if err := repository.SaveFilmTask(builtinTask); err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟包含旧版 cronTasks 字段的 JSON 备份报文
+	rawJSON := `{
+		"modules": {
+			"site": true,
+			"cronTasks": true
+		},
+		"backup": {
+			"version": 1,
+			"site": {
+				"siteName": "恢复后站点"
+			},
+			"cronTasks": [
+				{
+					"id": "deprecated_task",
+					"spec": "0 0 * * *",
+					"model": 0,
+					"state": false,
+					"remark": "已废弃的任务"
+				}
+			]
+		}
+	}`
+
+	var req model.ConfigBackupImportRequest
+	if err := json.Unmarshal([]byte(rawJSON), &req); err != nil {
+		t.Fatalf("unmarshal legacy backup failed: %v", err)
+	}
+
+	// 执行导入：不应报错，且应直接忽略废弃的 cronTasks
+	if err := BackupSvc.ImportConfig(req); err != nil {
+		t.Fatalf("import config failed: %v", err)
+	}
+
+	// 验证 1：site 正常被导入
+	site, err := repository.GetSiteBasic()
+	if err != nil || site.SiteName != "恢复后站点" {
+		t.Fatalf("site not updated: %+v, err: %v", site, err)
+	}
+
+	// 验证 2：系统内置任务完好无损，未被废弃的 deprecated_task 污染或清空
+	tasks, err := repository.GetAllFilmTask()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Id != model.TaskIDCollectClean {
+		t.Fatalf("builtin tasks corrupted, got: %+v", tasks)
+	}
+	if _, err := repository.GetFilmTaskById("deprecated_task"); err == nil {
+		t.Fatal("deprecated task should not be imported")
 	}
 }
