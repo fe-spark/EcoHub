@@ -10,7 +10,6 @@ type ConfigBackup struct {
 	AppVersion   string              `json:"appVersion,omitempty"`
 	Site         *BasicConfig        `json:"site,omitempty"`
 	FilmSources  []FilmSource        `json:"filmSources"`
-	CronTasks    []FilmCollectTask   `json:"cronTasks"`
 	Banners      Banners             `json:"banners"`
 	BannerConfig *BannerConfig       `json:"bannerConfig,omitempty"`
 	MappingRules []MappingRuleExport `json:"mappingRules"`
@@ -33,7 +32,6 @@ type MappingRuleExport struct {
 type ConfigBackupModules struct {
 	Site         bool `json:"site"`
 	FilmSources  bool `json:"filmSources"`
-	CronTasks    bool `json:"cronTasks"`
 	Banners      bool `json:"banners"`
 	MappingRules bool `json:"mappingRules"`
 	Proxy        bool `json:"proxy"`
@@ -56,5 +54,5 @@ type ConfigBackupImportRequest struct {
 
 // Any 是否至少勾选一个模块
 func (m ConfigBackupModules) Any() bool {
-	return m.Site || m.FilmSources || m.CronTasks || m.Banners || m.MappingRules || m.Proxy || m.TMDB || m.Notify || m.Analytics
+	return m.Site || m.FilmSources || m.Banners || m.MappingRules || m.Proxy || m.TMDB || m.Notify || m.Analytics
 }

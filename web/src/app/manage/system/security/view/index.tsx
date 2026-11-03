@@ -31,7 +31,6 @@ import styles from "./index.module.less";
 interface ConfigBackupModules {
   site: boolean;
   filmSources: boolean;
-  cronTasks: boolean;
   banners: boolean;
   notify: boolean;
   mappingRules: boolean;
@@ -46,7 +45,6 @@ interface ConfigBackup {
   appVersion?: string;
   site?: unknown;
   filmSources?: unknown[];
-  cronTasks?: unknown[];
   banners?: unknown[];
   bannerConfig?: unknown;
   notify?: unknown;
@@ -59,7 +57,6 @@ interface ConfigBackup {
 const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
   { key: "site", label: "网站配置" },
   { key: "filmSources", label: "采集站" },
-  { key: "cronTasks", label: "计划任务" },
   { key: "banners", label: "首页轮播" },
   { key: "notify", label: "通知配置" },
   { key: "mappingRules", label: "映射规则" },
@@ -71,7 +68,6 @@ const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
 const ALL_MODULES: ConfigBackupModules = {
   site: true,
   filmSources: true,
-  cronTasks: true,
   banners: true,
   notify: true,
   mappingRules: true,
@@ -109,9 +105,6 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   }
   if (Array.isArray(backup.filmSources)) {
     parts.push(`采集站 ${backup.filmSources.length}`);
-  }
-  if (Array.isArray(backup.cronTasks)) {
-    parts.push(`计划任务 ${backup.cronTasks.length}`);
   }
   if (Array.isArray(backup.banners)) {
     parts.push(`封面 ${backup.banners.length}`);

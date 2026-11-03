@@ -6,7 +6,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 
-	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -82,26 +81,4 @@ func DeleteFilmTask(id string) error {
 		return errors.New("数据库未连接")
 	}
 	return db.Mdb.Unscoped().Where("task_id = ?", id).Delete(&model.CrontabRecord{}).Error
-}
-
-func ResetFilmTasks(tasks []model.FilmCollectTask) error {
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CrontabRecord{}).Error; err != nil {
-			return err
-		}
-		for _, task := range tasks {
-			rec := model.CrontabRecord{
-				TaskId:    task.Id,
-				Time:      task.Time,
-				Spec:      task.Spec,
-				TaskModel: task.Model,
-				State:     task.State,
-				Remark:    task.Remark,
-			}
-			if err := tx.Create(&rec).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }
