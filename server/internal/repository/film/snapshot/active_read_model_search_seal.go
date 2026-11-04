@@ -309,6 +309,39 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		SearchPosts:         buildSearchPostings(items),
 	}
 }
+func patchSingleRankPool(pools map[string][]int64, key string, cand rankCand, items []FilmSearchMeta, pos map[int64]int, sortType, cap int) {
+	if key == "" || cand.mid <= 0 || cap <= 0 {
+		return
+	}
+	existing := pools[key]
+	filtered := make([]int64, 0, len(existing)+1)
+	for _, id := range existing {
+		if id != cand.mid {
+			filtered = append(filtered, id)
+		}
+	}
+	insertIdx := len(filtered)
+	for i, id := range filtered {
+		p, ok := pos[id]
+		if !ok || p >= len(items) {
+			continue
+		}
+		other := rankFromMeta(&items[p])
+		if rankBetter(sortType, cand, other) {
+			insertIdx = i
+			break
+		}
+	}
+	res := make([]int64, 0, len(filtered)+1)
+	res = append(res, filtered[:insertIdx]...)
+	res = append(res, cand.mid)
+	res = append(res, filtered[insertIdx:]...)
+	if len(res) > cap {
+		res = res[:cap]
+	}
+	pools[key] = res
+}
+
 func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, upsertMap map[int64]FilmSearchMeta) *filmSearchMetaIndex {
 	if cur == nil || len(cur.Items) == 0 || cur.Version != version {
 		items := make([]FilmSearchMeta, 0, len(upsertMap))
@@ -321,47 +354,115 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 	newItems := make([]FilmSearchMeta, len(cur.Items), len(cur.Items)+len(upsertMap))
 	copy(newItems, cur.Items)
 
-	hasRenamedExisting := false
+	newPos := make(map[int64]int, len(cur.Pos)+len(upsertMap))
+	for k, v := range cur.Pos {
+		newPos[k] = v
+	}
+
+	newByCategory := make(map[string][]int, len(cur.ByCategory))
+	for k, v := range cur.ByCategory {
+		newByCategory[k] = append([]int(nil), v...)
+	}
+
+	newFilms := make(map[string]int64, len(cur.FilmsBySource))
+	for k, v := range cur.FilmsBySource {
+		newFilms[k] = v
+	}
+
 	for mid, meta := range upsertMap {
-		if idx, exists := cur.Pos[mid]; exists {
-			old := &cur.Items[idx]
-			if old.Item.CleanName != meta.Item.CleanName ||
-				old.Item.PinyinInitials != meta.Item.PinyinInitials ||
-				old.Item.PinyinInitialAlts != meta.Item.PinyinInitialAlts ||
-				old.Item.PinyinFull != meta.Item.PinyinFull {
-				hasRenamedExisting = true
-			}
+		if idx, exists := newPos[mid]; exists {
 			newItems[idx] = meta
 		} else {
+			newIdx := len(newItems)
 			newItems = append(newItems, meta)
+			newPos[mid] = newIdx
+			if src := strings.TrimSpace(meta.FirstSourceId); src != "" {
+				newFilms[src]++
+			}
+			if cKey := strings.TrimSpace(meta.CategoryKey); cKey != "" {
+				newByCategory[cKey] = append(newByCategory[cKey], newIdx)
+			}
 		}
 	}
-	internSearchMetas(newItems)
-
-	byUpdate, pos, films, multiSource, hotPools, yearPools, recentPools, sourceHot, byCategory := buildSearchMetaRanks(newItems)
-
-	var posts *searchPostings
-	if hasRenamedExisting {
-		posts = buildSearchPostings(newItems)
-	} else {
-		posts = cloneAndPatchSearchPostings(cur, newItems, upsertMap, pos)
+	if len(newItems) > len(cur.Items) {
+		internSearchMetas(newItems[len(cur.Items):])
 	}
 
-	log.Printf("[ActiveReadModel] 内存索引增量封口完成 mids=%d renamed=%t recents=%d hots=%d total=%d",
-		len(upsertMap), hasRenamedExisting, len(recentPools), len(hotPools), len(newItems))
+	newByUpdate := make([]int, len(newItems))
+	for i := range newItems {
+		newByUpdate[i] = i
+	}
+	slices.SortFunc(newByUpdate, func(i, j int) int {
+		left := &newItems[i]
+		right := &newItems[j]
+		if left.Item.UpdateStamp != right.Item.UpdateStamp {
+			if left.Item.UpdateStamp > right.Item.UpdateStamp {
+				return -1
+			}
+			return 1
+		}
+		if left.Mid > right.Mid {
+			return -1
+		}
+		if left.Mid < right.Mid {
+			return 1
+		}
+		return 0
+	})
+
+	newRecentPools := make(map[string][]int64, len(cur.RecentPools))
+	for k, v := range cur.RecentPools {
+		newRecentPools[k] = v
+	}
+	newHotPools := make(map[string][]int64, len(cur.HotPools))
+	for k, v := range cur.HotPools {
+		newHotPools[k] = v
+	}
+	newYearPools := make(map[string][]int64, len(cur.YearPools))
+	for k, v := range cur.YearPools {
+		newYearPools[k] = v
+	}
+	newSourceHot := make(map[string][]int64, len(cur.SourceHot))
+	for k, v := range cur.SourceHot {
+		newSourceHot[k] = v
+	}
+
+	for _, meta := range upsertMap {
+		item := meta
+		cand := rankFromMeta(&item)
+		for _, src := range item.PlaySources {
+			src = strings.TrimSpace(src)
+			if src == "" {
+				continue
+			}
+			patchSingleRankPool(newSourceHot, src, cand, newItems, newPos, 1, sourceHotNameCap)
+			key := hotPoolMapKey(src, item.CategoryKey)
+			patchSingleRankPool(newHotPools, key, cand, newItems, newPos, 1, categoryRankCap)
+			patchSingleRankPool(newYearPools, key, cand, newItems, newPos, 0, categoryRankCap)
+			patchSingleRankPool(newRecentPools, key, cand, newItems, newPos, 2, categoryRankCap)
+			if item.RootCategoryKey != "" && item.RootCategoryKey != item.CategoryKey {
+				rootKey := hotPoolMapKey(src, item.RootCategoryKey)
+				patchSingleRankPool(newHotPools, rootKey, cand, newItems, newPos, 1, categoryRankCap)
+				patchSingleRankPool(newYearPools, rootKey, cand, newItems, newPos, 0, categoryRankCap)
+				patchSingleRankPool(newRecentPools, rootKey, cand, newItems, newPos, 2, categoryRankCap)
+			}
+		}
+	}
+
+	posts := cloneAndPatchSearchPostings(cur, newItems, upsertMap, newPos)
 
 	return &filmSearchMetaIndex{
 		Version:             version,
 		Items:               newItems,
-		ByUpdate:            byUpdate,
-		Pos:                 pos,
-		FilmsBySource:       films,
-		MultiSourceBySource: multiSource,
-		HotPools:            hotPools,
-		YearPools:           yearPools,
-		RecentPools:         recentPools,
-		SourceHot:           sourceHot,
-		ByCategory:          byCategory,
+		ByUpdate:            newByUpdate,
+		Pos:                 newPos,
+		FilmsBySource:       newFilms,
+		MultiSourceBySource: cur.MultiSourceBySource,
+		HotPools:            newHotPools,
+		YearPools:           newYearPools,
+		RecentPools:         newRecentPools,
+		SourceHot:           newSourceHot,
+		ByCategory:          newByCategory,
 		SearchPosts:         posts,
 	}
 }
