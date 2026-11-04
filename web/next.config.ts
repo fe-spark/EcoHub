@@ -18,11 +18,21 @@ const nextConfig: NextConfig = {
     API_URL: apiUrl,
   },
   async rewrites() {
+    /** 弹幕服务地址，默认本机；实际部署请用环境变量 DANMU_API_URL 覆盖 */
+    const danmuApiUrl = (process.env.DANMU_API_URL?.trim() || "http://127.0.0.1:9321").replace(
+      /\/+$/,
+      "",
+    );
     // 浏览器 /api/* → 后端 /api/*（API_URL 带不带 /api 都正确）
     return [
       {
         source: "/api/:path*",
         destination: `${apiBase}/api/:path*`,
+      },
+      // 浏览器 /danmu-api/* → 弹幕服务 /api/v2/*（服务端转发，避免跨域）
+      {
+        source: "/danmu-api/:path*",
+        destination: `${danmuApiUrl}/api/v2/:path*`,
       },
     ];
   },
