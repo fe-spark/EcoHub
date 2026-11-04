@@ -217,6 +217,7 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		if firstID == "" {
 			firstID = retryBatchID
 		}
+		result.Started = append(result.Started, part.Started...)
 	}
 	if started == 0 {
 		if len(result.Skipped) > 0 {

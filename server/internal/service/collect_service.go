@@ -350,7 +350,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 
 	spider.ClearLimiter(source.Id)
 	if old.State && !source.State {
-		spider.StopTask(source.Id)
+		spider.StopCollectSource(source.Id, "采集站已停用")
 	}
 
 	clearProvideNetworkConfigCache()
@@ -421,5 +421,3 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 	return nil
 }
-
-

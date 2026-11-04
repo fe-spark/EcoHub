@@ -67,9 +67,9 @@ func InitMysql() (err error) {
 		return err
 	}
 
-	// 列表和采集都打 film_index。写事务并发默认 3，再留前台读和分页请求的余量。
+	// 采集写库上限 16 个写事务，再留前台查询与管理接口的连接余量。
 	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(32)
+	sqlDB.SetMaxOpenConns(48)
 	sqlDB.SetConnMaxLifetime(time.Minute * 30)
 	sqlDB.SetConnMaxIdleTime(time.Minute * 5)
 	if err := sqlDB.Ping(); err != nil {

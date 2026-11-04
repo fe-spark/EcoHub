@@ -162,6 +162,15 @@ func CollectSingleFilm(ids string) {
 			defer wg.Done()
 			defer batchCtx.releaseSourceOccupy(src.Id)
 			stored, err := collectFilmById(sourceMid, &src, batchCtx)
+			if errors.Is(err, errCollectDuringMaintenance) {
+				log.Printf("[Spider] 站点 %s 停止采集：维护任务执行中（%s）", src.Name, maintenanceRunningDetail())
+				detail := singleFilmSourceDetail(src, 0, "")
+				detail.Status = progress.StatusStopped
+				detail.PageCurrent = 0
+				detail.SuccessCnt = 0
+				batchCtx.recordSourceSnapshot(detail)
+				return
+			}
 			if err != nil {
 				batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, 0, err.Error()))
 				batchCtx.RecordSourceError(src.Id, err.Error())

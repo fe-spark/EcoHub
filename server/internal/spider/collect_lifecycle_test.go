@@ -156,30 +156,53 @@ func TestCollectLifecycle_RunExclusiveIsBusy(t *testing.T) {
 	}
 }
 
-func TestCollectLifecycle_ReserveMaintenanceBlocksNewCollect(t *testing.T) {
+func TestBeginMaintenanceRejectsCollectAndSecondMaintenance(t *testing.T) {
 	s := newCollectLifecycle()
 	if err := s.beginSource("in-flight"); err != nil {
 		t.Fatal(err)
 	}
-	entered := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		done <- s.reserveMaintenance(time.Second, func() error {
-			close(entered)
-			if err := s.beginSource("late"); err == nil {
-				return errors.New("maintenance should reject new collect")
-			}
-			return nil
-		})
-	}()
-	select {
-	case <-entered:
-		t.Fatal("maintenance entered before in-flight source finished")
-	case <-time.After(30 * time.Millisecond):
-	}
-	s.endSource("in-flight")
-	if err := <-done; err != nil {
+	if err := s.beginMaintenance(); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.beginSource("late"); !errors.Is(err, errCollectDuringMaintenance) {
+		t.Fatalf("new collect = %v", err)
+	}
+	if err := s.beginMaintenance(); !errors.Is(err, errMaintenanceBusy) {
+		t.Fatalf("second maintenance = %v", err)
+	}
+	s.endDrain()
+	s.endSource("in-flight")
+	if err := s.beginSource("after"); err != nil {
+		t.Fatalf("collect should resume after maintenance: %v", err)
+	}
+	s.endSource("after")
+}
+
+func TestRunMaintenanceRunsAfterInFlightExits(t *testing.T) {
+	prev := maintenanceExitWait
+	maintenanceExitWait = 2 * time.Second
+	defer func() { maintenanceExitWait = prev }()
+
+	s := newCollectLifecycle()
+	if err := s.beginSource("busy"); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		s.endSource("busy")
+	}()
+	called := false
+	if err := s.runMaintenance("测试维护，采集让行", func() error {
+		called = true
+		if err := s.beginSource("late"); !errors.Is(err, errCollectDuringMaintenance) {
+			t.Errorf("new collect = %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("action was not executed")
 	}
 	if err := s.beginSource("after"); err != nil {
 		t.Fatalf("collect should resume after maintenance: %v", err)
@@ -187,22 +210,34 @@ func TestCollectLifecycle_ReserveMaintenanceBlocksNewCollect(t *testing.T) {
 	s.endSource("after")
 }
 
+func TestRunMaintenanceFailsWhenCollectDoesNotExit(t *testing.T) {
+	prev := maintenanceExitWait
+	maintenanceExitWait = 40 * time.Millisecond
+	defer func() { maintenanceExitWait = prev }()
+
+	s := newCollectLifecycle()
+	if err := s.beginSource("stuck"); err != nil {
+		t.Fatal(err)
+	}
+	defer s.endSource("stuck")
+	called := false
+	err := s.runMaintenance("测试维护，采集让行", func() error {
+		called = true
+		return nil
+	})
+	if err == nil || called {
+		t.Fatalf("err=%v called=%v", err, called)
+	}
+	if err := s.beginSource("after"); err != nil {
+		t.Fatalf("gate should release after failure: %v", err)
+	}
+	s.endSource("after")
+}
+
 func TestCollectLifecycle_BeginDrainTimeoutDoesNotReleaseOwner(t *testing.T) {
 	s := newCollectLifecycle()
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		done <- s.reserveMaintenance(time.Second, func() error {
-			close(entered)
-			<-release
-			return nil
-		})
-	}()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("maintenance did not start")
+	if err := s.beginMaintenance(); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.beginDrain(40 * time.Millisecond); err == nil || !errors.Is(err, errDrainTimeout) {
 		t.Fatalf("second drain should time out, got %v", err)
@@ -210,8 +245,9 @@ func TestCollectLifecycle_BeginDrainTimeoutDoesNotReleaseOwner(t *testing.T) {
 	if err := s.beginSource("during"); err == nil {
 		t.Fatal("owner gate must still reject collect after the other drain times out")
 	}
-	close(release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	s.endDrain()
+	if err := s.beginSource("after"); err != nil {
+		t.Fatalf("collect should resume after maintenance: %v", err)
 	}
+	s.endSource("after")
 }

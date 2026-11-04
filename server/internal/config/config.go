@@ -58,18 +58,12 @@ const (
 var (
 	// CollectWriteMaxInflight 全局同时进行的写库事务上限。
 	CollectWriteMaxInflight = 16
-	// CollectWritePagesPerSec 写库稳态流速（页/秒）。
-	CollectWritePagesPerSec = 240
-	// CollectWriteBurstPages 写库允许的小突发（页）。
-	CollectWriteBurstPages = 80
 	// CollectWriteMaxPendingPagesPerSource 单站写库队列上限。
 	CollectWriteMaxPendingPagesPerSource = 500
 	// CollectWriteMaxPendingPagesGlobal 全局写库缓冲上限。
 	CollectWriteMaxPendingPagesGlobal = 5000
 	// CollectPageWorkers 单站分页请求并发数。
 	CollectPageWorkers = 16
-	// CollectPageWorkersSolo 仅 1 个 live 任务时的页并发。
-	CollectPageWorkersSolo = 32
 	// CollectSourceConcurrency 批量采集同时运行的站点数。0 表示不限制。
 	CollectSourceConcurrency = 0
 	// CollectFetchInFlight 全局取数在途上限。
@@ -211,8 +205,6 @@ const (
 	OrphanCleanSpec = "0 0 2 * * *"
 	// DefaultUpdateTime 每次采集最近 24 小时内更新的影片
 	DefaultUpdateTime = 24
-	// DefaultSpiderInterval 默认采集间隔 (ms)，当站点未配置时使用
-	DefaultSpiderInterval = 100
 )
 
 // -------------------------Database Connection Params-----------------------------------
@@ -338,11 +330,11 @@ func loadCollectRuntimeConfig() {
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集配置: 核数=%d 写并发=%d 速率=%d页/s burst=%d 队列缓冲=%d/%d | 页并发=%d(单站=%d) 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
+	fmt.Printf("[Config] 采集配置: 核数=%d 写并发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
 		runtime.GOMAXPROCS(0),
-		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
+		CollectWriteMaxInflight,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
-		CollectPageWorkers, CollectPageWorkersSolo, srcLimit, CollectFetchInFlight,
+		CollectPageWorkers, srcLimit, CollectFetchInFlight,
 		CollectProgressRetainSec, CollectProgressStaleSec)
 }
 

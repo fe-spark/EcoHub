@@ -68,11 +68,8 @@ func resolveCollectProfile() {
 	}
 	CollectSourceConcurrency = 2
 	CollectPageWorkers = 4
-	CollectPageWorkersSolo = 8
 	CollectFetchInFlight = 8
 	CollectWriteMaxInflight = 2
-	CollectWritePagesPerSec = 40
-	CollectWriteBurstPages = 12
 	CollectWriteMaxPendingPagesPerSource = 32
 	CollectWriteMaxPendingPagesGlobal = 64
 }

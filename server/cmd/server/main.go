@@ -150,7 +150,7 @@ func start() {
 	_ = srv.Close()
 
 	// 2. 快速停止采集任务与通知轮询（非阻塞通知协程退出）
-	spider.StopAllTasks()
+	spider.StopAllCollect("进程退出，停止采集")
 	service.NotifySvc.StopBotPoller()
 
 	log.Printf("[Shutdown] 退出完成")

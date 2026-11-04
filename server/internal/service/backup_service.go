@@ -118,7 +118,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 
 	// 2. 导入采集站前停掉采集。未开写的页直接丢掉，只等正在写的事务。
 	if req.Modules.FilmSources {
-		if err := spider.StopAllTasksAndWait(0); err != nil {
+		if err := spider.StopAllTasksAndWait(0, "导入采集站配置，停止采集"); err != nil {
 			return fmt.Errorf("停止进行中的采集失败: %w", err)
 		}
 	}

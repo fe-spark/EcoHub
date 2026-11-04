@@ -2,80 +2,75 @@ package fetcher
 
 import (
 	"context"
+	"errors"
+	"net/url"
 	"testing"
 	"time"
 
-	"server/internal/config"
+	"server/internal/model"
+	"server/internal/utils"
 )
 
-func TestGetSourcePageConcurrencySharesHostBudget(t *testing.T) {
-	prevWorkers := config.CollectPageWorkers
-	prevSolo := config.CollectPageWorkersSolo
-	prevBudget := config.CollectFetchInFlight
-	prevDeps := deps
-	t.Cleanup(func() {
-		config.CollectPageWorkers = prevWorkers
-		config.CollectPageWorkersSolo = prevSolo
-		config.CollectFetchInFlight = prevBudget
-		deps = prevDeps
-	})
-	config.CollectPageWorkers = 16
-	config.CollectPageWorkersSolo = 24
-	config.CollectFetchInFlight = 48
+func TestFetchSlotBlocksWhenFull(t *testing.T) {
+	slots := make(chan struct{}, 1)
+	if err := acquireSlot(context.Background(), slots); err != nil {
+		t.Fatal(err)
+	}
+	blocked, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := acquireSlot(blocked, slots); err == nil {
+		t.Fatal("full slot should block until the context ends")
+	}
+	releaseSlot(slots)
+	if err := acquireSlot(context.Background(), slots); err != nil {
+		t.Fatal(err)
+	}
+	releaseSlot(slots)
+}
 
-	deps.LiveTaskCount = func() int { return 1 }
-	if got := GetSourcePageConcurrency(nil); got != 24 {
-		t.Fatalf("solo=%d", got)
+func TestGetFilmDetailWithRetry_EmptyListDoesNotRetry(t *testing.T) {
+	old := deps
+	t.Cleanup(func() { deps = old })
+
+	var calls int
+	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
+		return func(error) {}, nil
 	}
-	deps.LiveTaskCount = func() int { return 12 }
-	if got := GetSourcePageConcurrency(nil); got != 4 {
-		t.Fatalf("12 stations=%d", got)
-	}
-	deps.LiveTaskCount = func() int { return 2 }
-	if got := GetSourcePageConcurrency(nil); got != 16 {
-		t.Fatalf("2 stations=%d", got)
+	deps.GetFilmDetail = func(*model.FilmSource, utils.RequestInfo) ([]model.MovieDetail, error) {
+		calls++
+		return nil, nil
 	}
 
-	if gotMax := GetSourcePageConcurrencyMax(nil); gotMax != 24 {
-		t.Fatalf("max solo=%d", gotMax)
+	_, err := GetFilmDetailWithRetry(context.Background(), &model.FilmSource{Id: "s"}, utils.RequestInfo{Params: url.Values{}})
+	if err == nil || err.Error() != "response list is empty" {
+		t.Fatalf("err=%v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("empty list calls=%d", calls)
 	}
 }
 
-func TestDynamicLimiterScale(t *testing.T) {
-	currentLimit := 1
-	limiter := newDynamicLimiter(func() int {
-		return currentLimit
-	})
+func TestGetFilmDetailWithRetry_RateLimitRetriesOnce(t *testing.T) {
+	old := deps
+	t.Cleanup(func() { deps = old })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	if err := limiter.acquire(ctx); err != nil {
-		t.Fatalf("首次获取应该成功: %v", err)
+	var calls int
+	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
+		return func(error) {}, nil
+	}
+	deps.GetFilmDetail = func(*model.FilmSource, utils.RequestInfo) ([]model.MovieDetail, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("HTTP 429 Too Many Requests")
+		}
+		return []model.MovieDetail{{Id: 1, Name: "甲"}}, nil
 	}
 
-	// 第二次获取在 limit=1 时应该阻塞
-	blockedCtx, blockedCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer blockedCancel()
-	if err := limiter.acquire(blockedCtx); err == nil {
-		t.Fatal("在达到 limit=1 时第二次获取应该阻塞并超时")
+	list, err := GetFilmDetailWithRetry(context.Background(), &model.FilmSource{Id: "s"}, utils.RequestInfo{Params: url.Values{}})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%v err=%v", list, err)
 	}
-
-	// 动态放开 limit 到 2
-	currentLimit = 2
-	limiter.cond.Broadcast()
-
-	fastCtx, fastCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer fastCancel()
-	if err := limiter.acquire(fastCtx); err != nil {
-		t.Fatalf("动态扩容到 limit=2 后应该成功获取: %v", err)
-	}
-
-	// release 两次
-	limiter.release()
-	limiter.release()
-
-	if limiter.running != 0 {
-		t.Fatalf("全部释放后 running 应该为 0, got %d", limiter.running)
+	if calls != 2 {
+		t.Fatalf("429 should retry once, calls=%d", calls)
 	}
 }

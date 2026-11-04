@@ -22,7 +22,6 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     state: Boolean(item.state),
     sort: Number(item.sort ?? 0),
     isPrimary: Boolean(item.isPrimary),
-    interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastRunTime: item.lastRunTime,
     lastRunPageCount: item.lastRunPageCount ? Number(item.lastRunPageCount) : 0,

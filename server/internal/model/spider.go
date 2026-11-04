@@ -67,7 +67,6 @@ type FilmSource struct {
 	Sort               int       `json:"sort" gorm:"default:0;index"`          // 站点排序序号，越小越靠前
 	IsPrimary          bool      `json:"isPrimary" gorm:"-"`                   // 运行时动态标记是否为首位基准站（首位生效站点）
 	IsPosterSource     bool      `json:"isPosterSource" gorm:"default:false"`  // 是否为海报/封面图源（全局单选）
-	Interval           int       `json:"interval"`                             // 采集时间间隔 单位/ms
 	Cd                 int       `json:"cd"`                                   // 采集时长 单位/小时
 	Format             string    `json:"format" gorm:"size:16;default:'json'"` // 采集数据格式: json | xml (默认 json)
 	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"`  // 播放链接域名替换规则 (每行一条: old.com => new.com)

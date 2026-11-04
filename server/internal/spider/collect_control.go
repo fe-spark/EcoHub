@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"server/internal/model"
@@ -17,9 +19,87 @@ const deleteStopTimeout = 3 * time.Minute
 // importStopTimeout 导入停采集的等待上限。只覆盖正在执行的写事务。
 const importStopTimeout = 20 * time.Second
 
-// StopTask 停止拉页，并丢掉该站还没开写的页。正在写的事务写完后，运行退出才标成已停止。
-// 还没跑起来的站直接标成已停止。两种情况都马上放掉占用，新采集不会被旧批次盖掉。
+var (
+	stopAllReason     atomic.Value
+	sourceStopReasons sync.Map
+)
+
+func normalizeStopReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "未说明原因"
+	}
+	return reason
+}
+
+func currentStopAllReason() string {
+	reason, _ := stopAllReason.Load().(string)
+	if reason == "" {
+		return "未说明原因"
+	}
+	return reason
+}
+
+func sourceStopReason(sourceID string) string {
+	if v, ok := sourceStopReasons.Load(strings.TrimSpace(sourceID)); ok {
+		if reason, ok := v.(string); ok {
+			return reason
+		}
+	}
+	return ""
+}
+
+func rememberSourceStop(sourceID, reason string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	sourceStopReasons.Store(sourceID, reason)
+}
+
+// collectStopReason 站点这次被停掉的原因。单站原因优先于最近一次全部停止。
+func collectStopReason(sourceID string) string {
+	if reason := sourceStopReason(sourceID); reason != "" {
+		return reason
+	}
+	return currentStopAllReason()
+}
+
+// StopAllCollect 停止全部采集，并记下原因供后续派发日志使用。
+func StopAllCollect(reason string) {
+	reason = normalizeStopReason(reason)
+	stopAllReason.Store(reason)
+	stopAllVersion.Add(1)
+	ids := make([]string, 0)
+	progress.RangeTasks(func(id, _ string) bool {
+		ids = append(ids, id)
+		return true
+	})
+	for _, id := range ids {
+		rememberSourceStop(id, reason)
+		log.Printf("[Spider] 停止站点采集：id=%s，%s", id, reason)
+		progress.RequestStop(id)
+	}
+	progress.MarkAllRunningStopped()
+	releaseQueuedCollectOccupies()
+	scheduler.CancelPendingWrites()
+	log.Printf("[Spider] 停止全部采集：%s，活跃任务 %d 个", reason, len(ids))
+}
+
+// StopTask 用户停止单个采集站。
 func StopTask(sourceID string) {
+	StopCollectSource(sourceID, "用户停止该站")
+}
+
+// StopCollectSource 停止单个采集站，日志写明原因。
+func StopCollectSource(sourceID, reason string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	reason = normalizeStopReason(reason)
+	rememberSourceStop(sourceID, reason)
+	log.Printf("[Spider] 停止站点采集：id=%s，%s", sourceID, reason)
 	progress.RequestStop(sourceID)
 	releaseCollectSourceIDs(sourceID)
 	scheduler.CancelSource(sourceID)
@@ -47,35 +127,21 @@ func StopSourceForDelete(sourceID string) (release func(), err error) {
 }
 
 func stopAndWaitSource(sourceID string) error {
-	StopTask(sourceID)
+	StopCollectSource(sourceID, "删除采集站，停止采集")
 	return collectLifecycle.waitSource(sourceID, deleteStopTimeout)
 }
 
-// StopAllTasks 一键终止：先递增派发版本号阻断新站点启动，再停止全部活跃任务。
+// StopAllTasks 用户一键终止全部采集。
 func StopAllTasks() {
-	stopAllVersion.Add(1)
-	ids := make([]string, 0)
-	progress.RangeTasks(func(id, _ string) bool {
-		ids = append(ids, id)
-		return true
-	})
-	for _, id := range ids {
-		progress.RequestStop(id)
-	}
-	progress.MarkAllRunningStopped()
-	releaseQueuedCollectOccupies()
-	scheduler.CancelPendingWrites()
-	if len(ids) > 0 {
-		log.Printf("[Spider] 已强制停止 %d 个活跃采集任务\n", len(ids))
-	}
+	StopAllCollect("用户一键终止")
 }
 
-// StopAllTasksAndWait 停止全部采集并等待正在写的事务结束。
-func StopAllTasksAndWait(timeout time.Duration) error {
+// StopAllTasksAndWait 按给定原因停止全部采集，并等待正在写的事务结束。
+func StopAllTasksAndWait(timeout time.Duration, reason string) error {
 	if timeout <= 0 {
 		timeout = importStopTimeout
 	}
-	StopAllTasks()
+	StopAllCollect(reason)
 	return collectLifecycle.waitNotBusy(timeout)
 }
 

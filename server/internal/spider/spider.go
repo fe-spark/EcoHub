@@ -75,15 +75,12 @@ func init() {
 		GetFilmDetail: func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
 			return ResolveCollector(s.ResolveFormat()).GetFilmDetail(r)
 		},
-		WaitTurn:      waitSourceRequestTurn,
-		LiveTaskCount: countLiveCollectTasks,
-		SavePage:      saveCollectedFilmForCollect,
-
-		SkipPublishOnError:     shouldSkipCollectPublishOnError,
-		ResolveSpiderProxy:     repository.ResolveSpiderProxy,
-		ResolveSourceProxy:     repository.ResolveSourceProxy,
-		OnSourceFailed:         emitSourceFailedNotify,
-		SourceConcurrencyScale: GetSourceConcurrencyScale,
+		WaitTurn:           waitSourceRequestTurn,
+		SavePage:           saveCollectedFilmForCollect,
+		SkipPublishOnError: shouldSkipCollectPublishOnError,
+		ResolveSpiderProxy: repository.ResolveSpiderProxy,
+		ResolveSourceProxy: repository.ResolveSourceProxy,
+		OnSourceFailed:     emitSourceFailedNotify,
 	})
 }
 
@@ -121,10 +118,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		}
 	}()
 	if runVersion != nil && isDispatchStopped(*runVersion) {
-		return errors.New("任务已被一键终止，跳过启动")
+		reason := currentStopAllReason()
+		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
+		return fmt.Errorf("停止采集：%s", reason)
 	}
 	if (runVersion != nil || allowPreparedStart) && (progress.IsStopped(id) || progress.IsStopping(id)) {
-		return errors.New("任务已被停止，跳过启动")
+		reason := collectStopReason(id)
+		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
+		return fmt.Errorf("停止采集：%s", reason)
 	}
 	if runVersion == nil && !allowPreparedStart && progress.IsStarting(id) {
 		return errors.New("该采集站已在批量队列中，已跳过本次采集")
@@ -137,6 +138,17 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		return errors.New("采集站点已停用")
 	}
 	if err := collectLifecycle.beginSource(id); err != nil {
+		if errors.Is(err, errCollectDuringMaintenance) {
+			log.Printf("[Spider] 站点 %s 停止采集：维护任务执行中（%s）", id, maintenanceRunningDetail())
+			progress.MarkStopped(id)
+			if batchCtx != nil {
+				batchCtx.releaseSourceOccupy(id)
+			} else {
+				releaseCollectSourceIDs(id)
+			}
+			releasedPreparedOccupy = true
+			return nil
+		}
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
 		return err
 	}
@@ -255,9 +267,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	})
 	switch {
 	case errors.Is(err, progress.ErrDispatchStopped):
-		return errors.New("任务已被一键终止，跳过启动")
+		reason := currentStopAllReason()
+		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
+		return fmt.Errorf("停止采集：%s", reason)
 	case errors.Is(err, progress.ErrStopRequested):
-		return errors.New("任务已被停止，跳过启动")
+		reason := collectStopReason(id)
+		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
+		return fmt.Errorf("停止采集：%s", reason)
 	case errors.Is(err, progress.ErrTaskExists):
 		log.Printf("[Spider] 站点 %s 已有任务正在运行，跳过本次采集...\n", id)
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", id)

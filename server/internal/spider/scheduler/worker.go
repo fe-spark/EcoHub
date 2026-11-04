@@ -122,7 +122,6 @@ func (l *writeLane) snapshot() writeSnapshot {
 		WritingSources:   writing,
 		MaxPendingSource: l.maxPerSource,
 		MaxPendingGlobal: l.maxGlobal,
-		PagesPerSec:      int(l.limiter.Limit()),
 		MaxInflight:      l.workers,
 	}
 }

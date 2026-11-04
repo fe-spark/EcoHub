@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +25,6 @@ var CronCollect *cron.Cron = CreateCron()
 // Cid 是内存值，不持久化到 DB，每次重启重新注册
 var taskCidMap = make(map[string]cron.EntryID)
 var taskCidLock sync.RWMutex
-var orphanCleanTaskLock sync.Mutex
 
 // runningCronTasks 记录当前正在执行的定时任务 ID,用于前端展示"执行中"以及禁用编辑操作。
 var runningCronTasks sync.Map
@@ -180,11 +180,35 @@ func runTaskBody(ft model.FilmCollectTask) {
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
 }
 
-var (
-	runningMaintenanceTasks sync.Map
-	orphanCleanWaitTimeout  = 10 * time.Minute
-	maintenanceWaitTimeout  = 10 * time.Minute
-)
+var runningMaintenanceTasks sync.Map
+
+func isMaintenanceModel(taskModel int) bool {
+	switch taskModel {
+	case model.TaskModelOrphanClean, model.TaskModelLogClean, model.TaskModelCollectClean:
+		return true
+	default:
+		return false
+	}
+}
+
+func maintenanceRunningDetail() string {
+	ids := make([]string, 0)
+	runningMaintenanceTasks.Range(func(key, _ any) bool {
+		id, _ := key.(string)
+		if id != "" {
+			ids = append(ids, id)
+		}
+		return true
+	})
+	if len(ids) == 0 {
+		if collectLifecycle.isMaintenanceBusy() {
+			return "维护闸门占用中"
+		}
+		return "无记录"
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, "，")
+}
 
 func isMaintenanceRunning() bool {
 	count := 0
@@ -195,20 +219,50 @@ func isMaintenanceRunning() bool {
 	return count > 0 || collectLifecycle.isMaintenanceBusy()
 }
 
-func executeOrphanCleanTask(ft model.FilmCollectTask) {
+func rejectManualRun(ft model.FilmCollectTask) error {
+	if !isMaintenanceRunning() {
+		return nil
+	}
+	if isMaintenanceModel(ft.Model) {
+		return fmt.Errorf("%w（%s）", errMaintenanceBusy, maintenanceRunningDetail())
+	}
+	if ft.Model == model.TaskModelAutoCollect {
+		return fmt.Errorf("%w（%s）", errCollectDuringMaintenance, maintenanceRunningDetail())
+	}
+	return nil
+}
+
+func executeMaintenance(ft model.FilmCollectTask, fallback string, action func(remark string, startedAt time.Time) error) {
 	runningMaintenanceTasks.Store(ft.Id, struct{}{})
 	defer runningMaintenanceTasks.Delete(ft.Id)
 
-	orphanCleanTaskLock.Lock()
-	defer orphanCleanTaskLock.Unlock()
 	startedAt := time.Now()
-	remark := ft.Remark
-	if strings.TrimSpace(remark) == "" {
-		remark = "片库冗余数据与孤儿清理"
+	remark := strings.TrimSpace(ft.Remark)
+	if remark == "" {
+		remark = fallback
 	}
-	err := collectLifecycle.reserveMaintenance(orphanCleanWaitTimeout, func() error {
+	err := collectLifecycle.runMaintenance(fmt.Sprintf("维护任务开工，采集让行：%s（%s）", remark, ft.Id), func() error {
 		noteTaskRan(ft.Id, time.Now())
-		log.Printf("[CleanOrphan] 低频清理优先：已阻断新采集，开始独占清理，waitCost=%s", time.Since(startedAt))
+		log.Printf("[Maintenance] 采集已让行，开始执行：%s（%s）", remark, ft.Id)
+		return action(remark, startedAt)
+	})
+	finishMaintenance(ft, remark, err)
+}
+
+func finishMaintenance(ft model.FilmCollectTask, remark string, err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, errMaintenanceBusy) {
+		log.Printf("定时任务跳过: %s（%s），已有维护任务在执行（%s）", remark, ft.Id, maintenanceRunningDetail())
+		return
+	}
+	syslog.Errorf("[Maintenance] %s 失败: %v", remark, err)
+	emitCronFailedNotify(ft.Id, remark, err.Error())
+}
+
+func executeOrphanCleanTask(ft model.FilmCollectTask) {
+	executeMaintenance(ft, "片库冗余数据与孤儿清理", func(remark string, startedAt time.Time) error {
 		if db.Mdb == nil {
 			return nil
 		}
@@ -224,19 +278,6 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 			remark, n, k, p, m, time.Since(startedAt))
 		return nil
 	})
-	finishOrphanClean(ft, remark, startedAt, err)
-}
-
-func finishOrphanClean(ft model.FilmCollectTask, remark string, startedAt time.Time, err error) {
-	if err == nil {
-		return
-	}
-	if errors.Is(err, errDrainTimeout) {
-		log.Printf("定时任务跳过: %s，%v，耗时 %s", remark, err, time.Since(startedAt))
-		return
-	}
-	syslog.Errorf("[CleanOrphan] 片库清理已执行但失败: %v", err)
-	emitCronFailedNotify(ft.Id, remark, err.Error())
 }
 
 func cleanOrphanData() (int64, int64, error) {
@@ -267,16 +308,7 @@ const (
 )
 
 func executeLogCleanTask(ft model.FilmCollectTask) {
-	runningMaintenanceTasks.Store(ft.Id, struct{}{})
-	defer runningMaintenanceTasks.Delete(ft.Id)
-
-	startedAt := time.Now()
-	remark := ft.Remark
-	if strings.TrimSpace(remark) == "" {
-		remark = "清理过期运行日志"
-	}
-	err := collectLifecycle.reserveMaintenance(maintenanceWaitTimeout, func() error {
-		noteTaskRan(ft.Id, time.Now())
+	executeMaintenance(ft, "清理过期运行日志", func(remark string, startedAt time.Time) error {
 		n, err := syslog.PruneExpiredLogs(logRetention)
 		if err != nil {
 			return err
@@ -284,45 +316,25 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 		log.Printf("定时任务完成: %s，清理过期日志 %d 个，耗时 %s", remark, n, time.Since(startedAt))
 		return nil
 	})
-	if err != nil {
-		if errors.Is(err, errDrainTimeout) {
-			log.Printf("定时任务跳过: %s，%v，耗时 %s", remark, err, time.Since(startedAt))
-			return
-		}
-		syslog.Errorf("[LogClean] 清理过期运行日志失败: %v", err)
-		emitCronFailedNotify(ft.Id, remark, err.Error())
-	}
 }
 
 func executeCollectRecordCleanTask(ft model.FilmCollectTask) {
-	runningMaintenanceTasks.Store(ft.Id, struct{}{})
-	defer runningMaintenanceTasks.Delete(ft.Id)
-
-	startedAt := time.Now()
-	remark := ft.Remark
-	if strings.TrimSpace(remark) == "" {
-		remark = "定期清理超过 30 天的采集运行记录与快照"
-	}
-	err := collectLifecycle.reserveMaintenance(maintenanceWaitTimeout, func() error {
-		noteTaskRan(ft.Id, time.Now())
-		return repository.CleanOldCollectRecords(30)
-	})
-	if err != nil {
-		if errors.Is(err, errDrainTimeout) {
-			log.Printf("定时任务跳过: %s，%v，耗时 %s", remark, err, time.Since(startedAt))
-			return
+	executeMaintenance(ft, "定期清理超过 30 天的采集运行记录与快照", func(remark string, startedAt time.Time) error {
+		if err := repository.CleanOldCollectRecords(30); err != nil {
+			return err
 		}
-		log.Printf("定时任务失败: %s，err=%v，耗时 %s", remark, err, time.Since(startedAt))
-		emitCronFailedNotify(ft.Id, remark, err.Error())
-	} else {
 		log.Printf("定时任务完成: %s，耗时 %s", remark, time.Since(startedAt))
-	}
+		return nil
+	})
 }
 
 // RunTaskOnce 立即手动执行一次任务
 func RunTaskOnce(id string) error {
 	ft, err := repository.GetFilmTaskById(id)
 	if err != nil {
+		return err
+	}
+	if err := rejectManualRun(ft); err != nil {
 		return err
 	}
 	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
@@ -354,13 +366,12 @@ func noteTaskRan(id string, at time.Time) {
 	taskRanAt.Store(id, at)
 }
 
-// TaskPrev 上次真正开工的时间。排队和等待让路不算，调度触发和手动执行都算。
+// TaskPrev 上次真正开工的时间。调度入队、让行和跳过不算。
 func TaskPrev(taskId string) time.Time {
-	prev := GetEntryByTaskId(taskId).Prev
 	if v, ok := taskRanAt.Load(taskId); ok {
-		if at, ok := v.(time.Time); ok && at.After(prev) {
+		if at, ok := v.(time.Time); ok {
 			return at
 		}
 	}
-	return prev
+	return time.Time{}
 }

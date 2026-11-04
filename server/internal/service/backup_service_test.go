@@ -79,7 +79,6 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 			Uri:      "https://api.source1.com/api.php/provide/vod",
 			State:    true,
 			Sort:     1,
-			Interval: 300,
 			Cd:       24,
 			Format:   "json",
 		},
