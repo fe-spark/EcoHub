@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/utils"
@@ -441,9 +440,6 @@ func DemoteExistingPosterSourceTx(tx *gorm.DB, exceptID string) error {
 }
 
 func normalizeCollectSourceDefaults(source *model.FilmSource) {
-	if source.Interval <= 0 {
-		source.Interval = config.DefaultSpiderInterval
-	}
 	normalizeCollectCd(source)
 	if source.Format == "" {
 		source.Format = model.SourceFormatJSON

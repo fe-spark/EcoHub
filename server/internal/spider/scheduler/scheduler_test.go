@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,9 +10,6 @@ import (
 
 func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
 	lane := newWriteLane("test-rr")
-	// 关闭限速影响：把 limiter 设得极高，只验证取页顺序。
-	lane.limiter.SetLimit(1e6)
-	lane.limiter.SetBurst(1000)
 	lane.workers = 0 // 不自动 start workers，手动 nextJob
 
 	// 站 A 页 1,2,3；站 B 页 101,102,103
@@ -63,8 +59,6 @@ func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
 
 func TestWriteLaneSameSourceSerial(t *testing.T) {
 	lane := newWriteLane("test-serial")
-	lane.limiter.SetLimit(1e6)
-	lane.limiter.SetBurst(1000)
 	// 多 worker 下同站仍必须串行（writing 互斥）。
 	lane.workers = 3
 	lane.start()
@@ -106,47 +100,8 @@ func TestWriteLaneSameSourceSerial(t *testing.T) {
 	}
 }
 
-func TestWriteLaneRateLimitApprox(t *testing.T) {
-	lane := newWriteLane("test-rate")
-	// 约 10 页/秒，burst=1
-	lane.limiter.SetLimit(10)
-	lane.limiter.SetBurst(1)
-	lane.workers = 1
-	lane.start()
-
-	const pages = 6
-	var wg sync.WaitGroup
-	wg.Add(pages)
-	start := time.Now()
-	for i := 1; i <= pages; i++ {
-		p := i
-		if err := lane.submit(context.Background(), Job{
-			SourceID:   "R1",
-			SourceName: "R1",
-			Page:       p,
-			Write:      func() (Mids, error) { return Mids{}, nil },
-			Complete:   func(Completion) { wg.Done() },
-		}); err != nil {
-			t.Fatalf("submit: %v", err)
-		}
-	}
-	lane.finishSource("R1")
-	wg.Wait()
-	elapsed := time.Since(start)
-
-	// 6 页 @10/s 理论约 0.5s+，允许抖动；应明显大于无限制的瞬时完成。
-	if elapsed < 400*time.Millisecond {
-		t.Fatalf("rate limit too loose: finished %d pages in %s", pages, elapsed)
-	}
-	if elapsed > 3*time.Second {
-		t.Fatalf("rate limit too strict: finished %d pages in %s", pages, elapsed)
-	}
-}
-
 func TestWriteLaneGlobalBackpressure(t *testing.T) {
 	lane := newWriteLane("test-global-bp")
-	lane.limiter.SetLimit(1e6)
-	lane.limiter.SetBurst(1000)
 	lane.maxPerSource = 10
 	lane.maxGlobal = 3
 	lane.workers = 0
@@ -217,8 +172,6 @@ func TestWriteLaneGlobalBackpressure(t *testing.T) {
 
 func TestWriteLaneSourceBackpressure(t *testing.T) {
 	lane := newWriteLane("test-source-bp")
-	lane.limiter.SetLimit(1e6)
-	lane.limiter.SetBurst(1000)
 	lane.maxPerSource = 2
 	lane.maxGlobal = 100
 	lane.workers = 0
@@ -274,8 +227,6 @@ func TestWriteLaneSourceBackpressure(t *testing.T) {
 
 func TestWriteLanePanicReleasesWriting(t *testing.T) {
 	lane := newWriteLane("test-panic")
-	lane.limiter.SetLimit(1e6)
-	lane.limiter.SetBurst(1000)
 	lane.workers = 1
 	lane.start()
 
@@ -324,52 +275,8 @@ func TestWriteLanePanicReleasesWriting(t *testing.T) {
 	}
 }
 
-func TestWriteLaneReserveCancelDoesNotStarve(t *testing.T) {
-	// 多 worker + 极少页：验证 take 失败路径会 Cancel reservation，
-	// 不会因为空烧 token 把后续页拖到数秒级。
-	lane := newWriteLane("test-reserve-cancel")
-	lane.limiter.SetLimit(20) // 20 页/秒
-	lane.limiter.SetBurst(1)
-	lane.workers = 4
-	lane.start()
-
-	const pages = 8
-	var wg sync.WaitGroup
-	wg.Add(pages)
-	start := time.Now()
-	for i := 1; i <= pages; i++ {
-		p := i
-		// 分散到多个站，放大 take 竞争。
-		src := fmt.Sprintf("S%d", (i-1)%4)
-		if err := lane.submit(context.Background(), Job{
-			SourceID:   src,
-			SourceName: src,
-			Page:       p,
-			Write: func() (Mids, error) {
-				time.Sleep(2 * time.Millisecond)
-				return Mids{}, nil
-			},
-			Complete: func(Completion) { wg.Done() },
-		}); err != nil {
-			t.Fatalf("submit: %v", err)
-		}
-	}
-	for _, id := range []string{"S0", "S1", "S2", "S3"} {
-		lane.finishSource(id)
-	}
-	wg.Wait()
-	elapsed := time.Since(start)
-
-	// 8 页 @20/s 理论 ~0.35s+；若空烧严重会远超 2s。
-	if elapsed > 2*time.Second {
-		t.Fatalf("reserve cancel likely broken: 8 pages took %s", elapsed)
-	}
-}
-
 func TestWriteLaneWaitPending(t *testing.T) {
 	lane := newWriteLane("test-wait-pending")
-	lane.limiter.SetLimit(100)
-	lane.limiter.SetBurst(10)
 	lane.workers = 2
 	lane.start()
 
@@ -471,8 +378,6 @@ func TestWriteLaneWaitPending_WorkerPanic(t *testing.T) {
 
 func TestWriteLaneCancelSourceCompletesPending(t *testing.T) {
 	lane := newWriteLane("test-cancel-source")
-	lane.limiter.SetLimit(1e6)
-	lane.limiter.SetBurst(1000)
 	lane.workers = 0
 
 	var completed atomic.Int32

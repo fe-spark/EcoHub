@@ -163,18 +163,18 @@ func (s *InitService) AnalyticsConfigInit() error {
 func defaultFilmSources() []model.FilmSource {
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	list := []model.FilmSource{
-		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24, IsPosterSource: true},
-		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24},
-		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, State: true, Interval: 50, Cd: 24},
-		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24},
-		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, State: true, Interval: 50, Cd: 24},
-		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, State: true, Interval: 50, Cd: 24},
-		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, State: true, Interval: 50, Cd: 24},
-		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, State: true, Interval: 50, Cd: 24},
-		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, State: true, Interval: 50, Cd: 24},
-		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, State: true, Interval: 50, Cd: 24},
-		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, State: true, Interval: 50, Cd: 24},
-		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, State: true, Interval: 50, Cd: 24},
+		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, State: true, Cd: 24, IsPosterSource: true},
+		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, State: true, Cd: 24},
+		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, State: true, Cd: 24},
+		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, State: true, Cd: 24},
+		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, State: true, Cd: 24},
+		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, State: true, Cd: 24},
+		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, State: true, Cd: 24},
+		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, State: true, Cd: 24},
+		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, State: true, Cd: 24},
+		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, State: true, Cd: 24},
+		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, State: true, Cd: 24},
+		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, State: true, Cd: 24},
 	}
 	for i := range list {
 		list[i].Sort = i

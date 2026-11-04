@@ -21,7 +21,6 @@ function site(
     uri: "",
     state: true,
     sort: 0,
-    interval: 0,
     progress: progress ?? null,
   };
 }

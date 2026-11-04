@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -47,52 +48,47 @@ func TestExecuteLogCleanTask(t *testing.T) {
 	executeLogCleanTask(ft2)
 }
 
-func TestExecuteOrphanCleanTask_LowFrequencyPriority(t *testing.T) {
-	origTimeout := orphanCleanWaitTimeout
-	defer func() { orphanCleanWaitTimeout = origTimeout }()
-	orphanCleanWaitTimeout = 300 * time.Millisecond
+func TestExecuteOrphanCleanTask_YieldsInFlightCollect(t *testing.T) {
+	prev := maintenanceExitWait
+	maintenanceExitWait = 300 * time.Millisecond
+	defer func() { maintenanceExitWait = prev }()
 
 	ft := model.FilmCollectTask{
 		Id:     "test_sys_orphan_clean",
-		Model:  2,
+		Model:  model.TaskModelOrphanClean,
 		State:  true,
-		Remark: "测试低频清理优先",
+		Remark: "测试采集让行",
 	}
-
-	executeOrphanCleanTask(ft)
 
 	if err := collectLifecycle.beginSource("test_busy_src"); err != nil {
 		t.Fatalf("beginSource failed: %v", err)
 	}
-	rejected := make(chan error, 1)
 	go func() {
 		time.Sleep(40 * time.Millisecond)
-		rejected <- collectLifecycle.beginSource("test_late_src")
-	}()
-	time.AfterFunc(80*time.Millisecond, func() {
 		collectLifecycle.endSource("test_busy_src")
-	})
-	start := time.Now()
+	}()
 	executeOrphanCleanTask(ft)
-	if time.Since(start) < 60*time.Millisecond {
-		t.Errorf("expected to wait for in-flight collect, returned in %v", time.Since(start))
-	}
-	if err := <-rejected; err == nil {
-		collectLifecycle.endSource("test_late_src")
-		t.Fatal("new collect should be rejected while low-frequency clean holds the gate")
-	}
 
 	if err := collectLifecycle.beginSource("after_clean"); err != nil {
 		t.Fatalf("collect should resume after clean: %v", err)
 	}
 	collectLifecycle.endSource("after_clean")
+}
 
-	orphanCleanWaitTimeout = 40 * time.Millisecond
-	if err := collectLifecycle.beginSource("test_stuck_src"); err != nil {
-		t.Fatalf("beginSource failed: %v", err)
+func TestRejectManualRun(t *testing.T) {
+	if err := collectLifecycle.beginMaintenance(); err != nil {
+		t.Fatal(err)
 	}
-	defer collectLifecycle.endSource("test_stuck_src")
-	executeOrphanCleanTask(ft)
+	defer collectLifecycle.endDrain()
+
+	collect := model.FilmCollectTask{Id: "collect", Model: model.TaskModelAutoCollect}
+	if err := rejectManualRun(collect); !errors.Is(err, errCollectDuringMaintenance) {
+		t.Fatalf("collect = %v", err)
+	}
+	orphan := model.FilmCollectTask{Id: "orphan", Model: model.TaskModelOrphanClean}
+	if err := rejectManualRun(orphan); !errors.Is(err, errMaintenanceBusy) {
+		t.Fatalf("maintenance = %v", err)
+	}
 }
 
 func TestFinishOrphanClean_NotifiesExecutedFailure(t *testing.T) {
@@ -107,22 +103,36 @@ func TestFinishOrphanClean_NotifiesExecutedFailure(t *testing.T) {
 			reason = got
 		},
 	})
-	finishOrphanClean(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", time.Now(), errors.New("刷新读模型失败"))
+	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", errors.New("刷新读模型失败"))
 	if reason != "刷新读模型失败" {
 		t.Fatalf("expected executed-failure notify, got %q", reason)
 	}
 }
 
-func TestFinishOrphanClean_DrainTimeoutDoesNotNotify(t *testing.T) {
+func TestFinishMaintenance_BusyDoesNotNotify(t *testing.T) {
 	prev := getNotifyDispatcher()
 	defer RegisterNotifyDispatcher(prev)
 	called := false
 	RegisterNotifyDispatcher(NotifyDispatcher{
 		OnCronFailed: func(string, string, string) { called = true },
 	})
-	finishOrphanClean(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", time.Now(), fmt.Errorf("%w: active=1", errDrainTimeout))
+	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", errMaintenanceBusy)
 	if called {
-		t.Fatal("drain timeout must not notify")
+		t.Fatal("busy skip must not notify")
+	}
+}
+
+func TestFinishMaintenance_WriteWaitNotifies(t *testing.T) {
+	prev := getNotifyDispatcher()
+	defer RegisterNotifyDispatcher(prev)
+	var reason string
+	RegisterNotifyDispatcher(NotifyDispatcher{
+		OnCronFailed: func(_, _, got string) { reason = got },
+	})
+	err := fmt.Errorf("等待在途写入结束失败: %w", context.DeadlineExceeded)
+	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", err)
+	if reason != err.Error() {
+		t.Fatalf("reason = %q", reason)
 	}
 }
 
@@ -145,22 +155,22 @@ func TestPlanCronBatchSkipsCollectWhenMaintenanceDue(t *testing.T) {
 	logClean := model.FilmCollectTask{Id: "log", Model: model.TaskModelLogClean, State: true}
 	orphan := model.FilmCollectTask{Id: "orphan", Model: model.TaskModelOrphanClean, State: true}
 
-	run, skipped := planCronBatch([]model.FilmCollectTask{collect, logClean, orphan, collect}, false)
-	if len(skipped) != 1 || skipped[0] != "collect" {
-		t.Fatalf("skipped = %v", skipped)
+	run, skippedCollect, skippedMaintenance := planCronBatch([]model.FilmCollectTask{collect, logClean, orphan, collect}, false)
+	if len(skippedCollect) != 1 || skippedCollect[0] != "collect" || len(skippedMaintenance) != 0 {
+		t.Fatalf("skipped collect=%v maintenance=%v", skippedCollect, skippedMaintenance)
 	}
 	if len(run) != 2 || run[0].Id != "log" || run[1].Id != "orphan" {
 		t.Fatalf("run = %+v", run)
 	}
 
-	run, skipped = planCronBatch([]model.FilmCollectTask{collect}, true)
-	if len(run) != 0 || len(skipped) != 1 || skipped[0] != "collect" {
-		t.Fatalf("busy run=%+v skipped=%v", run, skipped)
+	run, skippedCollect, skippedMaintenance = planCronBatch([]model.FilmCollectTask{collect, logClean}, true)
+	if len(run) != 0 || len(skippedCollect) != 1 || skippedCollect[0] != "collect" || len(skippedMaintenance) != 1 || skippedMaintenance[0] != "log" {
+		t.Fatalf("busy run=%+v collect=%v maintenance=%v", run, skippedCollect, skippedMaintenance)
 	}
 
-	run, skipped = planCronBatch([]model.FilmCollectTask{collect, collect}, false)
-	if len(skipped) != 0 || len(run) != 1 || run[0].Id != "collect" {
-		t.Fatalf("collect only run=%+v skipped=%v", run, skipped)
+	run, skippedCollect, skippedMaintenance = planCronBatch([]model.FilmCollectTask{collect, collect}, false)
+	if len(skippedCollect) != 0 || len(skippedMaintenance) != 0 || len(run) != 1 || run[0].Id != "collect" {
+		t.Fatalf("collect only run=%+v collect=%v maintenance=%v", run, skippedCollect, skippedMaintenance)
 	}
 }
 

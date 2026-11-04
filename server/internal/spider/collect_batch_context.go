@@ -27,6 +27,12 @@ func registerActiveBatch(b *collectBatchContext) {
 	activeBatches[b] = struct{}{}
 }
 
+func activeBatchCount() int {
+	activeBatchesMu.Lock()
+	defer activeBatchesMu.Unlock()
+	return len(activeBatches)
+}
+
 func unregisterActiveBatch(b *collectBatchContext) {
 	if b == nil {
 		return

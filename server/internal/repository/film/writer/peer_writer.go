@@ -283,17 +283,24 @@ func refreshRemarksAndPlaySummaryWithStampTx(tx *gorm.DB, mids []int64, stampMid
 	return nil
 }
 
-func runPeerCollectTx(fn func(tx *gorm.DB) error) error {
-	if db.Mdb != nil && db.Mdb.Dialector != nil && db.Mdb.Dialector.Name() == "mysql" {
-		return db.Mdb.Transaction(fn, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+func runPeerCollectTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	conn := db.Mdb
+	if conn == nil {
+		return errors.New("数据库未连接")
 	}
-	return db.Mdb.Transaction(fn)
+	if ctx != nil {
+		conn = conn.WithContext(ctx)
+	}
+	if conn.Dialector != nil && conn.Dialector.Name() == "mysql" {
+		return conn.Transaction(fn, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	}
+	return conn.Transaction(fn)
 }
 
 func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, stored bool, err error) {
 	var linesChanged bool
 	var metaChanged bool
-	err = runPeerCollectTx(func(tx *gorm.DB) error {
+	err = runPeerCollectTx(context.Background(), func(tx *gorm.DB) error {
 		var existingMapping model.MovieSourceMapping
 		hasMapping := false
 		if err := tx.Where("source_id = ? AND source_mid = ?", source.Id, detail.Id).First(&existingMapping).Error; err == nil && existingMapping.GlobalMid > 0 {
@@ -415,7 +422,6 @@ func SaveCollectedPeerDetails(
 	page int,
 	list []model.MovieDetail,
 ) (scheduler.Mids, error) {
-	_ = ctx
 	details := filterPeerPageDetails(list)
 	if len(details) == 0 {
 		return scheduler.Mids{}, nil
@@ -429,7 +435,7 @@ func SaveCollectedPeerDetails(
 
 	var affected []int64
 	var notify []int64
-	err := runPeerCollectTx(func(tx *gorm.DB) error {
+	err := runPeerCollectTx(ctx, func(tx *gorm.DB) error {
 		var writeErr error
 		affected, notify, writeErr = writePeerPage(tx, source, details, sources)
 		return writeErr

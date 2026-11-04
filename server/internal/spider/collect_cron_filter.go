@@ -15,6 +15,10 @@ func AutoCollect(h int) {
 
 // AutoCollectTriggered 定时或自动触发采集，完全复用采集中心的批量采集逻辑。
 func AutoCollectTriggered(trigger string, h int) {
+	if isMaintenanceRunning() {
+		log.Printf("[Spider] 自动采集跳过：维护任务执行中（%s）", maintenanceRunningDetail())
+		return
+	}
 	if trigger == "" {
 		trigger = model.CollectTriggerCron
 	}

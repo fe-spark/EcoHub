@@ -67,7 +67,6 @@ export function useCollectSourceForm({
         uri: String(resp.data.uri ?? ""),
         state: Boolean(resp.data.state),
         isPosterSource: Boolean(resp.data.isPosterSource),
-        interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
         format: (resp.data.format as "json" | "xml") || "json",
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),

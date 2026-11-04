@@ -88,32 +88,26 @@ func TestApplyContainerCPUQuota_CgroupV1(t *testing.T) {
 type collectProfileValues struct {
 	source int
 	pages  int
-	solo   int
 	fetch  int
 	write  int
-	rate   int
-	burst  int
 	perSrc int
 	global int
 }
 
 func highCollectProfile() collectProfileValues {
-	return collectProfileValues{source: 0, pages: 16, solo: 32, fetch: 128, write: 16, rate: 240, burst: 80, perSrc: 500, global: 5000}
+	return collectProfileValues{source: 0, pages: 16, fetch: 128, write: 16, perSrc: 500, global: 5000}
 }
 
 func smallCollectProfile() collectProfileValues {
-	return collectProfileValues{source: 2, pages: 4, solo: 8, fetch: 8, write: 2, rate: 40, burst: 12, perSrc: 32, global: 64}
+	return collectProfileValues{source: 2, pages: 4, fetch: 8, write: 2, perSrc: 32, global: 64}
 }
 
 func collectProfileSnapshot() collectProfileValues {
 	return collectProfileValues{
 		source: CollectSourceConcurrency,
 		pages:  CollectPageWorkers,
-		solo:   CollectPageWorkersSolo,
 		fetch:  CollectFetchInFlight,
 		write:  CollectWriteMaxInflight,
-		rate:   CollectWritePagesPerSec,
-		burst:  CollectWriteBurstPages,
 		perSrc: CollectWriteMaxPendingPagesPerSource,
 		global: CollectWriteMaxPendingPagesGlobal,
 	}
@@ -122,11 +116,8 @@ func collectProfileSnapshot() collectProfileValues {
 func restoreCollectProfile(v collectProfileValues) {
 	CollectSourceConcurrency = v.source
 	CollectPageWorkers = v.pages
-	CollectPageWorkersSolo = v.solo
 	CollectFetchInFlight = v.fetch
 	CollectWriteMaxInflight = v.write
-	CollectWritePagesPerSec = v.rate
-	CollectWriteBurstPages = v.burst
 	CollectWriteMaxPendingPagesPerSource = v.perSrc
 	CollectWriteMaxPendingPagesGlobal = v.global
 }

@@ -18,7 +18,7 @@ import (
 
 func ClearSpider() error {
 	filmrepo.ReportResetProgress(5, "正在停止采集任务")
-	StopAllTasks()
+	StopAllCollect("清空片库，停止采集")
 	filmrepo.ReportResetProgress(15, "正在清空数据")
 	return collectLifecycle.runExclusive(func() error {
 		repository.ResetCollectStatsCoalescer()

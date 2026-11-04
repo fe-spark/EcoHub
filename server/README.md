@@ -279,9 +279,9 @@ server/
 ├── internal/model/         # 数据模型与 DTO
 ├── internal/spider/        # 采集编排与对外 API
 │   ├── converter/          # 三方接口数据转换
-│   ├── fetcher/            # 分页取数：页数探测、限流退避重试、页并发与零成功停站
+│   ├── fetcher/            # 分页取数：页数探测、固定页并发、全局在途与零成功停站
 │   ├── progress/           # 采集进度状态机、超时清理与活跃任务注册表
-│   └── scheduler/          # 采集写库调度（限速 / 反压 / 跨站轮转）
+│   └── scheduler/          # 采集写库调度（反压 / 跨站轮转 / 同站串行）
 ├── internal/migration/     # 数据库结构版本迁移。当前只有空基线，新变更在末尾追加
 ├── internal/infra/         # 基础设施
 │   ├── db/                 # MySQL / Redis 客户端初始化与健康探测

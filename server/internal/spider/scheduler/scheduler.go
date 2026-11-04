@@ -9,16 +9,12 @@ import (
 	"time"
 
 	"server/internal/config"
-
-	"golang.org/x/time/rate"
 )
 
-// 写库调度采用「水龙头」模型：
-//  1. 有活再取 token（避免空转吞 token）
-//  2. take 单页 + 跨站 round-robin
-//  3. 全局限速在 writing 占用之外完成，写槽只服务真实 SQL
-//  4. 同站 writing 互斥；worker panic 必释放 writing
-//  5. 单站 + 全局有界 buffer，满则反压拉页
+// 写库调度模型：
+//  1. take 单页 + 跨站 round-robin
+//  2. 同站 writing 互斥；worker panic 必释放 writing
+//  3. 单站 + 全局有界 buffer，满则反压拉页
 //
 // 对外只暴露 Submit / FinishSource / CancelSource / WaitPendingWrites 门面；
 // 真实落盘逻辑由调用方通过 Job.Write 注入，本包不依赖采集编排层。
@@ -84,7 +80,6 @@ type writeSnapshot struct {
 	WritingSources   int `json:"writingSources"`
 	MaxPendingSource int `json:"maxPendingSource"`
 	MaxPendingGlobal int `json:"maxPendingGlobal"`
-	PagesPerSec      int `json:"pagesPerSec"`
 	MaxInflight      int `json:"maxInflight"`
 }
 
@@ -137,7 +132,6 @@ type writeLane struct {
 	queues   map[string]*writeQueue
 	order    []string // sourceID 稳定顺序，用于 round-robin
 	rrCursor int      // 下一次 RR 起始下标
-	limiter  *rate.Limiter
 	workers  int
 
 	// 有界水箱（构造时从 config 拷贝，测试可覆盖）。
@@ -168,7 +162,6 @@ func newWriteLane(name string) *writeLane {
 		name:         name,
 		queues:       make(map[string]*writeQueue),
 		order:        make([]string, 0, 16),
-		limiter:      rate.NewLimiter(rate.Limit(config.CollectWritePagesPerSec), config.CollectWriteBurstPages),
 		workers:      config.CollectWriteMaxInflight,
 		maxPerSource: config.CollectWriteMaxPendingPagesPerSource,
 		maxGlobal:    config.CollectWriteMaxPendingPagesGlobal,
@@ -373,31 +366,18 @@ func (l *writeLane) start() {
 	for workerID := 1; workerID <= l.workers; workerID++ {
 		go l.run(workerID)
 	}
-	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d pages_per_sec=%.0f burst=%d pending_per_source=%d pending_global=%d",
-		l.name, l.workers, float64(l.limiter.Limit()), l.limiter.Burst(), l.maxPerSource, l.maxGlobal)
+	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d pending_per_source=%d pending_global=%d",
+		l.name, l.workers, l.maxPerSource, l.maxGlobal)
 }
 
 func (l *writeLane) run(workerID int) {
 	for {
-		// 1) 等到有可写任务（不占 writing、不吞 token）
+		// 1) 等到有可写任务（不占 writing）
 		l.waitUntilWork()
 
-		// 2) 预留限速 token（尚未 take）。若 take 失败必须 Cancel 退还，避免空烧页/秒额度。
-		res := l.limiter.Reserve()
-		if !res.OK() {
-			// 极限配置（rate≈0）下兜底，避免忙等。
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		if delay := res.Delay(); delay > 0 {
-			time.Sleep(delay)
-		}
-
-		// 3) 取页；可能被其它 worker 抢先
+		// 2) 取页；可能被其它 worker 抢先
 		job, meta, finish, ok := l.tryTakeOne()
 		if !ok {
-			// 关键：退还本次 reservation，保证实际写库速率贴近 pages_per_sec。
-			res.Cancel()
 			continue
 		}
 

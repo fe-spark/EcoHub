@@ -489,6 +489,8 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 
 	batchA := newCollectBatchContext(model.CollectTriggerManual, "全量", []model.FilmSource{sourceA}, time.Now(), true)
 	batchB := newCollectBatchContext(model.CollectTriggerCron, "定时", []model.FilmSource{sourceB}, time.Now(), false)
+	defer batchA.close()
+	defer batchB.close()
 
 	if !batchA.isStandalone {
 		t.Errorf("expected batch A isStandalone=true")

@@ -58,6 +58,9 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, model.CollectBa
 }
 
 func batchCollectBlockReason(fs model.FilmSource) string {
+	if isMaintenanceRunning() {
+		return "维护任务执行中（" + maintenanceRunningDetail() + "），已跳过"
+	}
 	if progress.IsCategorySyncing(fs.Id) {
 		return "分类采集中"
 	}

@@ -6,7 +6,6 @@ export interface FilmSource {
   sort?: number;
   isPosterSource?: boolean;
   isPrimary?: boolean;
-  interval: number;
   cd?: number;
   format?: "json" | "xml";
   domainReplaceRules?: string;
@@ -137,7 +136,6 @@ export interface SourceFormValues {
   state: boolean;
   format: "json" | "xml";
   isPosterSource: boolean;
-  interval?: number;
   cd?: number;
   domainReplaceRules?: string;
   proxyCollect?: boolean;
@@ -149,7 +147,6 @@ export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   state: true,
   format: "json",
   isPosterSource: false,
-  interval: 0,
   cd: 24,
   domainReplaceRules: "",
   proxyCollect: false,
@@ -215,7 +212,6 @@ export function normalizeSource(item: CollectListItemResponse): FilmSource {
     sort: Number(item.sort ?? 0),
     isPosterSource: Boolean(item.isPosterSource),
     isPrimary: Boolean(item.isPrimary),
-    interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     format: (item.format as "json" | "xml") || "json",
     lastRunTime: item.lastRunTime,

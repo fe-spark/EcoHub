@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"server/internal/model"
+	"server/internal/spider/scheduler"
 )
 
 var collectLifecycle = newCollectLifecycle()
@@ -38,7 +40,7 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.draining {
-		return errors.New("维护中，已拒绝采集")
+		return errCollectDuringMaintenance
 	}
 	if _, ok := s.activeSources[sourceID]; ok {
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
@@ -118,12 +120,40 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	return action()
 }
 
-// reserveMaintenance 低频维护预约：立刻拒绝新采集，等在途站点与发布收尾后独占执行。
-func (s *collectLifecycleState) reserveMaintenance(timeout time.Duration, action func() error) error {
-	if err := s.beginDrain(timeout); err != nil {
+var (
+	errMaintenanceBusy          = errors.New("已有维护任务在执行")
+	errCollectDuringMaintenance = errors.New("维护中，已跳过")
+	errDrainTimeout             = errors.New("等待采集空闲超时")
+)
+
+// maintenanceExitWait 停采集后等待在途写事务和本次运行退出的上限。
+// 沿用删除站点的退出上限。到点仍未退出则维护失败，不开始清理。
+var maintenanceExitWait = deleteStopTimeout
+
+// beginMaintenance 立刻占用闸门并拒绝新采集。闸门已被占用时直接返回，不等待。
+func (s *collectLifecycleState) beginMaintenance() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.draining {
+		return errMaintenanceBusy
+	}
+	s.draining = true
+	return nil
+}
+
+// runMaintenance 占用闸门、停止在途采集，等已开始的写事务、运行和这批收尾发布退出后独占执行。
+// 闸门被占用时立即返回，不等待另一条维护。
+func (s *collectLifecycleState) runMaintenance(reason string, action func() error) error {
+	if err := s.beginMaintenance(); err != nil {
 		return err
 	}
 	defer s.endDrain()
+
+	StopAllCollect(reason)
+	if err := s.waitStoppedCollect(time.Now().Add(maintenanceExitWait)); err != nil {
+		return err
+	}
+
 	s.beginPublish()
 	defer s.endPublish()
 	publishMu.Lock()
@@ -131,7 +161,36 @@ func (s *collectLifecycleState) reserveMaintenance(timeout time.Duration, action
 	return action()
 }
 
-var errDrainTimeout = errors.New("等待采集空闲超时")
+// waitStoppedCollect 等待停止后的写事务、站点运行和批次收尾发布退出。
+func (s *collectLifecycleState) waitStoppedCollect(deadline time.Time) error {
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := scheduler.WaitPendingWrites(ctx); err != nil {
+			return fmt.Errorf("等待在途写入结束失败: %w", err)
+		}
+		s.mu.Lock()
+		idle := s.activeCount == 0 && s.publishing == 0
+		s.mu.Unlock()
+		if idle && activeBatchCount() == 0 {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			s.mu.Lock()
+			activeCount := s.activeCount
+			publishing := s.publishing
+			s.mu.Unlock()
+			return fmt.Errorf("等待在途写入结束失败: active=%d publishing=%d batches=%d", activeCount, publishing, activeBatchCount())
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待在途写入结束失败: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
 
 func (s *collectLifecycleState) beginDrain(timeout time.Duration) error {
 	s.mu.Lock()
