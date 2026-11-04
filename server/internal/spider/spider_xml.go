@@ -138,11 +138,11 @@ func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree,
 	return tree, rss.List.PageCount, nil
 }
 
-// GetPageCount 探测 XML 源分页总页数
+// GetPageCount 探测 XML 源分页总页数（默认使用轻量 ac=list）
 func (xc *XmlCollect) GetPageCount(r utils.RequestInfo) (int, error) {
 	ensureParams(&r)
 	if len(r.Params.Get("ac")) == 0 {
-		r.Params.Set("ac", "videolist")
+		r.Params.Set("ac", "list")
 	}
 	r.Params.Set("pg", "1")
 	utils.ApiGet(&r)

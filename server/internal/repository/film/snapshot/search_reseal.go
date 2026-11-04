@@ -8,7 +8,10 @@ import (
 )
 
 // searchResealSealMin 达到该变动量时，收尾在内存里重算一次倒排和榜单，不扫全库。
-const searchResealSealMin = 50000
+const (
+	searchResealSealMin          = 50000
+	searchResealRebuildThreshold = 20000
+)
 
 // ResealSearchIndexMids 一条采集队列的变动只封口一次。
 // 库里仍在的影片走增量；变动达到 searchResealSealMin 或有删除时，用内存里的全表重算倒排和榜单。
@@ -25,6 +28,12 @@ func ResealSearchIndexMids(mids []int64) bool {
 		log.Printf("[ActiveReadModel] 内存无可用检索副本，触发全量重建 mids=%d", len(mids))
 		RequestActiveFilmSearchIndexRebuild()
 		return false
+	}
+
+	if len(mids) >= searchResealRebuildThreshold {
+		log.Printf("[ActiveReadModel] 变动量较大 (mids=%d >= %d)，触发全量重建检索索引", len(mids), searchResealRebuildThreshold)
+		RequestActiveFilmSearchIndexRebuild()
+		return true
 	}
 
 	total := int64(len(mids))

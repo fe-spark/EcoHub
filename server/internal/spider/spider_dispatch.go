@@ -169,7 +169,7 @@ func probeSourcePageCount(s *model.FilmSource, h int, trigger string) error {
 		r.Params.Set("h", fmt.Sprint(resolved))
 	}
 	if s.ResolveFormat() == model.SourceFormatXML && r.Params.Get("ac") == "" {
-		r.Params.Set("ac", "videolist")
+		r.Params.Set("ac", "list")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -218,7 +218,7 @@ func ProbeSitePageTotal(s *model.FilmSource) (int, error) {
 		return 0, err
 	}
 	if s.ResolveFormat() == model.SourceFormatXML && r.Params.Get("ac") == "" {
-		r.Params.Set("ac", "videolist")
+		r.Params.Set("ac", "list")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

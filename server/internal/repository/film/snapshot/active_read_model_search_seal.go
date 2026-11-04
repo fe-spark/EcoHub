@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"slices"
-	"sort"
 	"strings"
 
 	"server/internal/infra/db"
@@ -192,15 +191,24 @@ func itemAggregateKey(item *FilmSearchMeta) string {
 	return utils.NormalizeIdentityTitle(item.Item.Name)
 }
 
-func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMetaIndex {
-	internSearchMetas(items)
-	byUpdate := make([]int, len(items))
-	pos := make(map[int64]int, len(items))
-	films := make(map[string]int64)
+func buildSearchMetaRanks(items []FilmSearchMeta) (
+	byUpdate []int,
+	pos map[int64]int,
+	films map[string]int64,
+	multiSource map[string]int64,
+	hotPools map[string][]int64,
+	yearPools map[string][]int64,
+	recentPools map[string][]int64,
+	sourceHot map[string][]int64,
+	byCategory map[string][]int,
+) {
+	byUpdate = make([]int, len(items))
+	pos = make(map[int64]int, len(items))
+	films = make(map[string]int64)
 	hits := make(map[string][]rankCand)
 	years := make(map[string][]rankCand)
 	recents := make(map[string][]rankCand)
-	sourceHot := make(map[string][]rankCand)
+	sourceHotMap := make(map[string][]rankCand)
 	for i := range items {
 		byUpdate[i] = i
 		item := &items[i]
@@ -215,7 +223,7 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 			if src == "" {
 				continue
 			}
-			keepRank(sourceHot, src, rankFromMeta(item), 1, sourceHotNameCap)
+			keepRank(sourceHotMap, src, rankFromMeta(item), 1, sourceHotNameCap)
 			noteFilmRanks(hits, years, recents, hotPoolMapKey(src, item.CategoryKey), item)
 			if item.RootCategoryKey != "" && item.RootCategoryKey != item.CategoryKey {
 				noteFilmRanks(hits, years, recents, hotPoolMapKey(src, item.RootCategoryKey), item)
@@ -243,7 +251,7 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		}
 	}
 
-	multiSource := make(map[string]int64)
+	multiSource = make(map[string]int64)
 	for i := range items {
 		item := &items[i]
 		src := strings.TrimSpace(item.FirstSourceId)
@@ -272,14 +280,20 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		}
 		return 0
 	})
-	byCategory := make(map[string][]int)
-	for _, pos := range byUpdate {
-		key := strings.TrimSpace(items[pos].CategoryKey)
+	byCategory = make(map[string][]int)
+	for _, p := range byUpdate {
+		key := strings.TrimSpace(items[p].CategoryKey)
 		if key == "" {
 			continue
 		}
-		byCategory[key] = append(byCategory[key], pos)
+		byCategory[key] = append(byCategory[key], p)
 	}
+	return byUpdate, pos, films, multiSource, finishRanks(hits, 1), finishRanks(years, 0), finishRanks(recents, 2), finishRanks(sourceHotMap, 1), byCategory
+}
+
+func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMetaIndex {
+	internSearchMetas(items)
+	byUpdate, pos, films, multiSource, hotPools, yearPools, recentPools, sourceHot, byCategory := buildSearchMetaRanks(items)
 	return &filmSearchMetaIndex{
 		Version:             version,
 		Items:               items,
@@ -287,10 +301,10 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		Pos:                 pos,
 		FilmsBySource:       films,
 		MultiSourceBySource: multiSource,
-		HotPools:            finishRanks(hits, 1),
-		YearPools:           finishRanks(years, 0),
-		RecentPools:         finishRanks(recents, 2),
-		SourceHot:           finishRanks(sourceHot, 1),
+		HotPools:            hotPools,
+		YearPools:           yearPools,
+		RecentPools:         recentPools,
+		SourceHot:           sourceHot,
 		ByCategory:          byCategory,
 		SearchPosts:         buildSearchPostings(items),
 	}
@@ -307,63 +321,45 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 	newItems := make([]FilmSearchMeta, len(cur.Items), len(cur.Items)+len(upsertMap))
 	copy(newItems, cur.Items)
 
-	newPos := make(map[int64]int, len(cur.Pos)+len(upsertMap))
-	for k, v := range cur.Pos {
-		newPos[k] = v
-	}
-
-	newByCategory := make(map[string][]int, len(cur.ByCategory))
-	for k, v := range cur.ByCategory {
-		newByCategory[k] = append([]int(nil), v...)
-	}
-
-	newFilms := make(map[string]int64, len(cur.FilmsBySource))
-	for k, v := range cur.FilmsBySource {
-		newFilms[k] = v
-	}
-
+	hasRenamedExisting := false
 	for mid, meta := range upsertMap {
-		if idx, exists := newPos[mid]; exists {
+		if idx, exists := cur.Pos[mid]; exists {
+			old := &cur.Items[idx]
+			if old.Item.CleanName != meta.Item.CleanName ||
+				old.Item.PinyinInitials != meta.Item.PinyinInitials ||
+				old.Item.PinyinInitialAlts != meta.Item.PinyinInitialAlts ||
+				old.Item.PinyinFull != meta.Item.PinyinFull {
+				hasRenamedExisting = true
+			}
 			newItems[idx] = meta
 		} else {
-			newIdx := len(newItems)
 			newItems = append(newItems, meta)
-			newPos[mid] = newIdx
-			if src := strings.TrimSpace(meta.FirstSourceId); src != "" {
-				newFilms[src]++
-			}
-			if cKey := strings.TrimSpace(meta.CategoryKey); cKey != "" {
-				newByCategory[cKey] = append(newByCategory[cKey], newIdx)
-			}
 		}
 	}
+	internSearchMetas(newItems)
 
-	newByUpdate := make([]int, len(newItems))
-	for i := range newItems {
-		newByUpdate[i] = i
+	byUpdate, pos, films, multiSource, hotPools, yearPools, recentPools, sourceHot, byCategory := buildSearchMetaRanks(newItems)
+
+	var posts *searchPostings
+	if hasRenamedExisting {
+		posts = buildSearchPostings(newItems)
+	} else {
+		posts = cloneAndPatchSearchPostings(cur, newItems, upsertMap, pos)
 	}
-	sort.Slice(newByUpdate, func(i, j int) bool {
-		left := &newItems[newByUpdate[i]]
-		right := &newItems[newByUpdate[j]]
-		if left.Item.UpdateStamp != right.Item.UpdateStamp {
-			return left.Item.UpdateStamp > right.Item.UpdateStamp
-		}
-		return left.Mid > right.Mid
-	})
 
 	return &filmSearchMetaIndex{
 		Version:             version,
 		Items:               newItems,
-		ByUpdate:            newByUpdate,
-		Pos:                 newPos,
-		FilmsBySource:       newFilms,
-		MultiSourceBySource: cur.MultiSourceBySource,
-		HotPools:            cur.HotPools,
-		YearPools:           cur.YearPools,
-		RecentPools:         cur.RecentPools,
-		SourceHot:           cur.SourceHot,
-		ByCategory:          newByCategory,
-		SearchPosts:         cloneAndPatchSearchPostings(cur, newItems, upsertMap, newPos),
+		ByUpdate:            byUpdate,
+		Pos:                 pos,
+		FilmsBySource:       films,
+		MultiSourceBySource: multiSource,
+		HotPools:            hotPools,
+		YearPools:           yearPools,
+		RecentPools:         recentPools,
+		SourceHot:           sourceHot,
+		ByCategory:          byCategory,
+		SearchPosts:         posts,
 	}
 }
 
