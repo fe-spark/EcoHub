@@ -18,7 +18,6 @@ export interface CollectRecordSourceDetail {
   successCnt: number;
   failedCnt: number;
   filmsTotal: number;
-  films?: CollectRecordFilm[];
   error?: string;
 }
 
@@ -30,7 +29,7 @@ export type CollectHistoryStatus =
   | "stopped"
   | "interrupted";
 
-export type CollectTriggerType = "manual" | "cron" | "retry" | "single_update" | "recover" | string;
+export type CollectTriggerType = "manual" | "cron" | "retry" | "single_update" | string;
 
 export interface SourceIncident {
   sourceId: string;

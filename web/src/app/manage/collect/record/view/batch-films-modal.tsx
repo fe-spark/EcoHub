@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { Alert, Modal, Input, Button, Tag, Empty, Pagination, Spin, Space } from "antd";
+import { Alert, Modal, Input, Button, Empty, Pagination, Spin, Space } from "antd";
 import {
   VideoCameraOutlined,
   SearchOutlined,
@@ -40,7 +40,6 @@ export function BatchFilmsModal({
   const [pageSize, setPageSize] = useState(10);
   const [list, setList] = useState<FilmItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [sample, setSample] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [loading, setLoading] = useState(false);
   const appliedKeyword = useRef("");
@@ -56,7 +55,6 @@ export function BatchFilmsModal({
           total: number;
           current: number;
           pageSize: number;
-          sample?: boolean;
         }>("/manage/collect/history/films", {
           batchId,
           sourceId,
@@ -67,19 +65,16 @@ export function BatchFilmsModal({
         if (resp.code === 0 && resp.data) {
           setList(resp.data.list || []);
           setTotal(resp.data.total || 0);
-          setSample(Boolean(resp.data.sample));
           setCurrent(resp.data.current || pCurrent);
           setPageSize(resp.data.pageSize || pPageSize);
           return;
         }
         setList([]);
         setTotal(0);
-        setSample(false);
         setErrorText(resp.msg || "获取影片清单失败");
       } catch (err) {
         setList([]);
         setTotal(0);
-        setSample(false);
         setErrorText(err instanceof Error && err.message ? err.message : "获取影片清单失败");
       } finally {
         setLoading(false);
@@ -93,13 +88,11 @@ export function BatchFilmsModal({
       appliedKeyword.current = "";
       setKeyword("");
       setCurrent(1);
-      setSample(false);
       setErrorText("");
       void fetchFilms(1, 10, "");
     } else {
       setList([]);
       setTotal(0);
-      setSample(false);
       setErrorText("");
     }
   }, [open, fetchFilms]);
@@ -141,11 +134,6 @@ export function BatchFilmsModal({
           <div className={styles.headerTextGroup}>
             <div className={styles.headerTitleRow}>
               <span className={styles.headerTitle}>批次入库影片清单</span>
-              {sample ? (
-                <Tag color="warning" className={styles.sampleTag}>
-                  历史抽样
-                </Tag>
-              ) : null}
             </div>
             <div className={styles.headerSubtitle}>
               {sourceDesc} · 共 {total.toLocaleString("zh-CN")} 部入库影片
@@ -155,14 +143,6 @@ export function BatchFilmsModal({
       }
     >
       <div className={styles.modalBody}>
-        {sample ? (
-          <Alert
-            type="info"
-            showIcon
-            message="该批次产生于版本升级前，展示的是入库时记录的抽样片单（非全量落库清单）。"
-            className={styles.sampleAlert}
-          />
-        ) : null}
         {errorText ? <Alert type="error" showIcon message={errorText} className={styles.errorAlert} /> : null}
 
         <div className={styles.toolbar}>

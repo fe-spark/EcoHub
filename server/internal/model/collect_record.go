@@ -61,17 +61,16 @@ func (CollectRecord) TableName() string {
 
 // CollectRecordSourceDetail 批次中单站的执行明细快照
 type CollectRecordSourceDetail struct {
-	SourceID    string              `json:"sourceId"`
-	SourceName  string              `json:"sourceName"`
-	Status      string              `json:"status"`         // success / failed / stopped
-	Hour        int                 `json:"hour,omitempty"` // 该站实际拉取的小时窗口，-1 为全量
-	PageTotal   int                 `json:"pageTotal"`
-	PageCurrent int                 `json:"pageCurrent"`
-	SuccessCnt  int                 `json:"successCnt"`
-	FailedCnt   int                 `json:"failedCnt"`
-	FilmsTotal  int                 `json:"filmsTotal"`
-	Films       []CollectRecordFilm `json:"films,omitempty"` // 该站本次入库/更新的影片快照
-	Error       string              `json:"error,omitempty"`
+	SourceID    string `json:"sourceId"`
+	SourceName  string `json:"sourceName"`
+	Status      string `json:"status"`         // success / failed / stopped
+	Hour        int    `json:"hour,omitempty"` // 该站实际拉取的小时窗口，-1 为全量
+	PageTotal   int    `json:"pageTotal"`
+	PageCurrent int    `json:"pageCurrent"`
+	SuccessCnt  int    `json:"successCnt"`
+	FailedCnt   int    `json:"failedCnt"`
+	FilmsTotal  int    `json:"filmsTotal"`
+	Error       string `json:"error,omitempty"`
 }
 
 // CollectRecordCompletion 批次执行结束结算载荷

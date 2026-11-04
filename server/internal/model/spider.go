@@ -20,7 +20,6 @@ const (
 	CollectTriggerCron         = "cron"
 	CollectTriggerRetry        = "retry"
 	CollectTriggerSingleUpdate = "single_update"
-	CollectTriggerRecover      = "recover"
 )
 
 const (
