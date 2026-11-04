@@ -431,6 +431,32 @@ func CleanOldCollectRecords(days int) error {
 	})
 }
 
+// UpdateRunningCollectRecord 刷新仍在运行的批次页数、影片数和明细。不改终态。
+func UpdateRunningCollectRecord(batchID string, c model.CollectRecordCompletion) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return errors.New("批次号不能为空")
+	}
+	updates := map[string]any{
+		"success_sources": c.SuccessSources,
+		"failed_sources":  c.FailedSources,
+		"film_count":      c.FilmCount,
+		"page_total":      c.PageTotal,
+		"page_success":    c.PageSuccess,
+		"page_failed":     c.PageFailed,
+		"detail_json":     c.DetailJson,
+	}
+	if c.Hour != 0 {
+		updates["hour"] = c.Hour
+	}
+	return db.Mdb.Model(&model.CollectRecord{}).
+		Where("batch_id = ? AND status = ?", batchID, model.CollectRecordStatusRunning).
+		Updates(updates).Error
+}
+
 // MarkInterruptedCollectRecords 服务启动时兜底把残留 running 状态标记为 interrupted
 func MarkInterruptedCollectRecords() error {
 	if db.Mdb == nil {
@@ -446,14 +472,27 @@ func MarkInterruptedCollectRecords() error {
 		if duration < 0 {
 			duration = 0
 		}
+		films, bySource, err := collectRecordStoredFilmCounts(rec.BatchID)
+		if err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"status":      model.CollectRecordStatusInterrupted,
+			"finished_at": now,
+			"duration_ms": duration,
+			"error_msg":   "服务重启，任务异常中断",
+			"film_count":  films,
+		}
+		detail, err := applyStoredFilmTotals(rec.DetailJson, bySource)
+		if err != nil {
+			return err
+		}
+		if detail != "" {
+			updates["detail_json"] = detail
+		}
 		if err := db.Mdb.Model(&model.CollectRecord{}).
 			Where("id = ? AND status = ?", rec.ID, model.CollectRecordStatusRunning).
-			Updates(map[string]any{
-				"status":      model.CollectRecordStatusInterrupted,
-				"finished_at": now,
-				"duration_ms": duration,
-				"error_msg":   "服务重启，任务异常中断",
-			}).Error; err != nil {
+			Updates(updates).Error; err != nil {
 			return err
 		}
 	}

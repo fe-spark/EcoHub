@@ -30,10 +30,13 @@ type Batch interface {
 	AddNotifyMIDs(sourceID string, mids []int64)
 	// RecordSourceError 记录站点采集错误原因。
 	RecordSourceError(sourceID, reason string)
+	// TouchRecord 把已写入的影片和页数落到运行中的采集记录。
+	TouchRecord()
 }
 
 const (
-	// sourceConsecutiveFailureLimit 单站连续失败达到该值即终止本次采集，转收尾发布。
+	// sourceConsecutiveFailureLimit 单站连续失败达到该值即停止拉页。取页成功即归零。
+	// 已取到的页写完后，才把该站标成失败并移出队列。
 	sourceConsecutiveFailureLimit = 10
 	// progressLogPageStep 采集进度日志的页步长。
 	progressLogPageStep = 100
@@ -128,9 +131,9 @@ func (l *dynamicLimiter) release() {
 	l.mu.Unlock()
 }
 
-func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource, h int, batch Batch) (bool, int, error) {
+func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource, h int, batch Batch) (bool, int, int, error) {
 	if pageCount <= 0 {
-		return false, 0, nil
+		return false, 0, 0, nil
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
@@ -246,11 +249,13 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 			syslog.Warnf("[Spider] 站点 %s 采集失败累计=%d，最近失败 page=%d stage=%s err=%v", s.Name, snapshot.failed, page, stage, err)
 		}
 		recordFailure(page, stage, err)
+		if batch != nil {
+			batch.TouchRecord()
+		}
 		logProgress(false)
 	}
 	recordPageSuccess := func(page int, notifyMIDs, affectedMIDs []int64) {
 		snapshot := recordPageFinished(page, true, nil)
-		recordSuccess()
 		if batch != nil {
 			batch.AddAffectedMIDs(s, h, affectedMIDs)
 			batch.AddNotifyMIDs(s.Id, notifyMIDs)
@@ -262,6 +267,9 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 				cur.Current = page
 			}
 		})
+		if batch != nil {
+			batch.TouchRecord()
+		}
 		logProgress(false)
 	}
 
@@ -305,10 +313,12 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 						recordPageFailure(pg, "fetch", err)
 						continue
 					}
+					recordSuccess()
 					page := pg
 					items := list
 					writeWG.Add(1)
-					submitErr := scheduler.Submit(ctx, scheduler.Job{
+					// 页已经取到。停止或熔断只取消后续拉页，这一页仍要入队写完。
+					submitErr := scheduler.Submit(context.Background(), scheduler.Job{
 						SourceID:   s.Id,
 						SourceName: s.Name,
 						Page:       page,
@@ -363,20 +373,23 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 	}
 	if stopErr != nil {
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
-			if !progress.IsTerminalStatus(cur.Status) && cur.Status != progress.StatusStopping {
-				cur.Status = progress.StatusFailed
+			if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
+				return
 			}
+			cur.Status = progress.StatusFailed
+			cur.QueueId = ""
+			cur.Reason = model.CollectFailConsecutive
 		})
-		return stats.success > 0, stats.success, stopErr
+		return stats.success > 0, stats.success, stats.failed, stopErr
 	}
 	if ctx.Err() != nil {
-		return stats.success > 0, stats.success, ctx.Err()
+		return stats.success > 0, stats.success, stats.failed, ctx.Err()
 	}
 	if stats.failed > 0 {
 		errMsg := formatFailedPagesError(stats.failedPages, stats.failed, stats.lastErr)
-		return stats.success > 0, stats.success, fmt.Errorf("站点 %s %s", s.Name, errMsg)
+		return stats.success > 0, stats.success, stats.failed, fmt.Errorf("站点 %s %s", s.Name, errMsg)
 	}
-	return stats.success > 0, stats.success, nil
+	return stats.success > 0, stats.success, stats.failed, nil
 }
 
 func formatFailedPagesError(failedPages []int, totalFailed int, lastErr string) string {

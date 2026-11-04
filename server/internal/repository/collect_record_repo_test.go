@@ -160,11 +160,15 @@ func TestMarkInterruptedCollectRecords(t *testing.T) {
 
 	started := time.Now().Add(-2 * time.Minute)
 	_ = CreateCollectRecord(&model.CollectRecord{
-		BatchID:   "batch-running",
-		Trigger:   model.CollectTriggerManual,
-		Status:    model.CollectRecordStatusRunning,
-		StartedAt: started,
+		BatchID:    "batch-running",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusRunning,
+		StartedAt:  started,
+		DetailJson: `[{"sourceId":"s1","sourceName":"站","status":"running","filmsTotal":0}]`,
 	})
+	if err := BatchSaveCollectRecordFilms("batch-running", map[string][]int64{"s1": {11, 12}}); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := MarkInterruptedCollectRecords(); err != nil {
 		t.Fatalf("mark interrupted: %v", err)
@@ -182,6 +186,9 @@ func TestMarkInterruptedCollectRecords(t *testing.T) {
 	}
 	if list[0].FinishedAt == nil {
 		t.Fatal("expected finished_at")
+	}
+	if list[0].FilmCount != 2 || !strings.Contains(list[0].DetailJson, `"filmsTotal":2`) || !strings.Contains(list[0].DetailJson, `"status":"interrupted"`) {
+		t.Fatalf("interrupted films=%d detail=%s", list[0].FilmCount, list[0].DetailJson)
 	}
 }
 

@@ -38,7 +38,7 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.draining {
-		return errors.New("片库正在清空，已拒绝采集")
+		return errors.New("维护中，已拒绝采集")
 	}
 	if _, ok := s.activeSources[sourceID]; ok {
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
@@ -88,7 +88,6 @@ func (s *collectLifecycleState) isMaintenanceBusy() bool {
 	defer s.mu.Unlock()
 	return s.draining
 }
-
 
 func (s *collectLifecycleState) beginPublish() {
 	s.mu.Lock()

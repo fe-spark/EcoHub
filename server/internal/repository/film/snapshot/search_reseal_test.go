@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -122,6 +123,99 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	time.Sleep(40 * time.Millisecond)
 	if scanned.Load() {
 		t.Fatal("unexpected full-scan rebuild triggered when large mids should be resealed incrementally")
+	}
+}
+
+func TestResealRereadsWhenIndexPointerChanges(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	createTestFilm(t, gdb, 101, "将被删除", 1000, "默认主源")
+	createTestFilm(t, gdb, 102, "留下", 2000, "默认主源")
+	if err := SetActiveSnapshotVersion("v-stale"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-stale", []FilmSearchMeta{
+		{Mid: 101, Item: utils.FilmSearchItem{Mid: 101, Name: "将被删除"}},
+		{Mid: 102, Item: utils.FilmSearchItem{Mid: 102, Name: "留下"}},
+	}))
+
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	defer stopRebuild()
+
+	resealAfterRead = func() {
+		if err := gdb.Where("mid = ?", 101).Delete(&model.FilmIndex{}).Error; err != nil {
+			t.Errorf("delete film: %v", err)
+		}
+		activeFilmSearchMetas.Store(sealSearchMetaIndex("v-stale", []FilmSearchMeta{
+			{Mid: 102, Item: utils.FilmSearchItem{Mid: 102, Name: "已剔除"}},
+		}))
+	}
+	t.Cleanup(func() { resealAfterRead = nil })
+
+	if !ResealSearchIndexMids([]int64{101, 102}) {
+		t.Fatal("pointer change should reseal from a fresh read")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if scanned.Load() {
+		t.Fatal("pointer change should reread, not full-scan")
+	}
+	idx := activeFilmSearchMetas.Load()
+	if idx == nil {
+		t.Fatal("index missing")
+	}
+	for _, it := range idx.Items {
+		if it.Mid == 101 {
+			t.Fatal("deleted film was written back from the stale read")
+		}
+	}
+}
+
+func TestResealReadFailureRequestsRebuild(t *testing.T) {
+	setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-read-fail"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-read-fail", []FilmSearchMeta{{Mid: 1}}))
+
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	defer stopRebuild()
+
+	prevRead := readSearchMetaUpserts
+	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		return nil, nil, errors.New("db down")
+	}
+	t.Cleanup(func() { readSearchMetaUpserts = prevRead })
+
+	if ResealSearchIndexMids([]int64{1}) {
+		t.Fatal("read failure must not report applied")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if !scanned.Load() {
+		t.Fatal("read failure did not request a full rebuild")
+	}
+}
+
+func stubSearchRebuildScan(t *testing.T, scanned *atomic.Bool) func() {
+	t.Helper()
+	prevScan := scanActiveFilmSearchIndex
+	prevDebounce := searchRebuildDebounce
+	scanActiveFilmSearchIndex = func(uint64) error {
+		scanned.Store(true)
+		return nil
+	}
+	searchRebuildDebounce = 10 * time.Millisecond
+	return func() {
+		searchRebuild.mu.Lock()
+		if searchRebuild.timer != nil {
+			searchRebuild.timer.Stop()
+			searchRebuild.timer = nil
+		}
+		searchRebuild.gen = 0
+		searchRebuild.running = false
+		searchRebuild.mu.Unlock()
+		scanActiveFilmSearchIndex = prevScan
+		searchRebuildDebounce = prevDebounce
 	}
 }
 

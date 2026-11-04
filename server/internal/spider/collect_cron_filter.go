@@ -18,10 +18,6 @@ func AutoCollectTriggered(trigger string, h int) {
 	if trigger == "" {
 		trigger = model.CollectTriggerCron
 	}
-	if trigger == model.CollectTriggerCron && isMaintenanceRunning() {
-		log.Println("[Spider] 定时自动采集避让：检测到系统维护任务正在运行，放弃本次定时调度")
-		return
-	}
 	sources, err := repository.GetCollectSourceList()
 	if err != nil {
 		log.Printf("[Spider] 自动采集：读取采集站失败: %v", err)

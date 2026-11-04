@@ -3,6 +3,7 @@ package spider
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,6 +124,7 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 		).withReplayFilmIDs([]int64{filmID})
 		defer batch.close()
 		if len(changed) > 0 {
+			batch.AddAffectedMIDs(&src, 1, changed)
 			batch.AddNotifyMIDs(src.Id, changed)
 		}
 		if errMsg != "" {
@@ -186,7 +188,7 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(filmRows) != 1 || filmRows[0].Mid != 43 || filmRows[0].SourceID != "jy" {
-		t.Fatalf("only the notified mid should be stored, got %+v", filmRows)
+		t.Fatalf("only the stored mid should be kept, got %+v", filmRows)
 	}
 }
 
@@ -215,6 +217,7 @@ func TestReplayFilmIDsAreNotCopiedToIdleSources(t *testing.T) {
 		time.Now().Add(-time.Second),
 	).withReplayFilmIDs([]int64{43})
 	defer batch.close()
+	batch.AddAffectedMIDs(&srcA, 1, []int64{43})
 	batch.AddNotifyMIDs(srcA.Id, []int64{43})
 	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
 		SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone,
@@ -405,5 +408,61 @@ func TestSingleFilmBatch_RecordStartErrorReleasesOccupy(t *testing.T) {
 
 	if isOccupiedCollectSource(src.Id) {
 		t.Fatal("source should NOT be occupied after recordStart failure + close")
+	}
+}
+
+func TestCheckpointKeepsWrittenFilmsAfterInterrupt(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "film-src", Name: "入库站"}
+	batch := newCollectBatchContext(model.CollectTriggerCron, model.CollectTagCronCollect, []model.FilmSource{src}, time.Now()).withHour(24)
+	defer batch.close()
+	if err := batch.recordStart(); err != nil {
+		t.Fatal(err)
+	}
+	batch.noteSourceHour(src.Id, 48)
+	batch.AddAffectedMIDs(&src, 48, []int64{11, 12})
+	batch.AddNotifyMIDs(src.Id, []int64{11})
+	batch.flushRecordSync()
+
+	var films int64
+	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batch.batchID).Count(&films).Error; err != nil {
+		t.Fatal(err)
+	}
+	if films != 2 {
+		t.Fatalf("written films = %d, want both affected mids", films)
+	}
+	rec, err := repository.GetCollectRecordByBatchID(batch.batchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != model.CollectRecordStatusRunning || rec.FilmCount != 2 || rec.Hour != 48 {
+		t.Fatalf("running record status=%s films=%d hour=%d", rec.Status, rec.FilmCount, rec.Hour)
+	}
+	if !strings.Contains(rec.DetailJson, `"filmsTotal":2`) {
+		t.Fatalf("detail = %s", rec.DetailJson)
+	}
+
+	if err := repository.MarkInterruptedCollectRecords(); err != nil {
+		t.Fatal(err)
+	}
+	rec, err = repository.GetCollectRecordByBatchID(batch.batchID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Status != model.CollectRecordStatusInterrupted || rec.FilmCount != 2 || rec.Hour != 48 {
+		t.Fatalf("interrupted record status=%s films=%d hour=%d", rec.Status, rec.FilmCount, rec.Hour)
 	}
 }

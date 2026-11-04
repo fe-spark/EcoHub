@@ -7,42 +7,116 @@ import (
 	"server/internal/model"
 )
 
-// ResealSearchIndexMids 只刷新这次变更的影片，再按内存里的全表重算排行和倒排。
-// 没有现成索引时才退回全库扫描。采集结束走这里，避免改几百部片却把几十万行再读进内存。
-func ResealSearchIndexMids(mids []int64) {
+// searchResealSealMin 达到该变动量时，收尾在内存里重算一次倒排和榜单，不扫全库。
+const searchResealSealMin = 50000
+
+// ResealSearchIndexMids 一条采集队列的变动只封口一次。
+// 库里仍在的影片走增量；变动达到 searchResealSealMin 或有删除时，用内存里的全表重算倒排和榜单。
+// 没有可用内存索引时才请求全库重建。
+func ResealSearchIndexMids(mids []int64) bool {
 	mids = NormalizeSnapshotMIDs(mids)
 	if len(mids) == 0 || db.Mdb == nil {
-		return
+		return false
 	}
 
-	activeFilmSearchMetasMu.Lock()
-	cur := activeFilmSearchMetas.Load()
 	version := currentSearchIndexVersion()
-	if cur == nil || cur.Version == "" || (version != "" && cur.Version != version) {
-		activeFilmSearchMetasMu.Unlock()
-		log.Printf("[ActiveReadModel] 内存无可用检索副本，触发全量重建并广播进度")
+	base := activeFilmSearchMetas.Load()
+	if !searchIndexReady(base, version) {
+		log.Printf("[ActiveReadModel] 内存无可用检索副本，触发全量重建 mids=%d", len(mids))
 		RequestActiveFilmSearchIndexRebuild()
-		return
+		return false
 	}
-	defer activeFilmSearchMetasMu.Unlock()
-	version = cur.Version
 
-	upsertMap, drop, err := loadSearchMetaUpserts(mids)
+	total := int64(len(mids))
+	NotifySearchIndexProgress(total, 0, "indexing")
+	upsertMap, drop, err := readSearchMetaUpserts(mids, resealLoadProgress(total))
 	if err != nil {
 		log.Printf("[ActiveReadModel] 检索索引增量读取失败 mids=%d err=%v", len(mids), err)
-		return
+		RequestActiveFilmSearchIndexRebuild()
+		return false
 	}
-	var idx *filmSearchMetaIndex
-	if len(drop) == 0 {
-		idx = updateSearchMetaIndexIncremental(cur, version, upsertMap)
-	} else {
-		newItems := patchSearchMetas(cur.Items, upsertMap, drop)
-		idx = sealSearchMetaIndex(version, newItems)
+	if resealAfterRead != nil {
+		resealAfterRead()
 	}
-	activeFilmSearchMetas.Store(idx)
+
+	for {
+		activeFilmSearchMetasMu.Lock()
+		cur := activeFilmSearchMetas.Load()
+		if !searchIndexCurrent(cur, version) {
+			activeFilmSearchMetasMu.Unlock()
+			log.Printf("[ActiveReadModel] 检索副本在封口前已失效，触发全量重建 mids=%d", len(mids))
+			RequestActiveFilmSearchIndexRebuild()
+			return false
+		}
+		if cur == base {
+			sealAll := len(drop) > 0 || len(mids) >= searchResealSealMin
+			var idx *filmSearchMetaIndex
+			if sealAll {
+				idx = sealSearchMetaIndex(cur.Version, patchSearchMetas(cur.Items, upsertMap, drop))
+			} else {
+				idx = updateSearchMetaIndexIncremental(cur, cur.Version, upsertMap)
+			}
+			activeFilmSearchMetas.Store(idx)
+			activeFilmSearchMetasMu.Unlock()
+			log.Printf("[ActiveReadModel] 检索索引按需封口 mids=%d drop=%d seal=%t total=%d",
+				len(mids), len(drop), sealAll, len(idx.Items))
+			return true
+		}
+		activeFilmSearchMetasMu.Unlock()
+		base = cur
+		upsertMap, drop, err = readSearchMetaUpserts(mids, nil)
+		if err != nil {
+			log.Printf("[ActiveReadModel] 检索索引封口重读失败 mids=%d err=%v", len(mids), err)
+			RequestActiveFilmSearchIndexRebuild()
+			return false
+		}
+	}
 }
 
-func loadSearchMetaUpserts(mids []int64) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+func searchIndexReady(cur *filmSearchMetaIndex, version string) bool {
+	return cur != nil && cur.Version != "" && (version == "" || cur.Version == version)
+}
+
+func searchIndexCurrent(cur *filmSearchMetaIndex, version string) bool {
+	return searchIndexReady(cur, version) && cur.Version == version
+}
+
+// resealAfterRead 仅测试使用：锁外读完后、加锁前替换索引，用来撞指针变化。
+var resealAfterRead func()
+
+// readSearchMetaUpserts 封口读库入口。测试可替换成失败。
+var readSearchMetaUpserts = loadSearchMetaUpserts
+
+func resealLoadProgress(total int64) func(n int) {
+	next := resealProgressStep(total)
+	var loaded int64
+	return func(n int) {
+		loaded += int64(n)
+		if loaded < next && loaded < total {
+			return
+		}
+		done := loaded
+		if done > total {
+			done = total
+		}
+		NotifySearchIndexProgress(total, done, "indexing")
+		if loaded >= total {
+			next = total + 1
+			return
+		}
+		next = ((loaded / resealProgressStep(total)) + 1) * resealProgressStep(total)
+	}
+}
+
+func resealProgressStep(total int64) int64 {
+	step := total / 10
+	if step < 1 {
+		return total
+	}
+	return step
+}
+
+func loadSearchMetaUpserts(mids []int64, onBatch func(n int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
 	drop := make(map[int64]struct{}, len(mids))
 	for _, id := range mids {
 		drop[id] = struct{}{}
@@ -62,6 +136,9 @@ func loadSearchMetaUpserts(mids []int64) (map[int64]FilmSearchMeta, map[int64]st
 			return nil, nil, err
 		}
 		allRows = append(allRows, batchRows...)
+		if onBatch != nil {
+			onBatch(end - i)
+		}
 	}
 	plays, err := loadPlaySources(mids)
 	if err != nil {

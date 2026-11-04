@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   computeCollectQueueProgress,
+  consecutiveFailureNotice,
   finishedQueueViews,
   groupCollectQueues,
   isClientCollectQueueId,
@@ -126,6 +127,40 @@ test("computeCollectQueueProgress 按页数汇总进度", () => {
   assert.equal(view?.pageTotal, 150);
   assert.equal(view?.doneCount, 1);
   assert.equal(view?.failed, 10);
+});
+
+test("连续失败熔断文案带上采集站名", () => {
+  assert.equal(consecutiveFailureNotice("HD(SN)"), "已超出连续失败限制，HD(SN)采集失败");
+  assert.equal(consecutiveFailureNotice("  "), "已超出连续失败限制，采集站采集失败");
+});
+
+test("连续失败熔断后不再留在采集队列", () => {
+  const groups = groupCollectQueues([
+    site("a", {
+      id: "a",
+      name: "HD(SN)",
+      total: 10,
+      current: 4,
+      success: 3,
+      failed: 10,
+      status: "failed",
+      reason: "consecutive",
+    }),
+    site("b", {
+      id: "b",
+      name: "其它",
+      total: 10,
+      current: 2,
+      success: 2,
+      failed: 0,
+      status: "running",
+      queueId: "q-1",
+    }),
+  ]);
+  assert.deepEqual(
+    groups.map((g) => g.sourceIds),
+    [["b"]],
+  );
 });
 
 test("队列结束仍留在分组里时也要提示，成功用 success", () => {

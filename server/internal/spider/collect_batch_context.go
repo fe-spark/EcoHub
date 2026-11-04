@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,26 +38,34 @@ func unregisterActiveBatch(b *collectBatchContext) {
 
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
 type collectBatchContext struct {
-	mu                 sync.Mutex
-	batchID            string
-	parentBatchID      string
-	hour               int
-	replayFilmIDs      []int64
-	trigger            string
-	tag                string
-	sources            []model.FilmSource
-	startedAt          time.Time
-	isStandalone       bool
-	primaryWarmedUp    bool
-	masterAffectedMIDs map[int64]struct{}
-	notifyMIDs         map[int64]struct{}
-	sourceNotifyMIDs   map[string]map[int64]struct{}
-	sourceErrors       map[string]string
-	finishedSources    map[string]model.FilmSource
-	sourceSnapshots    map[string]model.CollectRecordSourceDetail
-	occupyTokens       map[string]uint64
-	runNoted           atomic.Bool
-	recordStarted      bool
+	mu               sync.Mutex
+	batchID          string
+	parentBatchID    string
+	hour             int
+	replayFilmIDs    []int64
+	trigger          string
+	tag              string
+	sources          []model.FilmSource
+	startedAt        time.Time
+	isStandalone     bool
+	primaryWarmedUp  bool
+	affectedMIDs     []int64
+	notifyMIDs       map[int64]struct{}
+	sourceNotifyMIDs map[string]map[int64]struct{}
+	filmMIDs         map[int64]struct{}
+	sourceFilmMIDs   map[string]map[int64]struct{}
+	pendingFilms     map[string][]int64
+	sourceHours      map[string]int
+	sourceErrors     map[string]string
+	progressDirty    bool
+	flushing         bool
+	lastFlush        time.Time
+	flushWG          sync.WaitGroup
+	finishedSources  map[string]model.FilmSource
+	sourceSnapshots  map[string]model.CollectRecordSourceDetail
+	occupyTokens     map[string]uint64
+	runNoted         atomic.Bool
+	recordStarted    bool
 }
 
 func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
@@ -68,19 +77,22 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		standalone = isStandalone[0]
 	}
 	b := &collectBatchContext{
-		batchID:            generateBatchID(startedAt),
-		trigger:            trigger,
-		tag:                tag,
-		sources:            sources,
-		startedAt:          startedAt,
-		isStandalone:       standalone,
-		masterAffectedMIDs: make(map[int64]struct{}),
-		notifyMIDs:         make(map[int64]struct{}),
-		sourceNotifyMIDs:   make(map[string]map[int64]struct{}, len(sources)),
-		sourceErrors:       make(map[string]string),
-		finishedSources:    make(map[string]model.FilmSource),
-		sourceSnapshots:    make(map[string]model.CollectRecordSourceDetail),
-		occupyTokens:       snapshotOccupyTokens(sources),
+		batchID:          generateBatchID(startedAt),
+		trigger:          trigger,
+		tag:              tag,
+		sources:          sources,
+		startedAt:        startedAt,
+		isStandalone:     standalone,
+		notifyMIDs:       make(map[int64]struct{}),
+		sourceNotifyMIDs: make(map[string]map[int64]struct{}, len(sources)),
+		filmMIDs:         make(map[int64]struct{}),
+		sourceFilmMIDs:   make(map[string]map[int64]struct{}, len(sources)),
+		pendingFilms:     make(map[string][]int64),
+		sourceHours:      make(map[string]int),
+		sourceErrors:     make(map[string]string),
+		finishedSources:  make(map[string]model.FilmSource),
+		sourceSnapshots:  make(map[string]model.CollectRecordSourceDetail),
+		occupyTokens:     snapshotOccupyTokens(sources),
 	}
 
 	registerActiveBatch(b)
@@ -100,28 +112,32 @@ func (b *collectBatchContext) takeAffectedMIDs() []int64 {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if len(b.masterAffectedMIDs) == 0 {
-		return nil
-	}
-	mids := make([]int64, 0, len(b.masterAffectedMIDs))
-	for mid := range b.masterAffectedMIDs {
-		mids = append(mids, mid)
-	}
-	b.masterAffectedMIDs = make(map[int64]struct{})
+	mids := b.affectedMIDs
+	b.affectedMIDs = nil
 	return mids
 }
 
-func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids []int64) {
-	if b == nil || len(mids) == 0 || s == nil {
+func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, _ int, mids []int64) {
+	if b == nil || s == nil || len(mids) == 0 {
+		return
+	}
+	kept := make([]int64, 0, len(mids))
+	for _, mid := range mids {
+		if mid > 0 {
+			kept = append(kept, mid)
+		}
+	}
+	if len(kept) == 0 {
 		return
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, mid := range mids {
-		if mid > 0 {
-			b.masterAffectedMIDs[mid] = struct{}{}
-		}
+	b.affectedMIDs = append(b.affectedMIDs, kept...)
+	b.trackFilmsLocked(s.Id, kept)
+	b.mu.Unlock()
+	if err := enqueueStreamPublish(s.Id, kept); err != nil {
+		log.Printf("[Spider][StreamPublish] 流式刷窗失败 source=%s err=%v", s.Id, err)
 	}
+	b.maybeFlushRecord()
 }
 
 // IsStandalone 实现 fetcher.Batch：单站采集，不与其他站点合并发布。
@@ -236,8 +252,10 @@ func (b *collectBatchContext) recordSourceSnapshot(detail model.CollectRecordSou
 		return
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.sourceSnapshots[detail.SourceID] = detail
+	b.mu.Unlock()
+	// 站点结束后立刻落库，批次还在跑时重启也能看见这一站已经写入的影片。
+	b.flushRecordSync()
 }
 
 func (b *collectBatchContext) getSourceSnapshot(sourceID string) (model.CollectRecordSourceDetail, bool) {
@@ -276,7 +294,7 @@ func (b *collectBatchContext) flushAndFinalize() error {
 		return nil
 	}
 	b.mu.Lock()
-	hasWork := len(b.finishedSources) > 0 || len(b.masterAffectedMIDs) > 0 || streamBuf.pendingCount() > 0
+	hasWork := len(b.finishedSources) > 0 || len(b.affectedMIDs) > 0 || streamBuf.pendingCount() > 0
 	warmupHome := false
 	if !b.primaryWarmedUp {
 		for id := range b.finishedSources {
@@ -305,6 +323,7 @@ func (b *collectBatchContext) close() {
 	if b == nil {
 		return
 	}
+	b.flushWG.Wait()
 	unregisterActiveBatch(b)
 	b.mu.Lock()
 	tokens := b.occupyTokens

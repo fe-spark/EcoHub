@@ -60,14 +60,14 @@ func TestSaveSinglePeerDetail_StaleSnapshotRejected(t *testing.T) {
 	source := &model.FilmSource{Id: "src-single", Name: "单站", State: true}
 	newer := testPeerDetailWithLines(1001, "新片", []string{"线路"}, []string{"第1集", "第2集"})
 	newer.UpdateTime = "2026-11-02 14:00:00"
-	mid, isNew, changed, err := saveSinglePeerDetailTx(source, newer)
+	mid, isNew, changed, _, err := saveSinglePeerDetailTx(source, newer)
 	if err != nil || mid <= 0 || !isNew {
 		t.Fatalf("save new film: mid=%d isNew=%v changed=%v err=%v", mid, isNew, changed, err)
 	}
 
 	older := testPeerDetailWithLines(1001, "新片", []string{"线路"}, []string{"第1集"})
 	older.UpdateTime = "2026-11-02 13:00:00"
-	staleMid, staleIsNew, staleChanged, err := saveSinglePeerDetailTx(source, older)
+	staleMid, staleIsNew, staleChanged, _, err := saveSinglePeerDetailTx(source, older)
 	if err != nil {
 		t.Fatalf("save older film: %v", err)
 	}

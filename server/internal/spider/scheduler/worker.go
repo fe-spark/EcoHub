@@ -120,8 +120,8 @@ func (l *writeLane) snapshot() writeSnapshot {
 		PendingTotal:     l.totalPending,
 		PendingSources:   len(l.queues),
 		WritingSources:   writing,
-		MaxPendingSource: l.maxPendingPerSource(),
-		MaxPendingGlobal: l.maxPendingGlobal(),
+		MaxPendingSource: l.maxPerSource,
+		MaxPendingGlobal: l.maxGlobal,
 		PagesPerSec:      int(l.limiter.Limit()),
 		MaxInflight:      l.workers,
 	}

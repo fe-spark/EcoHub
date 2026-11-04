@@ -173,6 +173,13 @@ export function finishedQueueViews<
 
 export type QueueEndLevel = "success" | "info" | "warning" | "error";
 
+export const CONSECUTIVE_FAIL_REASON = "consecutive";
+
+export function consecutiveFailureNotice(name: string): string {
+  const site = name.trim() || "采集站";
+  return `已超出连续失败限制，${site}采集失败`;
+}
+
 export function queueEndNotice(view: CollectQueueProgressView): {
   level: QueueEndLevel;
   text: string;

@@ -12,6 +12,7 @@ export interface CollectRecordSourceDetail {
   sourceId: string;
   sourceName: string;
   status: CollectRecordSourceStatus;
+  hour?: number;
   pageTotal: number;
   pageCurrent: number;
   successCnt: number;

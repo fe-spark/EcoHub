@@ -63,7 +63,8 @@ func (CollectRecord) TableName() string {
 type CollectRecordSourceDetail struct {
 	SourceID    string              `json:"sourceId"`
 	SourceName  string              `json:"sourceName"`
-	Status      string              `json:"status"` // success / failed / stopped
+	Status      string              `json:"status"`         // success / failed / stopped
+	Hour        int                 `json:"hour,omitempty"` // 该站实际拉取的小时窗口，-1 为全量
 	PageTotal   int                 `json:"pageTotal"`
 	PageCurrent int                 `json:"pageCurrent"`
 	SuccessCnt  int                 `json:"successCnt"`

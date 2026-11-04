@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -124,7 +125,7 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 					status = progress.StatusStarting
 				}
 			} else {
-				status, errMsg = settleSourceStatus(status, errMsg, snap.Success)
+				status, errMsg = settleSourceStatus(status, errMsg, snap.Success, snap.Reason)
 			}
 
 			name := strings.TrimSpace(src.Name)
@@ -139,16 +140,20 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 				SourceID:    src.Id,
 				SourceName:  name,
 				Status:      status,
+				Hour:        sourceHourLocked(b, src.Id),
 				PageTotal:   snap.Total,
-				PageCurrent: snap.Current,
+				PageCurrent: snap.Success,
 				SuccessCnt:  snap.Success,
 				FailedCnt:   snap.Failed,
-				FilmsTotal:  len(b.sourceNotifyMIDs[src.Id]),
+				FilmsTotal:  len(b.sourceFilmMIDs[src.Id]),
 				Error:       errMsg,
 			}
 		} else {
-			if films := len(b.sourceNotifyMIDs[src.Id]); films > detail.FilmsTotal {
+			if films := len(b.sourceFilmMIDs[src.Id]); films > detail.FilmsTotal {
 				detail.FilmsTotal = films
+			}
+			if detail.Hour == 0 {
+				detail.Hour = sourceHourLocked(b, src.Id)
 			}
 		}
 
@@ -166,7 +171,7 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 	}
 
 	detailBytes, _ := json.Marshal(details)
-	filmCount := len(b.notifyMIDs)
+	filmCount := len(b.filmMIDs)
 	durationMs := time.Since(b.startedAt).Milliseconds()
 
 	return &model.CollectRecordProgressPayload{
@@ -180,6 +185,198 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 		SuccessSources: succSources,
 		FailedSources:  failSources,
 		DetailJson:     string(detailBytes),
+	}
+}
+
+const (
+	recordFlushGap = 2 * time.Second
+	recordFlushMin = 200
+)
+
+func (b *collectBatchContext) noteSourceHour(sourceID string, hour int) {
+	if b == nil || strings.TrimSpace(sourceID) == "" || hour == 0 {
+		return
+	}
+	b.mu.Lock()
+	if b.sourceHours == nil {
+		b.sourceHours = map[string]int{}
+	}
+	changed := b.sourceHours[sourceID] != hour
+	b.sourceHours[sourceID] = hour
+	if hour > b.hour {
+		b.hour = hour
+		changed = true
+	}
+	if changed {
+		b.progressDirty = true
+	}
+	b.mu.Unlock()
+	if changed {
+		b.maybeFlushRecord()
+	}
+}
+
+func (b *collectBatchContext) sourceHour(sourceID string) int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return sourceHourLocked(b, sourceID)
+}
+
+func sourceHourLocked(b *collectBatchContext, sourceID string) int {
+	if b == nil {
+		return 0
+	}
+	if h, ok := b.sourceHours[sourceID]; ok && h != 0 {
+		return h
+	}
+	return b.hour
+}
+
+func (b *collectBatchContext) sourceFilmCount(sourceID string) int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.sourceFilmMIDs[sourceID])
+}
+
+func (b *collectBatchContext) batchHour() int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.hour
+}
+
+func (b *collectBatchContext) trackFilmsLocked(sourceID string, mids []int64) {
+	if b.sourceFilmMIDs == nil {
+		b.sourceFilmMIDs = map[string]map[int64]struct{}{}
+	}
+	if b.filmMIDs == nil {
+		b.filmMIDs = map[int64]struct{}{}
+	}
+	if b.pendingFilms == nil {
+		b.pendingFilms = map[string][]int64{}
+	}
+	set := b.sourceFilmMIDs[sourceID]
+	if set == nil {
+		set = map[int64]struct{}{}
+		b.sourceFilmMIDs[sourceID] = set
+	}
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := set[mid]; ok {
+			continue
+		}
+		set[mid] = struct{}{}
+		b.filmMIDs[mid] = struct{}{}
+		b.pendingFilms[sourceID] = append(b.pendingFilms[sourceID], mid)
+	}
+}
+
+// TouchRecord 页有进展时尝试把已写入影片和页数落到运行中的记录。
+func (b *collectBatchContext) TouchRecord() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.progressDirty = true
+	b.mu.Unlock()
+	b.maybeFlushRecord()
+}
+
+func (b *collectBatchContext) maybeFlushRecord() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if !b.recordStarted || b.flushing {
+		b.mu.Unlock()
+		return
+	}
+	pending := 0
+	for _, ids := range b.pendingFilms {
+		pending += len(ids)
+	}
+	due := pending >= recordFlushMin || time.Since(b.lastFlush) >= recordFlushGap
+	if !due || (pending == 0 && !b.progressDirty) {
+		b.mu.Unlock()
+		return
+	}
+	films := b.drainPendingLocked()
+	b.progressDirty = false
+	b.flushing = true
+	b.lastFlush = time.Now()
+	b.flushWG.Add(1)
+	b.mu.Unlock()
+	go func() {
+		defer b.flushWG.Done()
+		defer func() {
+			b.mu.Lock()
+			b.flushing = false
+			b.mu.Unlock()
+		}()
+		b.writeCheckpoint(films)
+	}()
+}
+
+func (b *collectBatchContext) drainPendingLocked() map[string][]int64 {
+	if len(b.pendingFilms) == 0 {
+		return nil
+	}
+	out := b.pendingFilms
+	b.pendingFilms = make(map[string][]int64)
+	return out
+}
+
+func (b *collectBatchContext) flushRecordSync() {
+	if b == nil {
+		return
+	}
+	b.flushWG.Wait()
+	b.mu.Lock()
+	if !b.recordStarted {
+		b.mu.Unlock()
+		return
+	}
+	films := b.drainPendingLocked()
+	b.progressDirty = false
+	b.lastFlush = time.Now()
+	b.mu.Unlock()
+	b.writeCheckpoint(films)
+}
+
+func (b *collectBatchContext) writeCheckpoint(films map[string][]int64) {
+	if b == nil || strings.TrimSpace(b.batchID) == "" {
+		return
+	}
+	if len(films) > 0 {
+		if err := repository.BatchSaveCollectRecordFilms(b.batchID, films); err != nil {
+			log.Printf("[Spider] 保存采集批次影片清单失败 batchID=%s: %v", b.batchID, err)
+		}
+	}
+	payload := b.LiveProgress()
+	if payload == nil {
+		return
+	}
+	if err := repository.UpdateRunningCollectRecord(b.batchID, model.CollectRecordCompletion{
+		Hour:           b.batchHour(),
+		SuccessSources: payload.SuccessSources,
+		FailedSources:  payload.FailedSources,
+		FilmCount:      payload.FilmCount,
+		PageTotal:      payload.PageTotal,
+		PageSuccess:    payload.PageSuccess,
+		PageFailed:     payload.PageFailed,
+		DetailJson:     payload.DetailJson,
+	}); err != nil {
+		log.Printf("[Spider] 刷新运行中采集记录失败 batchID=%s: %v", b.batchID, err)
 	}
 }
 

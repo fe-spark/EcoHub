@@ -139,3 +139,45 @@ func TestTaskPrevIncludesManualRun(t *testing.T) {
 		t.Fatalf("manual run = %v, want %v", got, at)
 	}
 }
+
+func TestPlanCronBatchSkipsCollectWhenMaintenanceDue(t *testing.T) {
+	collect := model.FilmCollectTask{Id: "collect", Model: model.TaskModelAutoCollect, State: true}
+	logClean := model.FilmCollectTask{Id: "log", Model: model.TaskModelLogClean, State: true}
+	orphan := model.FilmCollectTask{Id: "orphan", Model: model.TaskModelOrphanClean, State: true}
+
+	run, skipped := planCronBatch([]model.FilmCollectTask{collect, logClean, orphan, collect}, false)
+	if len(skipped) != 1 || skipped[0] != "collect" {
+		t.Fatalf("skipped = %v", skipped)
+	}
+	if len(run) != 2 || run[0].Id != "log" || run[1].Id != "orphan" {
+		t.Fatalf("run = %+v", run)
+	}
+
+	run, skipped = planCronBatch([]model.FilmCollectTask{collect}, true)
+	if len(run) != 0 || len(skipped) != 1 || skipped[0] != "collect" {
+		t.Fatalf("busy run=%+v skipped=%v", run, skipped)
+	}
+
+	run, skipped = planCronBatch([]model.FilmCollectTask{collect, collect}, false)
+	if len(skipped) != 0 || len(run) != 1 || run[0].Id != "collect" {
+		t.Fatalf("collect only run=%+v skipped=%v", run, skipped)
+	}
+}
+
+func TestEnqueueCronTaskCoalesce(t *testing.T) {
+	prevWait := cronCoalesceWait
+	cronCoalesceWait = 30 * time.Millisecond
+	defer func() { cronCoalesceWait = prevWait }()
+
+	task := model.FilmCollectTask{Id: "coalesce_collect", Model: model.TaskModelAutoCollect, State: true}
+	enqueueCronTask(task)
+	enqueueCronTask(task)
+	time.Sleep(60 * time.Millisecond)
+
+	cronMu.Lock()
+	pendingLen := len(cronPending)
+	cronMu.Unlock()
+	if pendingLen != 0 {
+		t.Fatalf("pending tasks should be flushed, got %d", pendingLen)
+	}
+}
