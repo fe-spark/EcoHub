@@ -181,5 +181,6 @@ func lockPeerCollectPage(source *model.FilmSource, details []model.MovieDetail) 
 func saveSinglePeerDetailSynced(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, error) {
 	unlock := lockPeerCollect(source, detail)
 	defer unlock()
-	return saveSinglePeerDetailTx(source, detail)
+	mid, isNew, playChanged, _, err := saveSinglePeerDetailTx(source, detail)
+	return mid, isNew, playChanged, err
 }

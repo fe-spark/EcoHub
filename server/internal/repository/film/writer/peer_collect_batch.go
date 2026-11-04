@@ -22,6 +22,7 @@ type peerPageItem struct {
 	isNew        bool
 	linesChanged bool
 	playChanged  bool
+	metaChanged  bool
 	create       bool
 	disabled     bool
 	stale        bool
@@ -98,7 +99,9 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 		if items[i].mid <= 0 || items[i].stale {
 			continue
 		}
-		affected = append(affected, items[i].mid)
+		if items[i].isNew || items[i].linesChanged || items[i].metaChanged {
+			affected = append(affected, items[i].mid)
+		}
 		if items[i].isNew || items[i].playChanged {
 			notify = append(notify, items[i].mid)
 		}
@@ -299,11 +302,15 @@ func syncPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem
 		return items[order[i]].mid < items[order[j]].mid
 	})
 	for _, idx := range order {
-		if err := syncOwnedFilmTx(tx, items[idx].film, source.Id, items[idx].detail); err != nil {
+		changed, err := syncOwnedFilmTx(tx, items[idx].film, source.Id, items[idx].detail)
+		if err != nil {
 			if IsCategoryNotMapped(err) {
 				continue
 			}
 			return err
+		}
+		if changed {
+			items[idx].metaChanged = true
 		}
 	}
 	return nil

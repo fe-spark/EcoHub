@@ -70,8 +70,17 @@ func TestSaveCollectedPeerDetails_PageCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replay: %v", err)
 	}
-	if len(again.Notify) != 0 {
-		t.Fatalf("identical replay should not notify: %v", again.Notify)
+	if len(again.Notify) != 0 || len(again.Affected) != 0 {
+		t.Fatalf("identical replay should not count as stored: affected=%v notify=%v", again.Affected, again.Notify)
+	}
+	renamed, err := SaveCollectedPeerDetails(context.Background(), sourceA, 2, []model.MovieDetail{
+		testPeerDetail(11, "电影甲改名", "第1集"),
+	})
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if len(renamed.Notify) != 0 || len(renamed.Affected) != 1 {
+		t.Fatalf("rename should count the film without a play notice: affected=%v notify=%v", renamed.Affected, renamed.Notify)
 	}
 	if countRows(t, gdb, &model.FilmIndex{}) != 2 || countRows(t, gdb, &model.FilmSourcePlaylist{}) != 2 {
 		t.Fatal("replay duplicated rows")
@@ -206,9 +215,9 @@ func TestSaveCollectedPeerDetails_SkipsOversizedFilm(t *testing.T) {
 		return nil, nil, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
 	}
 	origSave := savePeerFilm
-	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, error) {
+	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, bool, error) {
 		if detail.Id == 12 {
-			return 0, false, false, errors.New("Error 1406 (22001): Data too long for column 'last_episode' at row 5")
+			return 0, false, false, false, errors.New("Error 1406 (22001): Data too long for column 'last_episode' at row 5")
 		}
 		return origSave(source, detail)
 	}
@@ -249,9 +258,9 @@ func TestSaveCollectedPeerDetails_TransientFilmErrorRetriesPage(t *testing.T) {
 		return nil, nil, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
 	}
 	origSave := savePeerFilm
-	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, error) {
+	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, bool, error) {
 		if detail.Id == 12 {
-			return 0, false, false, errors.New("connection reset by peer")
+			return 0, false, false, false, errors.New("connection reset by peer")
 		}
 		return origSave(source, detail)
 	}

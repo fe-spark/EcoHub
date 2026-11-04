@@ -21,25 +21,11 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import dayjs from "dayjs";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { canRetryHistoryRecord, CollectHistoryRecord, CollectRecordSourceDetail, resolveBatchStatus } from "./types";
+import { formatCollectFilms, formatCollectPages, formatDuration, formatStartedAt } from "./record-format";
 import { ErrorDetailButton } from "./error-detail-button";
 import styles from "./index.module.less";
-
-export function formatDuration(ms: number): string {
-  if (ms <= 0) return "< 1 秒";
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds} 秒`;
-  const minutes = Math.floor(seconds / 60);
-  const remainingSec = seconds % 60;
-  if (minutes < 60) {
-    return remainingSec > 0 ? `${minutes} 分 ${remainingSec} 秒` : `${minutes} 分钟`;
-  }
-  const hours = Math.floor(minutes / 60);
-  const remainingMin = minutes % 60;
-  return `${hours} 小时 ${remainingMin} 分`;
-}
 
 export const COLLECT_TRIGGER_MAP: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   manual: { label: "手动采集", color: "blue", icon: <UserOutlined /> },
@@ -151,35 +137,6 @@ export function renderHourTag(hour: number, record?: { trigger?: string; tag?: s
       {label}
     </span>
   );
-}
-
-export function formatCollectPages(
-  record: { trigger?: string; tag?: string; status?: string },
-  pageSuccess: number,
-  pageTotal: number,
-  pageFailed: number,
-) {
-  // 旧的单片更新没有写入页进度。一次更新就是一次详情请求。
-  if (isSingleFilmRecord(record) && pageTotal <= 0 && pageSuccess <= 0 && pageFailed <= 0) {
-    if (record.status === "failed") return "0/1";
-    if (record.status === "success" || record.status === "done") return "1/1";
-  }
-  return `${pageSuccess}/${pageTotal}`;
-}
-
-export function formatCollectFilms(count: number, record: { status?: string }) {
-  if (count <= 0 && (record.status === "success" || record.status === "done")) {
-    return "无变更";
-  }
-  return `${Math.max(0, count)} 部`;
-}
-
-export function formatStartedAt(val: string) {
-  if (!val) return { primary: "-", full: "" };
-  const t = dayjs(val);
-  if (!t.isValid()) return { primary: val, full: val };
-  const full = t.format("YYYY-MM-DD HH:mm:ss");
-  return { primary: full, full };
 }
 
 export { resolveBatchStatus };
@@ -431,11 +388,6 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       key: "pages",
       width: "14%",
       render: (_, record) => {
-        const succ = record.pageSuccess;
-        const total = record.pageTotal;
-        const fail = record.pageFailed;
-
-        // 单片更新特化展示
         if (isSingleFilmRecord(record)) {
           return (
             <div className={styles.statCell}>
@@ -447,35 +399,16 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
           );
         }
 
-        const batchStatus = resolveBatchStatus(record);
+        const pages = formatCollectPages(record);
         return (
           <div className={styles.statCell}>
-            {fail > 0 ? (
-              <>
-                <span className={`${styles.statRow} ${styles.statFail}`}>
-                  <CloseCircleOutlined />
-                  {fail} 页失败
-                </span>
-                <span className={`${styles.statRow} ${styles.statTotal}`}>
-                  （成功 {succ} / 共 {total} 页）
-                </span>
-              </>
-            ) : batchStatus === "failed" ? (
-              <>
-                <span className={`${styles.statRow} ${styles.statFail}`}>
-                  <CloseCircleOutlined />
-                  未能拉取
-                </span>
-                <span className={`${styles.statRow} ${styles.statTotal}`}>
-                  {total === 0 ? "（探测失败）" : `（0 / 共 ${total} 页）`}
-                </span>
-              </>
-            ) : (
-              <span className={`${styles.statRow} ${styles.statTotal}`}>
-                <FileTextOutlined />
-                共 {total} 页
-              </span>
-            )}
+            <span className={`${styles.statRow} ${pages.alert ? styles.statFail : styles.statTotal}`}>
+              {pages.alert ? <CloseCircleOutlined /> : <FileTextOutlined />}
+              {pages.primary}
+            </span>
+            {pages.secondary ? (
+              <span className={`${styles.statRow} ${styles.statTotal}`}>{pages.secondary}</span>
+            ) : null}
           </div>
         );
       },

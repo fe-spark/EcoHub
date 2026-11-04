@@ -3,7 +3,6 @@ package spider
 import (
 	"fmt"
 	"reflect"
-	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -506,19 +505,11 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 
 	// 验证两批次各自独立持有自身标签刷新 MIDs，互不泄露
 	batchA.mu.Lock()
-	midsA := make([]int64, 0, len(batchA.masterAffectedMIDs))
-	for mid := range batchA.masterAffectedMIDs {
-		midsA = append(midsA, mid)
-	}
-	sort.Slice(midsA, func(i, j int) bool { return midsA[i] < midsA[j] })
+	midsA := sortedMIDSlice(batchA.affectedMIDs)
 	batchA.mu.Unlock()
 
 	batchB.mu.Lock()
-	midsB := make([]int64, 0, len(batchB.masterAffectedMIDs))
-	for mid := range batchB.masterAffectedMIDs {
-		midsB = append(midsB, mid)
-	}
-	sort.Slice(midsB, func(i, j int) bool { return midsB[i] < midsB[j] })
+	midsB := sortedMIDSlice(batchB.affectedMIDs)
 	batchB.mu.Unlock()
 
 	expectedA := []int64{100, 200}

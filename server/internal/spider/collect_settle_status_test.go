@@ -8,22 +8,32 @@ import (
 )
 
 func TestSettleSourceStatus(t *testing.T) {
-	status, errMsg := settleSourceStatus(progress.StatusStopping, "context canceled")
+	status, errMsg := settleSourceStatus(progress.StatusStopping, "context canceled", 0, "")
 	if status != progress.StatusStopped || errMsg != "" {
 		t.Fatalf("stopping should settle stopped without error, got %s %q", status, errMsg)
 	}
 
-	status, errMsg = settleSourceStatus(progress.StatusStopped, "用户停止")
+	status, errMsg = settleSourceStatus(progress.StatusStopped, "用户停止", 0, "")
 	if status != progress.StatusStopped || errMsg != "" {
 		t.Fatalf("stopped should clear error, got %s %q", status, errMsg)
 	}
 
-	status, errMsg = settleSourceStatus(progress.StatusDone, "连接超时")
+	status, errMsg = settleSourceStatus(progress.StatusDone, "连接超时", 0, "")
 	if status != progress.StatusFailed || errMsg != "连接超时" {
 		t.Fatalf("error should settle failed, got %s %q", status, errMsg)
 	}
 
-	status, errMsg = settleSourceStatus(progress.StatusDone, "")
+	status, errMsg = settleSourceStatus(progress.StatusDone, "连接超时", 3, "")
+	if status != model.CollectRecordStatusPartial || errMsg != "连接超时" {
+		t.Fatalf("page errors with success should settle partial, got %s %q", status, errMsg)
+	}
+
+	status, errMsg = settleSourceStatus(progress.StatusFailed, "连续采集失败", 8, model.CollectFailConsecutive)
+	if status != progress.StatusFailed || errMsg != "连续采集失败" {
+		t.Fatalf("consecutive failure should stay failed, got %s %q", status, errMsg)
+	}
+
+	status, errMsg = settleSourceStatus(progress.StatusDone, "", 0, "")
 	if status != progress.StatusDone || errMsg != "" {
 		t.Fatalf("done without error should stay done, got %s %q", status, errMsg)
 	}
@@ -71,4 +81,3 @@ func TestBatchCollectStatus(t *testing.T) {
 		t.Fatalf("expected partial when stopped alongside a failed source, got %s", s)
 	}
 }
-

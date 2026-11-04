@@ -153,53 +153,17 @@ type writeQueue struct {
 }
 
 func newWriteLane(name string) *writeLane {
-	pagesPerSec := float64(config.CollectWritePagesPerSec)
-	if pagesPerSec <= 0 {
-		pagesPerSec = float64(config.DefaultCollectWritePagesPerSec)
-	}
-	burst := config.CollectWriteBurstPages
-	if burst <= 0 {
-		burst = config.DefaultCollectWriteBurstPages
-	}
-	workers := config.CollectWriteMaxInflight
-	if workers <= 0 {
-		workers = config.DefaultCollectWriteMaxInflight
-	}
-
-	maxPerSource := config.CollectWriteMaxPendingPagesPerSource
-	if maxPerSource <= 0 {
-		maxPerSource = config.DefaultCollectWriteMaxPendingPagesPerSource
-	}
-	maxGlobal := config.CollectWriteMaxPendingPagesGlobal
-	if maxGlobal <= 0 {
-		maxGlobal = config.DefaultCollectWriteMaxPendingPagesGlobal
-	}
-
 	lane := &writeLane{
 		name:         name,
 		queues:       make(map[string]*writeQueue),
 		order:        make([]string, 0, 16),
-		limiter:      rate.NewLimiter(rate.Limit(pagesPerSec), burst),
-		workers:      workers,
-		maxPerSource: maxPerSource,
-		maxGlobal:    maxGlobal,
+		limiter:      rate.NewLimiter(rate.Limit(config.CollectWritePagesPerSec), config.CollectWriteBurstPages),
+		workers:      config.CollectWriteMaxInflight,
+		maxPerSource: config.CollectWriteMaxPendingPagesPerSource,
+		maxGlobal:    config.CollectWriteMaxPendingPagesGlobal,
 	}
 	lane.cond = sync.NewCond(&lane.mu)
 	return lane
-}
-
-func (l *writeLane) maxPendingPerSource() int {
-	if l.maxPerSource <= 0 {
-		return config.DefaultCollectWriteMaxPendingPagesPerSource
-	}
-	return l.maxPerSource
-}
-
-func (l *writeLane) maxPendingGlobal() int {
-	if l.maxGlobal <= 0 {
-		return config.DefaultCollectWriteMaxPendingPagesGlobal
-	}
-	return l.maxGlobal
 }
 
 func (l *writeLane) submit(ctx context.Context, job Job) error {
@@ -309,7 +273,7 @@ func (l *writeLane) submit(ctx context.Context, job Job) error {
 
 	if logEnter {
 		log.Printf("[Spider][WriteScheduler] %s 反压等待 reason=%s source=%s source_pending=%d global_pending=%d/%d source_limit=%d",
-			l.name, lastReason, enterSource, enterPending, enterGlobal, l.maxPendingGlobal(), l.maxPendingPerSource())
+			l.name, lastReason, enterSource, enterPending, enterGlobal, l.maxGlobal, l.maxPerSource)
 	}
 	if logLeave {
 		l.logBackpressureLeave(leaveCanceled, leaveReason, leaveSource, leaveWait, leavePending, leaveGlobal)
@@ -399,7 +363,7 @@ func (l *writeLane) start() {
 		go l.run(workerID)
 	}
 	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d pages_per_sec=%.0f burst=%d pending_per_source=%d pending_global=%d",
-		l.name, l.workers, float64(l.limiter.Limit()), l.limiter.Burst(), l.maxPendingPerSource(), l.maxPendingGlobal())
+		l.name, l.workers, float64(l.limiter.Limit()), l.limiter.Burst(), l.maxPerSource, l.maxGlobal)
 }
 
 func (l *writeLane) run(workerID int) {

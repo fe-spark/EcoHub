@@ -280,9 +280,7 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	if takeMIDs != nil {
 		mids = takeMIDs()
 	}
-	if len(mids) > 0 {
-		finalizer.enqueue(mids)
-	}
+	scheduleSearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {
@@ -294,84 +292,67 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	return nil
 }
 
-type searchIndexFinalizer struct {
-	mu          sync.Mutex
-	pendingMIDs map[int64]struct{}
-	activeTotal int64
-	activeDone  int64
-	isRunning   bool
+// searchResealQueue 把同一段时间里结束的队列合成一次封口。
+// 封口期间后到的 mid 留在切片里，当前这一次结束后再封一次。
+type searchResealQueue struct {
+	mu      sync.Mutex
+	pending []int64
+	running bool
 }
 
-var finalizer = &searchIndexFinalizer{
-	pendingMIDs: make(map[int64]struct{}),
-}
+var searchReseal = &searchResealQueue{}
 
-func (f *searchIndexFinalizer) enqueue(mids []int64) {
+func scheduleSearchReseal(mids []int64) {
 	if len(mids) == 0 {
 		return
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	for _, id := range mids {
-		if id > 0 {
-			f.pendingMIDs[id] = struct{}{}
-		}
+	searchReseal.mu.Lock()
+	searchReseal.pending = append(searchReseal.pending, mids...)
+	start := !searchReseal.running
+	if start {
+		searchReseal.running = true
 	}
-	f.activeTotal = f.activeDone + int64(len(f.pendingMIDs))
-
-	if !f.isRunning {
-		f.isRunning = true
-		go f.runWorker()
-	} else {
-		filmsnapshot.NotifySearchIndexProgress(f.activeTotal, f.activeDone, "indexing")
+	searchReseal.mu.Unlock()
+	if start {
+		go searchReseal.run()
 	}
 }
 
-func (f *searchIndexFinalizer) runWorker() {
-	started := time.Now()
+func (q *searchResealQueue) run() {
 	for {
-		f.mu.Lock()
-		if len(f.pendingMIDs) == 0 {
-			f.isRunning = false
-			total := f.activeTotal
-			f.activeTotal = 0
-			f.activeDone = 0
-			f.mu.Unlock()
-			filmsnapshot.NotifySearchIndexProgress(total, total, "done")
-			log.Printf("[Spider][Finalizer] 采集收尾完成：全部入库影片已封口进检索索引 total=%d cost=%s", total, time.Since(started).Round(time.Millisecond))
+		q.mu.Lock()
+		batch := q.pending
+		q.pending = nil
+		if len(batch) == 0 {
+			q.running = false
+			q.mu.Unlock()
 			return
 		}
-
-		const chunkSize = 1000
-		chunk := make([]int64, 0, chunkSize)
-		for mid := range f.pendingMIDs {
-			chunk = append(chunk, mid)
-			delete(f.pendingMIDs, mid)
-			if len(chunk) >= chunkSize {
-				break
-			}
+		q.mu.Unlock()
+		applied := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[Spider][SearchReseal] 封口失败 panic=%v", r)
+				}
+			}()
+			applied = filmsnapshot.ResealSearchIndexMids(batch)
+		}()
+		q.mu.Lock()
+		if len(q.pending) > 0 {
+			q.mu.Unlock()
+			continue
 		}
-		total := f.activeTotal
-		done := f.activeDone
-		f.mu.Unlock()
-
-		filmsnapshot.NotifySearchIndexProgress(total, done, "indexing")
-
-		_ = writer.UpsertSearchTagsByMids(chunk...)
-		_, _ = publishFilmSnapshot(chunk)
-		filmsnapshot.ResealSearchIndexMids(chunk)
-
-		f.mu.Lock()
-		f.activeDone += int64(len(chunk))
-		f.activeTotal = f.activeDone + int64(len(f.pendingMIDs))
-		newDone := f.activeDone
-		newTotal := f.activeTotal
-		f.mu.Unlock()
-
-		filmsnapshot.NotifySearchIndexProgress(newTotal, newDone, "indexing")
+		q.running = false
+		if applied {
+			p := filmsnapshot.GetLatestSearchIndexProgress()
+			filmsnapshot.NotifySearchIndexProgress(p.Total, p.Total, "done")
+		}
+		q.mu.Unlock()
+		return
 	}
 }
+
 func resetStreamPublishBufferForTest() {
 	streamBuf = newStreamPublishBuffer()
 }

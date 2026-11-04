@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -133,6 +134,67 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 	return out, total, nil
 }
 
+func collectRecordStoredFilmCounts(batchID string) (int, map[string]int, error) {
+	bySource := map[string]int{}
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" || db.Mdb == nil {
+		return 0, bySource, nil
+	}
+	var total int64
+	if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).
+		Where("batch_id = ?", batchID).
+		Distinct("mid").
+		Count(&total).Error; err != nil {
+		return 0, nil, err
+	}
+	var rows []struct {
+		SourceID string `gorm:"column:source_id"`
+		N        int    `gorm:"column:n"`
+	}
+	if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).
+		Select("source_id, COUNT(*) AS n").
+		Where("batch_id = ?", batchID).
+		Group("source_id").
+		Scan(&rows).Error; err != nil {
+		return 0, nil, err
+	}
+	for _, row := range rows {
+		bySource[row.SourceID] = row.N
+	}
+	return int(total), bySource, nil
+}
+
+// applyStoredFilmTotals 把已经落库的影片数写回站点明细，并把还在跑的站标成中断。
+func applyStoredFilmTotals(raw string, bySource map[string]int) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	var details []model.CollectRecordSourceDetail
+	if err := json.Unmarshal([]byte(raw), &details); err != nil {
+		return "", fmt.Errorf("批次明细损坏: %w", err)
+	}
+	changed := false
+	for i := range details {
+		if n, ok := bySource[details[i].SourceID]; ok && details[i].FilmsTotal != n {
+			details[i].FilmsTotal = n
+			changed = true
+		}
+		if details[i].Status == "running" || details[i].Status == "starting" {
+			details[i].Status = model.CollectRecordStatusInterrupted
+			changed = true
+		}
+	}
+	if !changed {
+		return "", nil
+	}
+	out, err := json.Marshal(details)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // escapeLikePattern 转义 LIKE 通配符，避免用户输入的 % 和 _ 被当成模式。
 func escapeLikePattern(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
@@ -140,4 +202,3 @@ func escapeLikePattern(s string) string {
 	s = strings.ReplaceAll(s, "_", "\\_")
 	return s
 }
-

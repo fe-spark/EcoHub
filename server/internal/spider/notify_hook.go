@@ -71,10 +71,21 @@ func emitBatchNotify(b *collectBatchContext) {
 			mids = append(mids, mid)
 		}
 	}
-	countBySource := make(map[string]int, len(b.sourceNotifyMIDs))
-	for sid, set := range b.sourceNotifyMIDs {
+	filmMids := make([]int64, 0, len(b.filmMIDs))
+	for mid := range b.filmMIDs {
+		if mid > 0 {
+			filmMids = append(filmMids, mid)
+		}
+	}
+	countBySource := make(map[string]int, len(b.sourceFilmMIDs))
+	for sid, set := range b.sourceFilmMIDs {
 		countBySource[sid] = len(set)
 	}
+	sourceHours := make(map[string]int, len(b.sourceHours))
+	for sid, hour := range b.sourceHours {
+		sourceHours[sid] = hour
+	}
+	batchHour := b.hour
 	errBySource := make(map[string]string, len(b.sourceErrors))
 	for k, v := range b.sourceErrors {
 		errBySource[k] = v
@@ -98,7 +109,7 @@ func emitBatchNotify(b *collectBatchContext) {
 					status = progress.StatusDone
 				}
 			}
-			status, errMsg = settleSourceStatus(status, errMsg, snap.Success)
+			status, errMsg = settleSourceStatus(status, errMsg, snap.Success, snap.Reason)
 			name := strings.TrimSpace(src.Name)
 			if name == "" {
 				name = strings.TrimSpace(snap.Name)
@@ -106,12 +117,17 @@ func emitBatchNotify(b *collectBatchContext) {
 			if name == "" {
 				name = src.Id
 			}
+			hour := sourceHours[src.Id]
+			if hour == 0 {
+				hour = batchHour
+			}
 			detail = model.CollectRecordSourceDetail{
 				SourceID:    src.Id,
 				SourceName:  name,
 				Status:      status,
+				Hour:        hour,
 				PageTotal:   snap.Total,
-				PageCurrent: snap.Current,
+				PageCurrent: snap.Success,
 				SuccessCnt:  snap.Success,
 				FailedCnt:   snap.Failed,
 				FilmsTotal:  countBySource[src.Id],
@@ -120,6 +136,13 @@ func emitBatchNotify(b *collectBatchContext) {
 		} else {
 			if count, ok := countBySource[src.Id]; ok && count > detail.FilmsTotal {
 				detail.FilmsTotal = count
+			}
+			if detail.Hour == 0 {
+				if hour := sourceHours[src.Id]; hour != 0 {
+					detail.Hour = hour
+				} else {
+					detail.Hour = batchHour
+				}
 			}
 		}
 		results = append(results, model.SourceNotifyResult{
@@ -135,7 +158,7 @@ func emitBatchNotify(b *collectBatchContext) {
 			FilmsTotal:  detail.FilmsTotal,
 		})
 	}
-	persistCollectRecord(b, results, mids, errBySource)
+	persistCollectRecord(b, results, filmMids, errBySource)
 
 	d := getNotifyDispatcher()
 	if d.OnBatchSummary == nil {
@@ -177,15 +200,19 @@ func batchCollectStatus(doneCount, partialCount, failedCount, stoppedCount, tota
 	return model.CollectRecordStatusFailed
 }
 
-func settleSourceStatus(status, errMsg string, successCnt ...int) (string, string) {
+func settleSourceStatus(status, errMsg string, successCnt int, reason string) (string, string) {
 	if status == progress.StatusStopping {
 		status = progress.StatusStopped
 	}
 	if status == progress.StatusStopped {
 		return status, ""
 	}
+	// 连续失败就是失败。已经写出的页留在成功页里，不把站点改成部分失败。
+	if reason == model.CollectFailConsecutive {
+		return progress.StatusFailed, strings.TrimSpace(errMsg)
+	}
 	if strings.TrimSpace(errMsg) != "" {
-		if len(successCnt) > 0 && successCnt[0] > 0 {
+		if successCnt > 0 {
 			return model.CollectRecordStatusPartial, errMsg
 		}
 		return progress.StatusFailed, errMsg
@@ -201,10 +228,11 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", b.batchID, err)
 		return
 	}
+	b.flushRecordSync()
 
 	b.mu.Lock()
-	midsBySource := make(map[string][]int64, len(b.sourceNotifyMIDs))
-	for sid, set := range b.sourceNotifyMIDs {
+	midsBySource := make(map[string][]int64, len(b.sourceFilmMIDs))
+	for sid, set := range b.sourceFilmMIDs {
 		srcMids := make([]int64, 0, len(set))
 		for m := range set {
 			if m > 0 {
@@ -245,6 +273,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 			SourceID:    r.SourceID,
 			SourceName:  r.SourceName,
 			Status:      r.Status,
+			Hour:        b.sourceHour(r.SourceID),
 			PageTotal:   r.PageTotal,
 			PageCurrent: r.PageCurrent,
 			SuccessCnt:  r.SuccessCnt,

@@ -97,10 +97,10 @@ func TestCollectBatchContext_StreamEnqueueKeepsTagMIDsIsolated(t *testing.T) {
 	batchA.addAffectedMIDs(&sourceA, -1, []int64{100, 200})
 	batchB.addAffectedMIDs(&sourceB, 24, []int64{300, 400})
 
-	if got := sortedMIDSet(batchA.masterAffectedMIDs); !reflect.DeepEqual(got, []int64{100, 200}) {
+	if got := sortedMIDSlice(batchA.affectedMIDs); !reflect.DeepEqual(got, []int64{100, 200}) {
 		t.Fatalf("batch A 标签集 = %v; want [100 200]", got)
 	}
-	if got := sortedMIDSet(batchB.masterAffectedMIDs); !reflect.DeepEqual(got, []int64{300, 400}) {
+	if got := sortedMIDSlice(batchB.affectedMIDs); !reflect.DeepEqual(got, []int64{300, 400}) {
 		t.Fatalf("batch B 标签集 = %v; want [300 400]", got)
 	}
 }
@@ -211,14 +211,11 @@ func seqMIDs(from, to int64) []int64 {
 	return out
 }
 
-func sortedMIDSet(set map[int64]struct{}) []int64 {
-	if len(set) == 0 {
+func sortedMIDSlice(mids []int64) []int64 {
+	if len(mids) == 0 {
 		return nil
 	}
-	out := make([]int64, 0, len(set))
-	for mid := range set {
-		out = append(out, mid)
-	}
+	out := append([]int64(nil), mids...)
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }

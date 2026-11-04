@@ -8,17 +8,14 @@ import (
 
 	"server/internal/model"
 	"server/internal/spider/progress"
-	"server/internal/spider/scheduler"
 )
 
 // deleteStopTimeout 删除前等待本次采集退出的上限。
 const deleteStopTimeout = 3 * time.Minute
 
-// StopTask 停止单个站点：打断写队列，并立刻从采集队列摘掉。
-// 已经跑起来的站进度保持「停止中」，等本次运行真正退出后再标成已停止。
+// StopTask 停止拉页。已经取到的页继续写完，运行退出后才标成已停止并离开队列。
 // 还没跑起来的站直接标成已停止。两种情况都马上放掉占用，新采集不会被旧批次盖掉。
 func StopTask(sourceID string) {
-	scheduler.CancelSource(sourceID)
 	progress.RequestStop(sourceID)
 	releaseCollectSourceIDs(sourceID)
 }
@@ -58,7 +55,6 @@ func StopAllTasks() {
 		return true
 	})
 	for _, id := range ids {
-		scheduler.CancelSource(id)
 		progress.RequestStop(id)
 	}
 	progress.MarkAllRunningStopped()
@@ -76,6 +72,7 @@ func StopAllTasksAndWait(timeout time.Duration) error {
 	StopAllTasks()
 	return collectLifecycle.waitNotBusy(timeout)
 }
+
 // PrepareSingleCollectStart 单站采集启动前占用采集源并预置起始进度。
 func PrepareSingleCollectStart(source model.FilmSource) error {
 	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")

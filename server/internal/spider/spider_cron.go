@@ -62,24 +62,24 @@ func CreateCron() *cron.Cron {
 	return cron.New(cron.WithSeconds())
 }
 
-// AddAutoUpdateCron 添加 所有已启用站点的影片更新定时任务
-func AddAutoUpdateCron(id, spec string) (cron.EntryID, error) {
-	// 校验 spec 表达式的有效性
+func addFilmCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
+		return -99, fmt.Errorf("定时任务添加失败，Cron 表达式校验失败: %w", err)
 	}
 	return CronCollect.AddFunc(spec, func() {
-		// 通过 Id 获取任务相关数据
 		ft, err := repository.GetFilmTaskById(id)
 		if err != nil {
-			log.Println("FilmCollectCron Exec Failed: ", err)
+			log.Printf("定时任务执行失败 id=%s err=%v", id, err)
 			return
 		}
-		executeTask(ft)
+		enqueueCronTask(ft)
 	})
 }
 
-
+// AddAutoUpdateCron 添加所有已启用站点的影片更新定时任务。
+func AddAutoUpdateCron(id, spec string) (cron.EntryID, error) {
+	return addFilmCron(id, spec)
+}
 
 // ValidSpec 校验cron表达式是否有效
 func ValidSpec(spec string) error {
@@ -90,47 +90,17 @@ func ValidSpec(spec string) error {
 
 // AddOrphanCleanCron 添加片库冗余数据与孤儿清理定时任务。
 func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
-	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败，Cron 表达式校验失败: ", err.Error()))
-	}
-	return CronCollect.AddFunc(spec, func() {
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Println("OrphanCleanCron Exec Failed: ", err)
-			return
-		}
-		executeTask(ft)
-	})
+	return addFilmCron(id, spec)
 }
 
 // AddCollectRecordCleanCron 定期清理超过 30 天的采集运行记录与快照。
 func AddCollectRecordCleanCron(id, spec string) (cron.EntryID, error) {
-	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
-	}
-	return CronCollect.AddFunc(spec, func() {
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Println("CollectRecordCleanCron Exec Failed: ", err)
-			return
-		}
-		executeTask(ft)
-	})
+	return addFilmCron(id, spec)
 }
 
-// AddLogCleanCron 添加系统运行日志清理定时任务
+// AddLogCleanCron 添加系统运行日志清理定时任务。
 func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
-	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
-	}
-	return CronCollect.AddFunc(spec, func() {
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Println("LogCleanCron Exec Failed: ", err)
-			return
-		}
-		executeTask(ft)
-	})
+	return addFilmCron(id, spec)
 }
 
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
@@ -170,9 +140,8 @@ func ReloadCronTask(id string) error {
 	return nil
 }
 
-// executeTask 执行特定的定时任务逻辑（cron 调度入口）。
-// 通过 runningCronTasks 的原子 LoadOrStore 保证同一任务同一时刻只跑一份;
-// 重叠的触发(慢任务跨调度周期、cron 与手动同时来)直接 skip。
+// executeTask 执行已入队或手动触发的任务。
+// runningCronTasks 保证同一任务同一时刻只跑一份，重叠触发直接跳过。
 func executeTask(ft model.FilmCollectTask) {
 	if !ft.State {
 		return
@@ -191,10 +160,6 @@ func runTaskBody(ft model.FilmCollectTask) {
 
 	switch ft.Model {
 	case model.TaskModelAutoCollect:
-		if isMaintenanceRunning() {
-			log.Printf("[Spider] 定时自动采集避让：检测到系统正在执行低频维护任务，自动跳过本次采集调度 (Task: %s)", ft.Id)
-			return
-		}
 		AutoCollectTriggered(model.CollectTriggerCron, ft.Time)
 		log.Println("执行一次已启用站点采集")
 	case model.TaskModelOrphanClean:
@@ -305,13 +270,13 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 	runningMaintenanceTasks.Store(ft.Id, struct{}{})
 	defer runningMaintenanceTasks.Delete(ft.Id)
 
-	noteTaskRan(ft.Id, time.Now())
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
 		remark = "清理过期运行日志"
 	}
 	err := collectLifecycle.reserveMaintenance(maintenanceWaitTimeout, func() error {
+		noteTaskRan(ft.Id, time.Now())
 		n, err := syslog.PruneExpiredLogs(logRetention)
 		if err != nil {
 			return err
@@ -333,13 +298,13 @@ func executeCollectRecordCleanTask(ft model.FilmCollectTask) {
 	runningMaintenanceTasks.Store(ft.Id, struct{}{})
 	defer runningMaintenanceTasks.Delete(ft.Id)
 
-	noteTaskRan(ft.Id, time.Now())
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
 		remark = "定期清理超过 30 天的采集运行记录与快照"
 	}
 	err := collectLifecycle.reserveMaintenance(maintenanceWaitTimeout, func() error {
+		noteTaskRan(ft.Id, time.Now())
 		return repository.CleanOldCollectRecords(30)
 	})
 	if err != nil {

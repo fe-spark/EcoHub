@@ -43,7 +43,7 @@ func singleFilmSourceDetail(src model.FilmSource, changed int, errMsg string) mo
 	return detail
 }
 
-func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
+func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (storedMids []int64, retErr error) {
 	if s == nil {
 		return nil, errors.New("采集站信息不存在")
 	}
@@ -57,7 +57,7 @@ func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchCont
 	if err != nil {
 		return nil, err
 	}
-	return written.Notify, nil
+	return written.Affected, nil
 }
 
 func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchCtx *collectBatchContext) (scheduler.Mids, error) {
@@ -161,14 +161,14 @@ func CollectSingleFilm(ids string) {
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
 			defer batchCtx.releaseSourceOccupy(src.Id)
-			changed, err := collectFilmById(sourceMid, &src, batchCtx)
+			stored, err := collectFilmById(sourceMid, &src, batchCtx)
 			if err != nil {
 				batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, 0, err.Error()))
 				batchCtx.RecordSourceError(src.Id, err.Error())
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
 				return
 			}
-			batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, len(changed), ""))
+			batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, len(stored), ""))
 			if isPreferredCollectSource(src.Id) {
 				if err := batchCtx.finalizePrimarySource(src.Id); err != nil {
 					syslog.Errorf("[CollectSingleFilm] 首选站 %s 缓存刷新失败: %v", src.Name, err)

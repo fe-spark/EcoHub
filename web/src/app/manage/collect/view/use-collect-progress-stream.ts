@@ -1,5 +1,5 @@
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import { isTerminalCollectStatus, nextCollectProgress } from "./collect-queue";
+import { useCallback, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { CONSECUTIVE_FAIL_REASON, isTerminalCollectStatus, nextCollectProgress } from "./collect-queue";
 import type { CollectProgress, FilmSource } from "./types";
 import type { SearchIndexProgress } from "./use-collect-stream";
 
@@ -9,10 +9,18 @@ export function useCollectProgressStream(
   resetTimersRef: MutableRefObject<Map<string, NodeJS.Timeout>>,
   onTerminalStatus?: (id: string, status: string) => void,
   searchIndexRef?: MutableRefObject<SearchIndexProgress | undefined>,
+  onConsecutiveFail?: (progress: CollectProgress) => void,
 ) {
+  const consecutiveSeenRef = useRef(new Set<string>());
   return useCallback((progressList: CollectProgress[]) => {
     if (!Array.isArray(progressList)) return;
     const progressMap = new Map(progressList.map((p) => [String(p.id), p]));
+    for (const p of progressList) {
+      const id = String(p.id);
+      if (p.status === "starting" || p.status === "running") {
+        consecutiveSeenRef.current.delete(id);
+      }
+    }
 
     const armClear = (id: string, queueId?: string, retryCount = 0) => {
       const timer = setTimeout(() => {
@@ -35,6 +43,16 @@ export function useCollectProgressStream(
 
     for (const p of progressList) {
       const id = String(p.id);
+      if (p.reason === CONSECUTIVE_FAIL_REASON && isTerminalCollectStatus(p.status)) {
+        if (!consecutiveSeenRef.current.has(id)) {
+          consecutiveSeenRef.current.add(id);
+          onConsecutiveFail?.(p);
+        }
+        if (!resetTimersRef.current.has(id)) {
+          armClear(id, p.queueId);
+        }
+        continue;
+      }
       if (isTerminalCollectStatus(p.status)) {
         onTerminalStatus?.(id, p.status);
         if (resetTimersRef.current.has(id)) continue;
@@ -68,5 +86,5 @@ export function useCollectProgressStream(
         };
       }),
     );
-  }, [onTerminalStatus, resetTimersRef, searchIndexRef, setSiteList]);
+  }, [onConsecutiveFail, onTerminalStatus, resetTimersRef, searchIndexRef, setSiteList]);
 }

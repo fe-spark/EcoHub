@@ -11,10 +11,10 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/fetcher"
 	"server/internal/spider/progress"
 	"server/internal/utils"
-	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 /*
@@ -75,12 +75,12 @@ func init() {
 		GetFilmDetail: func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
 			return ResolveCollector(s.ResolveFormat()).GetFilmDetail(r)
 		},
-		WaitTurn:           waitSourceRequestTurn,
-		LiveTaskCount:      countLiveCollectTasks,
-		SavePage:           saveCollectedFilmForCollect,
+		WaitTurn:      waitSourceRequestTurn,
+		LiveTaskCount: countLiveCollectTasks,
+		SavePage:      saveCollectedFilmForCollect,
 
-		SkipPublishOnError: shouldSkipCollectPublishOnError,
-		ResolveSpiderProxy: repository.ResolveSpiderProxy,
+		SkipPublishOnError:     shouldSkipCollectPublishOnError,
+		ResolveSpiderProxy:     repository.ResolveSpiderProxy,
 		ResolveSourceProxy:     repository.ResolveSourceProxy,
 		OnSourceFailed:         emitSourceFailedNotify,
 		SourceConcurrencyScale: GetSourceConcurrencyScale,
@@ -100,6 +100,7 @@ func HandlePreparedCollect(id string, h int) error {
 func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStandalone bool, allowPreparedStart bool, batchCtx *collectBatchContext) (retErr error) {
 	hadWrites := false
 	successPagesCount := 0
+	failedPagesCount := 0
 	pageCount := 0
 	var collectCtx context.Context
 	statsOwned := false
@@ -190,7 +191,10 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			if originalErr != nil && !errors.Is(originalErr, context.Canceled) {
 				errMsg = originalErr.Error()
 			}
-			if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
+			reason := snap.Reason
+			if reason == model.CollectFailConsecutive {
+				status = progress.StatusFailed
+			} else if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
 				if originalErr != nil {
 					if successPagesCount > 0 {
 						status = model.CollectRecordStatusPartial
@@ -201,34 +205,29 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 					status = progress.StatusDone
 				}
 			}
-			status, errMsg = settleSourceStatus(status, errMsg, successPagesCount)
+			status, errMsg = settleSourceStatus(status, errMsg, successPagesCount, reason)
 
 			totalP := pageCount
 			if totalP <= 0 {
 				totalP = snap.Total
 			}
-			currP := snap.Current
-			if currP < successPagesCount {
-				currP = successPagesCount
-			}
 			succP := successPagesCount
 			if succP <= 0 {
 				succP = snap.Success
 			}
-			failP := snap.Failed
-			if totalP > 0 && succP > 0 && succP < totalP && failP == 0 && originalErr != nil {
-				failP = totalP - succP
-			}
+			// 失败页只计真正失败的页。没抓到的页留在总数差额里，不能算失败。
+			failP := failedPagesCount
 
 			batchCtx.recordSourceSnapshot(model.CollectRecordSourceDetail{
 				SourceID:    s.Id,
 				SourceName:  s.Name,
 				Status:      status,
+				Hour:        batchCtx.sourceHour(s.Id),
 				PageTotal:   totalP,
-				PageCurrent: currP,
+				PageCurrent: succP,
 				SuccessCnt:  succP,
 				FailedCnt:   failP,
-				FilmsTotal:  len(batchCtx.sourceNotifyMIDs[s.Id]),
+				FilmsTotal:  batchCtx.sourceFilmCount(s.Id),
 				Error:       errMsg,
 			})
 			batchCtx.markSourceFinished(*s)
@@ -307,6 +306,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			log.Printf("[Spider] 站点 %s 定时采集窗口补齐 %dh → %dh（距上次成功采集）\n", s.Name, origH, h)
 		}
 	}
+	if batchCtx != nil {
+		batchCtx.noteSourceHour(s.Id, h)
+	}
 	pageCount = progress.PageTotal(id)
 	if pageCount < 0 {
 		if err := probeSourcePageCount(s, h, trigger); err != nil {
@@ -325,7 +327,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	})
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
-	hadWrites, successPagesCount, err = fetcher.CollectPages(collectCtx, pageCount, s, h, batchCtx)
+	hadWrites, successPagesCount, failedPagesCount, err = fetcher.CollectPages(collectCtx, pageCount, s, h, batchCtx)
 	if err != nil {
 		return err
 	}
@@ -388,4 +390,3 @@ func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.Film
 	go runPreparedBatch(batchCtx, hour, "失败重试")
 	return batchCtx.batchID, nil
 }
-

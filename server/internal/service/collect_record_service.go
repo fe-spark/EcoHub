@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -223,16 +224,24 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		return model.CollectBatchResult{}, nil
 	}
 
-	// 从明细解析失败站点
+	// 从明细解析失败站点，以及各站实际拉过的小时窗口。
 	failedSourceMap := make(map[string]bool)
+	hourBySource := make(map[string]int)
 	if rec.DetailJson != "" {
 		var details []model.CollectRecordSourceDetail
 		if err := json.Unmarshal([]byte(rec.DetailJson), &details); err != nil {
 			return model.CollectBatchResult{}, fmt.Errorf("批次明细损坏: %w", err)
 		}
 		for _, d := range details {
-			if (d.Status == "failed" || d.Status == "partial") && strings.TrimSpace(d.SourceID) != "" {
-				failedSourceMap[d.SourceID] = true
+			id := strings.TrimSpace(d.SourceID)
+			if id == "" {
+				continue
+			}
+			if d.Hour != 0 {
+				hourBySource[id] = d.Hour
+			}
+			if d.Status == "failed" || d.Status == "partial" {
+				failedSourceMap[id] = true
 			}
 		}
 	}
@@ -263,12 +272,45 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 	if len(targetIDs) == 0 {
 		return model.CollectBatchResult{}, errors.New("该批次没有需要重试的失败站点")
 	}
-	if rec.Hour == 0 {
-		return model.CollectBatchResult{}, errors.New("采集时长不能为 0")
+	groups := make(map[int][]string)
+	for _, id := range targetIDs {
+		hour := rec.Hour
+		if h, ok := hourBySource[id]; ok && h != 0 {
+			hour = h
+		}
+		if hour == 0 {
+			return model.CollectBatchResult{}, errors.New("采集时长不能为 0")
+		}
+		groups[hour] = append(groups[hour], id)
 	}
 
-	sources, result := spider.PrepareBatchCollectStart(targetIDs)
-	if len(sources) == 0 {
+	hours := make([]int, 0, len(groups))
+	for hour := range groups {
+		hours = append(hours, hour)
+	}
+	sort.Ints(hours)
+	var result model.CollectBatchResult
+	var firstID string
+	started := 0
+	for _, hour := range hours {
+		sources, part := spider.PrepareBatchCollectStart(groups[hour])
+		result.Skipped = append(result.Skipped, part.Skipped...)
+		if len(sources) == 0 {
+			continue
+		}
+		retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, hour, sources)
+		if err != nil {
+			if firstID != "" {
+				result.BatchID = firstID
+			}
+			return result, err
+		}
+		started++
+		if firstID == "" {
+			firstID = retryBatchID
+		}
+	}
+	if started == 0 {
 		if len(result.Skipped) > 0 {
 			reasons := make([]string, 0, len(result.Skipped))
 			for _, sk := range result.Skipped {
@@ -278,12 +320,7 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		}
 		return result, errors.New("所选站点当前无法启动重试")
 	}
-
-	retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, rec.Hour, sources)
-	if err != nil {
-		return result, err
-	}
-	result.BatchID = retryBatchID
+	result.BatchID = firstID
 	return result, nil
 }
 

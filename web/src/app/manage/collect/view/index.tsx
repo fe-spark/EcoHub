@@ -28,7 +28,7 @@ import { useCollectDeleteQueue } from "./use-collect-delete-queue";
 import { useCollectSort } from "./use-collect-sort";
 import { useCollectSourceForm } from "./use-collect-source-form";
 import { useCollectCardActions } from "./use-collect-card-actions";
-import { isTerminalCollectStatus, newClientCollectQueueId } from "./collect-queue";
+import { consecutiveFailureNotice, isTerminalCollectStatus, newClientCollectQueueId } from "./collect-queue";
 import {
   isCollectBusyStatus,
   type CollectListItemResponse,
@@ -147,6 +147,13 @@ export default function CollectManagePageView() {
     resetTimersRef,
     handleTerminalStatus,
     searchIndexRef,
+    (progress) => {
+      message.error({
+        key: `collect-consecutive-${progress.id}`,
+        content: consecutiveFailureNotice(progress.name),
+        duration: 2,
+      });
+    },
   );
 
   const {

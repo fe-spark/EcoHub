@@ -167,16 +167,7 @@ func waitRetryBackoff(ctx context.Context, attempt int) error {
 
 func GetSourcePageConcurrency(s *model.FilmSource) int {
 	base := config.CollectPageWorkers
-	if base <= 0 {
-		base = config.DefaultCollectPageWorkers
-	}
 	solo := config.CollectPageWorkersSolo
-	if solo <= 0 {
-		solo = config.DefaultCollectPageWorkersSolo
-	}
-	if solo < base {
-		solo = base
-	}
 	live := 1
 	if deps.LiveTaskCount != nil {
 		if n := deps.LiveTaskCount(); n > 1 {
@@ -187,11 +178,7 @@ func GetSourcePageConcurrency(s *model.FilmSource) int {
 	if live <= 1 {
 		perSource = solo
 	} else {
-		budget := config.CollectFetchInFlight
-		if budget <= 0 {
-			budget = base * 2
-		}
-		perSource = budget / live
+		perSource = config.CollectFetchInFlight / live
 		if perSource < 2 {
 			perSource = 2
 		}
@@ -214,18 +201,7 @@ func GetSourcePageConcurrency(s *model.FilmSource) int {
 
 // GetSourcePageConcurrencyMax 获取单站允许的最大并发协程上限（用于弹性 worker 协程池容量）。
 func GetSourcePageConcurrencyMax(_ *model.FilmSource) int {
-	solo := config.CollectPageWorkersSolo
-	if solo <= 0 {
-		solo = config.DefaultCollectPageWorkersSolo
-	}
-	base := config.CollectPageWorkers
-	if base <= 0 {
-		base = config.DefaultCollectPageWorkers
-	}
-	if solo < base {
-		solo = base
-	}
-	return solo
+	return config.CollectPageWorkersSolo
 }
 
 func buildPageRequest(s *model.FilmSource, h, pg int) (utils.RequestInfo, error) {

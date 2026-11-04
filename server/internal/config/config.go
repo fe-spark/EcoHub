@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -42,18 +43,7 @@ var (
 )
 
 const (
-
-	// 统一高吞吐采集运行时参数（支持 12 站全并行，稳态 240 页/s，30 分钟内跑完全站）
-	DefaultCollectWriteMaxInflight              = 16  // 写库事务并发
-	DefaultCollectWritePagesPerSec              = 240 // 稳态页/秒
-	DefaultCollectWriteBurstPages               = 80  // 突发，减少写阀空转
-	DefaultCollectWriteMaxPendingPagesPerSource = 500 // 单站写队列
-	DefaultCollectWriteMaxPendingPagesGlobal    = 5000 // 全局写队列
-	DefaultCollectPageWorkers                   = 16  // 单站分页 HTTP 并发
-	DefaultCollectPageWorkersSolo               = 32  // 仅 1 站在跑时提高页并发
-	DefaultCollectSourceConcurrency             = 0   // 批量同时跑的站点数；0=不限制全部站点并行
-	DefaultCollectFetchInFlight                 = 128 // 全局取数在途上限
-	DefaultCollectStatsFlushIntervalSec         = 5
+	DefaultCollectStatsFlushIntervalSec = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
 	// 仅保留足够前端完成结束态展示的窗口（SSE 实时推送 + 倒计时），过后自动清除，恢复初始态。
 	DefaultCollectProgressRetainSec = 3
@@ -64,25 +54,26 @@ const (
 	FilmPictureAccess = "/api/upload/pic/poster/"
 )
 
-// 采集写阀 / 并发 运行时参数（InitConfig 按 CPU 核数自动选档，见 resolveCollectProfile）。
+// 采集并发初值即 3 核及以上的全速档。2 核及以下由 resolveCollectProfile 在启动时覆盖。
 var (
 	// CollectWriteMaxInflight 全局同时进行的写库事务上限。
-	CollectWriteMaxInflight = DefaultCollectWriteMaxInflight
+	CollectWriteMaxInflight = 16
 	// CollectWritePagesPerSec 写库稳态流速（页/秒）。
-	CollectWritePagesPerSec = DefaultCollectWritePagesPerSec
+	CollectWritePagesPerSec = 240
 	// CollectWriteBurstPages 写库允许的小突发（页）。
-	CollectWriteBurstPages = DefaultCollectWriteBurstPages
+	CollectWriteBurstPages = 80
 	// CollectWriteMaxPendingPagesPerSource 单站写库队列上限。
-	CollectWriteMaxPendingPagesPerSource = DefaultCollectWriteMaxPendingPagesPerSource
+	CollectWriteMaxPendingPagesPerSource = 500
 	// CollectWriteMaxPendingPagesGlobal 全局写库缓冲上限。
-	CollectWriteMaxPendingPagesGlobal = DefaultCollectWriteMaxPendingPagesGlobal
+	CollectWriteMaxPendingPagesGlobal = 5000
 	// CollectPageWorkers 单站分页请求并发数。
-	CollectPageWorkers = DefaultCollectPageWorkers
-	// CollectPageWorkersSolo 仅 1 个 live 任务时的页并发（单站全量提速）。
-	CollectPageWorkersSolo = DefaultCollectPageWorkersSolo
-	// CollectSourceConcurrency 批量采集同时运行的站点数；0 表示不限制。
-	CollectSourceConcurrency = DefaultCollectSourceConcurrency
-	CollectFetchInFlight = DefaultCollectFetchInFlight
+	CollectPageWorkers = 16
+	// CollectPageWorkersSolo 仅 1 个 live 任务时的页并发。
+	CollectPageWorkersSolo = 32
+	// CollectSourceConcurrency 批量采集同时运行的站点数。0 表示不限制。
+	CollectSourceConcurrency = 0
+	// CollectFetchInFlight 全局取数在途上限。
+	CollectFetchInFlight = 128
 	// CollectStatsFlushIntervalSec last_collect_time 合并写库最小间隔（秒）。
 	CollectStatsFlushIntervalSec = DefaultCollectStatsFlushIntervalSec
 	// CollectProgressRetainSec done/failed 进度保留秒数。
@@ -189,8 +180,8 @@ const (
 )
 
 const (
-	AuthUserClaims   = "UserClaims"
-	AuthCookieName   = "ecohub_auth_token"
+	AuthUserClaims       = "UserClaims"
+	AuthCookieName       = "ecohub_auth_token"
 	DefaultAdminUser     = "admin"
 	DefaultAdminPassword = "admin"
 )
@@ -342,11 +333,13 @@ func InitConfig() {
 
 }
 func loadCollectRuntimeConfig() {
+	resolveCollectProfile()
 	srcLimit := "不限制"
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集配置: 写并发=%d 速率=%d页/s burst=%d 队列缓冲=%d/%d | 页并发=%d(单站=%d) 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
+	fmt.Printf("[Config] 采集配置: 核数=%d 写并发=%d 速率=%d页/s burst=%d 队列缓冲=%d/%d | 页并发=%d(单站=%d) 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
+		runtime.GOMAXPROCS(0),
 		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, CollectPageWorkersSolo, srcLimit, CollectFetchInFlight,

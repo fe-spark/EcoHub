@@ -59,9 +59,9 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 }
 
 // syncOwnedFilmTx 用本站最新采集结果更新自己的档案。不改其他站的档案，也不改播放备注和更新时间。
-func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, detail model.MovieDetail) error {
+func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, detail model.MovieDetail) (bool, error) {
 	if existing == nil || existing.Mid <= 0 || existing.FirstSourceId != sourceID {
-		return nil
+		return false, nil
 	}
 	if detail.Pid <= 0 && existing.Pid > 0 {
 		detail.Pid = existing.Pid
@@ -75,18 +75,22 @@ func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, de
 	next, err := ConvertFilmIndex(sourceID, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
 		if IsCategoryNotMapped(err) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	updates := ownedFilmUpdates(existing, &next)
-	if len(updates) > 0 {
+	changed := len(updates) > 0
+	if changed {
 		updates["updated_at"] = time.Now()
 		if err := tx.Model(&model.FilmIndex{}).Where("mid = ?", existing.Mid).Updates(updates).Error; err != nil {
-			return err
+			return false, err
 		}
 	}
-	return rewriteOwnedMatchKeysTx(tx, existing, updates, detail)
+	if err := rewriteOwnedMatchKeysTx(tx, existing, updates, detail); err != nil {
+		return false, err
+	}
+	return changed, nil
 }
 
 func ownedFilmUpdates(existing, next *model.FilmIndex) map[string]any {
@@ -286,7 +290,9 @@ func runPeerCollectTx(fn func(tx *gorm.DB) error) error {
 	return db.Mdb.Transaction(fn)
 }
 
-func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, err error) {
+func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, stored bool, err error) {
+	var linesChanged bool
+	var metaChanged bool
 	err = runPeerCollectTx(func(tx *gorm.DB) error {
 		var existingMapping model.MovieSourceMapping
 		hasMapping := false
@@ -356,14 +362,16 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			return nil
 		}
 		newLines := buildPlaylistsFromDetail(mid, source.Id, detail)
-		linesChanged, playChanged, err := saveStationPlaylistsTx(tx, mid, source.Id, newLines)
+		var playChanged bool
+		linesChanged, playChanged, err = saveStationPlaylistsTx(tx, mid, source.Id, newLines)
 		if err != nil {
 			return err
 		}
 		playLinesChanged = playChanged
 
 		if !isNew {
-			if err := syncOwnedFilmTx(tx, filmIndex, source.Id, detail); err != nil {
+			metaChanged, err = syncOwnedFilmTx(tx, filmIndex, source.Id, detail)
+			if err != nil {
 				return err
 			}
 		}
@@ -380,7 +388,8 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 
 		return nil
 	})
-	return mid, isNew, playLinesChanged, err
+	stored = isNew || linesChanged || metaChanged
+	return mid, isNew, playLinesChanged, stored, err
 }
 
 // writePeerPage 和 savePeerFilm 默认走批量事务和单片事务。测试可替换它们。
@@ -445,7 +454,7 @@ func savePeerFilmsIsolated(source *model.FilmSource, page int, details []model.M
 	affected := make([]int64, 0, len(details))
 	notify := make([]int64, 0, len(details))
 	for _, detail := range details {
-		mid, isNew, playChanged, err := savePeerFilm(source, detail)
+		mid, isNew, playChanged, stored, err := savePeerFilm(source, detail)
 		if err != nil {
 			if isDeterministicRowError(err) {
 				log.Printf("[Spider][PeerCollect] 单片入库跳过 source=%s page=%d vod=%d name=%s err=%v",
@@ -456,7 +465,7 @@ func savePeerFilmsIsolated(source *model.FilmSource, page int, details []model.M
 				source.Id, page, detail.Id, err)
 			return scheduler.Mids{}, err
 		}
-		if mid <= 0 {
+		if mid <= 0 || !stored {
 			continue
 		}
 		affected = append(affected, mid)

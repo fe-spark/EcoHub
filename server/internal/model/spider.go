@@ -55,7 +55,6 @@ func (CrontabRecord) TableName() string {
 	return TableCrontabRecord
 }
 
-
 const (
 	SourceFormatJSON = "json"
 	SourceFormatXML  = "xml"
@@ -93,8 +92,8 @@ func (f *FilmSource) TableName() string {
 type CollectSourceStats struct {
 	gorm.Model
 	SourceId         string     `gorm:"uniqueIndex;size:32"`
-	LastCollectTime  *time.Time `gorm:"index"` // 定时采集整次成功，补窗锚点
-	LastRunTime      *time.Time `gorm:"index"` // 任意采集跑完，卡片「上次采集」
+	LastCollectTime  *time.Time `gorm:"index"`     // 定时采集整次成功，补窗锚点
+	LastRunTime      *time.Time `gorm:"index"`     // 任意采集跑完，卡片「上次采集」
 	LastRunPageCount int        `gorm:"default:0"` // 任意采集跑完，卡片「上次采集总页」
 	SitePageTotal    int        `gorm:"default:0"` // 采集站全站总页
 }
@@ -139,6 +138,8 @@ type FilmSourceDelBatchRequest struct {
 	Ids []string `json:"ids"`
 }
 
+const CollectFailConsecutive = "consecutive"
+
 type CollectProgress struct {
 	Id      string `json:"id"`
 	Name    string `json:"name"`
@@ -148,6 +149,8 @@ type CollectProgress struct {
 	Failed  int    `json:"failed"`
 	Status  string `json:"status"`
 	QueueId string `json:"queueId,omitempty"`
+	// Reason 失败原因。consecutive 表示连续失败熔断，前端据此摘出队列。
+	Reason string `json:"reason,omitempty"`
 }
 
 type FilmSourceListItem struct {

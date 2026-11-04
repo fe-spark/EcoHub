@@ -14,10 +14,10 @@ const (
 )
 
 func (l *writeLane) submitBlockedReason(queue *writeQueue) backpressureReason {
-	if len(queue.pending) >= l.maxPendingPerSource() {
+	if len(queue.pending) >= l.maxPerSource {
 		return bpSourceFull
 	}
-	if l.totalPending >= l.maxPendingGlobal() {
+	if l.totalPending >= l.maxGlobal {
 		return bpGlobalFull
 	}
 	return bpNone
@@ -47,5 +47,5 @@ func (l *writeLane) logBackpressureLeave(canceled bool, reason backpressureReaso
 		status = "canceled"
 	}
 	log.Printf("[Spider][WriteScheduler] %s 反压结束 status=%s reason=%s source=%s wait=%s source_pending=%d global_pending=%d/%d",
-		l.name, status, reason, sourceName, wait.Round(time.Millisecond), sourcePending, globalPending, l.maxPendingGlobal())
+		l.name, status, reason, sourceName, wait.Round(time.Millisecond), sourcePending, globalPending, l.maxGlobal)
 }

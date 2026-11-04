@@ -26,7 +26,13 @@ import {
   canRetryHistorySource,
 } from "./types";
 import {
+  formatCollectFilms,
+  formatCollectPages,
   formatDuration,
+  formatSourcePages,
+  formatSourceWindow,
+} from "./record-format";
+import {
   isSingleFilmRecord,
   RecordStatusMark,
   renderHourTag,
@@ -37,6 +43,21 @@ import { BatchFilmsModal } from "./batch-films-modal";
 import styles from "./batch-detail-drawer.module.less";
 
 const { Text } = Typography;
+
+function PageProgressBody({ record }: { record: CollectHistoryRecord }) {
+  const pages = formatCollectPages(record);
+  const stopped = record.status === "stopped" || record.status === "interrupted";
+  const valueClass = pages.alert ? styles.kpiValueFail : stopped ? styles.kpiValueWarn : styles.kpiValueOk;
+  const Icon = pages.alert ? CloseCircleOutlined : stopped ? ExclamationCircleOutlined : CheckCircleOutlined;
+  return (
+    <>
+      <span className={valueClass}>
+        <Icon /> {pages.primary}
+      </span>
+      <span className={styles.kpiSub}>{pages.secondary || "全部完成"}</span>
+    </>
+  );
+}
 
 export interface BatchDetailDrawerProps {
   open: boolean;
@@ -202,45 +223,8 @@ export function BatchDetailDrawer({
                     <span className={styles.kpiValueDefault}>单片重放</span>
                     <span className={styles.kpiSub}>1 部</span>
                   </>
-                ) : record.pageFailed > 0 ? (
-                  <>
-                    <span className={styles.kpiValueFail}>
-                      <CloseCircleOutlined /> {record.pageFailed} 页失败
-                    </span>
-                    <span className={styles.kpiSub}>
-                      （成功 {record.pageSuccess} / 共 {record.pageTotal} 页）
-                    </span>
-                  </>
-                ) : resolveBatchStatus(record) === "failed" ? (
-                  <>
-                    <span className={styles.kpiValueFail}>
-                      <CloseCircleOutlined /> 未能拉取
-                    </span>
-                    <span className={styles.kpiSub}>
-                      {record.pageTotal === 0 ? "总页探测失败" : "拉取失败"}
-                    </span>
-                  </>
-                ) : resolveBatchStatus(record) === "partial" ? (
-                  <>
-                    <span className={styles.kpiValueWarn}>
-                      <ExclamationCircleOutlined /> 成功 {record.pageSuccess} 页
-                    </span>
-                    <span className={styles.kpiSub}>存在未完成站点</span>
-                  </>
-                ) : record.status === "stopped" || record.status === "interrupted" ? (
-                  <>
-                    <span className={styles.kpiValueWarn}>
-                      <ExclamationCircleOutlined /> 共 {record.pageSuccess} 页
-                    </span>
-                    <span className={styles.kpiSub}>已停止拉取</span>
-                  </>
                 ) : (
-                  <>
-                    <span className={styles.kpiValueOk}>
-                      <CheckCircleOutlined /> 共 {record.pageTotal} 页
-                    </span>
-                    <span className={styles.kpiSub}>全部完成</span>
-                  </>
+                  <PageProgressBody record={record} />
                 )}
               </div>
             </div>
@@ -269,8 +253,10 @@ export function BatchDetailDrawer({
                   </>
                 ) : (
                   <>
-                    <span className={styles.kpiValueMuted}>无变更</span>
-                    <span className={styles.kpiSub}>0 部</span>
+                    <span className={styles.kpiValueMuted}>{formatCollectFilms(0, record)}</span>
+                    {record.status === "success" || record.status === "done" ? (
+                      <span className={styles.kpiSub}>0 部</span>
+                    ) : null}
                   </>
                 )}
               </div>
@@ -303,7 +289,11 @@ export function BatchDetailDrawer({
               const sourceKey = `${record.batchId}:${item.sourceId}`;
               const isRetrying = retryingSourceKeys.has(sourceKey);
               const retry = (item.status === "failed" || item.status === "partial") && canRetryHistorySource(record);
-              const failedPages = item.failedCnt ?? 0;
+              const shownStatus =
+                record.status === "interrupted" && (item.status === "running" || item.status === "starting")
+                  ? "interrupted"
+                  : item.status;
+              const windowLabel = formatSourceWindow(item.hour, record.hour);
 
               return (
                 <div key={item.sourceId || index} className={styles.sourceCard}>
@@ -316,7 +306,7 @@ export function BatchDetailDrawer({
                       </Text>
                     </div>
                     <div className={styles.sourceCardStatus}>
-                      <RecordStatusMark status={item.status} scope="source" />
+                      <RecordStatusMark status={shownStatus} scope="source" />
                       {retry && (
                         <Popconfirm
                           title={filmRetry ? "重试这部影片？" : `重试采集站「${item.sourceName}」？`}
@@ -342,20 +332,9 @@ export function BatchDetailDrawer({
                     <span className={styles.withIcon}>
                       <FileTextOutlined />
                       <span>
-                        页码：
-                        {item.pageTotal > 0 ? (
-                          `${item.pageCurrent}/${item.pageTotal}`
-                        ) : item.status === "failed" ? (
-                          <span className={styles.metricFail}>探测失败</span>
-                        ) : item.status === "stopped" ? (
-                          <span className={styles.metricWarn}>已停止</span>
-                        ) : (
-                          "0/0"
-                        )}
+                        页码：{formatSourcePages({ ...item, status: shownStatus })}
+                        {windowLabel ? ` · ${windowLabel}` : ""}
                       </span>
-                      {failedPages > 0 && (
-                        <span className={styles.metricFail}>（失败 {failedPages} 页）</span>
-                      )}
                     </span>
                     <span className={styles.withIcon}>
                       <VideoCameraOutlined />
@@ -374,7 +353,7 @@ export function BatchDetailDrawer({
                           +{item.filmsTotal.toLocaleString("zh-CN")} 部
                         </a>
                       ) : (
-                        <span className={styles.filmCountEmpty}>无变更</span>
+                        <span className={styles.filmCountEmpty}>{formatCollectFilms(0, { status: shownStatus })}</span>
                       )}
                     </span>
                   </div>
