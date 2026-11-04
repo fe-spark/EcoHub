@@ -12,7 +12,7 @@ const (
 // NotifyEventSwitches Telegram 通知事件开关（聚焦采集汇总与核心失败告警）
 type NotifyEventSwitches struct {
 	CollectBatchSummary bool `json:"collectBatchSummary"` // 采集批次完成摘要（含更新片单）
-	CollectSourceFailed bool `json:"collectSourceFailed"` // 单源连续失败终止告警
+	CollectSourceFailed bool `json:"collectSourceFailed"` // 单源采集失败告警
 	CronTaskFailed      bool `json:"cronTaskFailed"`      // 定时任务执行失败告警
 	SourceOrderChange   bool `json:"sourceOrderChange"`   // 采集站排序与首选站切换通知
 }

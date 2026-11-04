@@ -103,7 +103,7 @@ func (s *InitService) loadActiveFilmReadModel() error {
 
 func (s *InitService) TableInit() error {
 	if err := repository.AutoMigrateAll(); err != nil {
-		return fmt.Errorf("数据库结构迁移失败: %w", err)
+		return fmt.Errorf("建表失败: %w", err)
 	}
 	if err := repository.RunSchemaMigrations(); err != nil {
 		return fmt.Errorf("数据库版本迁移失败: %w", err)
@@ -208,31 +208,12 @@ func (s *InitService) CollectCrontabInit() error {
 	return nil
 }
 
-// ensureDefaultTasks 已有任务保持原样。清理已废弃任务，补齐新任务。
+// ensureDefaultTasks 已有任务保持原样，缺的默认任务补上。
 func (s *InitService) ensureDefaultTasks() ([]model.FilmCollectTask, error) {
 	existing, err := repository.GetAllFilmTask()
 	if err != nil {
 		return nil, fmt.Errorf("读取定时任务失败: %w", err)
 	}
-
-	// 清理已废除的独立重试任务 sys_cron_recover_collect
-	filtered := make([]model.FilmCollectTask, 0, len(existing))
-	for _, t := range existing {
-		if t.Id == "sys_cron_recover_collect" || t.Model == 1 {
-			_ = repository.DeleteFilmTask(t.Id)
-			continue
-		}
-		// 将旧的 failure_clean 迁移升级为 collect_clean
-		if t.Id == model.TaskIDFailureClean {
-			t.Id = model.TaskIDCollectClean
-			t.Model = model.TaskModelCollectClean
-			t.Remark = "定期清理超过 30 天的采集运行记录与快照"
-			_ = repository.DeleteFilmTask(model.TaskIDFailureClean)
-			_ = repository.SaveFilmTask(t)
-		}
-		filtered = append(filtered, t)
-	}
-	existing = filtered
 
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
