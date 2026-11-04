@@ -192,6 +192,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		}
 		if runOK {
 			repository.NoteCollectSourceStats(s.Id)
+			log.Printf("[Spider] 站点 %s 采集成功，已记录 last_collect_time", s.Name)
 		} else if statsOwned {
 			repository.DropCollectSourceStatsPending(s.Id)
 		}

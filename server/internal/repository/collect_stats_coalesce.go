@@ -153,6 +153,7 @@ func FlushCollectSourceStats(sourceIDs ...string) {
 		collectStats.mu.Lock()
 		collectStats.lastFlushed[id] = nowFlush
 		collectStats.mu.Unlock()
+		log.Printf("[CollectStats] 刷盘 last_collect_time: source=%s at=%s", id, at.Format("2006-01-02 15:04:05"))
 	}
 }
 

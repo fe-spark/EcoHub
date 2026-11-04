@@ -76,6 +76,8 @@ func (jc *JsonCollect) GetPageCount(r utils.RequestInfo) (count int, err error) 
 		r.Params.Set("ac", "list")
 	}
 	r.Params.Set("pg", "1")
+	ac := r.Params.Get("ac")
+	h := r.Params.Get("h")
 	utils.ApiGet(&r)
 	// 判断请求结果是否为空, 如果为空直接输出错误并终止
 	if len(r.Resp) <= 0 {
@@ -93,6 +95,7 @@ func (jc *JsonCollect) GetPageCount(r utils.RequestInfo) (count int, err error) 
 		return
 	}
 	count = int(res.PageCount)
+	log.Printf("[Spider] JSON 源探页完成 ac=%s h=%s pagecount=%d total=%d", ac, h, count, res.Total)
 	return
 }
 

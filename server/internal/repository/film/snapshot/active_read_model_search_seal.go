@@ -347,6 +347,9 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 		posts = cloneAndPatchSearchPostings(cur, newItems, upsertMap, pos)
 	}
 
+	log.Printf("[ActiveReadModel] 内存索引增量封口完成 mids=%d renamed=%t recents=%d hots=%d total=%d",
+		len(upsertMap), hasRenamedExisting, len(recentPools), len(hotPools), len(newItems))
+
 	return &filmSearchMetaIndex{
 		Version:             version,
 		Items:               newItems,
