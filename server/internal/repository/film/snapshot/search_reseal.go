@@ -2,7 +2,6 @@ package snapshot
 
 import (
 	"log"
-	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -28,7 +27,6 @@ func ResealSearchIndexMids(mids []int64) {
 	defer activeFilmSearchMetasMu.Unlock()
 	version = cur.Version
 
-	started := time.Now()
 	upsertMap, drop, err := loadSearchMetaUpserts(mids)
 	if err != nil {
 		log.Printf("[ActiveReadModel] 检索索引增量读取失败 mids=%d err=%v", len(mids), err)
@@ -42,8 +40,6 @@ func ResealSearchIndexMids(mids []int64) {
 		idx = sealSearchMetaIndex(version, newItems)
 	}
 	activeFilmSearchMetas.Store(idx)
-	log.Printf("[ActiveReadModel] 检索索引按变更封口 mids=%d total=%d cost=%s",
-		len(mids), len(idx.Items), time.Since(started).Round(time.Millisecond))
 }
 
 func loadSearchMetaUpserts(mids []int64) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
