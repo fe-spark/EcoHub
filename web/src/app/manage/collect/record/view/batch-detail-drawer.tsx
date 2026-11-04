@@ -254,7 +254,7 @@ export function BatchDetailDrawer({
                 ) : (
                   <>
                     <span className={styles.kpiValueMuted}>{formatCollectFilms(0, record)}</span>
-                    {record.status === "success" || record.status === "done" ? (
+                    {record.status === "success" ? (
                       <span className={styles.kpiSub}>0 部</span>
                     ) : null}
                   </>
