@@ -109,7 +109,7 @@ func emitBatchNotify(b *collectBatchContext) {
 					status = progress.StatusDone
 				}
 			}
-			status, errMsg = settleSourceStatus(status, errMsg, snap.Success, snap.Reason)
+			status, errMsg = settleSourceStatus(status, errMsg, snap.Success)
 			name := strings.TrimSpace(src.Name)
 			if name == "" {
 				name = strings.TrimSpace(snap.Name)
@@ -200,16 +200,12 @@ func batchCollectStatus(doneCount, partialCount, failedCount, stoppedCount, tota
 	return model.CollectRecordStatusFailed
 }
 
-func settleSourceStatus(status, errMsg string, successCnt int, reason string) (string, string) {
+func settleSourceStatus(status, errMsg string, successCnt int) (string, string) {
 	if status == progress.StatusStopping {
 		status = progress.StatusStopped
 	}
 	if status == progress.StatusStopped {
 		return status, ""
-	}
-	// 连续失败就是失败。已经写出的页留在成功页里，不把站点改成部分失败。
-	if reason == model.CollectFailConsecutive {
-		return progress.StatusFailed, strings.TrimSpace(errMsg)
 	}
 	if strings.TrimSpace(errMsg) != "" {
 		if successCnt > 0 {

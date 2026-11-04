@@ -3,8 +3,8 @@ package service
 import (
 	"errors"
 	"fmt"
-	"time"
 	"server/internal/access"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/syslog"
@@ -13,6 +13,7 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 )
+
 // BackupService 站点配置备份/恢复（不含影视库存与账号）
 type BackupService struct{}
 
@@ -115,7 +116,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		return err
 	}
 
-	// 2. 导入采集站前，阻断新采集并等待在途写入和发布彻底排空
+	// 2. 导入采集站前停掉采集。未开写的页直接丢掉，只等正在写的事务。
 	if req.Modules.FilmSources {
 		if err := spider.StopAllTasksAndWait(0); err != nil {
 			return fmt.Errorf("停止进行中的采集失败: %w", err)
@@ -150,7 +151,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		repository.ClearIndexPageCache()
 		needCategoryRefresh = true
 	}
-
 
 	if req.Modules.Banners {
 		banners := backup.Banners

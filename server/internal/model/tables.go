@@ -20,7 +20,6 @@ const (
 	TableFileInfo           = "files"
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
-	TableFailureRecord      = "failure_records"
 	TableSchemaMigration    = "schema_migrations"
 	TableTMDBConfig         = "tmdb_config"
 	TableBannerConfig       = "banner_config"

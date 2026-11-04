@@ -207,7 +207,7 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, sess.OverviewHTML, markup)
 }
 
-// PublishSourceFailed 发送单源连续失败终止告警
+// PublishSourceFailed 发送单源采集失败告警
 func (s *NotifyService) PublishSourceFailed(sourceID, sourceName, reason string) {
 	cfg, err := repository.GetNotifyConfig()
 	if err != nil {

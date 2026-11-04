@@ -44,8 +44,6 @@ export interface CollectProgress {
   queueId?: string;
   /** 本地 starting 记下的上一轮 queueId。空字符串表示当时没有上一轮。 */
   staleQueueId?: string;
-  /** consecutive 表示连续失败熔断 */
-  reason?: string;
 }
 
 /** 仍在拉页或排队。停止中的收尾不算，避免按钮提前变成开始采集。 */

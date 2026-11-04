@@ -125,7 +125,7 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 					status = progress.StatusStarting
 				}
 			} else {
-				status, errMsg = settleSourceStatus(status, errMsg, snap.Success, snap.Reason)
+				status, errMsg = settleSourceStatus(status, errMsg, snap.Success)
 			}
 
 			name := strings.TrimSpace(src.Name)

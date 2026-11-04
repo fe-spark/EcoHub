@@ -48,7 +48,7 @@ type Deps struct {
 	ResolveSpiderProxy func() (bool, string, error)
 	// ResolveSourceProxy 查询站点是否启用代理。配置读取失败必须返回错误。
 	ResolveSourceProxy func(sourceID string) (bool, string, error)
-	// OnSourceFailed 单站连续失败达到上限终止采集时的通知回调（可选）。
+	// OnSourceFailed 站点尚无成功页而停止采集时的通知回调（可选）。
 	OnSourceFailed func(sourceID, sourceName, reason string)
 	// SourceConcurrencyScale 返回当前站点因限流等状态计算的并发缩放系数 (0.1 ~ 1.0)。
 	SourceConcurrencyScale func(sourceID string) float64

@@ -1,4 +1,4 @@
-// Package fetcher 采集取数：分页结果投递（页并发 / 写调度 / 连续失败停抓）与进度回报。
+// Package fetcher 采集取数：分页结果投递（页并发 / 写调度 / 零成功停站）与进度回报。
 //
 // 与 fetcher.go 同属一个「取数」模块：本文件负责单站分页的并发调度与收尾判定，
 // 外部能力（落库、通知、状态机）全部通过 Deps 注入，不反向依赖 spider 根包。
@@ -35,14 +35,17 @@ type Batch interface {
 }
 
 const (
-	// sourceConsecutiveFailureLimit 单站连续失败达到该值即停止拉页。取页成功即归零。
-	// 已取到的页写完后，才把该站标成失败并移出队列。
-	sourceConsecutiveFailureLimit = 10
+	// sourceStartupFailLimit 没有任何成功页时，取页失败达到该次数就停止。
+	sourceStartupFailLimit = 32
 	// progressLogPageStep 采集进度日志的页步长。
 	progressLogPageStep = 100
 	// failureLogStep 失败日志的步长。
 	failureLogStep = 10
 )
+
+func shouldStopUnprovenSource(fetchOK, fetchFails int) bool {
+	return fetchOK == 0 && fetchFails >= sourceStartupFailLimit
+}
 
 type pageStats struct {
 	latestPage  int
@@ -162,8 +165,9 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 	}()
 
 	var writeWG sync.WaitGroup
-	var consecutiveFailuresMu sync.Mutex
-	consecutiveFailures := 0
+	var fetchMu sync.Mutex
+	fetchOK := 0
+	fetchFails := 0
 	var stopErr error
 	var stopOnce sync.Once
 	var statsMu sync.Mutex
@@ -204,18 +208,22 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		statsMu.Unlock()
 		return snapshot
 	}
-	recordFailure := func(page int, stage string, err error) {
-		consecutiveFailuresMu.Lock()
-		consecutiveFailures++
-		currentFailures := consecutiveFailures
-		consecutiveFailuresMu.Unlock()
-
-		if currentFailures < sourceConsecutiveFailureLimit {
+	noteFetchOK := func() {
+		fetchMu.Lock()
+		fetchOK++
+		fetchMu.Unlock()
+	}
+	noteFetchFail := func(page int, err error) {
+		fetchMu.Lock()
+		fetchFails++
+		ok, fails := fetchOK, fetchFails
+		fetchMu.Unlock()
+		if !shouldStopUnprovenSource(ok, fails) {
 			return
 		}
 		stopOnce.Do(func() {
-			stopErr = fmt.Errorf("站点 %s 连续采集失败 %d 次，已终止本次采集", s.Name, sourceConsecutiveFailureLimit)
-			syslog.Errorf("[Spider] 站点 %s 连续失败达到阈值，终止采集 page=%d stage=%s err=%v", s.Name, page, stage, err)
+			stopErr = fmt.Errorf("站点 %s 已失败 %d 页且尚无成功页，已停止本次采集", s.Name, sourceStartupFailLimit)
+			syslog.Errorf("[Spider] 站点 %s 尚无成功页，停止采集 page=%d err=%v", s.Name, page, err)
 			if batch != nil {
 				batch.RecordSourceError(s.Id, stopErr.Error())
 			}
@@ -225,13 +233,8 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 			cancel()
 		})
 	}
-	recordSuccess := func() {
-		consecutiveFailuresMu.Lock()
-		consecutiveFailures = 0
-		consecutiveFailuresMu.Unlock()
-	}
 	markStopped := func() {
-		// 连续失败停抓不写成用户「已停止」。
+		// 零成功停站不写成用户「已停止」。
 		if stopErr != nil {
 			return
 		}
@@ -248,7 +251,6 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		if shouldLogFailure(snapshot.failed) {
 			syslog.Warnf("[Spider] 站点 %s 采集失败累计=%d，最近失败 page=%d stage=%s err=%v", s.Name, snapshot.failed, page, stage, err)
 		}
-		recordFailure(page, stage, err)
 		if batch != nil {
 			batch.TouchRecord()
 		}
@@ -311,14 +313,15 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 							return
 						}
 						recordPageFailure(pg, "fetch", err)
+						noteFetchFail(pg, err)
 						continue
 					}
-					recordSuccess()
+					noteFetchOK()
 					page := pg
 					items := list
 					writeWG.Add(1)
-					// 页已经取到。停止或熔断只取消后续拉页，这一页仍要入队写完。
-					submitErr := scheduler.Submit(context.Background(), scheduler.Job{
+					// 停站取消这次提交。已经开始的写事务仍用独立上下文写完。
+					submitErr := scheduler.Submit(ctx, scheduler.Job{
 						SourceID:   s.Id,
 						SourceName: s.Name,
 						Page:       page,
@@ -378,7 +381,6 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 			}
 			cur.Status = progress.StatusFailed
 			cur.QueueId = ""
-			cur.Reason = model.CollectFailConsecutive
 		})
 		return stats.success > 0, stats.success, stats.failed, stopErr
 	}

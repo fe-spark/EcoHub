@@ -39,7 +39,18 @@ func FinishSource(sourceID string) {
 
 // CancelSource 丢弃站点仍在排队的写入任务（在途写入不受影响）。
 func CancelSource(sourceID string) {
+	if writes == nil || writes.lane == nil {
+		return
+	}
 	writes.cancelSource(sourceID)
+}
+
+// CancelPendingWrites 丢弃全部仍在排队的写入任务（在途写入不受影响）。
+func CancelPendingWrites() {
+	if writes == nil || writes.lane == nil {
+		return
+	}
+	writes.cancelAll()
 }
 
 // Completion 单页写入的完成回调载荷。

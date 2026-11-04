@@ -191,10 +191,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			if originalErr != nil && !errors.Is(originalErr, context.Canceled) {
 				errMsg = originalErr.Error()
 			}
-			reason := snap.Reason
-			if reason == model.CollectFailConsecutive {
-				status = progress.StatusFailed
-			} else if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
+			if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
 				if originalErr != nil {
 					if successPagesCount > 0 {
 						status = model.CollectRecordStatusPartial
@@ -205,7 +202,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 					status = progress.StatusDone
 				}
 			}
-			status, errMsg = settleSourceStatus(status, errMsg, successPagesCount, reason)
+			status, errMsg = settleSourceStatus(status, errMsg, successPagesCount)
 
 			totalP := pageCount
 			if totalP <= 0 {

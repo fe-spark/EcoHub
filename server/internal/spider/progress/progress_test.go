@@ -152,7 +152,7 @@ func TestMarkStoppedDoesNotClobberFailed(t *testing.T) {
 	MarkStopped(sourceID)
 	snap, ok := Snapshot(sourceID)
 	if !ok || snap.Status != StatusFailed {
-		t.Fatalf("连续失败终态不得被标成 stopped, got ok=%v status=%q", ok, snap.Status)
+		t.Fatalf("failed 不得被标成 stopped, got ok=%v status=%q", ok, snap.Status)
 	}
 }
 

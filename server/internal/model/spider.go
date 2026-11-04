@@ -24,7 +24,6 @@ const (
 )
 
 const (
-	TaskIDFailureClean = "sys_cron_failure_clean"
 	TaskIDCollectClean = "sys_cron_collect_clean"
 )
 
@@ -138,8 +137,6 @@ type FilmSourceDelBatchRequest struct {
 	Ids []string `json:"ids"`
 }
 
-const CollectFailConsecutive = "consecutive"
-
 type CollectProgress struct {
 	Id      string `json:"id"`
 	Name    string `json:"name"`
@@ -149,8 +146,6 @@ type CollectProgress struct {
 	Failed  int    `json:"failed"`
 	Status  string `json:"status"`
 	QueueId string `json:"queueId,omitempty"`
-	// Reason 失败原因。consecutive 表示连续失败熔断，前端据此摘出队列。
-	Reason string `json:"reason,omitempty"`
 }
 
 type FilmSourceListItem struct {
