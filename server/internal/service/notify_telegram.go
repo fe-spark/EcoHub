@@ -217,8 +217,6 @@ func triggerLabel(trigger string) string {
 		return "定时任务"
 	case model.CollectTriggerSingleUpdate:
 		return "单片更新"
-	case model.CollectTriggerRecover:
-		return "失败重试"
 	case model.CollectTriggerManual:
 		return "手动采集"
 	default:

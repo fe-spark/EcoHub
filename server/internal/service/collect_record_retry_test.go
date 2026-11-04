@@ -191,73 +191,19 @@ func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 		Page:     1,
 		PageSize: 10,
 	}
-	films, total, sample, err := CollectRecordSvc.GetBatchFilms(q)
-	if err != nil || sample || total != 1 || len(films) != 1 || films[0].Name != "星际穿越" {
-		t.Fatalf("expected 星际穿越, got %+v total=%d sample=%v err=%v", films, total, sample, err)
+	films, total, err := CollectRecordSvc.GetBatchFilms(q)
+	if err != nil || total != 1 || len(films) != 1 || films[0].Name != "星际穿越" {
+		t.Fatalf("expected 星际穿越, got %+v total=%d err=%v", films, total, err)
 	}
 
-	if err := repository.CreateCollectRecord(&model.CollectRecord{
-		BatchID:    "batch-films-svc",
-		Trigger:    model.CollectTriggerManual,
-		Status:     model.CollectRecordStatusSuccess,
-		StartedAt:  time.Now(),
-		DetailJson: `[{"sourceId":"s1","films":[{"mid":9,"name":"不该出现"}]}]`,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	missed, missedTotal, missedSample, err := CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
+	missed, missedTotal, err := CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
 		BatchID:  "batch-films-svc",
 		SourceID: "s1",
 		Keyword:  "不存在的片名",
 		Page:     1,
 		PageSize: 10,
 	})
-	if err != nil || missedSample || missedTotal != 0 || len(missed) != 0 {
-		t.Fatalf("keyword miss must not fall back to samples, got %+v total=%d sample=%v err=%v", missed, missedTotal, missedSample, err)
-	}
-
-	// 2. 影片表没有记录时，才读 detail_json 样例，并标明不是全量。
-	_ = repository.CreateCollectRecord(&model.CollectRecord{
-		BatchID:    "batch-legacy-fallback",
-		Trigger:    model.CollectTriggerManual,
-		Status:     model.CollectRecordStatusSuccess,
-		StartedAt:  time.Now(),
-		DetailJson: `[{"sourceId":"s2","status":"success","films":[{"mid":2002,"name":"楚门的世界"}]}]`,
-	})
-	qFallback := model.CollectRecordFilmQuery{
-		BatchID:  "batch-legacy-fallback",
-		SourceID: "s2",
-		Page:     1,
-		PageSize: 10,
-	}
-	legacyFilms, legacyTotal, legacySample, err := CollectRecordSvc.GetBatchFilms(qFallback)
-	if err != nil || !legacySample || legacyTotal != 1 || len(legacyFilms) != 1 || legacyFilms[0].Name != "楚门的世界" {
-		t.Fatalf("expected 楚门的世界 sample, got %+v total=%d sample=%v err=%v", legacyFilms, legacyTotal, legacySample, err)
-	}
-
-	_, _, _, err = CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
-		BatchID:  "batch-bad-json",
-		Page:     1,
-		PageSize: 10,
-	})
-	if err != nil {
-		t.Fatalf("missing record should stay empty, got %v", err)
-	}
-	if err := repository.CreateCollectRecord(&model.CollectRecord{
-		BatchID:    "batch-bad-json",
-		Trigger:    model.CollectTriggerManual,
-		Status:     model.CollectRecordStatusSuccess,
-		StartedAt:  time.Now(),
-		DetailJson: `{`,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, _, _, err = CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
-		BatchID:  "batch-bad-json",
-		Page:     1,
-		PageSize: 10,
-	})
-	if err == nil || !strings.Contains(err.Error(), "批次明细损坏") {
-		t.Fatalf("expected broken detail error, got %v", err)
+	if err != nil || missedTotal != 0 || len(missed) != 0 {
+		t.Fatalf("keyword miss got %+v total=%d err=%v", missed, missedTotal, err)
 	}
 }

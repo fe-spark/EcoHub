@@ -40,14 +40,6 @@ export const COLLECT_TAG_MAP: Record<string, { label: string; color: string; ico
   retry_collect: { label: "失败重试", color: "purple", icon: <ReloadOutlined /> },
   cron_collect: { label: "定时任务", color: "cyan", icon: <ScheduleOutlined /> },
   single_update: { label: "单片更新", color: "geekblue", icon: <VideoCameraOutlined /> },
-  // 兼容历史存量数据
-  "Batch-Collect": { label: "批量采集", color: "blue", icon: <CloudDownloadOutlined /> },
-  "Single-Collect": { label: "单站采集", color: "blue", icon: <ApiOutlined /> },
-  批量采集: { label: "批量采集", color: "blue", icon: <CloudDownloadOutlined /> },
-  单站采集: { label: "单站采集", color: "blue", icon: <ApiOutlined /> },
-  失败重试: { label: "失败重试", color: "purple", icon: <ReloadOutlined /> },
-  定时任务: { label: "定时任务", color: "cyan", icon: <ScheduleOutlined /> },
-  单片更新: { label: "单片更新", color: "geekblue", icon: <VideoCameraOutlined /> },
 };
 
 function columnTitle(icon: React.ReactNode, label: string) {

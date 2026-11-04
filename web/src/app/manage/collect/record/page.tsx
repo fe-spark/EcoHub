@@ -1,5 +1,5 @@
-import FailureRecordPageView from "./view";
+import CollectRecordPageView from "./view";
 
-export default function FailureRecordPage() {
-  return <FailureRecordPageView />;
+export default function CollectRecordPage() {
+  return <CollectRecordPageView />;
 }

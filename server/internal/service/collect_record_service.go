@@ -12,8 +12,6 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider"
-
-	"gorm.io/gorm"
 )
 
 type CollectRecordService struct{}
@@ -40,7 +38,7 @@ func attachSingleFilmNames(list []model.CollectRecord) error {
 	seen := make(map[int64]struct{})
 	parsed := make([][]int64, len(list))
 	for i := range list {
-		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate && list[i].Tag != "单片更新" {
+		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate {
 			continue
 		}
 		rowIDs := parseFilmIDs(list[i].FilmIDs)
@@ -85,99 +83,9 @@ func (s *CollectRecordService) ListOpenIncidents(now time.Time) ([]model.SourceI
 }
 
 // GetBatchFilms 分页获取某采集批次的影片清单。
-// 第三个返回值表示结果来自 detail_json 里的历史样例，不是全量清单。
-func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, bool, error) {
+func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, error) {
 	q.Page, q.PageSize = normalizeFilmPage(q.Page, q.PageSize)
-	list, total, err := repository.GetCollectRecordFilms(q)
-	if err != nil {
-		return nil, 0, false, err
-	}
-	if total > 0 {
-		return list, total, false, nil
-	}
-	if strings.TrimSpace(q.Keyword) != "" {
-		_, rawTotal, rawErr := repository.GetCollectRecordFilms(model.CollectRecordFilmQuery{
-			BatchID:  q.BatchID,
-			SourceID: q.SourceID,
-			Page:     1,
-			PageSize: 1,
-		})
-		if rawErr != nil {
-			return nil, 0, false, rawErr
-		}
-		if rawTotal > 0 {
-			return []model.CollectRecordFilm{}, 0, false, nil
-		}
-	}
-
-	samples, err := legacySampleFilms(q)
-	if err != nil {
-		return nil, 0, false, err
-	}
-	if len(samples) == 0 {
-		return []model.CollectRecordFilm{}, 0, false, nil
-	}
-	page, pageSize := normalizeFilmPage(q.Page, q.PageSize)
-	start := (page - 1) * pageSize
-	if start >= len(samples) {
-		return []model.CollectRecordFilm{}, int64(len(samples)), true, nil
-	}
-	end := start + pageSize
-	if end > len(samples) {
-		end = len(samples)
-	}
-	return samples[start:end], int64(len(samples)), true, nil
-}
-
-// legacySampleFilms 只在影片表确实没有该批次记录时读取旧 detail_json 样例。
-func legacySampleFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, error) {
-	rec, err := repository.GetCollectRecordByBatchID(q.BatchID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	if rec == nil || strings.TrimSpace(rec.DetailJson) == "" {
-		return nil, nil
-	}
-	var details []model.CollectRecordSourceDetail
-	if err := json.Unmarshal([]byte(rec.DetailJson), &details); err != nil {
-		return nil, fmt.Errorf("批次明细损坏: %w", err)
-	}
-
-	sourceID := strings.TrimSpace(q.SourceID)
-	seen := make(map[int64]struct{})
-	films := make([]model.CollectRecordFilm, 0)
-	for _, detail := range details {
-		if sourceID != "" && strings.TrimSpace(detail.SourceID) != sourceID {
-			continue
-		}
-		for _, film := range detail.Films {
-			if film.Mid <= 0 {
-				continue
-			}
-			if sourceID == "" {
-				if _, ok := seen[film.Mid]; ok {
-					continue
-				}
-				seen[film.Mid] = struct{}{}
-				film.SourceID = ""
-			}
-			films = append(films, film)
-		}
-	}
-	keyword := strings.TrimSpace(q.Keyword)
-	if keyword == "" {
-		return films, nil
-	}
-	filtered := make([]model.CollectRecordFilm, 0, len(films))
-	for _, film := range films {
-		if strings.Contains(film.Name, keyword) {
-			filtered = append(filtered, film)
-		}
-	}
-	return filtered, nil
+	return repository.GetCollectRecordFilms(q)
 }
 
 func normalizeFilmPage(page, pageSize int) (int, int) {
