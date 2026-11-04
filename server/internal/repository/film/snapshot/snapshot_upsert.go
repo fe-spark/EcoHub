@@ -3,7 +3,6 @@ package snapshot
 import (
 	"log"
 	"strings"
-	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -112,7 +111,6 @@ func TouchActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 func upsertActiveSnapshots(mids []int64, refreshSearch bool) (string, int, error) {
 	activeSnapshotUpsertMu.Lock()
 	defer activeSnapshotUpsertMu.Unlock()
-	startedAt := time.Now()
 
 	version := strings.TrimSpace(GetActiveReadModelVersion())
 	if version == "" {
@@ -141,7 +139,6 @@ func upsertActiveSnapshots(mids []int64, refreshSearch bool) (string, int, error
 		}
 	}
 	scheduleSnapshotCacheInvalidation(version, ids)
-	log.Printf("[Snapshot] 列表可见性已跟随 film_index version=%s input=%d kept=%d deleted=%d search=%t cost=%s", version, len(ids), len(existing), len(deletedMIDs), refreshSearch, time.Since(startedAt))
 	return version, len(existing), nil
 }
 

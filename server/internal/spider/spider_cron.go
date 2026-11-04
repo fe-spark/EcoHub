@@ -191,6 +191,10 @@ func runTaskBody(ft model.FilmCollectTask) {
 
 	switch ft.Model {
 	case model.TaskModelAutoCollect:
+		if isMaintenanceRunning() {
+			log.Printf("[Spider] 定时自动采集避让：检测到系统正在执行低频维护任务，自动跳过本次采集调度 (Task: %s)", ft.Id)
+			return
+		}
 		AutoCollectTriggered(model.CollectTriggerCron, ft.Time)
 		log.Println("执行一次已启用站点采集")
 	case model.TaskModelOrphanClean:
@@ -211,12 +215,27 @@ func runTaskBody(ft model.FilmCollectTask) {
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
 }
 
-var orphanCleanWaitTimeout = 10 * time.Minute
+var (
+	runningMaintenanceTasks sync.Map
+	orphanCleanWaitTimeout  = 10 * time.Minute
+	maintenanceWaitTimeout  = 10 * time.Minute
+)
+
+func isMaintenanceRunning() bool {
+	count := 0
+	runningMaintenanceTasks.Range(func(_, _ any) bool {
+		count++
+		return false
+	})
+	return count > 0 || collectLifecycle.isMaintenanceBusy()
+}
 
 func executeOrphanCleanTask(ft model.FilmCollectTask) {
+	runningMaintenanceTasks.Store(ft.Id, struct{}{})
+	defer runningMaintenanceTasks.Delete(ft.Id)
+
 	orphanCleanTaskLock.Lock()
 	defer orphanCleanTaskLock.Unlock()
-
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
@@ -283,31 +302,51 @@ const (
 )
 
 func executeLogCleanTask(ft model.FilmCollectTask) {
+	runningMaintenanceTasks.Store(ft.Id, struct{}{})
+	defer runningMaintenanceTasks.Delete(ft.Id)
+
 	noteTaskRan(ft.Id, time.Now())
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
 		remark = "清理过期运行日志"
 	}
-	n, err := syslog.PruneExpiredLogs(logRetention)
+	err := collectLifecycle.reserveMaintenance(maintenanceWaitTimeout, func() error {
+		n, err := syslog.PruneExpiredLogs(logRetention)
+		if err != nil {
+			return err
+		}
+		log.Printf("定时任务完成: %s，清理过期日志 %d 个，耗时 %s", remark, n, time.Since(startedAt))
+		return nil
+	})
 	if err != nil {
+		if errors.Is(err, errDrainTimeout) {
+			log.Printf("定时任务跳过: %s，%v，耗时 %s", remark, err, time.Since(startedAt))
+			return
+		}
 		syslog.Errorf("[LogClean] 清理过期运行日志失败: %v", err)
 		emitCronFailedNotify(ft.Id, remark, err.Error())
-		return
 	}
-
-	log.Printf("定时任务完成: %s，清理过期日志 %d 个，耗时 %s", remark, n, time.Since(startedAt))
 }
 
 func executeCollectRecordCleanTask(ft model.FilmCollectTask) {
+	runningMaintenanceTasks.Store(ft.Id, struct{}{})
+	defer runningMaintenanceTasks.Delete(ft.Id)
+
 	noteTaskRan(ft.Id, time.Now())
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
 		remark = "定期清理超过 30 天的采集运行记录与快照"
 	}
-	err := repository.CleanOldCollectRecords(30)
+	err := collectLifecycle.reserveMaintenance(maintenanceWaitTimeout, func() error {
+		return repository.CleanOldCollectRecords(30)
+	})
 	if err != nil {
+		if errors.Is(err, errDrainTimeout) {
+			log.Printf("定时任务跳过: %s，%v，耗时 %s", remark, err, time.Since(startedAt))
+			return
+		}
 		log.Printf("定时任务失败: %s，err=%v，耗时 %s", remark, err, time.Since(startedAt))
 		emitCronFailedNotify(ft.Id, remark, err.Error())
 	} else {

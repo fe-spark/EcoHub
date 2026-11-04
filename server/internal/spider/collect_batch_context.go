@@ -1,14 +1,12 @@
 package spider
 
 import (
-	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"server/internal/model"
-	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 // publishMu 全局快照发布互斥锁，确保向 MySQL 发布快照时单次只有一个线程在执行
@@ -118,15 +116,11 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids [
 		return
 	}
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	for _, mid := range mids {
 		if mid > 0 {
 			b.masterAffectedMIDs[mid] = struct{}{}
 		}
-	}
-	sourceID := s.Id
-	b.mu.Unlock()
-	if err := enqueueStreamPublish(sourceID, mids); err != nil {
-		log.Printf("[Spider][StreamPublish] 流式刷窗失败 source=%s err=%v", sourceID, err)
 	}
 }
 
@@ -274,13 +268,7 @@ func (b *collectBatchContext) finalizePrimarySource(sourceID string) error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	if err := finalizeStreamPublish(b.takeAffectedMIDs, true); err != nil {
-		return err
-	}
-	if b.hour == 0 {
-		filmsnapshot.RequestActiveFilmSearchIndexRebuild()
-	}
-	return nil
+	return finalizeStreamPublish(b.takeAffectedMIDs, true)
 }
 
 func (b *collectBatchContext) flushAndFinalize() error {
@@ -310,13 +298,7 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	if err := finalizeStreamPublish(b.takeAffectedMIDs, warmupHome); err != nil {
-		return err
-	}
-	if b.hour == 0 {
-		filmsnapshot.RequestActiveFilmSearchIndexRebuild()
-	}
-	return nil
+	return finalizeStreamPublish(b.takeAffectedMIDs, warmupHome)
 }
 
 func (b *collectBatchContext) close() {

@@ -83,6 +83,12 @@ func (s *collectLifecycleState) isBusy() bool {
 	defer s.mu.Unlock()
 	return s.activeCount > 0 || s.publishing > 0
 }
+func (s *collectLifecycleState) isMaintenanceBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.draining
+}
+
 
 func (s *collectLifecycleState) beginPublish() {
 	s.mu.Lock()
