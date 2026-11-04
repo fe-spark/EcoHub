@@ -86,21 +86,22 @@ func GetVersionedIndexPageCacheKey() string {
 }
 
 func ClearIndexPageCache() {
-	if db.Rdb == nil {
+	rdb := db.Rdb
+	if rdb == nil {
 		return
 	}
-	iter := db.Rdb.Scan(db.Cxt, 0, config.IndexPageCacheKey+"*", config.MaxScanCount).Iterator()
+	iter := rdb.Scan(db.Cxt, 0, config.IndexPageCacheKey+"*", config.MaxScanCount).Iterator()
 	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
+		rdb.Del(db.Cxt, iter.Val())
 	}
-	db.Rdb.Del(db.Cxt, config.DailyUpdatesCatCacheKey)
-	dailyIter := db.Rdb.Scan(db.Cxt, 0, config.DailyUpdatesCatCacheKey+"*", config.MaxScanCount).Iterator()
+	rdb.Del(db.Cxt, config.DailyUpdatesCatCacheKey)
+	dailyIter := rdb.Scan(db.Cxt, 0, config.DailyUpdatesCatCacheKey+"*", config.MaxScanCount).Iterator()
 	for dailyIter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, dailyIter.Val())
+		rdb.Del(db.Cxt, dailyIter.Val())
 	}
-	pageIter := db.Rdb.Scan(db.Cxt, 0, config.DailyUpdatesCachePrefix+"*", config.MaxScanCount).Iterator()
+	pageIter := rdb.Scan(db.Cxt, 0, config.DailyUpdatesCachePrefix+"*", config.MaxScanCount).Iterator()
 	for pageIter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, pageIter.Val())
+		rdb.Del(db.Cxt, pageIter.Val())
 	}
 }
 
