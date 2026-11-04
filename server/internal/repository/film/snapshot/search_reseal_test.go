@@ -126,6 +126,30 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	}
 }
 
+func TestResealSearchIndexMids_TriggersRebuildWhenExceedsThreshold(t *testing.T) {
+	setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-threshold"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-threshold", []FilmSearchMeta{{Mid: 1}}))
+
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	defer stopRebuild()
+
+	hugeMids := make([]int64, searchResealRebuildThreshold)
+	for i := range hugeMids {
+		hugeMids[i] = int64(i + 1)
+	}
+	if !ResealSearchIndexMids(hugeMids) {
+		t.Fatal("expected reseal to return true when triggering rebuild")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if !scanned.Load() {
+		t.Fatal("expected full-scan rebuild triggered when mids exceeds rebuild threshold")
+	}
+}
+
 func TestResealRereadsWhenIndexPointerChanges(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	createTestFilm(t, gdb, 101, "将被删除", 1000, "默认主源")

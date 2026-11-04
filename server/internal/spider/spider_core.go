@@ -70,15 +70,14 @@ func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree
 	return tree, filmListPage.PageCount, nil
 }
 
-// GetPageCount 获取分页总页数
+// GetPageCount 获取分页总页数。默认使用轻量级 ac=list 仅探测页数与总量，避免拉取巨型 detail 数据。
 func (jc *JsonCollect) GetPageCount(r utils.RequestInfo) (count int, err error) {
-	// 发送请求获取pageCount, 默认为获取 ac = detail
 	if len(r.Params.Get("ac")) <= 0 {
-		r.Params.Set("ac", "detail")
+		r.Params.Set("ac", "list")
 	}
 	r.Params.Set("pg", "1")
 	utils.ApiGet(&r)
-	//  判断请求结果是否为空, 如果为空直接输出错误并终止
+	// 判断请求结果是否为空, 如果为空直接输出错误并终止
 	if len(r.Resp) <= 0 {
 		errMsg := r.Err
 		if errMsg == "" {

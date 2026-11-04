@@ -85,13 +85,23 @@ func init() {
 }
 
 func HandlePreparedCollect(id string, h int) error {
-	if s := repository.FindCollectSourceById(id); s != nil {
-		if err := probeSourcePageCount(s, h, model.CollectTriggerManual); err != nil {
-			abortUnstartedCollect(id, nil)
-			return err
-		}
+	s := repository.FindCollectSourceById(id)
+	if s == nil {
+		abortUnstartedCollect(id, nil)
+		return errors.New("采集任务开启失败，采集站信息不存在")
 	}
-	return handleCollectWithStopVersion(id, h, nil, true, true, nil)
+	if err := probeSourcePageCount(s, h, model.CollectTriggerManual); err != nil {
+		abortUnstartedCollect(id, nil)
+		return err
+	}
+	batchCtx := newCollectBatchContext(model.CollectTriggerManual, model.CollectTagSingleCollect, []model.FilmSource{*s}, time.Now()).withHour(h)
+	batchCtx.isStandalone = true
+	if err := batchCtx.recordStart(); err != nil {
+		abandonQueuedCollectSource(*s, batchCtx)
+		batchCtx.close()
+		return err
+	}
+	return handleCollectWithStopVersion(id, h, nil, true, true, batchCtx)
 }
 
 func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStandalone bool, allowPreparedStart bool, batchCtx *collectBatchContext) (retErr error) {
@@ -177,11 +187,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			batchCtx.RecordSourceError(s.Id, originalErr.Error())
 		}
 		runOK := shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id)
-		if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron && statsOwned {
+		if statsOwned {
 			repository.UnsuppressCollectSourceStats(s.Id)
-			if runOK {
-				repository.NoteCollectSourceStats(s.Id)
-			}
+		}
+		if runOK {
+			repository.NoteCollectSourceStats(s.Id)
+		} else if statsOwned {
+			repository.DropCollectSourceStatsPending(s.Id)
 		}
 		effectiveSuccess := successPagesCount
 		if runOK || effectiveSuccess > 0 || hadWrites {
@@ -281,10 +293,8 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		return err
 	}
 	collectCtx = progress.WithRunEpoch(ctx, progress.Epoch(id))
-	if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron {
-		repository.SuppressCollectSourceStats(s.Id)
-		statsOwned = true
-	}
+	repository.SuppressCollectSourceStats(s.Id)
+	statsOwned = true
 
 	defer func() {
 		if progress.UnregisterTask(id, reqId) {

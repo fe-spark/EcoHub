@@ -38,25 +38,13 @@ func finalizeCategorySync() {
 
 // StartCollect 执行对指定站点的采集任务
 func (s *SpiderService) StartCollect(id string, h int) error {
-	fs := repository.FindCollectSourceById(id)
-	if fs == nil {
-		return errors.New("采集任务开启失败，采集站信息不存在")
-	}
-	if !fs.State {
-		return errors.New("采集任务开启失败，该采集站已被禁用，请先启用后再采集")
-	}
-	if !repository.SourceHasCategoryMapping(fs.Id) {
-		return fmt.Errorf("采集站 %s 还没有分类，请重新保存后再采集", fs.Name)
-	}
-	if err := spider.PrepareSingleCollectStart(*fs); err != nil {
-		return err
-	}
-	go func() {
-		err := spider.HandlePreparedCollect(id, h)
-		if err != nil {
-			log.Printf("[SpiderService] 资源站[%s]采集任务执行失败: %s", id, err)
+	res := s.BatchCollect(h, []string{id})
+	if len(res.Started) == 0 {
+		for _, item := range res.Skipped {
+			return errors.New(item.Reason)
 		}
-	}()
+		return errors.New("采集任务开启失败")
+	}
 	return nil
 }
 

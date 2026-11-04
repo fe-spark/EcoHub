@@ -197,3 +197,48 @@ func TestTagMetaMatch_DisabledCategoryHidden(t *testing.T) {
 		t.Fatal("expected disabledMeta to be filtered out")
 	}
 }
+
+func TestUpdateSearchMetaIndexIncremental_UpdatesRankPools(t *testing.T) {
+	initial := sealSearchMetaIndex("v1", []FilmSearchMeta{
+		{
+			Mid:           1,
+			FirstSourceId: "src-1",
+			PlaySources:   []string{"src-1"},
+			CategoryKey:   "cat-1",
+			Item: utils.FilmSearchItem{
+				Mid:         1,
+				Name:        "旧电影",
+				CleanName:   "旧电影",
+				UpdateStamp: 100,
+			},
+		},
+	})
+
+	key := hotPoolMapKey("src-1", "cat-1")
+	if len(initial.RecentPools[key]) != 1 || initial.RecentPools[key][0] != 1 {
+		t.Fatalf("initial RecentPools=%v, want [1]", initial.RecentPools[key])
+	}
+
+	updated := updateSearchMetaIndexIncremental(initial, "v1", map[int64]FilmSearchMeta{
+		2: {
+			Mid:           2,
+			FirstSourceId: "src-1",
+			PlaySources:   []string{"src-1"},
+			CategoryKey:   "cat-1",
+			Item: utils.FilmSearchItem{
+				Mid:         2,
+				Name:        "新电影",
+				CleanName:   "新电影",
+				UpdateStamp: 200,
+			},
+		},
+	})
+
+	recents := updated.RecentPools[key]
+	if len(recents) != 2 {
+		t.Fatalf("updated RecentPools length=%d, want 2, got %v", len(recents), recents)
+	}
+	if recents[0] != 2 || recents[1] != 1 {
+		t.Fatalf("updated RecentPools order=%v, want [2, 1]", recents)
+	}
+}
