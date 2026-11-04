@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -91,6 +92,7 @@ func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMet
 	if len(modifiedPos) == 0 {
 		return cur.SearchPosts
 	}
+	slices.Sort(modifiedPos)
 	posts := &searchPostings{
 		runes: make(map[rune][]int32, len(cur.SearchPosts.runes)+256),
 		ascii: make(map[string][]int32, len(cur.SearchPosts.ascii)+256),
@@ -104,6 +106,16 @@ func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMet
 	for _, p := range modifiedPos {
 		meta := &items[p]
 		appendSingleItemPostings(posts, p, meta)
+	}
+	for _, p := range modifiedPos {
+		if p < int32(len(cur.Items)) {
+			meta := &items[p]
+			for _, r := range meta.Item.CleanName {
+				if r >= 128 && len(posts.runes[r]) > 1 {
+					slices.Sort(posts.runes[r])
+				}
+			}
+		}
 	}
 	return posts
 }
