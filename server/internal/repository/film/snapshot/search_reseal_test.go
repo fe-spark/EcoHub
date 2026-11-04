@@ -126,6 +126,28 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	}
 }
 
+func TestResealSearchIndexMids_LargeBatchStaysIncremental(t *testing.T) {
+	setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-large"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-large", []FilmSearchMeta{{Mid: 1}}))
+
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	defer stopRebuild()
+
+	hugeMids := make([]int64, 55000)
+	for i := range hugeMids {
+		hugeMids[i] = int64(i + 1)
+	}
+	ResealSearchIndexMids(hugeMids)
+	time.Sleep(40 * time.Millisecond)
+	if scanned.Load() {
+		t.Fatal("unexpected full-scan rebuild triggered for large batch without drops")
+	}
+}
+
 func TestResealRereadsWhenIndexPointerChanges(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	createTestFilm(t, gdb, 101, "将被删除", 1000, "默认主源")

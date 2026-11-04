@@ -7,11 +7,8 @@ import (
 	"server/internal/model"
 )
 
-// searchResealSealMin 达到该变动量时，收尾在内存里重算一次倒排和榜单，不扫全库。
-const searchResealSealMin = 50000
-
 // ResealSearchIndexMids 一条采集队列的变动只封口一次。
-// 库里仍在的影片走增量；变动达到 searchResealSealMin 或有删除时，用内存里的全表重算倒排和榜单。
+// 库里仍在的影片走增量；有物理删除时才在内存里重算倒排和榜单，不扫全库。
 // 没有可用内存索引时才请求全库重建。
 func ResealSearchIndexMids(mids []int64) bool {
 	mids = NormalizeSnapshotMIDs(mids)
@@ -49,9 +46,9 @@ func ResealSearchIndexMids(mids []int64) bool {
 			return false
 		}
 		if cur == base {
-			sealAll := len(drop) > 0 || len(mids) >= searchResealSealMin
 			var idx *filmSearchMetaIndex
-			if sealAll {
+			hasDrop := len(drop) > 0
+			if hasDrop {
 				idx = sealSearchMetaIndex(cur.Version, patchSearchMetas(cur.Items, upsertMap, drop))
 			} else {
 				idx = updateSearchMetaIndexIncremental(cur, cur.Version, upsertMap)
@@ -59,7 +56,7 @@ func ResealSearchIndexMids(mids []int64) bool {
 			activeFilmSearchMetas.Store(idx)
 			activeFilmSearchMetasMu.Unlock()
 			log.Printf("[ActiveReadModel] 检索索引按需封口 mids=%d drop=%d seal=%t total=%d",
-				len(mids), len(drop), sealAll, len(idx.Items))
+				len(mids), len(drop), hasDrop, len(idx.Items))
 			return true
 		}
 		activeFilmSearchMetasMu.Unlock()
