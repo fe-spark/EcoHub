@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Card, Popconfirm, Space } from "antd";
+import { Button, Card, Popconfirm, Space, Tooltip } from "antd";
 import styles from "./index.module.less";
 
 export interface CollectToolbarProps {
@@ -8,6 +8,7 @@ export interface CollectToolbarProps {
   canWrite: boolean;
   batchStateUpdating: boolean;
   batchDeleting: boolean;
+  isIndexing?: boolean;
   deleteConfirmTitle: string;
   deleteConfirmDescription: string;
   onSelectAll: () => void;
@@ -26,6 +27,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
     canWrite,
     batchStateUpdating,
     batchDeleting,
+    isIndexing = false,
     deleteConfirmTitle,
     deleteConfirmDescription,
     onSelectAll,
@@ -53,14 +55,18 @@ export default function CollectToolbar(props: CollectToolbarProps) {
           </Button>
         </Space>
         <Space size={8} wrap className={styles.toolbarActions}>
-          <Button
-            type="primary"
-            disabled={!canWrite || selectedCount === 0}
-            data-tour="collect-batch"
-            onClick={onOpenBatchCollect}
-          >
-            批量采集{selectedCount > 0 ? ` (${selectedCount})` : ""}
-          </Button>
+          <Tooltip title={isIndexing ? "检索索引更新中，采集已暂停" : undefined}>
+            <span>
+              <Button
+                type="primary"
+                disabled={!canWrite || selectedCount === 0 || isIndexing}
+                data-tour="collect-batch"
+                onClick={onOpenBatchCollect}
+              >
+                批量采集{selectedCount > 0 ? ` (${selectedCount})` : ""}
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             loading={batchStateUpdating}
             disabled={!canWrite || selectedCount === 0}

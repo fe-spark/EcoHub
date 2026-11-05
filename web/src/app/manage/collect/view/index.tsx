@@ -29,10 +29,10 @@ import { useCollectSort } from "./use-collect-sort";
 import { useCollectSourceForm } from "./use-collect-source-form";
 import { useCollectCardActions } from "./use-collect-card-actions";
 import { useCollectIncidents } from "./use-collect-incidents";
-import { isTerminalCollectStatus, newClientCollectQueueId } from "./collect-queue";
 import {
   isCollectBusyStatus,
   type CollectListItemResponse,
+  type CollectProgress,
   type FilmSource,
   normalizeSource,
 } from "./types";
@@ -70,8 +70,13 @@ export default function CollectManagePageView() {
           const rawData = Array.isArray(resp.data) ? resp.data : [];
           setSiteList((current) => {
             const cdMap = new Map(current.map((item) => [item.id, item.cd]));
+            const progressMap = new Map(current.map((item) => [item.id, item.progress ?? null]));
             const normalizedList = rawData.map((item: CollectListItemResponse) => {
               const normalized = normalizeSource(item);
+              if (progressFromStreamRef.current) {
+                // 进度流是唯一数据源；列表里的进度可能比 SSE 旧。
+                normalized.progress = progressMap.get(item.id) ?? null;
+              }
               if (cdMap.has(item.id) && cdMap.get(item.id)) {
                 normalized.cd = cdMap.get(item.id);
               }
@@ -92,15 +97,6 @@ export default function CollectManagePageView() {
               return { ...fresh, isPrimary: item.isPrimary };
             });
           });
-          if (stoppingSiteIdsRef.current.size > 0) {
-            for (const id of stoppingSiteIdsRef.current) {
-              const item = rawData.find((s: CollectListItemResponse) => s.id === id);
-              if (!item || !item.progress || isTerminalCollectStatus(item.progress.status)) {
-                stoppingSiteIdsRef.current.delete(id);
-                message.info({ key: `collect-stop-site-${id}`, content: "采集已停止", duration: 2 });
-              }
-            }
-          }
           if (createdId) {
             setTimeout(() => {
               document.getElementById(`source-card-${createdId}`)?.scrollIntoView({
@@ -121,31 +117,15 @@ export default function CollectManagePageView() {
     [message, pendingCategoryStatusRef, pendingSortRef],
   );
 
-  const resetTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
-  const stoppingSiteIdsRef = useRef<Set<string>>(new Set());
+  const progressFromStreamRef = useRef(false);
 
-  const handleTerminalStatus = useCallback(
-    (id: string, status: string) => {
-      if (stoppingSiteIdsRef.current.has(id)) {
-        stoppingSiteIdsRef.current.delete(id);
-        const text = status === "stopped" ? "采集已停止" : status === "failed" ? "采集失败" : "采集完成";
-        message.info({
-          key: `collect-stop-site-${id}`,
-          content: text,
-          duration: 2,
-        });
-        setSiteList((current) =>
-          current.map((item) => (item.id === id ? { ...item, progress: null } : item)),
-        );
-      }
+  const applyProgressSnapshot = useCollectProgressStream(setSiteList);
+  const handleProgressStream = useCallback(
+    (list: CollectProgress[]) => {
+      progressFromStreamRef.current = true;
+      applyProgressSnapshot(list);
     },
-    [message, setSiteList],
-  );
-
-  const handleProgressStream = useCollectProgressStream(
-    setSiteList,
-    resetTimersRef,
-    handleTerminalStatus,
+    [applyProgressSnapshot],
   );
 
   const {
@@ -219,7 +199,12 @@ export default function CollectManagePageView() {
     batchRows,
     openBatchCollect,
     startBatchCollect,
-  } = useCollectBatchRunner(siteList, setSiteList, selectedSourceIds, getCollectList, clearSelection);
+  } = useCollectBatchRunner(
+    siteList,
+    selectedSourceIds,
+    clearSelection,
+    searchIndexProgress,
+  );
 
   const fetchProxyStatus = useCallback(async () => {
     try {
@@ -239,17 +224,12 @@ export default function CollectManagePageView() {
 
   useEffect(() => {
     mountedRef.current = true;
-    const timers = resetTimersRef.current;
     void getCollectList();
     void fetchProxyStatus();
     void refreshIncidents();
     return () => {
       mountedRef.current = false;
       cleanupSort();
-      for (const timer of timers.values()) {
-        clearTimeout(timer);
-      }
-      timers.clear();
     };
   }, [cleanupSort, fetchProxyStatus, getCollectList, refreshIncidents]);
 
@@ -258,7 +238,10 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList);
+  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(
+    siteList,
+    searchIndexProgress,
+  );
 
   const updateSiteListItem = useCallback((id: string, updater: (record: FilmSource) => FilmSource) => {
     setSiteList((current) => current.map((item) => (item.id === id ? updater(item) : item)));
@@ -283,8 +266,8 @@ export default function CollectManagePageView() {
     setSiteList,
     updateSiteListItem,
     getCollectList,
-    stoppingSiteIdsRef,
     onDeleteSubmitted: enqueueDeletingSources,
+    searchIndex: searchIndexProgress,
   });
 
   const {
@@ -382,6 +365,7 @@ export default function CollectManagePageView() {
           canWrite={canOperate}
           batchStateUpdating={batchStateUpdating}
           batchDeleting={batchDeleting}
+          isIndexing={searchIndexProgress?.status === "indexing"}
           deleteConfirmTitle={deleteConfirmTitle}
           deleteConfirmDescription={deleteConfirmDescription}
           onSelectAll={selectAllSources}
@@ -465,6 +449,7 @@ export default function CollectManagePageView() {
         open={batchOpen}
         rows={batchRows}
         batchTime={batchTime}
+        isIndexing={searchIndexProgress?.status === "indexing"}
         onCancel={() => setBatchOpen(false)}
         onSubmit={() => void startBatchCollect()}
         onBatchTimeChange={setBatchTime}

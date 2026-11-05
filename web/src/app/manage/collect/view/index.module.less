@@ -242,8 +242,13 @@
   box-shadow: 0 0 0 1px var(--ant-color-border-secondary);
 }
 
-.toneStopping {
+.toneStopped {
   --card-accent: #faad14;
+}
+
+/* 待检索 / 检索封口中 */
+.toneSealing {
+  --card-accent: #1677ff;
 }
 
 /* 采集失败 */
@@ -260,8 +265,8 @@
 /* 头部：可拖拽区域，增加背景色标识 */
 .cardHead {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
   margin: -16px -16px 14px -16px;
   padding: 12px 14px;
@@ -281,6 +286,19 @@
     cursor: grabbing;
     background: var(--ant-color-fill-secondary);
   }
+}
+
+/* 头部第一行：勾选、站名、状态与开关 */
+.cardHeadTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 头部第二块：地址与本次采集进度占满整行 */
+.cardHeadBody {
+  min-width: 0;
 }
 
 /* 拖拽原位占位符：虚线边框与半透明度，视觉指示明确 */
@@ -354,7 +372,7 @@
   --card-accent: #faad14;
 }
 
-.sourceCardMaster.toneStopping {
+.sourceCardMaster.toneStopped {
   --card-accent: #faad14;
 }
 
@@ -364,13 +382,10 @@
 
 .cardUri {
   display: block;
-  margin-top: 4px;
   font-size: 12px;
   line-height: 18px;
   color: var(--ant-color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-all;
   text-decoration: none;
   transition: color 0.2s ease;
 }
@@ -422,9 +437,14 @@
   background: var(--ant-color-fill-tertiary);
 }
 
-.statusStopping {
+.statusStopped {
   color: #faad14;
   background: rgba(250, 173, 20, 0.1);
+}
+
+.statusSealing {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.1);
 }
 
 .statusFailed {
@@ -532,6 +552,39 @@
   margin-top: auto;
   min-width: 0;
   width: 100%;
+}
+
+/* 本轮采集情况：图标 + 数字，放不下时换行，不裁切 */
+.cardProgress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.cardProgressItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cardProgressLabel {
+  color: var(--ant-color-text-secondary);
+}
+
+.cardProgressSuccess {
+  color: var(--ant-color-success);
+}
+
+.cardProgressFailed {
+  color: var(--ant-color-error);
 }
 
 .cardMeta {

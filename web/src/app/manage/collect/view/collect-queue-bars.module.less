@@ -64,6 +64,22 @@
   }
 }
 
+.queueStopped {
+  border-color: rgba(250, 173, 20, 0.28);
+
+  &::before {
+    background: #faad14;
+  }
+}
+
+.queueSealing {
+  border-color: rgba(22, 119, 255, 0.28);
+
+  &::before {
+    background: #1677ff;
+  }
+}
+
 .queueException {
   border-color: rgba(255, 77, 79, 0.28);
 
@@ -139,6 +155,16 @@
 .statusSuccess {
   color: #52c41a;
   background: rgba(82, 196, 26, 0.1);
+}
+
+.statusStopped {
+  color: #faad14;
+  background: rgba(250, 173, 20, 0.1);
+}
+
+.statusSealing {
+  color: #1677ff;
+  background: rgba(22, 119, 255, 0.1);
 }
 
 .statusException {
@@ -231,6 +257,14 @@
 
 .percentSuccess {
   color: #52c41a;
+}
+
+.percentStopped {
+  color: #faad14;
+}
+
+.percentSealing {
+  color: #1677ff;
 }
 
 .percentException {

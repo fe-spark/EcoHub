@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { Button, Checkbox, Popconfirm, Select, Switch, Tag, Tooltip } from "antd";
 import {
-  DeleteOutlined, DisconnectOutlined, EditOutlined, ExclamationCircleOutlined,
-  GlobalOutlined, LoadingOutlined, PoweroffOutlined, ReloadOutlined, StopOutlined, SyncOutlined,
+  CheckOutlined, CloseOutlined, DeleteOutlined, DisconnectOutlined, EditOutlined,
+  ExclamationCircleOutlined, GlobalOutlined, LoadingOutlined, PoweroffOutlined,
+  ReloadOutlined, StopOutlined, SyncOutlined,
 } from "@ant-design/icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -10,20 +11,21 @@ import dayjs from "dayjs";
 import { collectDuration, type FilmSource, type SourceIncident } from "./types";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
-import type { SealRingView } from "./seal-ring";
 import { useManagePermission } from "@/lib/manage-permission";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { ApiPost } from "@/lib/client-api";
 import styles from "./index.module.less";
 
 const toneClassMap: Record<StatusTone, string> = {
-  running: styles.toneRunning, enabled: styles.toneEnabled, disabled: styles.toneDisabled,
-  stopping: styles.toneStopping, failed: styles.toneFailed, deleting: styles.toneDeleting,
+  running: styles.toneRunning, sealing: styles.toneSealing, stopped: styles.toneStopped,
+  failed: styles.toneFailed, enabled: styles.toneEnabled, disabled: styles.toneDisabled,
+  deleting: styles.toneDeleting,
 };
 
 const statusClassMap: Record<StatusTone, string> = {
-  running: styles.statusRunning, enabled: styles.statusEnabled, disabled: styles.statusDisabled,
-  stopping: styles.statusStopping, failed: styles.statusFailed, deleting: styles.statusDeleting,
+  running: styles.statusRunning, sealing: styles.statusSealing, stopped: styles.statusStopped,
+  failed: styles.statusFailed, enabled: styles.statusEnabled, disabled: styles.statusDisabled,
+  deleting: styles.statusDeleting,
 };
 
 interface CollectSourceCardProps {
@@ -31,7 +33,8 @@ interface CollectSourceCardProps {
   selected: boolean;
   /** 任务仍处于采集生命周期（starting/running） */
   active: boolean;
-  seal?: SealRingView | null;
+  /** 检索索引正在重建，全部采集暂停 */
+  indexing?: boolean;
   globalSpiderProxyReady?: boolean;
   headerDragProps?: React.HTMLAttributes<HTMLDivElement>;
   onSelect: (id: string, checked: boolean) => void;
@@ -53,7 +56,7 @@ export default function CollectSourceCard({
   record,
   selected,
   active,
-  seal = null,
+  indexing = false,
   globalSpiderProxyReady = false,
   headerDragProps,
   onSelect,
@@ -74,27 +77,32 @@ export default function CollectSourceCard({
   const isStopping = phase === "stopping";
   const isRunning = active;
   const busy = isRunning || isStopping;
+  const sealing = phase === "sealing";
   const { canWrite } = useManagePermission();
-  const { label: statusLabel, tone: statusTone } = resolveSourceStatus(
-    record,
-    active || isStopping,
-    isDeleting,
-  );
+  const resolved = resolveSourceStatus(record, active || isStopping, isDeleting);
+  const statusLabel = resolved.label;
+  const statusTone = resolved.tone;
   const canStop = phase === "starting" || phase === "running";
   const startDisabled =
     !canWrite ||
     !record.state ||
     isDeleting ||
     busy ||
+    indexing ||
+    sealing ||
     Boolean(record.categorySyncing) ||
     record.categoryReady === false;
-  const startTitle = !record.state
-    ? "已禁用"
-    : record.categorySyncing
-      ? "分类采集中"
-      : record.categoryReady === false
-        ? "缺分类"
-        : undefined;
+  const startTitle = indexing
+    ? "检索索引更新中，采集已暂停"
+    : sealing
+      ? "待检索"
+      : !record.state
+        ? "已禁用"
+        : record.categorySyncing
+          ? "分类采集中"
+          : record.categoryReady === false
+            ? "缺分类"
+            : undefined;
   const categoryTitle = record.categorySyncing
     ? "分类采集中"
     : record.categoryReady === false
@@ -143,9 +151,18 @@ export default function CollectSourceCard({
     .filter(Boolean)
     .join(" ");
 
+  // 卡片上的本轮采集情况：成功页、失败页、完成页，失败页码收在悬停提示里。
+  const progress = record.progress;
+  const successPages = progress?.success ?? 0;
+  const failedPages = progress?.failed ?? 0;
+  const finishedPages = successPages + failedPages;
+  const totalPages = Math.max(progress?.total ?? 0, 0);
+  const failedPageList = progress?.failedPages ?? [];
+
   return (
     <div className={cardClassNames}>
       <div className={styles.cardHead} {...headerDragProps}>
+        <div className={styles.cardHeadTop}>
         <span
           onPointerDown={(event) => event.stopPropagation()}
           style={{ display: "inline-flex", lineHeight: 1 }}
@@ -212,24 +229,13 @@ export default function CollectSourceCard({
               </Tag>
             ) : null}
           </div>
-          <Tooltip title={record.uri}>
-            <a
-              href={record.uri}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.cardUri}
-              onClick={(event) => event.stopPropagation()}
-            >
-              {record.uri}
-            </a>
-          </Tooltip>
         </div>
         <div
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
           style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
         >
-          {(isRunning || isStopping || isDeleting || phase === "failed" || phase === "stopping") && (
+          {(isRunning || isStopping || isDeleting || phase === "failed" || phase === "stopping" || phase === "stopped" || sealing) && (
             <span className={`${styles.statusPill} ${statusClassMap[statusTone]}`}>
               <span className={styles.statusDot} />
               {statusLabel}
@@ -247,6 +253,48 @@ export default function CollectSourceCard({
               }}
             />
           </Tooltip>
+        </div>
+        </div>
+        <div className={styles.cardHeadBody}>
+          <Tooltip title={record.uri}>
+            <a
+              href={record.uri}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.cardUri}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {record.uri}
+            </a>
+          </Tooltip>
+          {progress ? (
+            <div className={styles.cardProgress}>
+              <span className={styles.cardProgressLabel}>本次采集</span>
+              <span>
+                {finishedPages}/{totalPages}
+              </span>
+              <Tooltip title={`成功 ${successPages} 页`}>
+                <span className={styles.cardProgressItem}>
+                  <CheckOutlined className={styles.cardProgressSuccess} />
+                  {successPages}
+                </span>
+              </Tooltip>
+              <Tooltip
+                title={
+                  failedPageList.length > 0
+                    ? `失败 ${failedPages} 页：${failedPageList.join("、")}`
+                    : `失败 ${failedPages} 页`
+                }
+              >
+                <span className={styles.cardProgressItem}>
+                  <CloseOutlined
+                    className={failedPages > 0 ? styles.cardProgressFailed : undefined}
+                  />
+                  {failedPages}
+                </span>
+              </Tooltip>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -460,7 +508,7 @@ export default function CollectSourceCard({
           </div>
 
           <div className={styles.ringGroup}>
-            <CollectProgressView progress={record.progress} variant="ring" seal={seal} />
+            <CollectProgressView progress={record.progress} variant="ring" />
           </div>
         </div>
       </div>

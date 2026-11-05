@@ -36,6 +36,8 @@ type progressState struct {
 	probed bool
 	// epoch 每次新开采集加一。旧运行的进度写入对不上就丢弃。
 	epoch uint64
+	// sealOutcome 封口周期结束后回落的状态：done 或 stopped。
+	sealOutcome string
 }
 
 // Ensure 初始化站点进度条目：已存在则刷新名称与时间，不存在则按 starting 创建。
@@ -75,6 +77,7 @@ func SetPageTotal(sourceID string, pageCount int) {
 		state.data.Current = 0
 		state.data.Success = 0
 		state.data.Failed = 0
+		state.data.FailedPages = nil
 		if pageCount <= 0 {
 			state.data.Status = StatusDone
 		}
@@ -185,7 +188,7 @@ func FinishRun(ctx context.Context, sourceID string, retErr error) {
 		case state.data.Status == StatusStopping:
 			state.data.Status = StatusStopped
 			changed = true
-		case retErr != nil && !IsTerminalStatus(state.data.Status):
+		case retErr != nil && !IsTerminalStatus(state.data.Status) && state.data.Status != StatusSealing:
 			state.data.Status = StatusFailed
 			changed = true
 		}
@@ -212,11 +215,14 @@ func Snapshot(sourceID string) (model.CollectProgress, bool) {
 
 // 采集进度状态机（SourceJob）：
 //
-//	starting → running → done / stopped / failed
+//	starting → running → sealing → done / stopped / failed
+//
+// sealing 表示抓页已结束、等检索索引封口；封口周期结束才收成 done。
 const (
 	StatusStarting = "starting"
 	StatusRunning  = "running"
 	StatusStopping = "stopping"
+	StatusSealing  = "sealing"
 	StatusDone     = "done"
 	StatusFailed   = "failed"
 	StatusStopped  = "stopped"
@@ -285,7 +291,7 @@ func IsAlreadyQueuedOrRunning(sourceID string) bool {
 		return true
 	}
 	// 停止中的收尾还没退出。这段时间和按钮上的 loading 对齐，退出后才能再开。
-	if snap, ok := Snapshot(sourceID); ok && snap.Status == StatusStopping {
+	if snap, ok := Snapshot(sourceID); ok && (snap.Status == StatusStopping || snap.Status == StatusSealing) {
 		return true
 	}
 	if refreshAndIsBlockingProgress(sourceID) {
@@ -327,25 +333,85 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	return true
 }
 
-func MarkSourceDone(sourceID string) {
-	Update(sourceID, func(progress *model.CollectProgress) {
-		if progress.Status == StatusRunning || progress.Status == StatusStarting {
-			progress.Status = StatusDone
-		}
-	})
-	FlushHotpathSideEffects(sourceID)
+// MarkSourceSealingIfRun 本代正常跑完先进入待检索，等封口周期结束再收成完成。
+// 停止中留给 FinishRun 收成已停止。
+func MarkSourceSealingIfRun(ctx context.Context, sourceID string) bool {
+	return markSealing(ctx, sourceID, StatusDone)
 }
 
-// MarkSourceDoneIfRun 本代正常跑完才标完成。停止中留给 FinishRun 收成已停止。
-func MarkSourceDoneIfRun(ctx context.Context, sourceID string) {
-	if !UpdateRun(ctx, sourceID, func(progress *model.CollectProgress) {
-		if progress.Status == StatusRunning || progress.Status == StatusStarting {
-			progress.Status = StatusDone
-		}
-	}) {
-		return
+// MarkStoppedAsSealing 用户停止后也先进待检索，封口周期结束时收成已停止。
+func MarkStoppedAsSealing(ctx context.Context, sourceID string) bool {
+	return markSealing(ctx, sourceID, StatusStopped)
+}
+
+func markSealing(ctx context.Context, sourceID, outcome string) bool {
+	epoch, ok := ctx.Value(runEpochKey{}).(uint64)
+	if !ok {
+		return false
 	}
+	val, exists := store.Load(sourceID)
+	if !exists {
+		return false
+	}
+	state := val.(*progressState)
+	state.mu.Lock()
+	if state.epoch != epoch {
+		state.mu.Unlock()
+		return false
+	}
+	switch state.data.Status {
+	case StatusRunning, StatusStarting, StatusStopping:
+	default:
+		state.mu.Unlock()
+		return false
+	}
+	if outcome == StatusDone && state.data.Status == StatusStopping {
+		state.mu.Unlock()
+		return false
+	}
+	state.data.Status = StatusSealing
+	state.sealOutcome = outcome
+	state.updated = time.Now()
+	state.mu.Unlock()
+	NotifyChange()
 	FlushHotpathSideEffects(sourceID)
+	return true
+}
+
+// MarkSealed 封口周期结束，把等检索的站点收成最终状态。已经重开或失败的保持原状。
+func MarkSealed(sourceIDs []string) {
+	now := time.Now()
+	changed := false
+	for _, sourceID := range sourceIDs {
+		val, ok := store.Load(sourceID)
+		if !ok {
+			continue
+		}
+		state := val.(*progressState)
+		state.mu.Lock()
+		if state.data.Status == StatusSealing {
+			if state.sealOutcome == StatusStopped {
+				state.data.Status = StatusStopped
+			} else {
+				state.data.Status = StatusDone
+			}
+			state.data.Sealed = true
+			state.sealOutcome = ""
+			state.updated = now
+			changed = true
+		}
+		state.mu.Unlock()
+	}
+	if changed {
+		NotifyChange()
+	}
+}
+
+func IsSealing(sourceID string) bool {
+	if progress, ok := Snapshot(sourceID); ok {
+		return progress.Status == StatusSealing
+	}
+	return false
 }
 
 func FlushHotpathSideEffects(sourceIDs ...string) {
@@ -365,6 +431,9 @@ func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
 		state.data.Current = 0
 		state.data.Success = 0
 		state.data.Failed = 0
+		state.data.FailedPages = nil
+		state.data.Sealed = false
+		state.sealOutcome = ""
 		state.probed = false
 		state.data.Status = StatusStarting
 		state.data.QueueId = queueID
@@ -447,6 +516,12 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		}
 
 		if IsTerminalStatus(progress.Status) {
+			state.mu.Unlock()
+			list = append(list, progress)
+			return true
+		}
+
+		if progress.Status == StatusSealing {
 			state.mu.Unlock()
 			list = append(list, progress)
 			return true

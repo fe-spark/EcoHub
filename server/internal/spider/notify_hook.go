@@ -3,7 +3,6 @@ package spider
 import (
 	"encoding/json"
 	"log"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -204,6 +203,10 @@ func settleSourceStatus(status, errMsg string, successCnt int) (string, string) 
 	if status == progress.StatusStopping {
 		status = progress.StatusStopped
 	}
+	if status == progress.StatusSealing {
+		// 待检索是成功采集的收尾阶段，记录按完成落库。
+		status = progress.StatusDone
+	}
 	if status == progress.StatusStopped {
 		return status, ""
 	}
@@ -224,21 +227,16 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", b.batchID, err)
 		return
 	}
-	b.flushRecordSync()
-
-	b.mu.Lock()
-	midsBySource := make(map[string][]int64, len(b.sourceFilmMIDs))
-	for sid, set := range b.sourceFilmMIDs {
-		srcMids := make([]int64, 0, len(set))
-		for m := range set {
-			if m > 0 {
-				srcMids = append(srcMids, m)
+	filmCount := len(mids)
+	if missed := b.flushRecordSync(); len(missed) > 0 {
+		var bySource map[string]int
+		filmCount, bySource = b.abandonUnstored(missed)
+		for i := range results {
+			if n, ok := bySource[results[i].SourceID]; ok {
+				results[i].FilmsTotal = n
 			}
 		}
-		sort.Slice(srcMids, func(i, j int) bool { return srcMids[i] < srcMids[j] })
-		midsBySource[sid] = srcMids
 	}
-	b.mu.Unlock()
 
 	totalPage := 0
 	succPage := 0
@@ -316,7 +314,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		FailedSources:  failedCount + partialCount,
 		FinishedAt:     now,
 		DurationMs:     duration,
-		FilmCount:      len(mids),
+		FilmCount:      filmCount,
 		FilmIDs:        batchFilmIDs,
 		PageTotal:      totalPage,
 		PageSuccess:    succPage,
@@ -329,19 +327,12 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		log.Printf("[Spider] 结算采集记录失败 batchID=%s: %v", b.batchID, err)
 	}
 
-	// 清单只记各站实际入库的 mid。重放影片留在记录的 film_ids 上，供重试和历史跳转。
-	if len(midsBySource) > 0 {
-		if err := repository.BatchSaveCollectRecordFilms(b.batchID, midsBySource); err != nil {
-			log.Printf("[Spider] 保存采集批次影片清单失败 batchID=%s: %v", b.batchID, err)
-		}
-	}
-
 	BroadcastRecordCompletion(&model.CollectRecordProgressPayload{
 		BatchID:        b.batchID,
 		Status:         status,
 		FinishedAt:     &now,
 		DurationMs:     duration,
-		FilmCount:      len(mids),
+		FilmCount:      filmCount,
 		PageTotal:      totalPage,
 		PageSuccess:    succPage,
 		PageFailed:     failPage,

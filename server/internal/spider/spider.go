@@ -31,6 +31,9 @@ func init() {
 			Percent: p.Percent,
 			Status:  p.Status,
 		})
+		if p.Status == "done" || p.Status == "idle" {
+			searchReseal.complete()
+		}
 	})
 }
 
@@ -184,6 +187,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	}
 	defer func() {
 		originalErr := retErr
+		// 用户停止也走待检索：先等本次收尾，封口周期结束再落成已停止。
+		if collectCtx != nil && progress.IsStopping(s.Id) {
+			defer func() {
+				if progress.MarkStoppedAsSealing(collectCtx, s.Id) {
+					searchReseal.addSealing(s.Id)
+				}
+			}()
+		}
 		if originalErr != nil && batchCtx != nil && !errors.Is(originalErr, context.Canceled) {
 			batchCtx.RecordSourceError(s.Id, originalErr.Error())
 		}
@@ -368,7 +379,10 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	if err != nil {
 		return err
 	}
-	progress.MarkSourceDoneIfRun(collectCtx, id)
+	// 抓页结束先进待检索，封口周期结束时由服务端收成完成。
+	if progress.MarkSourceSealingIfRun(collectCtx, id) {
+		searchReseal.addSealing(id)
+	}
 	return nil
 }
 
@@ -398,6 +412,13 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 	if len(sources) == 0 {
 		return
 	}
+	if searchIndexBlocksCollect() {
+		log.Printf("[Spider] 批量采集跳过：%s", errSearchIndexUpdating.Error())
+		for _, source := range sources {
+			abandonQueuedCollectSource(source, nil)
+		}
+		return
+	}
 	if trigger == "" {
 		trigger = model.CollectTriggerManual
 	}
@@ -412,6 +433,9 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.FilmSource, sourceTargetPages ...map[string][]int) (string, error) {
 	if len(sources) == 0 {
 		return "", errors.New("没有可重试的站点")
+	}
+	if searchIndexBlocksCollect() {
+		return "", errSearchIndexUpdating
 	}
 	sources = prioritizeCollectSources(sources)
 	startedAt := time.Now()

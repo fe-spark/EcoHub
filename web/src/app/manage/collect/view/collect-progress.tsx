@@ -4,7 +4,6 @@ import { Progress } from "antd";
 import CollectRing from "./collect-ring";
 import { resolveRingView } from "./collect-ring-view";
 import { resolveCollectProgressStatusText, type CollectProgress } from "./types";
-import type { SealRingView } from "./seal-ring";
 import styles from "./index.module.less";
 
 interface CollectProgressViewProps {
@@ -13,18 +12,15 @@ interface CollectProgressViewProps {
   compact?: boolean;
   /** 环形进度：固定占位，无进度时显示空环，保证卡片高度稳定 */
   variant?: "bar" | "ring";
-  /** 封口队列圆环。有值时替换采集环。 */
-  seal?: SealRingView | null;
 }
 
 export default function CollectProgressView({
   progress,
   compact = false,
   variant = "bar",
-  seal = null,
 }: CollectProgressViewProps) {
   if (variant === "ring") {
-    const ring = resolveRingView(progress, seal);
+    const ring = resolveRingView(progress);
     if (!ring) return null;
     return <CollectRing view={ring} />;
   }
@@ -34,37 +30,42 @@ export default function CollectProgressView({
   const finished = Math.max((progress?.success ?? 0) + failed, 0);
   const done = Math.min(finished, total || finished);
   const isDone = progress?.status === "done";
+  const sealing = progress?.status === "sealing";
   const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
   const zeroPageFinished =
     total === 0 &&
     (isDone || progress?.status === "failed" || progress?.status === "stopped");
   const percent = !progress
     ? 0
-    : isDone
-      ? 100
-      : progress.status === "starting"
-        ? 0
-        : Math.min(rawPercent, 99);
+    : sealing
+      ? 0
+      : isDone
+        ? 100
+        : progress.status === "starting"
+          ? 0
+          : Math.min(rawPercent, 99);
   const statusText = resolveCollectProgressStatusText(progress);
   const progressText = !progress
     ? "未开始"
-    : total > 0
-      ? `${done}/${total} 页`
-      : zeroPageFinished
-        ? "无新内容"
-        : done > 0
-          ? `${done} 页`
-          : progress.status === "starting"
-            ? "排队中"
-            : "即将开始采集";
+    : sealing
+      ? "待检索"
+      : total > 0
+        ? `${done}/${total} 页`
+        : zeroPageFinished
+          ? "无新内容"
+          : done > 0
+            ? `${done} 页`
+            : progress.status === "starting"
+              ? "排队中"
+              : "即将开始采集";
   const isFullFail = progress?.status === "failed" && (progress.success ?? 0) === 0;
   const progressStatus = !progress
     ? "normal"
-    : progress.status === "running" || progress.status === "stopping"
+    : progress.status === "running" || progress.status === "stopping" || sealing
       ? "active"
       : isFullFail
         ? "exception"
-        : progress.status === "done"
+        : isDone
           ? "success"
           : "normal";
   const progressStrokeColor = failed > 0 && !isFullFail ? "#faad14" : undefined;

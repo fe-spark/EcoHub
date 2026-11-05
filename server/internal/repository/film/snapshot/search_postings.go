@@ -18,6 +18,10 @@ type searchPostings struct {
 }
 
 func appendSingleItemPostings(posts *searchPostings, pos int32, item *FilmSearchMeta) {
+	appendSingleItemPostingsCOW(posts, pos, item, nil, nil)
+}
+
+func appendSingleItemPostingsCOW(posts *searchPostings, pos int32, item *FilmSearchMeta, ownedR map[rune]struct{}, ownedA map[string]struct{}) {
 	if posts == nil || item == nil {
 		return
 	}
@@ -41,21 +45,24 @@ func appendSingleItemPostings(posts *searchPostings, pos int32, item *FilmSearch
 			seenRune[seenRuneCount] = r
 			seenRuneCount++
 		}
-		list := posts.runes[r]
-		if len(list) > 0 && list[len(list)-1] == pos {
+		if ownedR == nil {
+			list := posts.runes[r]
+			if len(list) > 0 && list[len(list)-1] == pos {
+				continue
+			}
+			posts.runes[r] = append(list, pos)
 			continue
 		}
-		posts.runes[r] = append(list, pos)
+		posts.runes[r] = cowAppendPos(posts.runes[r], ownedR, r, pos)
 	}
-	addAsciiPostings(posts.ascii, pos, item.Item.PinyinInitials)
+	addAsciiPostings(posts.ascii, pos, item.Item.PinyinInitials, ownedA)
 	if alts := item.Item.PinyinInitialAlts; alts != "" {
 		for _, alt := range strings.Fields(alts) {
-			addAsciiPostings(posts.ascii, pos, alt)
+			addAsciiPostings(posts.ascii, pos, alt, ownedA)
 		}
 	}
-	addAsciiPostings(posts.ascii, pos, item.Item.PinyinFull)
+	addAsciiPostings(posts.ascii, pos, item.Item.PinyinFull, ownedA)
 }
-
 
 func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 	posts := &searchPostings{
@@ -69,10 +76,14 @@ func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 }
 
 func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMeta, upsertMap map[int64]FilmSearchMeta, posMap map[int64]int) *searchPostings {
-	if cur == nil || cur.SearchPosts == nil || len(cur.SearchPosts.runes) == 0 {
+	if cur == nil || cur.SearchPosts == nil || len(cur.SearchPosts.runes) == 0 && len(cur.SearchPosts.ascii) == 0 {
 		return buildSearchPostings(items)
 	}
-	var modifiedPos []int32
+	type changed struct {
+		pos  int32
+		meta FilmSearchMeta
+	}
+	var modified []changed
 	for mid, meta := range upsertMap {
 		pos, ok := posMap[mid]
 		if !ok {
@@ -87,45 +98,63 @@ func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMet
 				continue
 			}
 		}
-		modifiedPos = append(modifiedPos, int32(pos))
+		modified = append(modified, changed{pos: int32(pos), meta: meta})
 	}
-	if len(modifiedPos) == 0 {
+	if len(modified) == 0 {
 		return cur.SearchPosts
 	}
-	slices.Sort(modifiedPos)
 	posts := &searchPostings{
-		runes: make(map[rune][]int32, len(cur.SearchPosts.runes)+256),
-		ascii: make(map[string][]int32, len(cur.SearchPosts.ascii)+256),
+		runes: make(map[rune][]int32, len(cur.SearchPosts.runes)+len(modified)),
+		ascii: make(map[string][]int32, len(cur.SearchPosts.ascii)+len(modified)),
 	}
 	for r, list := range cur.SearchPosts.runes {
-		posts.runes[r] = append([]int32(nil), list...)
+		posts.runes[r] = list
 	}
 	for s, list := range cur.SearchPosts.ascii {
-		posts.ascii[s] = append([]int32(nil), list...)
+		posts.ascii[s] = list
 	}
-	for _, p := range modifiedPos {
-		meta := &items[p]
-		appendSingleItemPostings(posts, p, meta)
-	}
-	for _, p := range modifiedPos {
-		if p < int32(len(cur.Items)) {
-			meta := &items[p]
-			for _, r := range meta.Item.CleanName {
-				if r >= 128 && len(posts.runes[r]) > 1 {
-					slices.Sort(posts.runes[r])
-				}
-			}
-		}
+	ownedR := make(map[rune]struct{})
+	ownedA := make(map[string]struct{})
+	for _, ch := range modified {
+		appendSingleItemPostingsCOW(posts, ch.pos, &ch.meta, ownedR, ownedA)
 	}
 	return posts
 }
-func addAsciiPostings(dst map[string][]int32, pos int32, raw string) {
+
+func cowAppendPos[K comparable](list []int32, owned map[K]struct{}, key K, pos int32) []int32 {
+	if len(list) > 0 && list[len(list)-1] == pos {
+		return list
+	}
+	if _, ok := owned[key]; !ok {
+		list = append([]int32(nil), list...)
+		owned[key] = struct{}{}
+	}
+	if len(list) == 0 || pos > list[len(list)-1] {
+		return append(list, pos)
+	}
+	for _, v := range list {
+		if v == pos {
+			return list
+		}
+	}
+	list = append(list, pos)
+	slices.Sort(list)
+	return list
+}
+func addAsciiPostings(dst map[string][]int32, pos int32, raw string, owned map[string]struct{}) {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	if raw == "" {
 		return
 	}
+	write := func(gram string) {
+		if owned == nil {
+			appendPosting(dst, gram, pos)
+			return
+		}
+		dst[gram] = cowAppendPos(dst[gram], owned, gram, pos)
+	}
 	if len(raw) == 1 && isSearchASCII(raw[0]) {
-		appendPosting(dst, raw, pos)
+		write(raw)
 		return
 	}
 	var seen [64]string
@@ -150,7 +179,7 @@ func addAsciiPostings(dst map[string][]int32, pos int32, raw string) {
 			seen[seenCount] = gram
 			seenCount++
 		}
-		appendPosting(dst, gram, pos)
+		write(gram)
 	}
 }
 

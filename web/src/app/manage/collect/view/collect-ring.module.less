@@ -9,7 +9,8 @@
 
 .track,
 .solid,
-.arc {
+.arc,
+.waitingArc {
   fill: none;
   stroke-linecap: round;
 }
@@ -19,13 +20,41 @@
 }
 
 .solid,
-.arc {
+.arc,
+.waitingArc {
   stroke: currentColor;
 }
 
 .arc {
   transform: rotate(-90deg);
   transform-origin: center;
+}
+
+.waitingArc {
+  transform-origin: center;
+  animation: waitingSpin 1.8s linear infinite;
+}
+
+.waitingRing {
+  animation: waitingPulse 2.4s ease-in-out infinite;
+}
+
+.waitingCenter {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.waitingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  animation: waitingDotPulse 1.8s ease-in-out infinite;
 }
 
 .label,
@@ -45,4 +74,33 @@
 
 .icon {
   font-size: 14px;
+}
+
+@keyframes waitingSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes waitingDotPulse {
+  0%, 100% {
+    transform: scale(0.75);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.95;
+  }
+}
+
+@keyframes waitingPulse {
+  0%, 100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
 }

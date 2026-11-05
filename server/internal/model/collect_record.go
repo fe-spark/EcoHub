@@ -48,7 +48,7 @@ type CollectRecord struct {
 	DetailJson     string              `gorm:"type:text" json:"detailJson,omitempty"`    // 站点明细 JSON
 }
 
-// CollectRecordFilm 采集批次清单里的一部影片。全部站点按 mid 去重，不填 SourceID。
+// CollectRecordFilm 采集批次清单里的一行影片。全部站点按清单行返回，并带上 SourceID。
 type CollectRecordFilm struct {
 	Mid      int64  `json:"mid"`
 	Name     string `json:"name"`

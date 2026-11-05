@@ -6,6 +6,40 @@ import (
 	"time"
 )
 
+func TestCollectLifecycle_WaitUntilIdle(t *testing.T) {
+	state := newCollectLifecycle()
+	if err := state.beginSource("s1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.beginSource("s2"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		state.waitUntilIdle()
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("returned while two sources are collecting")
+	default:
+	}
+	state.endSource("s1")
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("returned while one source is still collecting")
+	default:
+	}
+	state.endSource("s2")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("did not resume after the last source")
+	}
+}
+
 func TestWaitSourceReturnsAfterEnd(t *testing.T) {
 	state := newCollectLifecycle()
 	if err := state.beginSource("s1"); err != nil {

@@ -177,6 +177,14 @@ func TestCollectRecordHandler_HistoryFilms(t *testing.T) {
 	_ = repository.BatchSaveCollectRecordFilms("b-film-1", map[string][]int64{
 		"src_earth": {888},
 	})
+	_ = repository.CreateCollectRecord(&model.CollectRecord{
+		BatchID:    "b-film-1",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		FilmCount:  1,
+		DetailJson: `[{"sourceId":"src_earth","filmsTotal":1}]`,
+		StartedAt:  time.Now(),
+	})
 
 	r := gin.New()
 	r.GET("/history/films", CollectRecordHd.HistoryFilms)
@@ -201,7 +209,7 @@ func TestCollectRecordHandler_HistoryFilms(t *testing.T) {
 	var resp struct {
 		Code int `json:"code"`
 		Data struct {
-			List []model.CollectRecordFilm `json:"list"`
+			List  []model.CollectRecordFilm `json:"list"`
 			Total int64                     `json:"total"`
 		} `json:"data"`
 	}
@@ -213,4 +221,3 @@ func TestCollectRecordHandler_HistoryFilms(t *testing.T) {
 		t.Fatalf("expected 流浪地球, got %s", resp.Data.List[0].Name)
 	}
 }
-

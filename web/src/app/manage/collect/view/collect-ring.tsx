@@ -12,6 +12,7 @@ function ringColor(tone: RingTone, token: ReturnType<typeof theme.useToken>["tok
   if (tone === "success") return token.colorSuccess;
   if (tone === "warning") return token.colorWarning;
   if (tone === "error") return token.colorError;
+  if (tone === "processing") return token.colorInfo;
   return token.colorPrimary;
 }
 
@@ -23,18 +24,29 @@ export default function CollectRing({ view }: { view: RingView }) {
   const percent = Math.max(0, Math.min(100, view.percent));
   const dash = (percent / 100) * circumference;
   const center = (size / 2).toFixed(2);
+  const isWaiting = view.solid;
+
   return (
     <Tooltip title={view.tooltip}>
-      <span className={styles.ring} style={{ color }}>
+      <span className={`${styles.ring} ${isWaiting ? styles.waitingRing : ""}`} style={{ color }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
           <circle
-            className={view.solid ? styles.solid : styles.track}
+            className={styles.track}
             cx={center}
             cy={center}
             r={radius}
             strokeWidth={strokeWidth}
           />
-          {!view.solid && percent > 0 ? (
+          {isWaiting ? (
+            <circle
+              className={styles.waitingArc}
+              cx={center}
+              cy={center}
+              r={radius}
+              strokeWidth={strokeWidth}
+              strokeDasharray={`${(circumference * 0.35).toFixed(2)} ${circumference.toFixed(2)}`}
+            />
+          ) : percent > 0 ? (
             <circle
               className={styles.arc}
               cx={center}
@@ -45,6 +57,11 @@ export default function CollectRing({ view }: { view: RingView }) {
             />
           ) : null}
         </svg>
+        {isWaiting && view.center === "empty" ? (
+          <span className={styles.waitingCenter} aria-hidden>
+            <span className={styles.waitingDot} />
+          </span>
+        ) : null}
         {view.center === "percent" ? <span className={styles.label}>{percent}%</span> : null}
         {view.center === "success" ? <CheckOutlined className={styles.icon} /> : null}
         {view.center === "fail" ? <CloseOutlined className={styles.icon} /> : null}

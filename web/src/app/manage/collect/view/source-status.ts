@@ -3,7 +3,15 @@ import {
   type FilmSource,
 } from "./types";
 
-export type StatusTone = "running" | "enabled" | "disabled" | "stopping" | "failed" | "deleting";
+/** 卡片只保留 4 类采集色调：进行中、待检索、已停止、失败。 */
+export type StatusTone =
+  | "running"
+  | "sealing"
+  | "stopped"
+  | "failed"
+  | "enabled"
+  | "disabled"
+  | "deleting";
 
 export function resolveSourceStatus(
   record: FilmSource,
@@ -16,36 +24,33 @@ export function resolveSourceStatus(
 
   const phase = record.progress?.status;
 
-  if (phase === "stopping") {
-    return { label: "停止中", tone: "stopping" };
+  if (phase === "sealing") {
+    return { label: "待检索", tone: "sealing" };
   }
 
   if (active) {
     if (!record.state) {
-      return { label: "已终止·等待完成", tone: "stopping" };
+      return { label: "已终止·等待完成", tone: "stopped" };
     }
-    if (phase === "starting") {
-      return { label: "排队中", tone: "running" };
-    }
+    // 排队、抓页、停止中统一显示为采集中，减少状态文案。
     return { label: "采集中", tone: "running" };
   }
 
-  // 非活跃态：如果仍有进度残留（倒计时保留期或异常），反映真实终态
+  // 非活跃态：残留进度反映真实终态
   if (phase === "failed") {
-    const success = record.progress?.success ?? 0;
     return {
       label: resolveCollectProgressStatusText(record.progress),
-      tone: success > 0 ? "stopping" : "failed",
+      tone: "failed",
     };
   }
   if (phase === "stopped") {
-    return { label: resolveCollectProgressStatusText(record.progress), tone: "stopping" };
+    return { label: "已停止", tone: "stopped" };
   }
   if (phase === "done") {
     const failed = record.progress?.failed ?? 0;
     return {
       label: resolveCollectProgressStatusText(record.progress),
-      tone: failed > 0 ? "stopping" : "enabled",
+      tone: failed > 0 ? "stopped" : "enabled",
     };
   }
 
