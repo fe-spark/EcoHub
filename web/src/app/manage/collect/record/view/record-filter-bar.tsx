@@ -41,7 +41,7 @@ export function RecordFilterBar({
   onSearch,
   onReset,
 }: RecordFilterBarProps) {
-  // 核心视图切换：全部 / 有入库 / 有失败 / 执行中
+  // 核心视图切换：全部 / 有更新 / 有失败 / 执行中
   const activeSegment = (() => {
     if (params.status === "running") return "running";
     if (params.updated === "1") return "updated";
@@ -79,7 +79,7 @@ export function RecordFilterBar({
           onChange={handleSegmentChange}
           options={[
             { label: "全部批次", value: "all", icon: <AppstoreOutlined /> },
-            { label: "有入库", value: "updated", icon: <VideoCameraOutlined /> },
+            { label: "有更新", value: "updated", icon: <VideoCameraOutlined /> },
             { label: "有失败", value: "failed", icon: <WarningOutlined /> },
             { label: "执行中", value: "running", icon: <SyncOutlined /> },
           ]}

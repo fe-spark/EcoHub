@@ -293,7 +293,7 @@ export default function CollectRecordPageView() {
     <div className={styles.pageBody}>
       <ManagePageHeader
         title="采集记录"
-        description="管理每次影视采集的批次运行状态与成果指标，查看各站点抓取入库的影片明细。"
+        description="管理每次影视采集的批次运行状态与成果指标，查看各站点采集的影片更新明细。"
       />
 
       <RecordFilterBar

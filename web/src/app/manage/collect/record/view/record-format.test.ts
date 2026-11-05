@@ -22,11 +22,11 @@ test("真实失败页与成功总页清晰展示", () => {
   assert.equal(formatSourcePages({ status: "failed", pageTotal: 10, successCnt: 4, failedCnt: 2 }), "成功 4 / 共 10 页，失败 2 页");
 });
 
-test("成功且没有影片才写无变更", () => {
-  assert.equal(formatCollectFilms(0, { status: "success" }), "无变更");
-  assert.equal(formatCollectFilms(0, { status: "failed" }), "0 部");
-  assert.equal(formatCollectFilms(0, { status: "stopped" }), "0 部");
-  assert.equal(formatCollectFilms(2, { status: "success" }), "2 部");
+test("无产出统一写无更新", () => {
+  assert.equal(formatCollectFilms(0, { status: "success" }), "无更新");
+  assert.equal(formatCollectFilms(0, { status: "failed" }), "无更新");
+  assert.equal(formatCollectFilms(0, { status: "stopped" }), "无更新");
+  assert.equal(formatCollectFilms(2, { status: "success" }), "+2 部");
 });
 
 test("站点窗口和批次不同才单独显示", () => {
