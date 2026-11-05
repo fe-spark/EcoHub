@@ -84,11 +84,11 @@ export function formatSourceWindow(hour: number | undefined, batchHour: number):
   return hour > 0 ? `${hour} 小时` : "";
 }
 
-export function formatCollectFilms(count: number, record: { status?: string }) {
-  if (count <= 0 && (record.status === "success" || record.status === "done")) {
-    return "无变更";
+export function formatCollectFilms(count: number, _record?: { status?: string }) {
+  if (count <= 0) {
+    return "无更新";
   }
-  return `${Math.max(0, count)} 部`;
+  return `+${count} 部`;
 }
 
 export function formatStartedAt(val: string) {

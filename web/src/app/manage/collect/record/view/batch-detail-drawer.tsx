@@ -344,20 +344,22 @@ export function BatchDetailDrawer({
                     </span>
                     <span className={styles.withIcon}>
                       <VideoCameraOutlined />
-                      <span>入库更新：</span>
                       {item.filmsTotal > 0 ? (
-                        <a
-                          className={styles.filmCountLink}
-                          onClick={() =>
-                            setModalSource({
-                              id: item.sourceId,
-                              name: item.sourceName || item.sourceId,
-                            })
-                          }
-                          title="点击查看本次入库影片清单"
-                        >
-                          +{item.filmsTotal.toLocaleString("zh-CN")} 部
-                        </a>
+                        <>
+                          <span>更新：</span>
+                          <a
+                            className={styles.filmCountLink}
+                            onClick={() =>
+                              setModalSource({
+                                id: item.sourceId,
+                                name: item.sourceName || item.sourceId,
+                              })
+                            }
+                            title="查看更新影片清单"
+                          >
+                            +{item.filmsTotal.toLocaleString("zh-CN")} 部
+                          </a>
+                        </>
                       ) : (
                         <span className={styles.filmCountEmpty}>{formatCollectFilms(0, { status: shownStatus })}</span>
                       )}
