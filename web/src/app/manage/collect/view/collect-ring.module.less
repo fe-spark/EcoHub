@@ -1,0 +1,48 @@
+.ring {
+  position: relative;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  line-height: 1;
+  flex: none;
+}
+
+.track,
+.solid,
+.arc {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.track {
+  stroke: var(--ant-color-fill-secondary);
+}
+
+.solid,
+.arc {
+  stroke: currentColor;
+}
+
+.arc {
+  transform: rotate(-90deg);
+  transform-origin: center;
+}
+
+.label,
+.icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+}
+
+.label {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.icon {
+  font-size: 14px;
+}

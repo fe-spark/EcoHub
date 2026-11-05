@@ -296,7 +296,7 @@ test("isClientCollectQueueId 只认 q-local- 前缀", () => {
   assert.equal(isClientCollectQueueId(undefined), false);
 });
 
-test("所有站点跑完且检索索引构建中时，队列进入收尾中状态", () => {
+test("站点页进度结束时，采集队列不因检索索引保持收尾", () => {
   const doneSite = site("a", {
     id: "a",
     name: "a",
@@ -307,15 +307,9 @@ test("所有站点跑完且检索索引构建中时，队列进入收尾中状�
     status: "done",
     queueId: "q-1",
   });
-  const view = computeCollectQueueProgress(["a"], [doneSite], {
-    total: 17200,
-    current: 12400,
-    percent: 72,
-    status: "indexing",
-  });
-  assert.equal(view?.running, true);
-  assert.equal(view?.finalizing, true);
-  assert.equal(view?.percent, 72);
-  assert.equal(view?.finalizingCurrent, 12400);
-  assert.equal(view?.finalizingTotal, 17200);
+  const view = computeCollectQueueProgress(["a"], [doneSite]);
+  assert.equal(view?.running, false);
+  assert.equal(view?.percent, 100);
+  assert.equal(view?.pageDone, 10);
+  assert.equal(view?.pageTotal, 10);
 });

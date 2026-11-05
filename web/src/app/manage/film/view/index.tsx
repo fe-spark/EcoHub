@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { Table, Pagination } from "antd";
+import { Table, Pagination, Alert, Spin } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -12,6 +12,7 @@ import { FilmFilterBar } from "./film-filter-bar";
 import { FilmBatchBar } from "./film-batch-bar";
 import FilmDrawer from "../components/film-drawer";
 import styles from "./index.module.less";
+import { useFilmList } from "./use-film-list";
 
 function flattenCategoryNodes(nodes: any[]): any[] {
   const result: any[] = [];
@@ -65,7 +66,13 @@ export default function FilmListPageView() {
   const [editingFilmId, setEditingFilmId] = useState<number | null>(null);
   const [modalDefaultSourceId, setModalDefaultSourceId] = useState<string>("");
   const [modalDefaultCid, setModalDefaultCid] = useState<number | undefined>(undefined);
-
+  const [indexing, setIndexing] = useState(false);
+  const [indexingProgress, setIndexingProgress] = useState<{
+    total?: number;
+    current?: number;
+    percent?: number;
+    status?: string;
+  } | null>(null);
   useEffect(() => {
     const collectParentKeys = (nodes: any[]): (string | number)[] => {
       const keys: (string | number)[] = [];
@@ -83,43 +90,21 @@ export default function FilmListPageView() {
     setTreeExpandedKeys(collectParentKeys(options.categoryTree || []));
   }, [options.categoryTree]);
 
-  const getFilmPage = useCallback(
-    async (p?: any, overrideParams?: any) => {
-      setLoading(true);
-      const pg = p || page;
-      const reqParams = overrideParams || params;
-      try {
-        const resp = await ApiGet("/manage/film/search/list", {
-          ...reqParams,
-          current: pg.current,
-          pageSize: pg.pageSize,
-        });
-        if (resp.code !== 0) {
-          message.error(resp.msg || "影片列表获取失败");
-          return;
-        }
-        const formattedList = resp.data?.list?.map((item: any) => ({
-          ...item,
-          year: item.year <= 0 ? "未知" : item.year,
-          score: item.score === 0 ? "暂无" : item.score,
-        }));
-        setList(formattedList);
-        setPage(resp.data.params.paging);
-        const activeSource = reqParams.sourceId || resp.data.params?.sourceId || "";
-        if (activeSource) {
-          setTableSourceId(activeSource);
-          if (!reqParams.sourceId) {
-            setParams((prev: any) => ({ ...prev, sourceId: activeSource }));
-          }
-        }
-      } catch {
-        message.error("影片列表获取失败");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [message, params, page],
-  );
+  const notifyFilmError = useCallback((text: string) => {
+    message.error(text);
+  }, [message]);
+  const getFilmPage = useFilmList({
+    page,
+    params,
+    setLoading,
+    setList,
+    setPage,
+    setParams,
+    setTableSourceId,
+    setIndexing,
+    setIndexingProgress,
+    notifyError: notifyFilmError,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -351,6 +336,23 @@ export default function FilmListPageView() {
         styles={styles}
       />
 
+      {indexing ? (
+        <Alert
+          type="info"
+          showIcon
+          message={
+            <span>
+              最新采集数据正在构建检索索引中
+              {indexingProgress?.total
+                ? `（进度 ${indexingProgress.percent ?? 0}% · ${indexingProgress.current ?? 0}/${indexingProgress.total} 部）`
+                : "，请稍候"}
+              ，构建完成后将自动展示
+            </span>
+          }
+          className={styles.indexingAlert}
+        />
+      ) : null}
+
       <Table
         columns={columns}
         dataSource={list}
@@ -359,6 +361,18 @@ export default function FilmListPageView() {
         pagination={false}
         scroll={{ x: "max-content" }}
         size="middle"
+        locale={{
+          emptyText: indexing ? (
+            <div className={styles.indexingEmptyText}>
+              <Spin size="small" />
+              <span className={styles.indexingEmptyLabel}>
+                正在构建检索索引
+                {indexingProgress?.total ? `（${indexingProgress.percent ?? 0}%）` : ""}
+                ，请稍候...
+              </span>
+            </div>
+          ) : undefined,
+        }}
         rowSelection={{
           selectedRowKeys,
           onChange: (keys) => setSelectedRowKeys(keys),

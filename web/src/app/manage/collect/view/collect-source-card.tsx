@@ -10,6 +10,7 @@ import dayjs from "dayjs";
 import { collectDuration, type FilmSource, type SourceIncident } from "./types";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
+import type { SealRingView } from "./seal-ring";
 import { useManagePermission } from "@/lib/manage-permission";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { ApiPost } from "@/lib/client-api";
@@ -28,8 +29,9 @@ const statusClassMap: Record<StatusTone, string> = {
 interface CollectSourceCardProps {
   record: FilmSource;
   selected: boolean;
-  /** 任务仍处于采集生命周期（starting/running/page_done/waiting_publish/finalizing） */
+  /** 任务仍处于采集生命周期（starting/running） */
   active: boolean;
+  seal?: SealRingView | null;
   globalSpiderProxyReady?: boolean;
   headerDragProps?: React.HTMLAttributes<HTMLDivElement>;
   onSelect: (id: string, checked: boolean) => void;
@@ -51,6 +53,7 @@ export default function CollectSourceCard({
   record,
   selected,
   active,
+  seal = null,
   globalSpiderProxyReady = false,
   headerDragProps,
   onSelect,
@@ -400,7 +403,7 @@ export default function CollectSourceCard({
                   </Button>
                 </Popconfirm>
               ) : (
-                <Tooltip title="数据抓取已完成，正在等待落库">
+                <Tooltip title="数据抓取已完成，正在保存影片更新">
                   <span>
                     <Button danger icon={<StopOutlined />} disabled>
                       停止采集
@@ -457,7 +460,7 @@ export default function CollectSourceCard({
           </div>
 
           <div className={styles.ringGroup}>
-            <CollectProgressView progress={record.progress} variant="ring" />
+            <CollectProgressView progress={record.progress} variant="ring" seal={seal} />
           </div>
         </div>
       </div>

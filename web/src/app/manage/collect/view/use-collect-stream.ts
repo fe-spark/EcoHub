@@ -32,11 +32,18 @@ export interface SourceDeleteEvent {
   message?: string;
   deletedFilms?: number;
 }
+export interface SearchSealSite {
+  sourceId: string;
+  state: "sealing" | "waiting";
+  ahead: number;
+}
+
 export interface SearchIndexProgress {
   total: number;
   current: number;
   percent: number;
   status: "indexing" | "done" | "idle";
+  sites?: SearchSealSite[];
 }
 
 

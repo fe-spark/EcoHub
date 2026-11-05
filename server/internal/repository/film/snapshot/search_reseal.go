@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"log"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -11,6 +12,7 @@ import (
 // 库里仍在的影片走增量；有物理删除时才在内存里重算倒排和榜单，不扫全库。
 // 没有可用内存索引时才请求全库重建。
 func ResealSearchIndexMids(mids []int64) bool {
+	startedAt := time.Now()
 	mids = NormalizeSnapshotMIDs(mids)
 	if len(mids) == 0 || db.Mdb == nil {
 		return false
@@ -25,17 +27,26 @@ func ResealSearchIndexMids(mids []int64) bool {
 	}
 
 	total := int64(len(mids))
+	baseCount := 0
+	if base != nil {
+		baseCount = len(base.Items)
+	}
+	log.Printf("[ActiveReadModel] 检索索引封口启动 mids=%d 当前内存条目=%d version=%s", total, baseCount, version)
 	NotifySearchIndexProgress(total, 0, "indexing")
-	upsertMap, drop, err := readSearchMetaUpserts(mids, resealLoadProgress(total))
+	upsertMap, drop, err := readSearchMetaUpserts(mids, resealLoadProgress(total, startedAt))
 	if err != nil {
-		log.Printf("[ActiveReadModel] 检索索引增量读取失败 mids=%d err=%v", len(mids), err)
+		log.Printf("[ActiveReadModel] 检索索引增量读取失败 mids=%d err=%v 耗时=%s", len(mids), err, time.Since(startedAt).Round(time.Millisecond))
 		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}
+	dbCost := time.Since(startedAt)
+	log.Printf("[ActiveReadModel] 检索索引数据读取完成 upsert=%d drop=%d 耗时=%s，开始构建内存索引...",
+		len(upsertMap), len(drop), dbCost.Round(time.Millisecond))
 	if resealAfterRead != nil {
 		resealAfterRead()
 	}
 
+	buildStart := time.Now()
 	for {
 		activeFilmSearchMetasMu.Lock()
 		cur := activeFilmSearchMetas.Load()
@@ -48,6 +59,7 @@ func ResealSearchIndexMids(mids []int64) bool {
 		if cur == base {
 			var idx *filmSearchMetaIndex
 			hasDrop := len(drop) > 0
+			log.Printf("[ActiveReadModel] 检索索引内存构建启动 mids=%d drop=%d seal=%t", len(mids), len(drop), hasDrop)
 			if hasDrop {
 				idx = sealSearchMetaIndex(cur.Version, patchSearchMetas(cur.Items, upsertMap, drop))
 			} else {
@@ -55,8 +67,10 @@ func ResealSearchIndexMids(mids []int64) bool {
 			}
 			activeFilmSearchMetas.Store(idx)
 			activeFilmSearchMetasMu.Unlock()
-			log.Printf("[ActiveReadModel] 检索索引按需封口 mids=%d drop=%d seal=%t total=%d",
-				len(mids), len(drop), hasDrop, len(idx.Items))
+			buildCost := time.Since(buildStart)
+			log.Printf("[ActiveReadModel] 检索索引按需封口完成 mids=%d drop=%d seal=%t total=%d 耗时=%s (读库=%s 构建=%s)",
+				len(mids), len(drop), hasDrop, len(idx.Items),
+				time.Since(startedAt).Round(time.Millisecond), dbCost.Round(time.Millisecond), buildCost.Round(time.Millisecond))
 			return true
 		}
 		activeFilmSearchMetasMu.Unlock()
@@ -84,7 +98,7 @@ var resealAfterRead func()
 // readSearchMetaUpserts 封口读库入口。测试可替换成失败。
 var readSearchMetaUpserts = loadSearchMetaUpserts
 
-func resealLoadProgress(total int64) func(n int) {
+func resealLoadProgress(total int64, startedAt time.Time) func(n int) {
 	next := resealProgressStep(total)
 	var loaded int64
 	return func(n int) {
@@ -96,6 +110,9 @@ func resealLoadProgress(total int64) func(n int) {
 		if done > total {
 			done = total
 		}
+		pct := float64(done) * 100 / float64(total)
+		log.Printf("[ActiveReadModel] 检索索引读库进度: %d/%d (%.1f%%) 耗时=%s",
+			done, total, pct, time.Since(startedAt).Round(time.Millisecond))
 		NotifySearchIndexProgress(total, done, "indexing")
 		if loaded >= total {
 			next = total + 1
@@ -118,7 +135,7 @@ func loadSearchMetaUpserts(mids []int64, onBatch func(n int)) (map[int64]FilmSea
 	for _, id := range mids {
 		drop[id] = struct{}{}
 	}
-	const batchSize = 500
+	const batchSize = 1000
 	var allRows []dbMetaRow
 	for i := 0; i < len(mids); i += batchSize {
 		end := i + batchSize
@@ -137,10 +154,12 @@ func loadSearchMetaUpserts(mids []int64, onBatch func(n int)) (map[int64]FilmSea
 			onBatch(end - i)
 		}
 	}
+	log.Printf("[ActiveReadModel] 检索索引基础元数据读取完成 rows=%d，开始读取播放线路 mids=%d", len(allRows), len(mids))
 	plays, err := loadPlaySources(mids)
 	if err != nil {
 		return nil, nil, err
 	}
+	log.Printf("[ActiveReadModel] 检索索引播放线路读取完成 mids=%d", len(mids))
 	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
 	for _, r := range allRows {
 		meta := metaFromRow(r)

@@ -34,3 +34,13 @@ test("站点窗口和批次不同才单独显示", () => {
   assert.equal(formatSourceWindow(24, 24), "");
   assert.equal(formatSourceWindow(-1, 24), "全量");
 });
+
+test("运行中状态明确展示进度而非全部完成", () => {
+  const pages = formatCollectPages({ status: "running", pageSuccess: 20620, pageTotal: 26928, pageFailed: 0 });
+  assert.equal(pages.primary, "成功 20620 / 共 26928 页");
+  assert.equal(pages.secondary, "拉取中 · 76%");
+  assert.equal(pages.alert, false);
+
+  const sourcePage = formatSourcePages({ status: "running", pageTotal: 0, successCnt: 0, failedCnt: 0 });
+  assert.equal(sourcePage, "探测页码中");
+});

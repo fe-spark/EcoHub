@@ -20,6 +20,8 @@ import {
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
 import CollectSourceCard, { SortableCollectSourceCard } from "./collect-source-card";
+import { sealRingForSource } from "./seal-ring";
+import type { SearchIndexProgress } from "./use-collect-stream";
 import {
   isActiveCollectStatus,
   COLLECT_SOURCE_WARN_COUNT,
@@ -50,6 +52,7 @@ interface CollectSourceGridProps {
   onSyncCategory?: (id: string) => void;
   onUpdateSite?: (id: string, updater: (record: FilmSource) => FilmSource) => void;
   incidentMap?: Map<string, SourceIncident>;
+  searchIndex?: SearchIndexProgress;
 }
 
 export default function CollectSourceGrid({
@@ -74,6 +77,7 @@ export default function CollectSourceGrid({
   onSyncCategory,
   onUpdateSite,
   incidentMap,
+  searchIndex,
 }: CollectSourceGridProps) {
   const dndId = useId();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -153,6 +157,7 @@ export default function CollectSourceGrid({
                 onSyncCategory={onSyncCategory}
                 onUpdateSite={onUpdateSite}
                 incident={incidentMap?.get(site.id)}
+                seal={sealRingForSource(site.id, searchIndex)}
               />
             );
           })}
@@ -192,6 +197,7 @@ export default function CollectSourceGrid({
               onTerminateTask={() => {}}
               onEditSource={() => {}}
               onDeleteSource={() => {}}
+              seal={sealRingForSource(activeSite.id, searchIndex)}
             />
           </div>
         ) : null}

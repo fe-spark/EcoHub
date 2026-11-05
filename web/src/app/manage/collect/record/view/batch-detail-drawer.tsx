@@ -12,12 +12,8 @@ import {
   CloudServerOutlined,
   ReloadOutlined,
   VideoCameraOutlined,
-  ClockCircleOutlined,
   FileTextOutlined,
-  FieldTimeOutlined,
-  CheckCircleOutlined,
   CloseCircleOutlined,
-  ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import {
@@ -27,37 +23,18 @@ import {
 } from "./types";
 import {
   formatCollectFilms,
-  formatCollectPages,
-  formatDuration,
   formatSourcePages,
   formatSourceWindow,
 } from "./record-format";
 import {
-  isSingleFilmRecord,
   RecordStatusMark,
-  renderHourTag,
-  renderTriggerTag,
   resolveBatchStatus,
 } from "./history-columns";
 import { BatchFilmsModal } from "./batch-films-modal";
+import { BatchOverviewCards } from "./batch-overview-cards";
 import styles from "./batch-detail-drawer.module.less";
 
 const { Text } = Typography;
-
-function PageProgressBody({ record }: { record: CollectHistoryRecord }) {
-  const pages = formatCollectPages(record);
-  const stopped = record.status === "stopped" || record.status === "interrupted";
-  const valueClass = pages.alert ? styles.kpiValueFail : stopped ? styles.kpiValueWarn : styles.kpiValueOk;
-  const Icon = pages.alert ? CloseCircleOutlined : stopped ? ExclamationCircleOutlined : CheckCircleOutlined;
-  return (
-    <>
-      <span className={valueClass}>
-        <Icon /> {pages.primary}
-      </span>
-      <span className={styles.kpiSub}>{pages.secondary || "全部完成"}</span>
-    </>
-  );
-}
 
 export interface BatchDetailDrawerProps {
   open: boolean;
@@ -93,19 +70,7 @@ export function BatchDetailDrawer({
     return rank(b.status) - rank(a.status);
   });
 
-  const failedSources = details.filter((d) => d.status === "failed");
-  const partialSources = details.filter((d) => d.status === "partial");
-  const stoppedSources = details.filter((d) => d.status === "stopped");
-  const doneSources = details.filter((d) => d.status === "done" || d.status === "success");
-  const abnormalCount = failedSources.length + partialSources.length;
-
   const filmRetry = record.trigger === "single_update";
-  const effectiveMs =
-    record.durationMs > 0
-      ? record.durationMs
-      : record.finishedAt && record.startedAt
-        ? Math.max(0, dayjs(record.finishedAt).diff(dayjs(record.startedAt)))
-        : 0;
 
   return (
     <Drawer
@@ -124,145 +89,16 @@ export function BatchDetailDrawer({
       styles={{ body: { padding: "16px 20px" } }}
     >
       <div className={styles.drawerContent}>
-        <div className={styles.drawerOverviewCard}>
-          <div className={styles.drawerMetaStrip}>
-            <div className={styles.drawerMetaItem}>
-              <span className={styles.drawerMetaLabel}>执行时间</span>
-              <span className={styles.drawerMetaValue}>
-                <ClockCircleOutlined className={styles.metaIcon} />
-                {record.startedAt ? dayjs(record.startedAt).format("YYYY-MM-DD HH:mm:ss") : "-"}
-              </span>
-            </div>
-            <div className={styles.drawerMetaItem}>
-              <span className={styles.drawerMetaLabel}>采集方式</span>
-              <div className={styles.drawerMetaValue}>
-                {renderTriggerTag(record.trigger, record.tag)}
-              </div>
-            </div>
-            <div className={styles.drawerMetaItem}>
-              <span className={styles.drawerMetaLabel}>采集跨度</span>
-              <div className={styles.drawerMetaValue}>
-                {renderHourTag(record.hour, record)}
-              </div>
-            </div>
-            <div className={styles.drawerMetaItem}>
-              <span className={styles.drawerMetaLabel}>运行耗时</span>
-              <span className={styles.drawerMetaValue}>
-                <FieldTimeOutlined className={styles.metaIcon} />
-                {formatDuration(effectiveMs)}
-              </span>
-            </div>
-          </div>
-
-          <div className={styles.drawerKpiRow}>
-            <div className={styles.drawerKpiCard}>
-              <div className={styles.drawerKpiHeader}>
-                <CloudServerOutlined className={styles.kpiIcon} />
-                <span>覆盖站点</span>
-              </div>
-              <div className={styles.drawerKpiBody}>
-                {abnormalCount === 0 && stoppedSources.length === 0 && record.failedSources === 0 && record.pageFailed === 0 && record.status !== "running" && record.status !== "stopped" && record.status !== "interrupted" ? (
-                  <>
-                    <span className={styles.kpiValueOk}>
-                      <CheckCircleOutlined /> {record.sourceCount} 站成功
-                    </span>
-                    <span className={styles.kpiSub}>全部完成</span>
-                  </>
-                ) : resolveBatchStatus(record) === "failed" ? (
-                  <>
-                    <span className={styles.kpiValueFail}>
-                      <CloseCircleOutlined /> {abnormalCount || record.failedSources || record.sourceCount} 站失败
-                    </span>
-                    <span className={styles.kpiSub}>未能采集</span>
-                  </>
-                ) : abnormalCount === 0 && record.status === "running" ? (
-                  <>
-                    <span className={styles.kpiValueWarn}>
-                      <ExclamationCircleOutlined /> {record.sourceCount} 站采集中
-                    </span>
-                    <span className={styles.kpiSub}>尚未结算</span>
-                  </>
-                ) : abnormalCount === 0 ? (
-                  <>
-                    <span className={styles.kpiValueWarn}>
-                      <ExclamationCircleOutlined /> {stoppedSources.length || record.sourceCount} 站已停止
-                    </span>
-                    <span className={styles.kpiSub}>
-                      （{doneSources.length} / {record.sourceCount} 站成功）
-                    </span>
-                  </>
-                ) : record.sourceCount === 1 ? (
-                  <>
-                    <span className={styles.kpiValueWarn}>
-                      <ExclamationCircleOutlined /> 1 站未完成
-                    </span>
-                    <span className={styles.kpiSub}>部分受阻</span>
-                  </>
-                ) : (
-                  <>
-                    <span className={styles.kpiValueWarn}>
-                      <ExclamationCircleOutlined />
-                      {abnormalCount || record.failedSources || 1} 站未完成
-                    </span>
-                    <span className={styles.kpiSub}>
-                      （{doneSources.length} / {record.sourceCount} 站成功）
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className={styles.drawerKpiCard}>
-              <div className={styles.drawerKpiHeader}>
-                <FileTextOutlined className={styles.kpiIcon} />
-                <span>拉取页码</span>
-              </div>
-              <div className={styles.drawerKpiBody}>
-                {isSingleFilmRecord(record) ? (
-                  <>
-                    <span className={styles.kpiValueDefault}>单片重放</span>
-                    <span className={styles.kpiSub}>1 部</span>
-                  </>
-                ) : (
-                  <PageProgressBody record={record} />
-                )}
-              </div>
-            </div>
-
-            <div className={styles.drawerKpiCard}>
-              <div className={styles.drawerKpiHeader}>
-                <VideoCameraOutlined className={styles.kpiIcon} />
-                <span>更新影片</span>
-              </div>
-              <div className={styles.drawerKpiBody}>
-                {record.filmCount > 0 ? (
-                  <>
-                    <a
-                      className={styles.kpiValueHighlightLink}
-                      onClick={() =>
-                        setModalSource({
-                          id: "",
-                          name: "全部站点",
-                        })
-                      }
-                      title="点击查看影片清单"
-                    >
-                      +{record.filmCount.toLocaleString("zh-CN")} 部
-                    </a>
-                    <span className={styles.kpiSub}>点击查看清单</span>
-                  </>
-                ) : (
-                  <>
-                    <span className={styles.kpiValueMuted}>{formatCollectFilms(0, record)}</span>
-                    {record.status === "success" ? (
-                      <span className={styles.kpiSub}>0 部</span>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <BatchOverviewCards
+          record={record}
+          details={details}
+          onOpenFilmsModal={() =>
+            setModalSource({
+              id: "",
+              name: "全部站点",
+            })
+          }
+        />
 
         {record.errorMsg?.trim() && (
           <Alert
@@ -277,22 +113,25 @@ export function BatchDetailDrawer({
         <div className={styles.drawerSectionHeader}>
           <div className={styles.tableTitle}>各采集源成果与影片详情</div>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            共 {sortedDetails.length} 个站点参与采集
+            共 {sortedDetails.length || record.sourceCount} 个站点参与采集
           </Text>
         </div>
 
         {sortedDetails.length === 0 ? (
-          <div className={styles.detailEmpty}>暂无单站采集明细快照</div>
+          <div className={styles.detailEmpty}>
+            {record.status === "running" ? "正在初始化单站采集数据..." : "暂无单站采集明细快照"}
+          </div>
         ) : (
           <div className={styles.sourceCardList}>
             {sortedDetails.map((item, index) => {
               const sourceKey = `${record.batchId}:${item.sourceId}`;
               const isRetrying = retryingSourceKeys.has(sourceKey);
               const retry = (item.status === "failed" || item.status === "partial") && canRetryHistorySource(record);
-              const shownStatus =
-                record.status === "interrupted" && (item.status === "running" || item.status === "starting")
-                  ? "interrupted"
-                  : item.status;
+              const isSourceInterrupted =
+                record.status === "interrupted" && (item.status === "running" || item.status === "starting");
+              const shownStatus = isSourceInterrupted ? "interrupted" : item.status;
+              const isSourceOngoing =
+                shownStatus === "running" || shownStatus === "starting" || shownStatus === "waiting";
               const windowLabel = formatSourceWindow(item.hour, record.hour);
               const refTime = record.finishedAt || record.startedAt;
               const isWithinHalfHour = refTime ? dayjs().diff(dayjs(refTime), "minute") < 30 : false;
@@ -355,11 +194,13 @@ export function BatchDetailDrawer({
                                 name: item.sourceName || item.sourceId,
                               })
                             }
-                            title="查看更新影片清单"
+                            title="查看影片清单"
                           >
                             +{item.filmsTotal.toLocaleString("zh-CN")} 部
                           </a>
                         </>
+                      ) : isSourceOngoing ? (
+                        <span className={styles.filmCountEmpty}>更新中</span>
                       ) : (
                         <span className={styles.filmCountEmpty}>{formatCollectFilms(0, { status: shownStatus })}</span>
                       )}

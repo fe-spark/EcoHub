@@ -77,9 +77,12 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
+	indexing, indexingProgress := service.FilmSvc.SearchIndexState()
 	dto.Success(gin.H{
-		"params": s,
-		"list":   sl,
+		"params":           s,
+		"list":             sl,
+		"indexing":         indexing,
+		"indexingProgress": indexingProgress,
 	}, "影片分页信息获取成功", c)
 }
 

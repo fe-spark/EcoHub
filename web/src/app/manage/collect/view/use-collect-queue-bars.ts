@@ -14,7 +14,6 @@ import {
   type CollectQueueProgressView,
 } from "./collect-queue";
 import { progressAsStopping, type FilmSource } from "./types";
-import type { SearchIndexProgress } from "./use-collect-stream";
 
 
 interface QueueBarState {
@@ -29,7 +28,6 @@ export function useCollectQueueBars(
   sites: FilmSource[],
   setSiteList: Dispatch<SetStateAction<FilmSource[]>>,
   reloadList: () => Promise<void>,
-  searchIndex?: SearchIndexProgress,
 ) {
   const { message } = useAppMessage();
   const [bars, setBars] = useState<QueueBarState[]>([]);
@@ -58,7 +56,7 @@ export function useCollectQueueBars(
     let seqCursor = prev.reduce((max, bar) => Math.max(max, bar.seq), 0);
     const next: QueueBarState[] = [];
     for (const group of groups) {
-      const view = computeCollectQueueProgress(group.sourceIds, sites, searchIndex);
+      const view = computeCollectQueueProgress(group.sourceIds, sites);
       if (!view) {
         continue;
       }
@@ -78,6 +76,7 @@ export function useCollectQueueBars(
         view,
       });
     }
+
     let visible = next;
     if (tourHoldProgress) {
       for (const bar of prev) {
@@ -150,7 +149,7 @@ export function useCollectQueueBars(
     }
     barsRef.current = visible;
     setBars(visible);
-  }, [sites, tourHoldProgress, message, searchIndex, setSiteList]);
+  }, [sites, tourHoldProgress, message, setSiteList]);
 
   const stopQueue = async (queueId: string, sourceIds: string[]) => {
     const runningIds = sourceIds.filter((id) => {

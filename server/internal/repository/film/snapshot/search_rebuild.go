@@ -115,6 +115,13 @@ func IsSearchIndexRebuilding() bool {
 	return searchRebuild.running
 }
 
+// SearchRebuildScheduled 全量重建已在跑，或防抖定时器还没触发。
+func SearchRebuildScheduled() bool {
+	searchRebuild.mu.Lock()
+	defer searchRebuild.mu.Unlock()
+	return searchRebuild.running || searchRebuild.timer != nil
+}
+
 func startSearchRebuild() {
 	searchRebuild.mu.Lock()
 	searchRebuild.timer = nil

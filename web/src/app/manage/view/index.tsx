@@ -31,7 +31,7 @@ const quickEntries: QuickEntryItem[] = [
     key: "film",
     icon: VideoCameraOutlined,
     title: "影片列表",
-    description: "按采集源查看、更新和编辑入库影片。",
+    description: "按采集源查看、更新和编辑影片。",
     href: "/manage/film",
   },
   {

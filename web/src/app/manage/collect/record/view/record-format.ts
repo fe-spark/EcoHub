@@ -24,6 +24,8 @@ export function formatCollectPages(record: {
   const total = Math.max(0, record.pageTotal ?? 0);
   const fail = Math.max(0, record.pageFailed ?? 0);
   const status = record.status ?? "";
+  const isOngoing = status === "running" || status === "starting" || status === "waiting";
+
   if (fail > 0) {
     return {
       primary: `${fail} 页失败`,
@@ -45,14 +47,22 @@ export function formatCollectPages(record: {
       alert: false,
     };
   }
-  if (total > 0 && succ < total) {
+  if (isOngoing) {
+    const percent = total > 0 ? Math.min(100, Math.floor((succ / total) * 100)) : 0;
     return {
-      primary: `成功 ${succ} / 共 ${total} 页`,
-      secondary: "",
+      primary: total > 0 ? `成功 ${succ} / 共 ${total} 页` : `已拉取 ${succ} 页`,
+      secondary: total > 0 ? `拉取中 · ${percent}%` : "正在探测页码",
       alert: false,
     };
   }
-  return { primary: `共 ${total} 页`, secondary: "", alert: false };
+  if (total > 0 && succ < total) {
+    return {
+      primary: `成功 ${succ} / 共 ${total} 页`,
+      secondary: "未完成",
+      alert: false,
+    };
+  }
+  return { primary: `共 ${total} 页`, secondary: "全部完成", alert: false };
 }
 
 export function formatSourcePages(item: {
@@ -66,12 +76,15 @@ export function formatSourcePages(item: {
   const total = Math.max(0, item.pageTotal ?? 0);
   const succ = Math.max(0, item.successCnt ?? 0);
   const fail = Math.max(0, item.failedCnt ?? 0, item.failedPages?.length ?? 0);
+  const isOngoing = item.status === "running" || item.status === "starting" || item.status === "waiting";
+
   if (total <= 0) {
     if (fail > 0) return `失败 ${fail} 页`;
     const isProbeErr = item.error ? item.error.includes("探测") : true;
     if (item.status === "failed") return isProbeErr ? "探测失败" : "抓取失败";
     if (item.status === "stopped" || item.status === "interrupted") return "已停止";
-    return "0/0";
+    if (isOngoing) return "探测页码中";
+    return "-";
   }
   const parts = [`成功 ${succ} / 共 ${total} 页`];
   if (fail > 0) parts.push(`失败 ${fail} 页`);

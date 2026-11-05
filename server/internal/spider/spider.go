@@ -261,16 +261,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 				Error:       errMsg,
 			})
 			batchCtx.markSourceFinished(*s)
-			if !isStandalone && isPreferredCollectSource(s.Id) && originalErr == nil && !progress.IsStopped(s.Id) && !progress.IsStopping(s.Id) {
-				if err := batchCtx.finalizePrimarySource(s.Id); err != nil {
-					retErr = err
-				}
+			if err := batchCtx.sealFinishedSource(*s); err != nil {
+				log.Printf("[Spider] 站点 %s 封口入队失败: %v", s.Name, err)
 			}
 		}
 		if isStandalone && batchCtx != nil {
-			flushErr := batchCtx.flushAndFinalize()
-			if originalErr == nil && flushErr != nil {
-				retErr = flushErr
+			if flushErr := batchCtx.flushAndFinalize(); flushErr != nil {
+				log.Printf("[Spider] 站点 %s 收尾封口失败: %v", s.Name, flushErr)
 			}
 			batchCtx.emitSummary()
 			batchCtx.close()
