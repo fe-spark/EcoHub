@@ -282,7 +282,10 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				batchCtx.releaseSourceOccupy(fs.Id)
 				return
 			}
-			if err := probeSourcePageCount(&fs, h, trigger); err != nil {
+			targetPages := batchCtx.getTargetPages(fs.Id)
+			if len(targetPages) > 0 {
+				progress.SetPageTotal(fs.Id, len(targetPages))
+			} else if err := probeSourcePageCount(&fs, h, trigger); err != nil {
 				syslog.Errorf("[%s] 站点 %s 总页探测失败: %v", tag, fs.Name, err)
 				if batchCtx != nil {
 					batchCtx.RecordSourceError(fs.Id, err.Error())

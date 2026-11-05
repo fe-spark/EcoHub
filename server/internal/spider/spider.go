@@ -108,6 +108,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	hadWrites := false
 	successPagesCount := 0
 	failedPagesCount := 0
+	var failedPagesList []int
 	pageCount := 0
 	var collectCtx context.Context
 	statsOwned := false
@@ -233,12 +234,18 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			if totalP <= 0 {
 				totalP = snap.Total
 			}
+			if totalP <= 0 && len(failedPagesList) > 0 {
+				totalP = len(failedPagesList)
+			}
 			succP := successPagesCount
 			if succP <= 0 {
 				succP = snap.Success
 			}
 			// 失败页只计真正失败的页。没抓到的页留在总数差额里，不能算失败。
 			failP := failedPagesCount
+			if failP <= 0 && len(failedPagesList) > 0 {
+				failP = len(failedPagesList)
+			}
 
 			batchCtx.recordSourceSnapshot(model.CollectRecordSourceDetail{
 				SourceID:    s.Id,
@@ -249,6 +256,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 				PageCurrent: succP,
 				SuccessCnt:  succP,
 				FailedCnt:   failP,
+				FailedPages: failedPagesList,
 				FilmsTotal:  batchCtx.sourceFilmCount(s.Id),
 				Error:       errMsg,
 			})
@@ -334,7 +342,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		batchCtx.noteSourceHour(s.Id, h)
 	}
 	pageCount = progress.PageTotal(id)
-	if pageCount < 0 {
+	targetPages := batchCtx.getTargetPages(id)
+	if len(targetPages) > 0 {
+		pageCount = len(targetPages)
+		progress.SetPageTotal(id, pageCount)
+	} else if pageCount < 0 {
 		if err := probeSourcePageCount(s, h, trigger); err != nil {
 			return err
 		}
@@ -349,9 +361,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			cur.Status = progress.StatusRunning
 		}
 	})
-	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
+	if len(targetPages) > 0 {
+		log.Printf("[Spider] 站点 %s 重试失败页 共 %d 页 (%v)，开始采集...\n", s.Name, len(targetPages), targetPages)
+	} else {
+		log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
+	}
 
-	hadWrites, successPagesCount, failedPagesCount, err = fetcher.CollectPages(collectCtx, pageCount, s, h, batchCtx)
+	hadWrites, successPagesCount, failedPagesCount, failedPagesList, err = fetcher.CollectPages(collectCtx, pageCount, targetPages, s, h, batchCtx)
 	if err != nil {
 		return err
 	}
@@ -396,7 +412,7 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 }
 
 // StartBatchCollectRetry 先写入 running 批次，再异步执行失败站点重试。
-func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.FilmSource) (string, error) {
+func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.FilmSource, sourceTargetPages ...map[string][]int) (string, error) {
 	if len(sources) == 0 {
 		return "", errors.New("没有可重试的站点")
 	}
@@ -404,6 +420,9 @@ func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.Film
 	startedAt := time.Now()
 	batchCtx := newCollectBatchContext(model.CollectTriggerRetry, model.CollectTagRetryCollect, sources, startedAt).
 		withHour(hour).withParentBatchID(parentBatchID)
+	if len(sourceTargetPages) > 0 && len(sourceTargetPages[0]) > 0 {
+		batchCtx = batchCtx.withTargetPages(sourceTargetPages[0])
+	}
 	if err := batchCtx.recordStart(); err != nil {
 		for _, s := range sources {
 			abandonQueuedCollectSource(s, batchCtx)

@@ -41,9 +41,12 @@ func TestGetFilmDetailWithRetry_EmptyListDoesNotRetry(t *testing.T) {
 		return nil, nil
 	}
 
-	_, err := GetFilmDetailWithRetry(context.Background(), &model.FilmSource{Id: "s"}, utils.RequestInfo{Params: url.Values{}})
-	if err == nil || err.Error() != "response list is empty" {
-		t.Fatalf("err=%v", err)
+	list, err := GetFilmDetailWithRetry(context.Background(), &model.FilmSource{Id: "s"}, utils.RequestInfo{Params: url.Values{}})
+	if err != nil {
+		t.Fatalf("empty list should succeed with nil err, got: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("expected empty list, got %d items", len(list))
 	}
 	if calls != 1 {
 		t.Fatalf("empty list calls=%d", calls)
@@ -72,5 +75,30 @@ func TestGetFilmDetailWithRetry_RateLimitRetriesOnce(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("429 should retry once, calls=%d", calls)
+	}
+}
+
+func TestGetFilmDetailWithRetry_TimeoutRetriesAndSucceeds(t *testing.T) {
+	old := deps
+	t.Cleanup(func() { deps = old })
+
+	var calls int
+	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
+		return func(error) {}, nil
+	}
+	deps.GetFilmDetail = func(*model.FilmSource, utils.RequestInfo) ([]model.MovieDetail, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New(`Get "https://lovedan.net/api.php?pg=9408": context deadline exceeded`)
+		}
+		return []model.MovieDetail{{Id: 2, Name: "乙"}}, nil
+	}
+
+	list, err := GetFilmDetailWithRetry(context.Background(), &model.FilmSource{Id: "s"}, utils.RequestInfo{Params: url.Values{}})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list=%v err=%v", list, err)
+	}
+	if calls != 2 {
+		t.Fatalf("timeout should retry, calls=%d", calls)
 	}
 }

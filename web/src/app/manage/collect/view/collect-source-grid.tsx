@@ -24,6 +24,7 @@ import {
   isActiveCollectStatus,
   COLLECT_SOURCE_WARN_COUNT,
   type FilmSource,
+  type SourceIncident,
 } from "./types";
 import styles from "./index.module.less";
 
@@ -48,6 +49,7 @@ interface CollectSourceGridProps {
   onSortList: (nextList: FilmSource[]) => void;
   onSyncCategory?: (id: string) => void;
   onUpdateSite?: (id: string, updater: (record: FilmSource) => FilmSource) => void;
+  incidentMap?: Map<string, SourceIncident>;
 }
 
 export default function CollectSourceGrid({
@@ -71,6 +73,7 @@ export default function CollectSourceGrid({
   onSortList,
   onSyncCategory,
   onUpdateSite,
+  incidentMap,
 }: CollectSourceGridProps) {
   const dndId = useId();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -149,6 +152,7 @@ export default function CollectSourceGrid({
                 onChangeSourceState={onChangeSourceState}
                 onSyncCategory={onSyncCategory}
                 onUpdateSite={onUpdateSite}
+                incident={incidentMap?.get(site.id)}
               />
             );
           })}

@@ -232,7 +232,7 @@ export function BatchDetailDrawer({
             <div className={styles.drawerKpiCard}>
               <div className={styles.drawerKpiHeader}>
                 <VideoCameraOutlined className={styles.kpiIcon} />
-                <span>入库影片</span>
+                <span>更新影片</span>
               </div>
               <div className={styles.drawerKpiBody}>
                 {record.filmCount > 0 ? (
@@ -294,6 +294,9 @@ export function BatchDetailDrawer({
                   ? "interrupted"
                   : item.status;
               const windowLabel = formatSourceWindow(item.hour, record.hour);
+              const refTime = record.finishedAt || record.startedAt;
+              const isWithinHalfHour = refTime ? dayjs().diff(dayjs(refTime), "minute") < 30 : false;
+              const canRetryPages = isWithinHalfHour && Array.isArray(item.failedPages) && item.failedPages.length > 0;
 
               return (
                 <div key={item.sourceId || index} className={styles.sourceCard}>
@@ -309,8 +312,7 @@ export function BatchDetailDrawer({
                       <RecordStatusMark status={shownStatus} scope="source" />
                       {retry && (
                         <Popconfirm
-                          title={filmRetry ? "重试这部影片？" : `重试采集站「${item.sourceName}」？`}
-                          description={filmRetry ? "将按原影片重新采集" : "将按本次采集的时间窗口重新执行采集"}
+                          title={filmRetry ? "重试影片" : canRetryPages ? "重试失败页" : "重试该站"}
                           onConfirm={() => onRetrySingleSource(record.batchId, item.sourceId)}
                           disabled={!canWrite || isRetrying}
                         >
@@ -321,7 +323,11 @@ export function BatchDetailDrawer({
                             loading={isRetrying}
                             disabled={!canWrite}
                           >
-                            {filmRetry ? "重试该片" : "重试该站"}
+                            {filmRetry
+                              ? "重试该片"
+                              : canRetryPages
+                              ? `重试失败页 (${item.failedPages!.length})`
+                              : "重试该站"}
                           </Button>
                         </Popconfirm>
                       )}
@@ -360,8 +366,10 @@ export function BatchDetailDrawer({
 
                   {item.error?.trim() && (
                     <div className={styles.sourceCardError}>
-                      <CloseCircleOutlined className={styles.metricFail} />
-                      <span>{item.error}</span>
+                      <span className={styles.sourceCardErrorIcon}>
+                        <CloseCircleOutlined />
+                      </span>
+                      <span className={styles.sourceCardErrorText}>{item.error}</span>
                     </div>
                   )}
                 </div>

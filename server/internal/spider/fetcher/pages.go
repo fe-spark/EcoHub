@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,9 +65,18 @@ func shouldLogFailure(failed int) bool {
 	return failed == 1 || failed%failureLogStep == 0
 }
 
-func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource, h int, batch Batch) (bool, int, int, error) {
-	if pageCount <= 0 {
-		return false, 0, 0, nil
+const (
+	maxRecordedFailedPages = 500
+)
+
+func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s *model.FilmSource, h int, batch Batch) (bool, int, int, []int, error) {
+	totalWork := pageCount
+	useTargetPages := len(targetPages) > 0
+	if useTargetPages {
+		totalWork = len(targetPages)
+	}
+	if totalWork <= 0 {
+		return false, 0, 0, nil, nil
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
@@ -75,14 +85,24 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 	if maxWorkers <= 0 {
 		maxWorkers = 1
 	}
-	if pageCount < maxWorkers {
-		maxWorkers = pageCount
+	if totalWork < maxWorkers {
+		maxWorkers = totalWork
 	}
 
 	pages := make(chan int, maxWorkers)
 	writeCompletions := make(chan scheduler.Completion, 2048)
 	go func() {
 		defer close(pages)
+		if useTargetPages {
+			for _, pg := range targetPages {
+				select {
+				case <-ctx.Done():
+					return
+				case pages <- pg:
+				}
+			}
+			return
+		}
 		for pg := 1; pg <= pageCount; pg++ {
 			select {
 			case <-ctx.Done():
@@ -106,7 +126,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		snapshot := stats
 		done := snapshot.success + snapshot.failed
 		if !force {
-			if done == lastLoggedDone || !shouldLogProgress(done, pageCount) {
+			if done == lastLoggedDone || !shouldLogProgress(done, totalWork) {
 				statsMu.Unlock()
 				return
 			}
@@ -114,7 +134,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		lastLoggedDone = done
 		statsMu.Unlock()
 
-		log.Printf("[Spider] 站点 %s 采集进度 完成=%d/%d，成功=%d，失败=%d，最新页=%d", s.Name, done, pageCount, snapshot.success, snapshot.failed, snapshot.latestPage)
+		log.Printf("[Spider] 站点 %s 采集进度 完成=%d/%d，成功=%d，失败=%d，最新页=%d", s.Name, done, totalWork, snapshot.success, snapshot.failed, snapshot.latestPage)
 	}
 	recordPageFinished := func(page int, success bool, err error) pageStats {
 		statsMu.Lock()
@@ -125,7 +145,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 			stats.success++
 		} else {
 			stats.failed++
-			if len(stats.failedPages) < 10 {
+			if len(stats.failedPages) < maxRecordedFailedPages {
 				stats.failedPages = append(stats.failedPages, page)
 			}
 			if err != nil {
@@ -227,9 +247,6 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 					} else {
 						list, err = GetFilmDetailWithRetry(ctx, s, req)
 					}
-					if err == nil && len(list) == 0 {
-						err = errors.New("response list is empty")
-					}
 					if err != nil {
 						if ctx.Err() != nil {
 							markStopped()
@@ -299,6 +316,9 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 	if ctx.Err() != nil {
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
+	if len(stats.failedPages) > 0 {
+		sort.Ints(stats.failedPages)
+	}
 	if stopErr != nil {
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
@@ -307,16 +327,16 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 			cur.Status = progress.StatusFailed
 			cur.QueueId = ""
 		})
-		return stats.success > 0, stats.success, stats.failed, stopErr
+		return stats.success > 0, stats.success, stats.failed, stats.failedPages, stopErr
 	}
 	if ctx.Err() != nil {
-		return stats.success > 0, stats.success, stats.failed, ctx.Err()
+		return stats.success > 0, stats.success, stats.failed, stats.failedPages, ctx.Err()
 	}
 	if stats.failed > 0 {
 		errMsg := formatFailedPagesError(stats.failedPages, stats.failed, stats.lastErr)
-		return stats.success > 0, stats.success, stats.failed, fmt.Errorf("站点 %s %s", s.Name, errMsg)
+		return stats.success > 0, stats.success, stats.failed, stats.failedPages, fmt.Errorf("站点 %s %s", s.Name, errMsg)
 	}
-	return stats.success > 0, stats.success, stats.failed, nil
+	return stats.success > 0, stats.success, stats.failed, stats.failedPages, nil
 }
 
 func formatFailedPagesError(failedPages []int, totalFailed int, lastErr string) string {
@@ -324,14 +344,18 @@ func formatFailedPagesError(failedPages []int, totalFailed int, lastErr string) 
 		return ""
 	}
 	var pagesDesc string
-	if len(failedPages) == 1 {
-		pagesDesc = fmt.Sprintf("第 %d 页", failedPages[0])
-	} else if len(failedPages) > 0 {
-		strPages := make([]string, len(failedPages))
-		for i, p := range failedPages {
+	samplePages := failedPages
+	if len(samplePages) > 10 {
+		samplePages = samplePages[:10]
+	}
+	if len(samplePages) == 1 && totalFailed == 1 {
+		pagesDesc = fmt.Sprintf("第 %d 页", samplePages[0])
+	} else if len(samplePages) > 0 {
+		strPages := make([]string, len(samplePages))
+		for i, p := range samplePages {
 			strPages[i] = strconv.Itoa(p)
 		}
-		if totalFailed > len(failedPages) {
+		if totalFailed > len(samplePages) {
 			pagesDesc = fmt.Sprintf("共 %d 页失败 (第 %s... 页)", totalFailed, strings.Join(strPages, ", "))
 		} else {
 			pagesDesc = fmt.Sprintf("第 %s 页", strings.Join(strPages, ", "))

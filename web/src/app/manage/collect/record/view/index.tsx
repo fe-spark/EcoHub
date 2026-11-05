@@ -19,17 +19,15 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import { CollectHistoryRecord, SourceIncident } from "./types";
+import { CollectHistoryRecord } from "./types";
 import { BatchDetailDrawer } from "./batch-detail-drawer";
 import { getHistoryColumns } from "./history-columns";
-import { IncidentPanel } from "./incident-panel";
 import { RecordFilterBar, FilterParams } from "./record-filter-bar";
 import { useRecordStream } from "./use-record-stream";
 import styles from "./index.module.less";
 
 export default function CollectRecordPageView() {
   const [records, setRecords] = useState<CollectHistoryRecord[]>([]);
-  const [incidents, setIncidents] = useState<SourceIncident[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
@@ -100,23 +98,9 @@ export default function CollectRecordPageView() {
     }
   }, []);
 
-  const getIncidents = useCallback(async () => {
-    try {
-      const resp = await ApiGet<{ list: SourceIncident[] }>("/manage/collect/history/incidents");
-      if (resp.code === 0) {
-        setIncidents(resp.data?.list || []);
-        return;
-      }
-      message.error(resp.msg || "异常站点加载失败");
-    } catch {
-      // 网络错误已由请求拦截器提示
-    }
-  }, [message]);
-
   useEffect(() => {
     void getRecords();
-    void getIncidents();
-  }, [getRecords, getIncidents]);
+  }, [getRecords]);
 
   const currentBatchIds = useMemo(
     () => records.map((r) => r.batchId).filter(Boolean),
@@ -171,7 +155,6 @@ export default function CollectRecordPageView() {
           return updated;
         }),
       );
-      void getIncidents();
     },
   });
 
@@ -194,7 +177,6 @@ export default function CollectRecordPageView() {
         if (resp.code === 0) {
           message.success(record.trigger === "single_update" ? "已按原影片重新采集" : "已启动失败站点重试");
           void getRecords();
-          void getIncidents();
         } else {
           message.error(resp.msg || "重试启动失败");
         }
@@ -206,7 +188,7 @@ export default function CollectRecordPageView() {
         });
       }
     },
-    [message, getRecords, getIncidents],
+    [message, getRecords],
   );
 
   const handleRetrySingleSource = useCallback(
@@ -221,7 +203,6 @@ export default function CollectRecordPageView() {
         if (resp.code === 0) {
           message.success("已启动该站点采集重试");
           void getRecords();
-          void getIncidents();
         } else {
           message.error(resp.msg || "重试启动失败");
         }
@@ -233,7 +214,7 @@ export default function CollectRecordPageView() {
         });
       }
     },
-    [message, getRecords, getIncidents],
+    [message, getRecords],
   );
 
   const handleDeleteSelected = async () => {
@@ -247,7 +228,6 @@ export default function CollectRecordPageView() {
         message.success("选定记录已删除");
         setSelectedRowKeys([]);
         void getRecords();
-        void getIncidents();
       } else {
         message.error(resp.msg || "删除失败");
       }
@@ -264,7 +244,6 @@ export default function CollectRecordPageView() {
       const newPage = { ...pageRef.current, current: 1 };
       setPage(newPage);
       void getRecords(newPage);
-      void getIncidents();
     } else {
       message.error(resp.msg || "清空失败");
     }
@@ -314,14 +293,7 @@ export default function CollectRecordPageView() {
     <div className={styles.pageBody}>
       <ManagePageHeader
         title="采集记录"
-        description="管理每次影视采集的批次运行状态与成果指标，查看各站点抓取入库的影片明细，并对异常站点执行就地恢复重试。"
-      />
-
-      <IncidentPanel
-        incidents={incidents}
-        canWrite={canWrite}
-        retryingSourceKeys={retryingSourceKeys}
-        onRetry={handleRetrySingleSource}
+        description="管理每次影视采集的批次运行状态与成果指标，查看各站点抓取入库的影片明细。"
       />
 
       <RecordFilterBar
@@ -342,6 +314,7 @@ export default function CollectRecordPageView() {
           size="middle"
           pagination={false}
           tableLayout="fixed"
+          scroll={{ x: 1080 }}
           rowSelection={
             canWrite
               ? {
