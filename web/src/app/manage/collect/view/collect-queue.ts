@@ -3,8 +3,6 @@ import {
   type CollectProgress,
   type FilmSource,
 } from "./types";
-import type { SearchIndexProgress } from "./use-collect-stream";
-
 export interface CollectQueueGroup {
   queueId: string;
   sourceIds: string[];
@@ -23,10 +21,6 @@ export interface CollectQueueProgressView {
   pageTotal: number;
   failed: number;
   running: boolean;
-  finalizing?: boolean;
-  finalizingCurrent?: number;
-  finalizingTotal?: number;
-  finalizingPercent?: number;
 }
 
 export function collectQueueIdOf(progress?: CollectProgress | null): string | null {
@@ -60,7 +54,6 @@ export function groupCollectQueues(sites: FilmSource[]): CollectQueueGroup[] {
 export function computeCollectQueueProgress(
   sourceIds: string[],
   sites: FilmSource[],
-  searchIndex?: SearchIndexProgress,
 ): CollectQueueProgressView | null {
   if (sourceIds.length === 0) {
     return null;
@@ -105,14 +98,10 @@ export function computeCollectQueueProgress(
   if (counted === 0) {
     return null;
   }
-  const pageRunning = fetchingCount + stoppingCount > 0;
-  const isFinalizing = !pageRunning && counted > 0 && searchIndex?.status === "indexing";
-  const running = pageRunning || isFinalizing;
+  const running = fetchingCount + stoppingCount > 0;
   let percent = pageTotal > 0 ? Math.floor((pageDone / pageTotal) * 100) : 0;
-  if (pageRunning) {
+  if (running) {
     percent = Math.min(percent, 99);
-  } else if (isFinalizing) {
-    percent = searchIndex?.percent ?? 99;
   } else {
     percent = Math.min(percent, 100);
   }
@@ -128,10 +117,6 @@ export function computeCollectQueueProgress(
     pageTotal,
     failed,
     running,
-    finalizing: isFinalizing,
-    finalizingCurrent: searchIndex?.current ?? 0,
-    finalizingTotal: searchIndex?.total ?? 0,
-    finalizingPercent: searchIndex?.percent ?? 0,
   };
 }
 

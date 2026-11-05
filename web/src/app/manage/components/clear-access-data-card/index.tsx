@@ -209,7 +209,7 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
                   ? "正在检测历史统计数据..."
                   : hasData
                     ? `清空站点访问流量与统计数据，当前已累计保存 ${status?.totalRows} 条历史数据，支持全部清空或按天数保留（需管理密码）。`
-                    : "当前暂无历史落库统计数据，无需清理。"}
+                    : "当前暂无历史统计数据，无需清理。"}
               </Typography.Text>
             </div>
             <Tooltip

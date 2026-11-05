@@ -38,7 +38,6 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
     <div className={styles.queueList}>
       {items.map((item, index) => {
         const isRunning = item.view.running;
-        const isFinalizing = Boolean(item.view.finalizing);
         const isStopping = item.view.stoppingCount > 0;
         const hasFailed = item.view.failedCount > 0;
         const cardStateClass = isRunning
@@ -86,54 +85,28 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                   }`}
                 >
                   <span className={styles.statusDot} />
-                  {isFinalizing
-                    ? "收尾中"
-                    : isRunning
-                      ? isStopping
-                        ? "停止中"
-                        : "采集中"
-                      : hasFailed
-                        ? "异常"
-                        : "已完成"}
+                  {isRunning
+                    ? isStopping
+                      ? "停止中"
+                      : "采集中"
+                    : hasFailed
+                      ? "异常"
+                      : "已完成"}
                 </span>
                 <span className={styles.queueTitle}>
-                  {isFinalizing
-                    ? (items.length > 1 ? `队列 ${index + 1} 总进度 · 收尾中` : "队列总进度 · 收尾中")
-                    : queueProgressTitle(item.view.running, items.length, index + 1)}
+                  {queueProgressTitle(item.view.running, items.length, index + 1)}
                 </span>
 
                 <span className={styles.queuePages}>
-                  {isFinalizing ? (
-                    <>
-                      <strong className={styles.pageDoneNum}>
-                        {item.view.finalizingTotal && item.view.finalizingTotal > 0
-                          ? `检索索引 ${pageCount(item.view.finalizingCurrent || 0)}`
-                          : "检索索引构建中"}
-                      </strong>
-                      {item.view.finalizingTotal && item.view.finalizingTotal > 0 ? (
-                        <span className={styles.pageTotalNum}>
-                          / {pageCount(item.view.finalizingTotal)} 部
-                        </span>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <strong className={styles.pageDoneNum}>
-                        {pageCount(item.view.pageDone)}
-                      </strong>
-                      <span className={styles.pageTotalNum}>
-                        / {pageCount(item.view.pageTotal)} 页
-                      </span>
-                    </>
-                  )}
+                  <strong className={styles.pageDoneNum}>
+                    {pageCount(item.view.pageDone)}
+                  </strong>
+                  <span className={styles.pageTotalNum}>
+                    / {pageCount(item.view.pageTotal)} 页
+                  </span>
                 </span>
 
                 <Space size={4} wrap className={styles.queueTags}>
-                  {isFinalizing ? (
-                    <Tag color="processing" variant="filled" className={styles.microTag}>
-                      检索索引 {item.view.finalizingPercent || 0}%
-                    </Tag>
-                  ) : null}
                   <Tag
                     variant="filled"
                     className={`${styles.microTag} ${styles.stationTag}`}

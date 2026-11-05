@@ -151,6 +151,9 @@ func TestCollectBatchContext_OnlyPrimarySourceTriggersWarmup(t *testing.T) {
 	backupBatch := newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{backupSrc}, time.Now(), true)
 	defer backupBatch.close()
 	backupBatch.markSourceFinished(backupSrc)
+	if err := backupBatch.sealFinishedSource(backupSrc); err != nil {
+		t.Fatalf("backup sealFinishedSource: %v", err)
+	}
 	if err := backupBatch.flushAndFinalize(); err != nil {
 		t.Fatalf("backup flushAndFinalize: %v", err)
 	}
@@ -158,12 +161,12 @@ func TestCollectBatchContext_OnlyPrimarySourceTriggersWarmup(t *testing.T) {
 		t.Fatal("非首选站不应触发首页预热标记")
 	}
 
-	// 2. 批量采集中首选站先完成：finalizePrimarySource 立即置位 primaryWarmedUp，收尾 flushAndFinalize 不再重复预热
+	// 2. 批量采集中首选站先完成：sealFinishedSource 立即置位 primaryWarmedUp，收尾 flushAndFinalize 不再重复预热
 	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", []model.FilmSource{primarySrc, backupSrc}, time.Now(), false)
 	defer batch.close()
 	batch.markSourceFinished(primarySrc)
-	if err := batch.finalizePrimarySource(primarySrc.Id); err != nil {
-		t.Fatalf("finalizePrimarySource: %v", err)
+	if err := batch.sealFinishedSource(primarySrc); err != nil {
+		t.Fatalf("sealFinishedSource: %v", err)
 	}
 	if !batch.primaryWarmedUp {
 		t.Fatal("首选站完成后应立即置位 primaryWarmedUp")
@@ -171,6 +174,34 @@ func TestCollectBatchContext_OnlyPrimarySourceTriggersWarmup(t *testing.T) {
 	batch.markSourceFinished(backupSrc)
 	if err := batch.flushAndFinalize(); err != nil {
 		t.Fatalf("batch flushAndFinalize: %v", err)
+	}
+}
+
+func TestTakeSourceMIDs_LeavesOtherSource(t *testing.T) {
+	resetStreamPublishBufferForTest()
+	origPub := publishStreamWindowFn
+	publishStreamWindowFn = func(mids []int64) error { return nil }
+	t.Cleanup(func() {
+		resetStreamPublishBufferForTest()
+		publishStreamWindowFn = origPub
+	})
+
+	srcA := model.FilmSource{Id: "a", Name: "A"}
+	srcB := model.FilmSource{Id: "b", Name: "B"}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "mids", []model.FilmSource{srcA, srcB}, time.Now(), false)
+	defer batch.close()
+	batch.AddAffectedMIDs(&srcA, 1, []int64{1, 2, 1})
+	batch.AddAffectedMIDs(&srcB, 1, []int64{3})
+
+	got := batch.takeSourceMIDs("a")
+	if !reflect.DeepEqual(got, []int64{1, 2}) {
+		t.Fatalf("taken = %v", got)
+	}
+	if !reflect.DeepEqual(batch.affectedMIDs, []int64{3}) {
+		t.Fatalf("left = %v", batch.affectedMIDs)
+	}
+	if again := batch.takeSourceMIDs("a"); len(again) != 0 {
+		t.Fatalf("second take = %v", again)
 	}
 }
 

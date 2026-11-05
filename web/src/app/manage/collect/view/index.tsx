@@ -49,8 +49,6 @@ export default function CollectManagePageView() {
   const mountedRef = useRef(false);
   const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
   const [searchIndexProgress, setSearchIndexProgress] = useState<SearchIndexProgress>();
-  const searchIndexRef = useRef(searchIndexProgress);
-  searchIndexRef.current = searchIndexProgress;
 
   const { pendingSortRef, handleSortList, cleanupSort } = useCollectSort(siteList, setSiteList);
   const {
@@ -148,7 +146,6 @@ export default function CollectManagePageView() {
     setSiteList,
     resetTimersRef,
     handleTerminalStatus,
-    searchIndexRef,
   );
 
   const {
@@ -261,7 +258,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList, searchIndexProgress);
+  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList);
 
   const updateSiteListItem = useCallback((id: string, updater: (record: FilmSource) => FilmSource) => {
     setSiteList((current) => current.map((item) => (item.id === id ? updater(item) : item)));
@@ -436,6 +433,7 @@ export default function CollectManagePageView() {
               onSyncCategory={handleSyncCategory}
               onUpdateSite={updateSiteListItem}
               incidentMap={incidentMap}
+              searchIndex={searchIndexProgress}
             />
           </div>
         ) : (

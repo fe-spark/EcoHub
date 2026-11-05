@@ -428,7 +428,7 @@ export default function DailyUpdates() {
                 ) : null}
               </div>
               <p className={styles.blurb} key={`blurb-${filmId(shown)}`}>
-                {shown.blurb || "近 24 小时新入库内容，点击即可观看最新进度。"}
+                {shown.blurb || "近 24 小时最新更新内容，点击即可观看最新进度。"}
               </p>
 
               {rail.length > 0 ? (

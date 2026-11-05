@@ -57,7 +57,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "批量采集",
     description:
-      "所有采集站可同时采，各站点片子与播放线路自动聚合入库。开始后可看进度和终止。",
+      "所有采集站可同时采，各站点片子与播放线路自动聚合。开始后可看进度和终止。",
     route: "/manage/collect",
     target: "[data-tour='collect-batch']",
     placement: "bottom",
@@ -100,7 +100,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "核对影片列表",
     description:
-      "采集完成后到这里查看主站影片。没有数据通常是采集未完成或正在收尾入库。",
+      "采集完成后到这里查看主站影片。没有数据通常是采集未完成或正在保存更新。",
     route: "/manage/film",
     target: "[data-tour='menu-film']",
     placement: "right",
@@ -392,7 +392,7 @@ export default function ManageTour({
     target: () => queryTarget(liveTarget),
     arrow: { pointAtCenter: true },
     description: modalOpen
-      ? "确认采集范围后，点击「开始采集」启动多源聚合入库。"
+      ? "确认采集范围后，点击「开始采集」启动多源聚合。"
       : watchingProgress
         ? collectWaitDescription(progressPhase, progressEnded)
         : step?.description,

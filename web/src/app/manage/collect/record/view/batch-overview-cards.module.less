@@ -1,0 +1,224 @@
+.drawerOverviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+}
+
+.drawerMetaStrip {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.2fr) minmax(100px, 0.9fr) minmax(100px, 0.9fr) minmax(110px, 1fr);
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.drawerMetaItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.drawerMetaLabel {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.drawerMetaValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metaIcon {
+  color: var(--ant-color-text-tertiary);
+  font-size: 13px;
+}
+
+.drawerKpiRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.drawerKpiCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  min-width: 0;
+  transition: border-color 0.2s, box-shadow 0.2s;
+
+  &:hover {
+    border-color: var(--ant-color-border);
+  }
+}
+
+.drawerKpiHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kpiTitleGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpiIcon {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  flex-shrink: 0;
+}
+
+.kpiTag {
+  margin-inline-end: 0;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.drawerKpiBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.kpiMainNumberRow {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpiHeroNumber {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ant-color-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kpiHeroNumberSuccess {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ant-color-success);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kpiHeroNumberWarn {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ant-color-warning);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kpiHeroNumberFail {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ant-color-error);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kpiHeroNumberLink {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ant-color-primary, #fa8c16);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--ant-color-primary-hover, #ffa940);
+    text-decoration: underline;
+  }
+}
+
+.kpiHeroNumberMuted {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ant-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.kpiUnitSecondary {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ant-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kpiFooterSub {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ant-color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.kpiSubLink {
+  color: var(--ant-color-primary, #fa8c16);
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.2s ease;
+
+  &:hover {
+    color: var(--ant-color-primary-hover, #ffa940);
+    text-decoration: underline;
+  }
+}
+
+@media (max-width: 640px) {
+  .drawerMetaStrip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .drawerKpiRow {
+    grid-template-columns: 1fr;
+  }
+}

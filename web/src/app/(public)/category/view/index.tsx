@@ -138,7 +138,7 @@ export default function CategoryPageView({
         )}
         {renderSection(
           "最近更新",
-          "最新入库与更新进度追踪",
+          "最新收录与更新进度追踪",
           <SyncOutlined />,
           content?.recent,
           "update_stamp",

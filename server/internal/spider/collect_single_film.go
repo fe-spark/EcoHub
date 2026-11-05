@@ -178,10 +178,8 @@ func CollectSingleFilm(ids string) {
 				return
 			}
 			batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, len(stored), ""))
-			if isPreferredCollectSource(src.Id) {
-				if err := batchCtx.finalizePrimarySource(src.Id); err != nil {
-					syslog.Errorf("[CollectSingleFilm] 首选站 %s 缓存刷新失败: %v", src.Name, err)
-				}
+			if err := batchCtx.sealFinishedSource(src); err != nil {
+				syslog.Errorf("[CollectSingleFilm] 站点 %s 封口入队失败: %v", src.Name, err)
 			}
 		}(source, requestID)
 	}

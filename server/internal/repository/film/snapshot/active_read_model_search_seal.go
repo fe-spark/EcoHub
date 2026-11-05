@@ -50,7 +50,7 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 		Mid      int64
 		SourceId string `gorm:"column:source_id"`
 	}
-	const batchSize = 500
+	const batchSize = 1000
 	var rows []row
 	for i := 0; i < len(mids); i += batchSize {
 		end := i + batchSize
@@ -231,38 +231,7 @@ func buildSearchMetaRanks(items []FilmSearchMeta) (
 		}
 	}
 
-	sourceByKey := make(map[string]string, len(items)/2)
-	multiSourceKey := make(map[string]bool, len(items)/2)
-	aggregateKeys := make([]string, len(items))
-	for i := range items {
-		item := &items[i]
-		key := itemAggregateKey(item)
-		aggregateKeys[i] = key
-		src := strings.TrimSpace(item.FirstSourceId)
-		if key == "" || src == "" {
-			continue
-		}
-		if firstSrc, ok := sourceByKey[key]; ok {
-			if firstSrc != src {
-				multiSourceKey[key] = true
-			}
-		} else {
-			sourceByKey[key] = src
-		}
-	}
-
-	multiSource = make(map[string]int64)
-	for i := range items {
-		item := &items[i]
-		src := strings.TrimSpace(item.FirstSourceId)
-		if src == "" {
-			continue
-		}
-		key := aggregateKeys[i]
-		if len(item.PlaySources) >= 2 || (key != "" && multiSourceKey[key]) {
-			multiSource[src]++
-		}
-	}
+	multiSource = countMultiSourceBySource(items)
 	slices.SortFunc(byUpdate, func(i, j int) int {
 		left := &items[i]
 		right := &items[j]
@@ -457,7 +426,7 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 		ByUpdate:            newByUpdate,
 		Pos:                 newPos,
 		FilmsBySource:       newFilms,
-		MultiSourceBySource: cur.MultiSourceBySource,
+		MultiSourceBySource: countMultiSourceBySource(newItems),
 		HotPools:            newHotPools,
 		YearPools:           newYearPools,
 		RecentPools:         newRecentPools,

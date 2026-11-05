@@ -48,7 +48,13 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 	// 慢查询期间通道里会积压旧进度，快照必须读最新一份。
 	discardSearchIndexProgress(searchIndexCh)
 	latest := service.CollectSvc.SearchIndexProgress()
-	if err := stream.SendEvent("search_index_progress", latest); err != nil {
+	if err := stream.SendEvent("search_index_progress", progress.SearchIndexProgressEvent{
+		Total:   latest.Total,
+		Current: latest.Current,
+		Percent: latest.Percent,
+		Status:  latest.Status,
+		Sites:   progress.CurrentSearchSealSites(),
+	}); err != nil {
 		if errors.Is(err, errSSEWrite) {
 			return
 		}

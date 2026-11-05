@@ -29,7 +29,19 @@ func (s *FilmService) GetFilmPage(vo *model.SearchVo) ([]model.FilmIndex, error)
 			vo.SourceId = sources[0].Id
 		}
 	}
-	return filmsnapshot.GetSearchPageReadModel(*vo)
+	list, err := filmsnapshot.GetSearchPageReadModel(*vo)
+	if err != nil {
+		if filmsnapshot.IsSearchIndexBuilding() && errors.Is(err, filmsnapshot.ErrSearchIndexMissing) {
+			return []model.FilmIndex{}, nil
+		}
+		return nil, err
+	}
+	return list, nil
+}
+
+// SearchIndexState 返回当前检索索引是否正在构建及最新构建进度
+func (s *FilmService) SearchIndexState() (bool, any) {
+	return filmsnapshot.IsSearchIndexBuilding(), filmsnapshot.GetLatestSearchIndexProgress()
 }
 
 // GetSearchOptions 获取影片检索的select的选项options

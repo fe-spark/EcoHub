@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"server/internal/model"
+	filmcache "server/internal/repository/film/cache"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 // publishMu 全局快照发布互斥锁，确保向 MySQL 发布快照时单次只有一个线程在执行
@@ -44,35 +46,35 @@ func unregisterActiveBatch(b *collectBatchContext) {
 
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
 type collectBatchContext struct {
-	mu               sync.Mutex
-	batchID          string
-	parentBatchID    string
-	hour             int
-	replayFilmIDs    []int64
-	trigger          string
-	tag              string
-	sources          []model.FilmSource
-	startedAt        time.Time
-	isStandalone     bool
-	primaryWarmedUp  bool
-	affectedMIDs     []int64
-	notifyMIDs       map[int64]struct{}
-	sourceNotifyMIDs map[string]map[int64]struct{}
-	filmMIDs         map[int64]struct{}
-	sourceFilmMIDs   map[string]map[int64]struct{}
-	pendingFilms     map[string][]int64
-	sourceHours      map[string]int
-	sourceErrors     map[string]string
+	mu                sync.Mutex
+	batchID           string
+	parentBatchID     string
+	hour              int
+	replayFilmIDs     []int64
+	trigger           string
+	tag               string
+	sources           []model.FilmSource
+	startedAt         time.Time
+	isStandalone      bool
+	primaryWarmedUp   bool
+	affectedMIDs      []int64
+	notifyMIDs        map[int64]struct{}
+	sourceNotifyMIDs  map[string]map[int64]struct{}
+	filmMIDs          map[int64]struct{}
+	sourceFilmMIDs    map[string]map[int64]struct{}
+	pendingFilms      map[string][]int64
+	sourceHours       map[string]int
+	sourceErrors      map[string]string
 	sourceTargetPages map[string][]int
-	progressDirty    bool
-	flushing         bool
-	lastFlush        time.Time
-	flushWG          sync.WaitGroup
-	finishedSources  map[string]model.FilmSource
-	sourceSnapshots  map[string]model.CollectRecordSourceDetail
-	occupyTokens     map[string]uint64
-	runNoted         atomic.Bool
-	recordStarted    bool
+	progressDirty     bool
+	flushing          bool
+	lastFlush         time.Time
+	flushWG           sync.WaitGroup
+	finishedSources   map[string]model.FilmSource
+	sourceSnapshots   map[string]model.CollectRecordSourceDetail
+	occupyTokens      map[string]uint64
+	runNoted          atomic.Bool
+	recordStarted     bool
 }
 
 func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
@@ -275,25 +277,71 @@ func (b *collectBatchContext) getSourceSnapshot(sourceID string) (model.CollectR
 	return d, ok
 }
 
-// finalizePrimarySource 首选采集站完成时立即刷窗并触发首页缓存预热，无需等待同批其余慢速非首选站。
-func (b *collectBatchContext) finalizePrimarySource(sourceID string) error {
-	if b == nil || !isPreferredCollectSource(sourceID) {
+// takeSourceMIDs 取出这一站尚未封口的影片编号，其它站的编号留在批次里。
+func (b *collectBatchContext) takeSourceMIDs(sourceID string) []int64 {
+	if b == nil {
 		return nil
 	}
+	sourceID = strings.TrimSpace(sourceID)
 	b.mu.Lock()
-	if b.primaryWarmedUp {
-		b.mu.Unlock()
+	defer b.mu.Unlock()
+	set := b.sourceFilmMIDs[sourceID]
+	if len(set) == 0 || len(b.affectedMIDs) == 0 {
 		return nil
 	}
-	b.primaryWarmedUp = true
-	b.mu.Unlock()
+	taken := make([]int64, 0, len(set))
+	seen := make(map[int64]struct{}, len(set))
+	kept := make([]int64, 0, len(b.affectedMIDs))
+	for _, mid := range b.affectedMIDs {
+		if _, ok := set[mid]; !ok {
+			kept = append(kept, mid)
+			continue
+		}
+		if _, dup := seen[mid]; dup {
+			continue
+		}
+		seen[mid] = struct{}{}
+		taken = append(taken, mid)
+	}
+	b.affectedMIDs = kept
+	return taken
+}
 
+// sealFinishedSource 刷窗后把这一站送进全局封口队列。当时它是主站才预热首页。
+func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error {
+	if b == nil {
+		return nil
+	}
+	source.Id = strings.TrimSpace(source.Id)
+	if source.Id == "" {
+		return nil
+	}
 	collectLifecycle.beginPublish()
 	defer collectLifecycle.endPublish()
 	publishMu.Lock()
 	defer publishMu.Unlock()
+	if _, err := drainStreamPublishLocked(true, false); err != nil {
+		return err
+	}
+	mids := b.takeSourceMIDs(source.Id)
+	scheduleSearchResealSite(source.Id, source.Name, mids)
+	filmcache.ClearTVBoxConfigCache()
+	b.warmPrimaryHome(source.Id)
+	return nil
+}
 
-	return finalizeStreamPublish(b.takeAffectedMIDs, true)
+func (b *collectBatchContext) warmPrimaryHome(sourceID string) {
+	b.mu.Lock()
+	if !isPreferredCollectSource(sourceID) || b.primaryWarmedUp {
+		b.mu.Unlock()
+		return
+	}
+	b.primaryWarmedUp = true
+	b.mu.Unlock()
+	filmsnapshot.FlushSnapshotCacheInvalidation()
+	if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
+		filmsnapshot.NotifySnapshotPublished(version)
+	}
 }
 
 func (b *collectBatchContext) flushAndFinalize() error {

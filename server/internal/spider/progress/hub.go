@@ -10,12 +10,12 @@ import (
 
 // CategorySyncEvent 采集站分类同步状态事件
 type CategorySyncEvent struct {
-	SourceID    string                     `json:"sourceId"`
-	Status      string                     `json:"status"` // "syncing" | "ready" | "failed" | "confirm" | "idle"
-	Name        string                     `json:"name,omitempty"`
-	Changes     []model.CategoryTreeChange `json:"changes,omitempty"`
-	Message     string                     `json:"message,omitempty"`
-	DataCleared bool                       `json:"dataCleared,omitempty"`
+	SourceID      string                     `json:"sourceId"`
+	Status        string                     `json:"status"` // "syncing" | "ready" | "failed" | "confirm" | "idle"
+	Name          string                     `json:"name,omitempty"`
+	Changes       []model.CategoryTreeChange `json:"changes,omitempty"`
+	Message       string                     `json:"message,omitempty"`
+	DataCleared   bool                       `json:"dataCleared,omitempty"`
 	SitePageTotal int                        `json:"sitePageTotal,omitempty"`
 }
 
@@ -30,7 +30,7 @@ type SourceDeleteEvent struct {
 
 // Hub 采集进度全局广播中心
 type Hub struct {
-	mu                  sync.RWMutex
+	mu                     sync.RWMutex
 	subscribers            map[chan []model.CollectProgress]struct{}
 	categorySubscribers    map[chan CategorySyncEvent]struct{}
 	deleteSubscribers      map[chan SourceDeleteEvent]struct{}
@@ -312,16 +312,20 @@ func SubscribeSourceDelete(ctx context.Context) <-chan SourceDeleteEvent {
 
 	return ch
 }
-// SearchIndexProgressEvent 检索索引重建数字进度事件
+
+// SearchIndexProgressEvent 检索索引重建数字进度事件。
+// Sites 是全局唯一的封口队列，与采集队列条数无关。
 type SearchIndexProgressEvent struct {
-	Total   int64  `json:"total"`
-	Current int64  `json:"current"`
-	Percent int    `json:"percent"`
-	Status  string `json:"status"` // "indexing" | "done" | "idle"
+	Total   int64            `json:"total"`
+	Current int64            `json:"current"`
+	Percent int              `json:"percent"`
+	Status  string           `json:"status"` // "indexing" | "done" | "idle"
+	Sites   []SearchSealSite `json:"sites,omitempty"`
 }
 
 // BroadcastSearchIndexProgress 广播检索索引重建数字进度
 func BroadcastSearchIndexProgress(evt SearchIndexProgressEvent) {
+	evt.Sites = CurrentSearchSealSites()
 	GlobalHub.mu.RLock()
 	defer GlobalHub.mu.RUnlock()
 	for ch := range GlobalHub.searchIndexSubscribers {

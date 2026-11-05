@@ -198,7 +198,8 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         }
         setBackup(parsed);
         setFileName(file.name);
-        message.success(`已读取 ${file.name}`);
+        setPassword("");
+        setImportOpen(true);
       } catch {
         message.error("无法解析 JSON 备份文件");
       }
@@ -206,11 +207,6 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
     reader.onerror = () => message.error("读取文件失败");
     reader.readAsText(file);
     return false;
-  };
-
-  const openImport = () => {
-    setImportOpen(true);
-    setPassword("");
   };
 
   const closeImport = () => {
@@ -299,24 +295,19 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             <div className={styles.sectionText}>
               <Typography.Text strong>导入配置</Typography.Text>
               <Typography.Text type="secondary">
-                选择备份文件后按模块覆盖；需管理密码。导入采集站/任务时会先停止进行中的采集。
+                选择备份文件，校验通过后确认密码并按模块覆盖。导入采集站时会先停止进行中的采集。
               </Typography.Text>
             </div>
-            <Space wrap>
-              <Upload
-                accept=".json,application/json"
-                showUploadList={false}
-                beforeUpload={beforeUpload}
-                disabled={!canWrite || !isAdmin}
-              >
-                <Button icon={<UploadOutlined />} disabled={!canWrite || !isAdmin}>
-                  选择备份文件
-                </Button>
-              </Upload>
-              <Button type="primary" disabled={!canWrite || !isAdmin || !backup} onClick={openImport}>
-                导入配置
+            <Upload
+              accept=".json,application/json"
+              showUploadList={false}
+              beforeUpload={beforeUpload}
+              disabled={!canWrite || !isAdmin || importing}
+            >
+              <Button icon={<UploadOutlined />} disabled={!canWrite || !isAdmin || importing}>
+                选择备份文件
               </Button>
-            </Space>
+            </Upload>
           </div>
           {backup ? (
             <div className={styles.importPreview}>

@@ -1,5 +1,10 @@
-import { Progress, Tooltip } from "antd";
+"use client";
+
+import { Progress } from "antd";
+import CollectRing from "./collect-ring";
+import { resolveRingView } from "./collect-ring-view";
 import { resolveCollectProgressStatusText, type CollectProgress } from "./types";
+import type { SealRingView } from "./seal-ring";
 import styles from "./index.module.less";
 
 interface CollectProgressViewProps {
@@ -8,13 +13,21 @@ interface CollectProgressViewProps {
   compact?: boolean;
   /** 环形进度：固定占位，无进度时显示空环，保证卡片高度稳定 */
   variant?: "bar" | "ring";
+  /** 封口队列圆环。有值时替换采集环。 */
+  seal?: SealRingView | null;
 }
 
 export default function CollectProgressView({
   progress,
   compact = false,
   variant = "bar",
+  seal = null,
 }: CollectProgressViewProps) {
+  if (variant === "ring") {
+    const ring = resolveRingView(progress, seal);
+    if (!ring) return null;
+    return <CollectRing view={ring} />;
+  }
   // 无进度数据按 0% 处理，环形仍占位
   const total = Math.max(progress?.total ?? 0, 0);
   const failed = progress?.failed ?? 0;
@@ -62,22 +75,6 @@ export default function CollectProgressView({
   // 无进度数据时不渲染任何占位
   if (!progress) {
     return null;
-  }
-
-  // 环形进度：仅存在采集任务时渲染，避免无任务卡片出现误导性的 0%
-  if (variant === "ring") {
-    return (
-      <Tooltip title={`${statusText} · ${countLine}`}>
-        <Progress
-          type="circle"
-          percent={percent}
-          size={40}
-          status={progressStatus}
-          strokeColor={progressStrokeColor}
-          className={styles.progressRing}
-        />
-      </Tooltip>
-    );
   }
 
   // 横条紧凑：一行「百分比 + 条 + 状态/计数」

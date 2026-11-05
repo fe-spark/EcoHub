@@ -108,6 +108,27 @@ func TestSealSearchMetaIndex_MultiSourceCounts(t *testing.T) {
 	}
 }
 
+func TestIncrementalSeal_RefreshesMultiSourceCounts(t *testing.T) {
+	cur := sealSearchMetaIndex("v", []FilmSearchMeta{
+		{Mid: 1, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
+		{Mid: 3, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "独家影片"}},
+	})
+	if cur.MultiSourceBySource["src-a"] != 0 {
+		t.Fatalf("封口前 src-a 多源 = %d", cur.MultiSourceBySource["src-a"])
+	}
+
+	next := updateSearchMetaIndexIncremental(cur, "v", map[int64]FilmSearchMeta{
+		2: {Mid: 2, FirstSourceId: "src-b", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
+		3: {Mid: 3, FirstSourceId: "src-a", PlaySources: []string{"src-a", "src-c"}, Item: utils.FilmSearchItem{CleanName: "独家影片"}},
+	})
+	if next.MultiSourceBySource["src-a"] != 2 {
+		t.Fatalf("src-a 多源 = %d，want 2", next.MultiSourceBySource["src-a"])
+	}
+	if next.MultiSourceBySource["src-b"] != 1 {
+		t.Fatalf("src-b 多源 = %d，want 1", next.MultiSourceBySource["src-b"])
+	}
+}
+
 func TestLoadFilmSearchMetaIndex_DedupesPlayLines(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	createTestFilm(t, gdb, 7, "慶餘年", 10, "")

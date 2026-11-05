@@ -280,7 +280,7 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	if takeMIDs != nil {
 		mids = takeMIDs()
 	}
-	scheduleSearchReseal(mids)
+	scheduleSearchResealRemain(mids)
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {
@@ -290,67 +290,6 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 		}
 	}
 	return nil
-}
-
-// searchResealQueue 把同一段时间里结束的队列合成一次封口。
-// 封口期间后到的 mid 留在切片里，当前这一次结束后再封一次。
-type searchResealQueue struct {
-	mu      sync.Mutex
-	pending []int64
-	running bool
-}
-
-var searchReseal = &searchResealQueue{}
-
-func scheduleSearchReseal(mids []int64) {
-	if len(mids) == 0 {
-		return
-	}
-	searchReseal.mu.Lock()
-	searchReseal.pending = append(searchReseal.pending, mids...)
-	start := !searchReseal.running
-	if start {
-		searchReseal.running = true
-	}
-	searchReseal.mu.Unlock()
-	if start {
-		go searchReseal.run()
-	}
-}
-
-func (q *searchResealQueue) run() {
-	for {
-		q.mu.Lock()
-		batch := q.pending
-		q.pending = nil
-		if len(batch) == 0 {
-			q.running = false
-			q.mu.Unlock()
-			return
-		}
-		q.mu.Unlock()
-		applied := false
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[Spider][SearchReseal] 封口失败 panic=%v", r)
-				}
-			}()
-			applied = filmsnapshot.ResealSearchIndexMids(batch)
-		}()
-		q.mu.Lock()
-		if len(q.pending) > 0 {
-			q.mu.Unlock()
-			continue
-		}
-		q.running = false
-		if applied {
-			p := filmsnapshot.GetLatestSearchIndexProgress()
-			filmsnapshot.NotifySearchIndexProgress(p.Total, p.Total, "done")
-		}
-		q.mu.Unlock()
-		return
-	}
 }
 
 func resetStreamPublishBufferForTest() {
