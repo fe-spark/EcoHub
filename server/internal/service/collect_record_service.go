@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -135,6 +136,7 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 	// 从明细解析失败站点，以及各站实际拉过的小时窗口。
 	failedSourceMap := make(map[string]bool)
 	hourBySource := make(map[string]int)
+	failedPagesBySource := make(map[string][]int)
 	if rec.DetailJson != "" {
 		var details []model.CollectRecordSourceDetail
 		if err := json.Unmarshal([]byte(rec.DetailJson), &details); err != nil {
@@ -150,6 +152,9 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 			}
 			if d.Status == "failed" || d.Status == "partial" {
 				failedSourceMap[id] = true
+				if len(d.FailedPages) > 0 {
+					failedPagesBySource[id] = append([]int(nil), d.FailedPages...)
+				}
 			}
 		}
 	}
@@ -180,7 +185,17 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 	if len(targetIDs) == 0 {
 		return model.CollectBatchResult{}, errors.New("该批次没有需要重试的失败站点")
 	}
+
+	// 半小时内可以重试失败页，超过直接变成重试采集站
+	refTime := rec.StartedAt
+	if rec.FinishedAt != nil && !rec.FinishedAt.IsZero() {
+		refTime = *rec.FinishedAt
+	}
+	elapsed := time.Since(refTime)
+	isWithinHalfHour := elapsed <= 30*time.Minute
+
 	groups := make(map[int][]string)
+	targetPagesMap := make(map[string][]int)
 	for _, id := range targetIDs {
 		hour := rec.Hour
 		if h, ok := hourBySource[id]; ok && h != 0 {
@@ -190,6 +205,19 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 			return model.CollectBatchResult{}, errors.New("采集时长不能为 0")
 		}
 		groups[hour] = append(groups[hour], id)
+
+		if isWithinHalfHour && len(failedPagesBySource[id]) > 0 {
+			targetPagesMap[id] = failedPagesBySource[id]
+			log.Printf("[Spider] 批次 %s 站点 %s 距批次结束 %v（半小时内），重试失败页 (%d页): %v",
+				rec.BatchID, id, elapsed.Round(time.Second), len(targetPagesMap[id]), targetPagesMap[id])
+		} else {
+			if len(failedPagesBySource[id]) > 0 {
+				log.Printf("[Spider] 批次 %s 站点 %s 距批次结束 %v（已超半小时），转为重试采集站",
+					rec.BatchID, id, elapsed.Round(time.Second))
+			} else {
+				log.Printf("[Spider] 批次 %s 站点 %s 无失败页明细，重试采集站", rec.BatchID, id)
+			}
+		}
 	}
 
 	hours := make([]int, 0, len(groups))
@@ -206,7 +234,13 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		if len(sources) == 0 {
 			continue
 		}
-		retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, hour, sources)
+		hourTargetPages := make(map[string][]int)
+		for _, s := range sources {
+			if pages, ok := targetPagesMap[s.Id]; ok && len(pages) > 0 {
+				hourTargetPages[s.Id] = pages
+			}
+		}
+		retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, hour, sources, hourTargetPages)
 		if err != nil {
 			if firstID != "" {
 				result.BatchID = firstID

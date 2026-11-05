@@ -118,7 +118,7 @@ export function IncidentPanel({
         const loading = retryingSourceKeys.has(key);
         return (
           <Popconfirm
-            title={`重试采集站「${item.sourceName || item.sourceId}」？`}
+            title={`重试采集站「${item.sourceName || item.sourceId}」`}
             onConfirm={() => onRetry(item.latestBatchId, item.sourceId)}
             disabled={!canWrite || loading}
           >

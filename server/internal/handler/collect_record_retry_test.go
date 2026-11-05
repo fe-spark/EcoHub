@@ -162,3 +162,137 @@ func TestCollectRecordHandler_HistoryRetryBadDetail(t *testing.T) {
 		t.Fatalf("expected 批次明细损坏, got %+v", resp)
 	}
 }
+
+func TestCollectRecordHandler_HistoryRetryWithinHalfHour(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	_ = gdb.AutoMigrate(&model.CollectRecord{}, &model.FilmSource{}, &model.CategoryMapping{}, &model.SourceCategory{})
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "src-oscar", Name: "奥斯卡", State: true}
+	_ = gdb.Create(&src).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: src.Id, SourceTypeId: 1, RawName: "电影"}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 1}).Error
+
+	finishedAt := time.Now().Add(-5 * time.Minute)
+	detailJson := `[{"sourceId":"src-oscar","sourceName":"奥斯卡","status":"partial","failedCnt":2,"failedPages":[3190,4036]}]`
+	rec := &model.CollectRecord{
+		BatchID:     "b-within-30m",
+		Trigger:     model.CollectTriggerManual,
+		Hour:        24,
+		Status:      model.CollectRecordStatusPartial,
+		StartedAt:   finishedAt.Add(-10 * time.Minute),
+		FinishedAt:  &finishedAt,
+		DetailJson:  detailJson,
+		SourceCount: 1,
+	}
+	_ = repository.CreateCollectRecord(rec)
+
+	r := gin.New()
+	r.POST("/history/retry", CollectRecordHd.HistoryRetry)
+
+	reqBody, _ := json.Marshal(model.CollectRecordRetryReq{
+		BatchID:   "b-within-30m",
+		SourceIDs: []string{"src-oscar"},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/history/retry", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int                      `json:"code"`
+		Msg  string                   `json:"msg"`
+		Data model.CollectBatchResult `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d, msg=%s", resp.Code, resp.Msg)
+	}
+	if len(resp.Data.Started) != 1 || resp.Data.Started[0].Id != "src-oscar" {
+		t.Fatalf("expected src-oscar to start, got %+v", resp.Data)
+	}
+
+	saved, err := repository.GetCollectRecordByBatchID(resp.Data.BatchID)
+	if err != nil || saved == nil {
+		t.Fatalf("retry record missing: %v", err)
+	}
+	if saved.ParentBatchID != "b-within-30m" || saved.Trigger != model.CollectTriggerRetry {
+		t.Fatalf("unexpected retry record: %+v", saved)
+	}
+}
+
+func TestCollectRecordHandler_HistoryRetryAfterHalfHour(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	_ = gdb.AutoMigrate(&model.CollectRecord{}, &model.FilmSource{}, &model.CategoryMapping{}, &model.SourceCategory{})
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "src-oscar2", Name: "奥斯卡2", State: true}
+	_ = gdb.Create(&src).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: src.Id, SourceTypeId: 1, RawName: "电影"}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 1}).Error
+
+	finishedAt := time.Now().Add(-45 * time.Minute)
+	detailJson := `[{"sourceId":"src-oscar2","sourceName":"奥斯卡2","status":"partial","failedCnt":2,"failedPages":[3190,4036]}]`
+	rec := &model.CollectRecord{
+		BatchID:     "b-after-30m",
+		Trigger:     model.CollectTriggerManual,
+		Hour:        24,
+		Status:      model.CollectRecordStatusPartial,
+		StartedAt:   finishedAt.Add(-10 * time.Minute),
+		FinishedAt:  &finishedAt,
+		DetailJson:  detailJson,
+		SourceCount: 1,
+	}
+	_ = repository.CreateCollectRecord(rec)
+
+	r := gin.New()
+	r.POST("/history/retry", CollectRecordHd.HistoryRetry)
+
+	reqBody, _ := json.Marshal(model.CollectRecordRetryReq{
+		BatchID:   "b-after-30m",
+		SourceIDs: []string{"src-oscar2"},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/history/retry", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int                      `json:"code"`
+		Msg  string                   `json:"msg"`
+		Data model.CollectBatchResult `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Code != 0 {
+		t.Fatalf("expected code 0, got %d, msg=%s", resp.Code, resp.Msg)
+	}
+	if len(resp.Data.Started) != 1 || resp.Data.Started[0].Id != "src-oscar2" {
+		t.Fatalf("expected src-oscar2 to start, got %+v", resp.Data)
+	}
+}

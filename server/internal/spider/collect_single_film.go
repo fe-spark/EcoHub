@@ -83,7 +83,7 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 		return scheduler.Mids{}, fmt.Errorf("get movie detail failed: %w", err)
 	}
 	if len(list) <= 0 {
-		return scheduler.Mids{}, errors.New("get movie detail failed: response list is empty")
+		return scheduler.Mids{}, errors.New("get movie detail failed: film not found or unplayable")
 	}
 
 	written, err := saveCollectedFilmForCollect(ctx, s, 1, list)

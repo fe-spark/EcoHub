@@ -71,6 +71,7 @@ type CollectRecordSourceDetail struct {
 	FailedCnt   int    `json:"failedCnt"`
 	FilmsTotal  int    `json:"filmsTotal"`
 	Error       string `json:"error,omitempty"`
+	FailedPages []int  `json:"failedPages,omitempty"`
 }
 
 // CollectRecordCompletion 批次执行结束结算载荷

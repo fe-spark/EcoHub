@@ -19,6 +19,7 @@ export interface CollectRecordSourceDetail {
   failedCnt: number;
   filmsTotal: number;
   error?: string;
+  failedPages?: number[];
 }
 
 export type CollectHistoryStatus =

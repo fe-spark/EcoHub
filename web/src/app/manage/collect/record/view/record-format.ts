@@ -23,12 +23,11 @@ export function formatCollectPages(record: {
   const succ = Math.max(0, record.pageSuccess ?? 0);
   const total = Math.max(0, record.pageTotal ?? 0);
   const fail = Math.max(0, record.pageFailed ?? 0);
-  const missed = Math.max(0, total - succ - fail);
   const status = record.status ?? "";
   if (fail > 0) {
     return {
       primary: `${fail} 页失败`,
-      secondary: `成功 ${succ} / 共 ${total} 页${missed > 0 ? `，未抓 ${missed} 页` : ""}`,
+      secondary: total > 0 ? `成功 ${succ} / 共 ${total} 页` : `成功 ${succ} 页`,
       alert: true,
     };
   }
@@ -42,14 +41,14 @@ export function formatCollectPages(record: {
   if (status === "stopped" || status === "interrupted") {
     return {
       primary: `成功 ${succ} 页`,
-      secondary: missed > 0 ? `未抓 ${missed} 页` : "已停止",
+      secondary: total > 0 ? `共 ${total} 页` : "已停止",
       alert: false,
     };
   }
-  if (missed > 0) {
+  if (total > 0 && succ < total) {
     return {
       primary: `成功 ${succ} / 共 ${total} 页`,
-      secondary: `未抓 ${missed} 页`,
+      secondary: "",
       alert: false,
     };
   }
@@ -61,19 +60,21 @@ export function formatSourcePages(item: {
   pageTotal?: number;
   successCnt?: number;
   failedCnt?: number;
+  failedPages?: number[];
+  error?: string;
 }): string {
   const total = Math.max(0, item.pageTotal ?? 0);
   const succ = Math.max(0, item.successCnt ?? 0);
-  const fail = Math.max(0, item.failedCnt ?? 0);
+  const fail = Math.max(0, item.failedCnt ?? 0, item.failedPages?.length ?? 0);
   if (total <= 0) {
-    if (item.status === "failed") return "探测失败";
+    if (fail > 0) return `失败 ${fail} 页`;
+    const isProbeErr = item.error ? item.error.includes("探测") : true;
+    if (item.status === "failed") return isProbeErr ? "探测失败" : "抓取失败";
     if (item.status === "stopped" || item.status === "interrupted") return "已停止";
     return "0/0";
   }
-  const missed = Math.max(0, total - succ - fail);
   const parts = [`成功 ${succ} / 共 ${total} 页`];
   if (fail > 0) parts.push(`失败 ${fail} 页`);
-  if (missed > 0) parts.push(`未抓 ${missed} 页`);
   return parts.join("，");
 }
 

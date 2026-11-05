@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -102,12 +104,50 @@ func withFetchSlot(ctx context.Context, s *model.FilmSource, tag string, call fu
 	return callErr
 }
 
-func GetPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
-	pageCount, err := fetchPageCountOnce(ctx, s, r)
-	if err == nil || !utils.IsRateLimitedErr(err) {
-		return pageCount, err
+const (
+	maxPageFetchRetries = 2
+)
+
+func isRetryableFetchErr(err error) bool {
+	if err == nil {
+		return false
 	}
-	return fetchPageCountOnce(ctx, s, r)
+	if utils.IsRateLimitedErr(err) {
+		return true
+	}
+	msg := err.Error()
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "timeout") {
+		return true
+	}
+	if strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe") || strings.Contains(msg, "EOF") {
+		return true
+	}
+	if strings.Contains(msg, "status=500") || strings.Contains(msg, "status=502") || strings.Contains(msg, "status=503") || strings.Contains(msg, "status=504") {
+		return true
+	}
+	return false
+}
+
+func GetPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
+	var pageCount int
+	var err error
+	for attempt := 0; attempt <= maxPageFetchRetries; attempt++ {
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(time.Duration(attempt*200) * time.Millisecond):
+			}
+		}
+		pageCount, err = fetchPageCountOnce(ctx, s, r)
+		if err == nil || !isRetryableFetchErr(err) {
+			return pageCount, err
+		}
+	}
+	return pageCount, err
 }
 
 func fetchPageCountOnce(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
@@ -128,11 +168,40 @@ func fetchPageCountOnce(ctx context.Context, s *model.FilmSource, r utils.Reques
 }
 
 func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
-	list, err := fetchFilmDetailOnce(ctx, s, r)
-	if err == nil || !utils.IsRateLimitedErr(err) {
-		return list, err
+	page := r.Params.Get("pg")
+	if page == "" {
+		page = "-"
 	}
-	return fetchFilmDetailOnce(ctx, s, r)
+	srcName := ""
+	if s != nil {
+		srcName = s.Name
+	}
+	var list []model.MovieDetail
+	var err error
+	for attempt := 0; attempt <= maxPageFetchRetries; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if attempt > 0 {
+			log.Printf("[Spider] 站点 %s 第 %s 页抓取遇临时错误 (重试 %d/%d): %v", srcName, page, attempt, maxPageFetchRetries, err)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt*200) * time.Millisecond):
+			}
+		}
+		list, err = fetchFilmDetailOnce(ctx, s, r)
+		if err == nil {
+			if attempt > 0 {
+				log.Printf("[Spider] 站点 %s 第 %s 页重试成功 (第 %d 次尝试)", srcName, page, attempt+1)
+			}
+			return list, nil
+		}
+		if !isRetryableFetchErr(err) {
+			return list, err
+		}
+	}
+	return list, err
 }
 
 func fetchFilmDetailOnce(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
@@ -146,9 +215,6 @@ func fetchFilmDetailOnce(ctx context.Context, s *model.FilmSource, r utils.Reque
 		got, ferr := deps.GetFilmDetail(s, r)
 		if ferr != nil {
 			return ferr
-		}
-		if len(got) == 0 {
-			return errors.New("response list is empty")
 		}
 		list = got
 		return nil

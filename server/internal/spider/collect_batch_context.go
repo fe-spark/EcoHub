@@ -63,6 +63,7 @@ type collectBatchContext struct {
 	pendingFilms     map[string][]int64
 	sourceHours      map[string]int
 	sourceErrors     map[string]string
+	sourceTargetPages map[string][]int
 	progressDirty    bool
 	flushing         bool
 	lastFlush        time.Time
@@ -336,4 +337,29 @@ func (b *collectBatchContext) close() {
 	b.occupyTokens = nil
 	b.mu.Unlock()
 	releaseCollectTokens(tokens)
+}
+
+func (b *collectBatchContext) getTargetPages(sourceID string) []int {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.sourceTargetPages == nil {
+		return nil
+	}
+	return b.sourceTargetPages[sourceID]
+}
+
+func (b *collectBatchContext) withTargetPages(targetPages map[string][]int) *collectBatchContext {
+	if b == nil || len(targetPages) == 0 {
+		return b
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sourceTargetPages = make(map[string][]int, len(targetPages))
+	for k, v := range targetPages {
+		b.sourceTargetPages[k] = append([]int(nil), v...)
+	}
+	return b
 }

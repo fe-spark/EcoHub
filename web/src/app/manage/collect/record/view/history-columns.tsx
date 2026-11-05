@@ -208,7 +208,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       title: columnTitle(<ClockCircleOutlined />, "时间"),
       dataIndex: "startedAt",
       key: "startedAt",
-      width: "16%",
+      width: "15%",
       render: (val: string, record) => {
         const effectiveMs =
           record.status === "running" && record.startedAt && record.durationMs <= 0
@@ -229,7 +229,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       title: columnTitle(<CloudDownloadOutlined />, "采集方式"),
       dataIndex: "trigger",
       key: "trigger",
-      width: "14%",
+      width: "12%",
       render: (trigger: string, record) => {
         const films = singleFilmTargets(record);
         return (
@@ -267,14 +267,14 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
     {
       title: columnTitle(<FieldTimeOutlined />, "采集跨度"),
       key: "hour",
-      width: "11%",
+      width: "8%",
       render: (_, record) => renderHourTag(record.hour, record),
     },
     {
       title: columnTitle(<CheckCircleOutlined />, "状态"),
       dataIndex: "status",
       key: "status",
-      width: "10%",
+      width: "9%",
       render: (_: string, record) => renderStatusBadge(resolveBatchStatus(record)),
     },
     {
@@ -378,7 +378,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
     {
       title: columnTitle(<FileTextOutlined />, "拉取进度"),
       key: "pages",
-      width: "14%",
+      width: "18%",
       render: (_, record) => {
         if (isSingleFilmRecord(record)) {
           return (
@@ -406,10 +406,10 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       },
     },
     {
-      title: columnTitle(<VideoCameraOutlined />, "入库影片"),
+      title: columnTitle(<VideoCameraOutlined />, "更新影片"),
       dataIndex: "filmCount",
       key: "filmCount",
-      width: "11%",
+      width: "12%",
       render: (count: number, record) => {
         const text = formatCollectFilms(count, record);
         const emphasized = count > 0;
@@ -424,7 +424,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
     {
       title: columnTitle(<ReloadOutlined />, "操作"),
       key: "action",
-      width: "13%",
+      width: "14%",
       render: (_, record) => {
         const isRetrying = retryingBatchIds.has(record.batchId);
         const canRetry = canRetryHistoryRecord(record);
@@ -442,12 +442,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
             </Button>
             {canRetry ? (
               <Popconfirm
-                title={filmRetry ? "重试这部影片？" : "重试本次未完成的站点？"}
-                description={
-                  filmRetry
-                    ? "将按原影片重新采集"
-                    : "将重新采集本次未完成的站点"
-                }
+                title={filmRetry ? "重试该片" : "重试未完成站点"}
                 onConfirm={() => onRetryBatch(record)}
                 disabled={!canWrite || isRetrying}
               >

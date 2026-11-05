@@ -133,10 +133,10 @@ export function BatchFilmsModal({
           </div>
           <div className={styles.headerTextGroup}>
             <div className={styles.headerTitleRow}>
-              <span className={styles.headerTitle}>批次入库影片清单</span>
+              <span className={styles.headerTitle}>批次入库更新影片清单</span>
             </div>
             <div className={styles.headerSubtitle}>
-              {sourceDesc} · 共 {total.toLocaleString("zh-CN")} 部入库影片
+              {sourceDesc} · 共 {total.toLocaleString("zh-CN")} 部入库更新影片
             </div>
           </div>
         </div>

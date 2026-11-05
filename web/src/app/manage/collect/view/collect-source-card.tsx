@@ -1,20 +1,13 @@
 import React, { useState } from "react";
 import { Button, Checkbox, Popconfirm, Select, Switch, Tag, Tooltip } from "antd";
 import {
-  DeleteOutlined,
-  DisconnectOutlined,
-  EditOutlined,
-  GlobalOutlined,
-  LoadingOutlined,
-  PoweroffOutlined,
-  ReloadOutlined,
-  StopOutlined,
-  SyncOutlined,
+  DeleteOutlined, DisconnectOutlined, EditOutlined, ExclamationCircleOutlined,
+  GlobalOutlined, LoadingOutlined, PoweroffOutlined, ReloadOutlined, StopOutlined, SyncOutlined,
 } from "@ant-design/icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import dayjs from "dayjs";
-import { collectDuration, type FilmSource } from "./types";
+import { collectDuration, type FilmSource, type SourceIncident } from "./types";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -23,21 +16,13 @@ import { ApiPost } from "@/lib/client-api";
 import styles from "./index.module.less";
 
 const toneClassMap: Record<StatusTone, string> = {
-  running: styles.toneRunning,
-  enabled: styles.toneEnabled,
-  disabled: styles.toneDisabled,
-  stopping: styles.toneStopping,
-  failed: styles.toneFailed,
-  deleting: styles.toneDeleting,
+  running: styles.toneRunning, enabled: styles.toneEnabled, disabled: styles.toneDisabled,
+  stopping: styles.toneStopping, failed: styles.toneFailed, deleting: styles.toneDeleting,
 };
 
 const statusClassMap: Record<StatusTone, string> = {
-  running: styles.statusRunning,
-  enabled: styles.statusEnabled,
-  disabled: styles.statusDisabled,
-  stopping: styles.statusStopping,
-  failed: styles.statusFailed,
-  deleting: styles.statusDeleting,
+  running: styles.statusRunning, enabled: styles.statusEnabled, disabled: styles.statusDisabled,
+  stopping: styles.statusStopping, failed: styles.statusFailed, deleting: styles.statusDeleting,
 };
 
 interface CollectSourceCardProps {
@@ -58,6 +43,7 @@ interface CollectSourceCardProps {
   toggling?: boolean;
   onSyncCategory?: (id: string) => void;
   onUpdateSite?: (id: string, updater: (record: FilmSource) => FilmSource) => void;
+  incident?: SourceIncident;
 }
 
 /** 采集站卡片（仅顶部 Header 可拖拽，首位启用站点自动展现主站徽章） */
@@ -78,6 +64,7 @@ export default function CollectSourceCard({
   toggling = false,
   onSyncCategory,
   onUpdateSite,
+  incident,
 }: CollectSourceCardProps) {
   const isDeleting = deleting || Boolean(record.deleting);
   const phase = record.progress?.status;
@@ -169,6 +156,29 @@ export default function CollectSourceCard({
         <div className={styles.cardHeadMain}>
           <div className={styles.cardTitleRow}>
             <span className={styles.cardName}>{record.name}</span>
+            {incident ? (
+              <Tooltip
+                title={
+                  <div>
+                    <div>{incident.tripped ? "站点已熔断" : `采集异常（连续失败 ${incident.consecutiveFailures} 次）`}</div>
+                    {incident.latestError ? (
+                      <div style={{ fontSize: 12, marginTop: 4, wordBreak: "break-all" }}>
+                        {incident.latestError}
+                      </div>
+                    ) : null}
+                  </div>
+                }
+              >
+                <Tag
+                  icon={<ExclamationCircleOutlined />}
+                  color={incident.tripped ? "error" : "warning"}
+                  variant="filled"
+                  style={{ marginInlineEnd: 0, cursor: "pointer" }}
+                >
+                  {incident.tripped ? "已熔断" : "异常"}
+                </Tag>
+              </Tooltip>
+            ) : null}
             {record.isPrimary ? (
               <Tag color="gold" variant="filled" style={{ marginInlineEnd: 0 }}>
                 主站

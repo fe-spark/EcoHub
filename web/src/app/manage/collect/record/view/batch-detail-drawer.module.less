@@ -291,9 +291,26 @@
   background: var(--ant-color-error-bg);
   border: 1px solid var(--ant-color-error-border);
   border-radius: 6px;
-  color: var(--ant-color-error-text);
   font-size: 12px;
-  line-height: 1.5;
+}
+
+.sourceCardErrorIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  color: var(--ant-color-error);
+}
+
+.sourceCardErrorText {
+  flex: 1;
+  min-width: 0;
+  line-height: 18px;
+  color: var(--ant-color-error-text);
+  word-break: break-all;
 }
 
 .detailEmpty {
