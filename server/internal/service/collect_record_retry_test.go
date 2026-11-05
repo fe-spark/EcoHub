@@ -184,6 +184,14 @@ func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 	_ = repository.BatchSaveCollectRecordFilms("batch-films-svc", map[string][]int64{
 		"s1": {1001},
 	})
+	_ = repository.CreateCollectRecord(&model.CollectRecord{
+		BatchID:    "batch-films-svc",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		FilmCount:  1,
+		DetailJson: `[{"sourceId":"s1","filmsTotal":1}]`,
+		StartedAt:  time.Now(),
+	})
 
 	q := model.CollectRecordFilmQuery{
 		BatchID:  "batch-films-svc",

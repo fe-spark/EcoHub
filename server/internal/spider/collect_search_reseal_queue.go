@@ -1,219 +1,149 @@
 package spider
 
 import (
-	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
 )
 
-const sealCoalesceMax = 20000
-
-type sealSiteJob struct {
-	sourceID string
-	name     string
-	mids     []int64
-}
-
-// searchResealQueue 全局一条封口队列。采集队列有几条都排进这里，单协程依次封。
+// searchResealQueue 全局封口周期。
+// 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
+// 全部空闲后整库合并封一次，再把等检索的站点收成完成。
 type searchResealQueue struct {
 	mu      sync.Mutex
-	pending []sealSiteJob
-	sealing []sealSiteJob
+	pending map[int64]struct{}
+	sealing map[string]struct{}
 	running bool
 }
 
-var searchReseal = &searchResealQueue{}
+var searchReseal = &searchResealQueue{
+	pending: map[int64]struct{}{},
+	sealing: map[string]struct{}{},
+}
 
-func scheduleSearchResealSite(sourceID, name string, mids []int64) {
+var searchSealRunning atomic.Bool
+
+var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
+
+var applySearchReseal = filmsnapshot.ResealSearchIndexMids
+
+// addSealing 采集跑完后挂进本次封口周期。空封口也要走完，保证每次都有待检索阶段。
+func (q *searchResealQueue) addSealing(sourceID string) {
 	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" || len(mids) == 0 {
+	if sourceID == "" {
 		return
 	}
-	scheduleSearchResealJob(sealSiteJob{sourceID: sourceID, name: name, mids: mids})
+	q.mu.Lock()
+	q.sealing[sourceID] = struct{}{}
+	start := !q.running
+	if start {
+		q.running = true
+	}
+	q.mu.Unlock()
+
+	notifySealWaiting()
+	if start {
+		go q.run()
+	}
 }
 
-func scheduleSearchResealRemain(mids []int64) {
-	if len(mids) == 0 {
+func scheduleSearchReseal(mids []int64) {
+	q := searchReseal
+	q.mu.Lock()
+	added := 0
+	for _, mid := range mids {
+		if mid > 0 {
+			q.pending[mid] = struct{}{}
+			added++
+		}
+	}
+	if added == 0 {
+		q.mu.Unlock()
 		return
 	}
-	scheduleSearchResealJob(sealSiteJob{mids: append([]int64(nil), mids...)})
+	start := !q.running
+	if start {
+		q.running = true
+	}
+	q.mu.Unlock()
+
+	notifySealWaiting()
+	if start {
+		go q.run()
+	}
 }
 
-func scheduleSearchResealJob(job sealSiteJob) {
-	if len(job.mids) == 0 {
+func notifySealWaiting() {
+	if searchSealRunning.Load() || filmsnapshot.IsSearchIndexBuilding() {
 		return
 	}
-	searchReseal.mu.Lock()
-	searchReseal.pending, job = absorbPendingSameSource(searchReseal.pending, job)
-	searchReseal.pending = append(searchReseal.pending, job)
-	start := !searchReseal.running
-	if start {
-		searchReseal.running = true
-	}
-	searchReseal.mu.Unlock()
-	if start {
-		go searchReseal.run()
-		return
-	}
-	searchReseal.publishSites()
+	filmsnapshot.NotifySearchIndexProgress(0, 0, "waiting")
 }
 
 func (q *searchResealQueue) run() {
 	for {
 		q.mu.Lock()
-		taken, rest := coalesceSealJobs(q.pending, sealCoalesceMax)
-		q.pending = rest
-		q.sealing = taken
-		if len(taken) == 0 {
+		if len(q.pending) == 0 && len(q.sealing) == 0 {
 			q.running = false
-			progress.SetSearchSealSites(nil)
 			q.mu.Unlock()
 			return
 		}
 		q.mu.Unlock()
-		q.publishSites()
 
-		mids := flattenSealMIDs(taken)
-		applied := false
-		panicked := false
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					panicked = true
-					log.Printf("[Spider][SearchReseal] 封口失败 panic=%v", r)
-				}
-			}()
-			applied = filmsnapshot.ResealSearchIndexMids(mids)
-		}()
+		if collectLifecycle.collecting() {
+			waitCollectIdle()
+			continue
+		}
 
 		q.mu.Lock()
-		if len(q.pending) > 0 {
-			q.mu.Unlock()
-			continue
-		}
-		q.sealing = nil
-		q.running = false
-		progress.SetSearchSealSites(nil)
-		p := filmsnapshot.GetLatestSearchIndexProgress()
-		switch {
-		case applied:
-			filmsnapshot.NotifySearchIndexProgress(p.Total, p.Total, "done")
-		case !panicked && filmsnapshot.SearchRebuildScheduled():
-		default:
-			filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
-		}
+		mids := q.takePendingLocked()
 		q.mu.Unlock()
-		return
+
+		if len(mids) > 0 {
+			searchSealRunning.Store(true)
+			applySearchReseal(mids)
+			searchSealRunning.Store(false)
+		}
+		// 封口失败会转全量重建，等重建终态由进度监听收尾。
+		if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
+			q.mu.Lock()
+			q.running = false
+			q.mu.Unlock()
+			return
+		}
+		q.complete()
+		if len(mids) == 0 {
+			// 没有编号也要发一次终态，让前端把待检索收成完成。
+			filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
+		}
 	}
 }
 
-func (q *searchResealQueue) publishSites() {
+func (q *searchResealQueue) takePendingLocked() []int64 {
+	mids := make([]int64, 0, len(q.pending))
+	for mid := range q.pending {
+		mids = append(mids, mid)
+	}
+	q.pending = map[int64]struct{}{}
+	return mids
+}
+
+// complete 把当前等检索的站点收成完成。已经重开的站点保持原状。
+func (q *searchResealQueue) complete() {
 	q.mu.Lock()
-	progress.SetSearchSealSites(sealQueueSites(q.sealing, q.pending))
+	ids := make([]string, 0, len(q.sealing))
+	for id := range q.sealing {
+		ids = append(ids, id)
+	}
+	q.sealing = map[string]struct{}{}
 	q.mu.Unlock()
-	p := filmsnapshot.GetLatestSearchIndexProgress()
-	status := p.Status
-	if status == "" || status == "idle" || status == "done" {
-		status = "indexing"
-	}
-	filmsnapshot.NotifySearchIndexProgress(p.Total, p.Current, status)
+	progress.MarkSealed(ids)
 }
 
-func flattenSealMIDs(jobs []sealSiteJob) []int64 {
-	n := 0
-	for _, job := range jobs {
-		n += len(job.mids)
-	}
-	out := make([]int64, 0, n)
-	for _, job := range jobs {
-		out = append(out, job.mids...)
-	}
-	return out
-}
-
-// absorbPendingSameSource 把同一站还在排队的任务撤掉，编号并进这次入队的任务。
-// 正在封的任务不在 pending 里，不会被并进来。
-func absorbPendingSameSource(pending []sealSiteJob, job sealSiteJob) ([]sealSiteJob, sealSiteJob) {
-	if job.sourceID == "" {
-		return pending, job
-	}
-	kept := make([]sealSiteJob, 0, len(pending))
-	var prior []int64
-	for _, old := range pending {
-		if old.sourceID != job.sourceID {
-			kept = append(kept, old)
-			continue
-		}
-		prior = append(prior, old.mids...)
-	}
-	if len(prior) == 0 {
-		return pending, job
-	}
-	job.mids = unionSealMIDs(prior, job.mids)
-	return kept, job
-}
-
-func unionSealMIDs(groups ...[]int64) []int64 {
-	seen := make(map[int64]struct{})
-	out := make([]int64, 0)
-	for _, group := range groups {
-		for _, mid := range group {
-			if _, ok := seen[mid]; ok {
-				continue
-			}
-			seen[mid] = struct{}{}
-			out = append(out, mid)
-		}
-	}
-	return out
-}
-
-func coalesceSealJobs(jobs []sealSiteJob, max int) (taken, rest []sealSiteJob) {
-	if len(jobs) == 0 || max <= 0 {
-		return nil, append([]sealSiteJob(nil), jobs...)
-	}
-	total := 0
-	cut := 0
-	for i, job := range jobs {
-		n := len(job.mids)
-		if i > 0 && total+n > max {
-			break
-		}
-		total += n
-		cut = i + 1
-		if total >= max {
-			break
-		}
-	}
-	if cut == 0 {
-		return nil, append([]sealSiteJob(nil), jobs...)
-	}
-	return append([]sealSiteJob(nil), jobs[:cut]...), append([]sealSiteJob(nil), jobs[cut:]...)
-}
-
-func sealQueueSites(sealing, waiting []sealSiteJob) []progress.SearchSealSite {
-	out := make([]progress.SearchSealSite, 0, len(sealing)+len(waiting))
-	for _, job := range sealing {
-		if job.sourceID == "" {
-			continue
-		}
-		out = append(out, progress.SearchSealSite{SourceID: job.sourceID, State: "sealing", Ahead: 0})
-	}
-	ahead := len(sealing)
-	for _, job := range waiting {
-		if job.sourceID == "" {
-			ahead++
-			continue
-		}
-		out = append(out, progress.SearchSealSite{
-			SourceID: job.sourceID,
-			State:    "waiting",
-			Ahead:    ahead,
-		})
-		ahead++
-	}
-	return out
+// searchIndexBlocksCollect 检索索引正在加载或封口时，不许再开采集。
+func searchIndexBlocksCollect() bool {
+	return searchSealRunning.Load() || filmsnapshot.IsSearchIndexBuilding()
 }

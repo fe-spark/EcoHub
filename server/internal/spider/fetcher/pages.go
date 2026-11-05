@@ -193,6 +193,9 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Failed = snapshot.failed
 			cur.Current = snapshot.success + snapshot.failed
+			if len(cur.FailedPages) < maxRecordedFailedPages {
+				cur.FailedPages = append(cur.FailedPages, page)
+			}
 		})
 		if shouldLogFailure(snapshot.failed) {
 			syslog.Warnf("[Spider] 站点 %s 采集失败累计=%d，最近失败 page=%d stage=%s err=%v", s.Name, snapshot.failed, page, stage, err)

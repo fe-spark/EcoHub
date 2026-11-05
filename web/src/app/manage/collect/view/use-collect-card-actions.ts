@@ -1,21 +1,16 @@
 import { useCallback, useState } from "react";
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { newClientCollectQueueId } from "./collect-queue";
-import {
-  isActiveCollectStatus,
-  makeStartingProgress,
-  progressAsStopping,
-  type FilmSource,
-} from "./types";
+import { isActiveCollectStatus, type FilmSource } from "./types";
+import type { SearchIndexProgress } from "./use-collect-stream";
 
 interface UseCollectCardActionsParams {
   siteList: FilmSource[];
   setSiteList: React.Dispatch<React.SetStateAction<FilmSource[]>>;
   updateSiteListItem: (id: string, updater: (record: FilmSource) => FilmSource) => void;
   getCollectList: (createdId?: string) => Promise<void>;
-  stoppingSiteIdsRef: React.MutableRefObject<Set<string>>;
   onDeleteSubmitted?: (sources: { id: string; name: string }[]) => void;
+  searchIndex?: SearchIndexProgress;
 }
 
 export function useCollectCardActions({
@@ -23,8 +18,8 @@ export function useCollectCardActions({
   setSiteList,
   updateSiteListItem,
   getCollectList,
-  stoppingSiteIdsRef,
   onDeleteSubmitted,
+  searchIndex,
 }: UseCollectCardActionsParams) {
   const { message } = useAppMessage();
   const [togglingStateSourceId, setTogglingStateSourceId] = useState<string | null>(null);
@@ -55,6 +50,10 @@ export function useCollectCardActions({
 
   const startTask = useCallback(
     async (record: FilmSource) => {
+      if (searchIndex?.status === "indexing") {
+        message.warning("检索索引更新中，采集已暂停");
+        return;
+      }
       if (deletingSourceId === record.id) {
         return;
       }
@@ -74,19 +73,14 @@ export function useCollectCardActions({
         message.warning("停止中");
         return;
       }
+      if (record.progress?.status === "sealing") {
+        message.warning("待检索");
+        return;
+      }
       if (isActiveCollectStatus(record.progress?.status)) {
         message.warning("采集站已在采集中");
         return;
       }
-      updateSiteListItem(record.id, (item) => ({
-        ...item,
-        progress: makeStartingProgress(
-          record.id,
-          record.name,
-          newClientCollectQueueId(),
-          item.progress?.queueId ?? "",
-        ),
-      }));
       const resp = await ApiPost("/manage/spider/start", {
         ids: [record.id],
         time: record.cd ?? 24,
@@ -96,46 +90,25 @@ export function useCollectCardActions({
         return;
       }
       message.error(resp.msg || "启动采集失败");
-      updateSiteListItem(record.id, (item) => ({ ...item, progress: null }));
       await getCollectList();
     },
-    [deletingSourceId, getCollectList, message, updateSiteListItem],
+    [deletingSourceId, getCollectList, message, searchIndex],
   );
 
   const stopTask = useCallback(
     async (id: string) => {
-      stoppingSiteIdsRef.current.add(id);
-      updateSiteListItem(id, (item) => ({
-        ...item,
-        progress: progressAsStopping(item.progress, item.id, item.name),
-      }));
-      message.loading({
-        key: `collect-stop-site-${id}`,
-        content: "正在停止...",
-        duration: 0,
-      });
       try {
         const resp = await ApiPost("/manage/spider/stop", { ids: [id] });
         if (resp.code !== 0) {
-          stoppingSiteIdsRef.current.delete(id);
-          message.error({
-            key: `collect-stop-site-${id}`,
-            content: resp.msg || "终止任务失败",
-            duration: 2,
-          });
+          message.error(resp.msg || "终止任务失败");
           void getCollectList();
         }
       } catch {
-        stoppingSiteIdsRef.current.delete(id);
-        message.error({
-          key: `collect-stop-site-${id}`,
-          content: "终止任务失败",
-          duration: 2,
-        });
+        message.error("终止任务失败");
         void getCollectList();
       }
     },
-    [getCollectList, message, stoppingSiteIdsRef, updateSiteListItem],
+    [getCollectList, message],
   );
 
   const delSource = useCallback(

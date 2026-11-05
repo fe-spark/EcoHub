@@ -1,8 +1,10 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -22,7 +24,7 @@ func setupRecordFilmsTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	db.Mdb = testDB
-	if err := testDB.AutoMigrate(&model.CollectRecordFilmItem{}, &model.FilmIndex{}); err != nil {
+	if err := testDB.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}, &model.FilmIndex{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return testDB
@@ -49,6 +51,16 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 	items := map[string][]int64{
 		"src_1": {101, 102},
 		"src_2": {102, 103},
+	}
+	if err := testDB.Create(&model.CollectRecord{
+		BatchID:    batchID,
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		FilmCount:  3,
+		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":2}]`,
+		StartedAt:  time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
 	}
 
 	if err := BatchSaveCollectRecordFilms(batchID, items); err != nil {
@@ -95,25 +107,20 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 		t.Fatalf("expected 4 rows after repeated save, got %d", saved)
 	}
 
-	// 全部站点按 mid 去重，同一影片跨站只出现一次。
+	// 全部站点的总数是各站清单行数之和，和分页列表一致。
 	allQuery := model.CollectRecordFilmQuery{BatchID: batchID, Page: 1, PageSize: 10}
 	all, allTotal, err := GetCollectRecordFilms(allQuery)
 	if err != nil {
 		t.Fatalf("all-source query failed: %v", err)
 	}
-	if allTotal != 3 || len(all) != 3 || all[0].Mid != 101 || all[1].Mid != 102 || all[2].Mid != 103 {
-		t.Fatalf("expected distinct mids 101,102,103, got total=%d list=%+v", allTotal, all)
-	}
-	for _, film := range all {
-		if film.SourceID != "" {
-			t.Fatalf("all-source row should not carry source, got %+v", film)
-		}
+	if allTotal != 4 || len(all) != 4 {
+		t.Fatalf("expected total 4 and 4 rows, got total=%d list=%+v", allTotal, all)
 	}
 	named, namedTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: batchID, Keyword: "黑客", Page: 1, PageSize: 10,
 	})
-	if err != nil || namedTotal != 2 || len(named) != 2 || named[0].Mid != 101 || named[1].Mid != 102 {
-		t.Fatalf("expected keyword distinct 101,102, got total=%d list=%+v err=%v", namedTotal, named, err)
+	if err != nil || namedTotal != 3 || len(named) != 3 {
+		t.Fatalf("expected 3 keyword rows, got total=%d list=%+v err=%v", namedTotal, named, err)
 	}
 
 	// 清理
@@ -137,6 +144,16 @@ func TestGetCollectRecordFilms_NameLookupError(t *testing.T) {
 	if err := BatchSaveCollectRecordFilms("batch-names", map[string][]int64{"src_1": {101}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := testDB.Create(&model.CollectRecord{
+		BatchID:    "batch-names",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		FilmCount:  1,
+		DetailJson: `[{"sourceId":"src_1","filmsTotal":1}]`,
+		StartedAt:  time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := testDB.Migrator().DropTable(&model.FilmIndex{}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,3 +165,36 @@ func TestGetCollectRecordFilms_NameLookupError(t *testing.T) {
 	}
 }
 
+func TestBatchSaveCollectRecordFilms_ContinuesAfterChunkError(t *testing.T) {
+	testDB := setupRecordFilmsTestDB(t)
+	prevSize := collectFilmChunkSize
+	prevInsert := insertCollectFilmChunk
+	collectFilmChunkSize = 2
+	calls := 0
+	insertCollectFilmChunk = func(chunk []model.CollectRecordFilmItem) error {
+		calls++
+		if calls == 2 {
+			return errors.New("lock")
+		}
+		return prevInsert(chunk)
+	}
+	t.Cleanup(func() {
+		collectFilmChunkSize = prevSize
+		insertCollectFilmChunk = prevInsert
+	})
+
+	err := BatchSaveCollectRecordFilms("batch-chunk", map[string][]int64{
+		"s1": {1, 2, 3, 4, 5},
+	})
+	missed := UnstoredCollectFilms(err)
+	if err == nil || len(missed["s1"]) != 2 || missed["s1"][0] != 3 || missed["s1"][1] != 4 {
+		t.Fatalf("err=%v missed=%v calls=%d", err, missed, calls)
+	}
+	var saved []int64
+	if err := testDB.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", "batch-chunk").Order("mid ASC").Pluck("mid", &saved).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 3 || saved[0] != 1 || saved[1] != 2 || saved[2] != 5 {
+		t.Fatalf("saved=%v", saved)
+	}
+}

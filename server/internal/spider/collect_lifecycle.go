@@ -42,6 +42,9 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	if s.draining {
 		return errCollectDuringMaintenance
 	}
+	if searchIndexBlocksCollect() {
+		return errSearchIndexUpdating
+	}
 	if _, ok := s.activeSources[sourceID]; ok {
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
 	}
@@ -78,6 +81,19 @@ func (s *collectLifecycleState) waitIdleLocked() {
 	for s.activeCount > 0 {
 		s.cond.Wait()
 	}
+}
+
+// waitUntilIdle 等到没有站在抓页。正在封的那一批不在这里打断。
+func (s *collectLifecycleState) waitUntilIdle() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waitIdleLocked()
+}
+
+func (s *collectLifecycleState) collecting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeCount > 0
 }
 
 func (s *collectLifecycleState) isBusy() bool {
@@ -123,6 +139,7 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 var (
 	errMaintenanceBusy          = errors.New("已有维护任务在执行")
 	errCollectDuringMaintenance = errors.New("维护中，已跳过")
+	errSearchIndexUpdating      = errors.New("检索索引更新中，采集已暂停")
 	errDrainTimeout             = errors.New("等待采集空闲超时")
 )
 

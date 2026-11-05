@@ -26,6 +26,8 @@ export interface FilmSource {
 export type CollectProgressStatus =
   | "starting"
   | "running"
+  | "stopping"
+  | "sealing"
   | "done"
   | "failed"
   | "stopped"
@@ -39,15 +41,22 @@ export interface CollectProgress {
   success: number;
   failed: number;
   status: CollectProgressStatus;
-  /** 同一次采集队列的标识；不同队列各自一条总进度 */
+  /** 服务端分配的采集队列标识；同一次派发的站点共用一个。 */
   queueId?: string;
-  /** 本地 starting 记下的上一轮 queueId。空字符串表示当时没有上一轮。 */
-  staleQueueId?: string;
+  /** 本轮采集失败的页码，按抓取顺序记录。 */
+  failedPages?: number[];
+  /** 本轮的检索索引封口已完成。 */
+  sealed?: boolean;
 }
 
 /** 仍在拉页或排队。停止中的收尾不算，避免按钮提前变成开始采集。 */
 export function isActiveCollectStatus(status?: string | null): boolean {
   return status === "starting" || status === "running";
+}
+
+/** 抓页结束、等检索索引封口。 */
+export function isSealingStatus(status?: string | null): boolean {
+  return status === "sealing";
 }
 
 /** 含停止后的收尾。这段时间按钮保持「停止采集」并显示 loading。 */
@@ -67,6 +76,8 @@ export function resolveCollectStatusText(status?: string | null): string {
       return "采集中";
     case "stopping":
       return "停止中";
+    case "sealing":
+      return "待检索";
     case "done":
       return "采集完成";
     case "failed":
@@ -173,35 +184,6 @@ export interface CollectListItemResponse extends Partial<FilmSource> {
 }
 
 /** 点击停止后先标成停止中，避免服务端进度还没回来时按钮跳成开始采集。 */
-export function progressAsStopping(
-  progress: CollectProgress | null | undefined,
-  id: string,
-  name: string,
-): CollectProgress {
-  if (progress) {
-    return { ...progress, status: "stopping" };
-  }
-  return { id, name, total: 0, current: 0, success: 0, failed: 0, status: "stopping" };
-}
-
-export function makeStartingProgress(
-  id: string,
-  name: string,
-  queueId: string,
-  staleQueueId?: string | null,
-): CollectProgress {
-  return {
-    id,
-    name,
-    total: 0,
-    current: 0,
-    success: 0,
-    failed: 0,
-    status: "starting",
-    queueId,
-    staleQueueId: staleQueueId == null ? undefined : staleQueueId.trim(),
-  };
-}
 
 export function normalizeSource(item: CollectListItemResponse): FilmSource {
   return {

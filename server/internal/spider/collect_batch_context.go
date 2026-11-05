@@ -324,7 +324,7 @@ func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error 
 		return err
 	}
 	mids := b.takeSourceMIDs(source.Id)
-	scheduleSearchResealSite(source.Id, source.Name, mids)
+	scheduleSearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
 	b.warmPrimaryHome(source.Id)
 	return nil

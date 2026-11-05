@@ -1,4 +1,4 @@
-import { Button, Drawer, Flex, Form, Select, Space, Table, Tag, Typography } from "antd";
+import { Button, Drawer, Flex, Form, Select, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { collectDuration } from "./types";
 import styles from "./batch-collect-drawer.module.less";
@@ -13,13 +13,14 @@ interface BatchCollectDrawerProps {
   open: boolean;
   rows: BatchCollectRow[];
   batchTime: number;
+  isIndexing?: boolean;
   onCancel: () => void;
   onSubmit: () => void;
   onBatchTimeChange: (value: number) => void;
 }
 
 export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
-  const { open, rows, batchTime, onCancel, onSubmit, onBatchTimeChange } = props;
+  const { open, rows, batchTime, isIndexing = false, onCancel, onSubmit, onBatchTimeChange } = props;
   const startCount = rows.filter((item) => !item.reason).length;
 
   const columns: ColumnsType<BatchCollectRow> = [
@@ -60,14 +61,18 @@ export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
       extra={
         <Space>
           <Button onClick={onCancel}>取消</Button>
-          <Button
-            type="primary"
-            data-tour="collect-batch-submit"
-            disabled={startCount === 0}
-            onClick={onSubmit}
-          >
-            开始采集
-          </Button>
+          <Tooltip title={isIndexing ? "检索索引更新中，采集已暂停" : undefined}>
+            <span>
+              <Button
+                type="primary"
+                data-tour="collect-batch-submit"
+                disabled={startCount === 0 || isIndexing}
+                onClick={onSubmit}
+              >
+                开始采集
+              </Button>
+            </span>
+          </Tooltip>
         </Space>
       }
     >

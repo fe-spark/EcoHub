@@ -42,7 +42,7 @@ export interface SearchIndexProgress {
   total: number;
   current: number;
   percent: number;
-  status: "indexing" | "done" | "idle";
+  status: "indexing" | "done" | "idle" | "waiting";
   sites?: SearchSealSite[];
 }
 

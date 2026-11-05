@@ -1,4 +1,5 @@
 import { isActiveCollectStatus, type FilmSource } from "./types";
+import type { SearchIndexProgress } from "./use-collect-stream";
 
 export interface NamedSkip {
   name: string;
@@ -11,13 +12,22 @@ export function isSourceSelectable(site: FilmSource): boolean {
 }
 
 /** 空字符串表示可以采集。多个静态原因用顿号连在一起。 */
-export function collectBlockReason(site: FilmSource): string {
+export function collectBlockReason(
+  site: FilmSource,
+  searchIndex?: SearchIndexProgress | null,
+): string {
+  if (searchIndex?.status === "indexing") {
+    return "检索索引更新中，采集已暂停";
+  }
   if (site.categorySyncing) {
     return "分类采集中";
   }
   const status = site.progress?.status;
   if (status === "stopping") {
     return "停止中";
+  }
+  if (status === "sealing") {
+    return "待检索";
   }
   if (isActiveCollectStatus(status)) {
     return "采集中";

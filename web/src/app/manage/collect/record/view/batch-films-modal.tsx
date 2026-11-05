@@ -2,13 +2,16 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { Alert, Modal, Input, Button, Empty, Pagination, Spin, Space } from "antd";
+import { Alert, Modal, Input, Button, Pagination, Spin, Space } from "antd";
 import {
   VideoCameraOutlined,
   SearchOutlined,
   ExportOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  InboxOutlined,
+  InfoCircleOutlined,
+  CloseCircleOutlined,
 } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
@@ -42,11 +45,15 @@ export function BatchFilmsModal({
   const [total, setTotal] = useState(0);
   const [errorText, setErrorText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const appliedKeyword = useRef("");
 
   const fetchFilms = useCallback(
     async (pCurrent: number, pPageSize: number, pKeyword: string) => {
-      if (!batchId) return;
+      if (!batchId) {
+        setHasLoaded(true);
+        return;
+      }
       setLoading(true);
       setErrorText("");
       try {
@@ -78,6 +85,7 @@ export function BatchFilmsModal({
         setErrorText(err instanceof Error && err.message ? err.message : "获取影片清单失败");
       } finally {
         setLoading(false);
+        setHasLoaded(true);
       }
     },
     [batchId, sourceId],
@@ -89,11 +97,13 @@ export function BatchFilmsModal({
       setKeyword("");
       setCurrent(1);
       setErrorText("");
+      setHasLoaded(false);
       void fetchFilms(1, 10, "");
     } else {
       setList([]);
       setTotal(0);
       setErrorText("");
+      setHasLoaded(false);
     }
   }, [open, fetchFilms]);
 
@@ -120,12 +130,20 @@ export function BatchFilmsModal({
   const sourceDesc = sourceName || sourceId ? `来源站点：${sourceName || sourceId}` : "涵盖全部站点";
   const filmManageUrl = sourceId ? `/manage/film?sourceId=${encodeURIComponent(sourceId)}` : "/manage/film";
 
+  const isInitialSearching = !hasLoaded && loading;
+  const subtitleText = isInitialSearching
+    ? `${sourceDesc} · 正在读取更新清单...`
+    : `${sourceDesc} · 共 ${total.toLocaleString("zh-CN")} 部更新影片`;
+
+  const isBatchZeroUpdate = total === 0 && hasLoaded && !appliedKeyword.current;
+
   return (
     <Modal
       open={open}
       onCancel={onClose}
       footer={null}
-      width={680}
+      width={740}
+      destroyOnClose
       title={
         <div className={styles.modalHeader}>
           <div className={styles.headerIconWrap}>
@@ -136,35 +154,41 @@ export function BatchFilmsModal({
               <span className={styles.headerTitle}>更新影片清单</span>
             </div>
             <div className={styles.headerSubtitle}>
-              {sourceDesc} · 共 {total.toLocaleString("zh-CN")} 部更新影片
+              {subtitleText}
             </div>
           </div>
         </div>
       }
     >
       <div className={styles.modalBody}>
-        {errorText ? <Alert type="error" showIcon message={errorText} className={styles.errorAlert} /> : null}
+        {errorText && list.length > 0 ? (
+          <Alert type="error" showIcon message={errorText} className={styles.errorAlert} />
+        ) : null}
 
         <div className={styles.toolbar}>
           <Space size={8} className={styles.filterGroup}>
             <Input
-              placeholder="输入片名搜索..."
+              placeholder={isBatchZeroUpdate ? "当前批次无更新影片" : "输入片名搜索..."}
               allowClear
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
+              onPressEnter={handleExecuteSearch}
               className={styles.searchInput}
+              disabled={loading || isBatchZeroUpdate}
             />
             <Button
               type="primary"
               icon={<SearchOutlined />}
               onClick={handleExecuteSearch}
               loading={loading}
+              disabled={isBatchZeroUpdate}
             >
               搜索
             </Button>
             <Button
               icon={<ReloadOutlined />}
               onClick={handleResetSearch}
+              disabled={loading || (!keyword && !appliedKeyword.current)}
             >
               重置
             </Button>
@@ -179,70 +203,151 @@ export function BatchFilmsModal({
           </Button>
         </div>
 
-        <Spin spinning={loading}>
-          {list.length === 0 && !loading ? (
-            <div className={styles.emptyWrapper}>
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  appliedKeyword.current ? (
-                    <span>
-                      未搜索到与「<strong>{appliedKeyword.current}</strong>」匹配的影片
-                    </span>
-                  ) : (
-                    <span>该站点在本次采集批次中未产生新增或更新影片</span>
-                  )
-                }
-              >
-                {appliedKeyword.current ? (
-                  <Button size="small" icon={<ReloadOutlined />} onClick={handleResetSearch}>
-                    清除搜索条件
+        <div className={styles.contentContainer}>
+          <Spin spinning={loading} tip="正在加载更新影片...">
+            {errorText && list.length === 0 && !loading ? (
+              <div className={styles.emptyContainer}>
+                <div className={`${styles.emptyIconWrap} ${styles.emptyIconError}`}>
+                  <CloseCircleOutlined />
+                </div>
+                <div className={styles.emptyTitle}>获取更新影片失败</div>
+                <div className={styles.emptyDesc}>{errorText}</div>
+                <div className={styles.emptyActions}>
+                  <Button
+                    type="primary"
+                    icon={<ReloadOutlined />}
+                    onClick={() => void fetchFilms(current, pageSize, appliedKeyword.current)}
+                  >
+                    重新加载
                   </Button>
-                ) : null}
-              </Empty>
-            </div>
-          ) : (
-            <div className={styles.listWrapper}>
-              {list.map((film, index) => {
-                const num = (current - 1) * pageSize + index + 1;
-                const playUrl = resolvePlayEntryPath(film.mid, { sourceId: film.sourceId || sourceId });
-                return (
-                  <div key={`${film.sourceId ?? sourceId}-${film.mid}`} className={styles.listItem}>
-                    <div className={styles.rankBadge}>{num}</div>
-                    <div className={styles.filmInfo}>
-                      <Link href={playUrl} target="_blank" className={styles.filmName} title={film.name}>
-                        {film.name}
-                      </Link>
-                      <span className={styles.midTag}>#{film.mid}</span>
+                </div>
+              </div>
+            ) : list.length === 0 && !loading ? (
+              <div className={styles.emptyContainer}>
+                <div className={styles.emptyIconWrap}>
+                  {appliedKeyword.current ? <SearchOutlined /> : <InboxOutlined />}
+                </div>
+                <div className={styles.emptyTitle}>
+                  {appliedKeyword.current ? "未找到匹配影片" : "本次采集无更新影片"}
+                </div>
+                <div className={styles.emptyDesc}>
+                  {appliedKeyword.current ? (
+                    <>
+                      未搜索到包含「<strong>{appliedKeyword.current}</strong>」的更新影片记录
+                    </>
+                  ) : sourceName && sourceName !== "全部站点" ? (
+                    `「${sourceName}」在本次采集批次中未产生新增或更新影片`
+                  ) : (
+                    "本次批次采集的所有站点均未产生新增或增量更新影片"
+                  )}
+                </div>
+                <div className={styles.emptyHint}>
+                  <InfoCircleOutlined />
+                  <span>
+                    {appliedKeyword.current
+                      ? "建议精简片名关键词，或前往影片库进行全库模糊检索"
+                      : "本次采集可能仅拉取了已存在且无变更的影片，数据已是最新状态"}
+                  </span>
+                </div>
+                <div className={styles.emptyActions}>
+                  {appliedKeyword.current ? (
+                    <>
+                      <Button
+                        type="primary"
+                        ghost
+                        icon={<ReloadOutlined />}
+                        onClick={handleResetSearch}
+                      >
+                        清除搜索条件
+                      </Button>
+                      <Button
+                        icon={<ExportOutlined />}
+                        href={filmManageUrl}
+                        target="_blank"
+                      >
+                        前往影片库检索
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        type="primary"
+                        ghost
+                        icon={<ExportOutlined />}
+                        href={filmManageUrl}
+                        target="_blank"
+                      >
+                        前往影片库查看全部
+                      </Button>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={() => void fetchFilms(1, pageSize, "")}
+                      >
+                        刷新清单
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : list.length === 0 && loading ? (
+              <div className={styles.loadingPlaceholder} />
+            ) : (
+              <div className={styles.listWrapper}>
+                {list.map((film, index) => {
+                  const playUrl = resolvePlayEntryPath(film.mid, { sourceId: film.sourceId || sourceId });
+                  const badgeText = film.mid ? `#${film.mid}` : `#${index + 1}`;
+
+                  return (
+                    <div key={`${film.sourceId ?? sourceId}-${film.mid}`} className={styles.listItem}>
+                      <span className={styles.midBadge}>{badgeText}</span>
+                      <div className={styles.filmInfo}>
+                        <Link href={playUrl} target="_blank" className={styles.filmName} title={film.name}>
+                          {film.name}
+                        </Link>
+                      </div>
+                      <Button
+                        type="primary"
+                        ghost
+                        size="small"
+                        icon={<PlayCircleOutlined />}
+                        href={playUrl}
+                        target="_blank"
+                        className={styles.playBtn}
+                      >
+                        播放
+                      </Button>
                     </div>
-                    <Button
-                      type="primary"
-                      ghost
-                      size="small"
-                      icon={<PlayCircleOutlined />}
-                      href={playUrl}
-                      target="_blank"
-                      className={styles.playBtn}
-                    >
-                      播放
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Spin>
+                  );
+                })}
+              </div>
+            )}
+          </Spin>
+        </div>
 
         {total > pageSize && (
           <div className={styles.paginationWrapper}>
+            <div className={styles.paginationTotal}>
+              共 <span className={styles.totalHighlight}>{total.toLocaleString("zh-CN")}</span> 部影片
+            </div>
             <Pagination
               current={current}
               pageSize={pageSize}
               total={total}
               size="small"
               showSizeChanger
+              showLessItems
               pageSizeOptions={[10, 20, 50, 100]}
-              showTotal={(t) => `共 ${t.toLocaleString("zh-CN")} 部`}
+              classNames={{
+                root: styles.paginationRoot,
+                item: styles.paginationItem,
+              }}
+              styles={{
+                item: {
+                  minWidth: 28,
+                  padding: "0 6px",
+                  whiteSpace: "nowrap",
+                },
+              }}
               onChange={handlePageChange}
             />
           </div>

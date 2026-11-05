@@ -188,22 +188,52 @@ func TestStampPageRunningSkipsTerminal(t *testing.T) {
 	}
 }
 
-func TestMarkSourceDone(t *testing.T) {
-	const sourceID = "mark-source-done"
+func TestMarkSealingThenSealed(t *testing.T) {
+	const sourceID = "mark-source-sealing"
 	store.Delete(sourceID)
 	t.Cleanup(func() { store.Delete(sourceID) })
 
-	ensure(sourceID, "DoneSource")
+	ensure(sourceID, "SealingSource")
 	Update(sourceID, func(p *model.CollectProgress) {
 		p.Status = StatusRunning
 		p.Total = 10
 		p.Success = 10
 		p.Current = 10
 	})
-	MarkSourceDone(sourceID)
+	ctx := WithRunEpoch(context.Background(), Epoch(sourceID))
+	if !MarkSourceSealingIfRun(ctx, sourceID) {
+		t.Fatal("跑完应进入待检索")
+	}
 	snap, ok := Snapshot(sourceID)
+	if !ok || snap.Status != StatusSealing {
+		t.Fatalf("应进入 sealing, got ok=%v status=%q", ok, snap.Status)
+	}
+	MarkSealed([]string{sourceID})
+	snap, ok = Snapshot(sourceID)
 	if !ok || snap.Status != StatusDone {
-		t.Fatalf("MarkSourceDone 应变 done, got ok=%v status=%q", ok, snap.Status)
+		t.Fatalf("封口结束应变 done, got ok=%v status=%q", ok, snap.Status)
+	}
+}
+
+func TestStoppedRunsSealThenStopped(t *testing.T) {
+	const sourceID = "mark-source-stopped"
+	store.Delete(sourceID)
+	t.Cleanup(func() { store.Delete(sourceID) })
+
+	ensure(sourceID, "StoppedSource")
+	Update(sourceID, func(p *model.CollectProgress) {
+		p.Status = StatusStopping
+	})
+	ctx := WithRunEpoch(context.Background(), Epoch(sourceID))
+	if !MarkStoppedAsSealing(ctx, sourceID) {
+		t.Fatal("停止后也应先进待检索")
+	}
+	if snap, _ := Snapshot(sourceID); snap.Status != StatusSealing {
+		t.Fatalf("应进入 sealing, got %q", snap.Status)
+	}
+	MarkSealed([]string{sourceID})
+	if snap, _ := Snapshot(sourceID); snap.Status != StatusStopped {
+		t.Fatalf("封口结束应变 stopped, got %q", snap.Status)
 	}
 }
 

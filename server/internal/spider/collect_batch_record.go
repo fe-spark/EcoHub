@@ -336,35 +336,101 @@ func (b *collectBatchContext) drainPendingLocked() map[string][]int64 {
 	return out
 }
 
-func (b *collectBatchContext) flushRecordSync() {
+func (b *collectBatchContext) flushRecordSync() map[string][]int64 {
 	if b == nil {
-		return
+		return nil
 	}
 	b.flushWG.Wait()
 	b.mu.Lock()
 	if !b.recordStarted {
 		b.mu.Unlock()
-		return
+		return nil
 	}
 	films := b.drainPendingLocked()
 	b.progressDirty = false
 	b.lastFlush = time.Now()
 	b.mu.Unlock()
-	b.writeCheckpoint(films)
+	return b.writeCheckpoint(films)
 }
 
-func (b *collectBatchContext) writeCheckpoint(films map[string][]int64) {
-	if b == nil || strings.TrimSpace(b.batchID) == "" {
+func (b *collectBatchContext) requeuePending(films map[string][]int64) {
+	if b == nil || len(films) == 0 {
 		return
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pendingFilms == nil {
+		b.pendingFilms = map[string][]int64{}
+	}
+	for sourceID, mids := range films {
+		if sourceID == "" || len(mids) == 0 {
+			continue
+		}
+		b.pendingFilms[sourceID] = append(b.pendingFilms[sourceID], mids...)
+	}
+}
+
+// abandonUnstored 结算时丢掉最终仍没写上的编号，让影片数和清单行一致。
+func (b *collectBatchContext) abandonUnstored(films map[string][]int64) (int, map[string]int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for sourceID, mids := range films {
+		drop := make(map[int64]int, len(mids))
+		for _, mid := range mids {
+			if mid > 0 {
+				drop[mid]++
+			}
+		}
+		pending := b.pendingFilms[sourceID]
+		if len(pending) > 0 {
+			kept := pending[:0]
+			for _, mid := range pending {
+				if drop[mid] > 0 {
+					drop[mid]--
+					continue
+				}
+				kept = append(kept, mid)
+			}
+			if len(kept) == 0 {
+				delete(b.pendingFilms, sourceID)
+			} else {
+				b.pendingFilms[sourceID] = kept
+			}
+		}
+		set := b.sourceFilmMIDs[sourceID]
+		for _, mid := range mids {
+			if mid > 0 {
+				delete(set, mid)
+			}
+		}
+	}
+	next := make(map[int64]struct{})
+	bySource := make(map[string]int, len(b.sourceFilmMIDs))
+	for sourceID, set := range b.sourceFilmMIDs {
+		bySource[sourceID] = len(set)
+		for mid := range set {
+			next[mid] = struct{}{}
+		}
+	}
+	b.filmMIDs = next
+	return len(next), bySource
+}
+
+func (b *collectBatchContext) writeCheckpoint(films map[string][]int64) map[string][]int64 {
+	if b == nil || strings.TrimSpace(b.batchID) == "" {
+		return nil
+	}
+	var missed map[string][]int64
 	if len(films) > 0 {
 		if err := repository.BatchSaveCollectRecordFilms(b.batchID, films); err != nil {
 			log.Printf("[Spider] 保存采集批次影片清单失败 batchID=%s: %v", b.batchID, err)
+			missed = repository.UnstoredCollectFilms(err)
+			b.requeuePending(missed)
 		}
 	}
 	payload := b.LiveProgress()
 	if payload == nil {
-		return
+		return missed
 	}
 	if err := repository.UpdateRunningCollectRecord(b.batchID, model.CollectRecordCompletion{
 		Hour:           b.batchHour(),
@@ -378,6 +444,7 @@ func (b *collectBatchContext) writeCheckpoint(films map[string][]int64) {
 	}); err != nil {
 		log.Printf("[Spider] 刷新运行中采集记录失败 batchID=%s: %v", b.batchID, err)
 	}
+	return missed
 }
 
 // GetActiveBatchesLiveProgress 批量查询指定批次当前运行中的实时进展快照

@@ -107,6 +107,10 @@ func CollectFilms(mids []int64) {
 }
 
 func CollectSingleFilm(ids string) {
+	if searchIndexBlocksCollect() {
+		log.Printf("[Spider] 单片采集跳过：%s", errSearchIndexUpdating.Error())
+		return
+	}
 	globalMid, err := strconv.ParseInt(strings.TrimSpace(ids), 10, 64)
 	if err != nil || globalMid <= 0 {
 		log.Printf("[Spider] CollectSingleFilm: 非法影片 ID %q\n", ids)

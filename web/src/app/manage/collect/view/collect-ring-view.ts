@@ -1,7 +1,6 @@
-import type { SealRingView } from "./seal-ring";
 import { resolveCollectProgressStatusText, type CollectProgress } from "./types";
 
-export type RingTone = "primary" | "success" | "warning" | "error";
+export type RingTone = "primary" | "processing" | "success" | "warning" | "error";
 export type RingCenter = "empty" | "percent" | "success" | "fail";
 
 export interface RingView {
@@ -44,24 +43,18 @@ function collectTooltip(progress: CollectProgress): string {
   return `${resolveCollectProgressStatusText(progress)} · ${countLine}`;
 }
 
-/** 封口环优先。环和中间内容共用一个 tone。 */
-export function resolveRingView(
-  progress?: CollectProgress | null,
-  seal?: SealRingView | null,
-): RingView | null {
-  if (seal?.mode === "waiting") {
-    return { percent: 0, tone: "primary", solid: true, center: "empty", tooltip: seal.tooltip };
-  }
-  if (seal?.mode === "sealing") {
+/** 封口等待环优先，其余按采集进度渲染。 */
+export function resolveRingView(progress?: CollectProgress | null): RingView | null {
+  if (!progress) return null;
+  if (progress.status === "sealing") {
     return {
-      percent: seal.percent,
-      tone: "primary",
-      solid: false,
-      center: "percent",
-      tooltip: seal.tooltip,
+      percent: 0,
+      tone: "processing",
+      solid: true,
+      center: "empty",
+      tooltip: "待检索",
     };
   }
-  if (!progress) return null;
   const failed = progress.failed ?? 0;
   const fullFail = progress.status === "failed" && (progress.success ?? 0) === 0;
   const partialFail = failed > 0 && !fullFail;

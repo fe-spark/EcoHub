@@ -106,10 +106,12 @@ func TestCleanOldCollectRecords(t *testing.T) {
 		StartedAt: oldTime,
 	})
 	_ = CreateCollectRecord(&model.CollectRecord{
-		BatchID:   "batch-new",
-		Trigger:   model.CollectTriggerCron,
-		Status:    model.CollectRecordStatusSuccess,
-		StartedAt: newTime,
+		BatchID:    "batch-new",
+		Trigger:    model.CollectTriggerCron,
+		Status:     model.CollectRecordStatusSuccess,
+		FilmCount:  1,
+		DetailJson: `[{"sourceId":"s1","filmsTotal":1}]`,
+		StartedAt:  newTime,
 	})
 
 	if err := BatchSaveCollectRecordFilms("batch-old", map[string][]int64{"s1": {1}}); err != nil {
@@ -332,7 +334,7 @@ func TestPurgeSourceCollectHistory(t *testing.T) {
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
 		StartedAt:  now,
-		DetailJson: `[{"sourceId":"src-a","status":"success"},{"sourceId":"src-b","status":"success"}]`,
+		DetailJson: `[{"sourceId":"src-a","status":"success","filmsTotal":1},{"sourceId":"src-b","status":"success","filmsTotal":1}]`,
 	}
 	if err := CreateCollectRecord(alone); err != nil {
 		t.Fatal(err)
@@ -415,10 +417,12 @@ func TestClearAndDeleteKeepRunningFilms(t *testing.T) {
 	setupTestDB(t)
 	now := time.Now()
 	running := &model.CollectRecord{
-		BatchID:   "batch-running",
-		Trigger:   model.CollectTriggerManual,
-		Status:    model.CollectRecordStatusRunning,
-		StartedAt: now,
+		BatchID:    "batch-running",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusRunning,
+		FilmCount:  1,
+		DetailJson: `[{"sourceId":"s1","filmsTotal":1}]`,
+		StartedAt:  now,
 	}
 	done := &model.CollectRecord{
 		BatchID:   "batch-done",

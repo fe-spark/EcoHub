@@ -136,14 +136,17 @@ type FilmSourceDelBatchRequest struct {
 }
 
 type CollectProgress struct {
-	Id      string `json:"id"`
-	Name    string `json:"name"`
-	Total   int    `json:"total"`
-	Current int    `json:"current"`
-	Success int    `json:"success"`
-	Failed  int    `json:"failed"`
-	Status  string `json:"status"`
-	QueueId string `json:"queueId,omitempty"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
+	Total       int    `json:"total"`
+	Current     int    `json:"current"`
+	Success     int    `json:"success"`
+	Failed      int    `json:"failed"`
+	Status      string `json:"status"`
+	QueueId     string `json:"queueId,omitempty"`
+	FailedPages []int  `json:"failedPages,omitempty"`
+	// Sealed 本轮的检索索引封口已完成。
+	Sealed bool `json:"sealed,omitempty"`
 }
 
 type FilmSourceListItem struct {
