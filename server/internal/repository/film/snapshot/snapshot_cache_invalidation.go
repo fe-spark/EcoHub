@@ -29,20 +29,17 @@ func RefreshAccessDataCaches() {
 			config.CategoryTreeKey,
 			config.TVBoxConfigCacheKey,
 			config.BannersKey,
-			config.DailyUpdatesCatCacheKey,
 		)
 	}
 	cache.BumpSearchTagsVersion()
 	cache.ClearPatterns(
 		fmt.Sprintf("%s*", config.IndexPageCacheKey),
-		fmt.Sprintf("%s*", config.DailyUpdatesCatCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxConfigCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
 		fmt.Sprintf("%s:*", config.FilmSearchTagsKey),
 		fmt.Sprintf("%s:*", config.FilmFilterOptionKey),
-		fmt.Sprintf("%s:*", config.DailyUpdatesCachePrefix),
 	)
 }
 
@@ -59,6 +56,7 @@ func filmListDerivedCachePatterns() []string {
 		config.FilmRelatePrefix + ":*",
 		config.FilmClassifyCacheKey + ":*",
 		config.IndexPageCacheKey + "*",
+		config.TVBoxConfigCacheKey + ":*",
 	}
 }
 

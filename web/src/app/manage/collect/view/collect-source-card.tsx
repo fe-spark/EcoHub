@@ -15,13 +15,15 @@ import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./index.module.less";
 
 const toneClassMap: Record<StatusTone, string> = {
-  running: styles.toneRunning, sealing: styles.toneSealing, stopped: styles.toneStopped,
+  running: styles.toneRunning, runningFailed: styles.toneRunningFailed,
+  sealing: styles.toneSealing, stopped: styles.toneStopped,
   failed: styles.toneFailed, enabled: styles.toneEnabled, disabled: styles.toneDisabled,
   deleting: styles.toneDeleting,
 };
 
 const statusClassMap: Record<StatusTone, string> = {
-  running: styles.statusRunning, sealing: styles.statusSealing, stopped: styles.statusStopped,
+  running: styles.statusRunning, runningFailed: styles.statusRunningFailed,
+  sealing: styles.statusSealing, stopped: styles.statusStopped,
   failed: styles.statusFailed, enabled: styles.statusEnabled, disabled: styles.statusDisabled,
   deleting: styles.statusDeleting,
 };

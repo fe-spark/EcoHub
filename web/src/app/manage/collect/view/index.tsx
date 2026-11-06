@@ -238,7 +238,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(
+  const { queueBars, sealBar, stoppingQueueId, stopQueue } = useCollectQueueBars(
     siteList,
     searchIndexProgress,
   );
@@ -384,9 +384,10 @@ export default function CollectManagePageView() {
           />
         ) : null}
 
-        {queueBars.length > 0 ? (
+        {queueBars.length > 0 || sealBar ? (
           <CollectQueueBars
             items={queueBars}
+            sealBar={sealBar}
             stoppingQueueId={stoppingQueueId}
             canWrite={canOperate}
             onStopQueue={(queueId, sourceIds) => void stopQueue(queueId, sourceIds)}

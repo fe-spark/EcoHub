@@ -245,6 +245,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 					status = progress.StatusDone
 				}
 			}
+			if msg := formatCategorySkip(batchCtx.CategorySkip(s.Id)); msg != "" {
+				log.Printf("[Spider] 站点 %s %s", s.Name, msg)
+				if errMsg != "" {
+					errMsg = errMsg + "；" + msg
+				} else {
+					errMsg = msg
+				}
+			}
 			status, errMsg = settleSourceStatus(status, errMsg, successPagesCount)
 
 			totalP := pageCount
@@ -322,7 +330,8 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	defer func() {
 		if progress.UnregisterTask(id, reqId) {
 			progress.Update(id, func(cur *model.CollectProgress) {
-				if retErr != nil && cur.Status != progress.StatusStopped && cur.Status != progress.StatusStopping {
+				// 待检索已经挂上封口队列，退出不能再改回失败。
+				if retErr != nil && cur.Status != progress.StatusStopped && cur.Status != progress.StatusStopping && cur.Status != progress.StatusSealing {
 					cur.Status = progress.StatusFailed
 					return
 				}
@@ -382,14 +391,15 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	}
 
 	hadWrites, successPagesCount, failedPagesCount, failedPagesList, err = fetcher.CollectPages(collectCtx, pageCount, targetPages, s, h, batchCtx)
-	if err != nil {
+	// 有成功页的失败也进待检索。零成功直接失败。停止中由 MarkSourceSealingIfRun 拒绝。
+	if err != nil && !hadWrites {
 		return err
 	}
-	// 抓页结束先进待检索，封口周期结束时由服务端收成完成。
-	if progress.MarkSourceSealingIfRun(collectCtx, id) {
-		searchReseal.addSealing(id)
+	if !progress.MarkSourceSealingIfRun(collectCtx, id) {
+		return err
 	}
-	return nil
+	searchReseal.addSealing(id)
+	return err
 }
 
 func filterSourcesReadyForCollect(sources []model.FilmSource) []model.FilmSource {

@@ -6,6 +6,7 @@ import {
   formatCollectPages,
   formatSourcePages,
   formatSourceWindow,
+  splitFailureMarks,
 } from "./record-format";
 
 test("停止写明未抓，不把没抓的页显示成失败", () => {
@@ -87,6 +88,30 @@ test("站点窗口和批次不同才单独显示", () => {
   assert.equal(formatSourceWindow(48, 24), "48 小时");
   assert.equal(formatSourceWindow(24, 24), "");
   assert.equal(formatSourceWindow(-1, 24), "全量");
+});
+
+test("失败页文案可以单独拆出来上色", () => {
+  assert.deepEqual(splitFailureMarks("成功 1148 / 共 3380 页，失败 8 页"), [
+    { text: "成功 1148 / 共 3380 页，", fail: false },
+    { text: "失败 8 页", fail: true },
+  ]);
+  assert.deepEqual(splitFailureMarks("成功 4 · 失败 2 · 未抓 4 · 共 10 页"), [
+    { text: "成功 4 · ", fail: false },
+    { text: "失败 2", fail: true },
+    { text: " · 未抓 4 · 共 10 页", fail: false },
+  ]);
+});
+
+test("运行中的个别失败不把成功进度标成整行失败", () => {
+  const pages = formatCollectPages({
+    status: "running",
+    pageSuccess: 17604,
+    pageTotal: 65612,
+    pageFailed: 8,
+  });
+  assert.equal(pages.primary, "成功 17604 / 共 65612 页");
+  assert.equal(pages.secondary, "拉取中 · 26% · 失败 8");
+  assert.equal(pages.alert, false);
 });
 
 test("运行中状态明确展示进度而非全部完成", () => {

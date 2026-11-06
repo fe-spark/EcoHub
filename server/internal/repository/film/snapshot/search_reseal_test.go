@@ -12,11 +12,15 @@ import (
 
 func TestPatchSearchMetasKeepsUntouchedAndDropsMissing(t *testing.T) {
 	items := []FilmSearchMeta{{Mid: 1}, {Mid: 2}, {Mid: 3}}
+	ptrs := make([]*FilmSearchMeta, len(items))
+	for i := range items {
+		ptrs[i] = &items[i]
+	}
 	upsert := map[int64]FilmSearchMeta{
 		2: {Mid: 2, FirstSourceId: "new"},
 		4: {Mid: 4},
 	}
-	got := patchSearchMetas(items, upsert, map[int64]struct{}{3: {}})
+	got := patchSearchMetas(ptrs, upsert, map[int64]struct{}{3: {}})
 	if len(got) != 3 {
 		t.Fatalf("len=%d, want 3", len(got))
 	}

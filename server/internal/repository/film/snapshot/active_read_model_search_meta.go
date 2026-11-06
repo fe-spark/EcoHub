@@ -32,7 +32,7 @@ type FilmSearchMeta struct {
 
 type filmSearchMetaIndex struct {
 	Version             string
-	Items               []FilmSearchMeta
+	Items               []*FilmSearchMeta
 	ByUpdate            []int
 	Pos                 map[int64]int
 	FilmsBySource       map[string]int64
@@ -104,11 +104,11 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, c
 			if pos < 0 || int(pos) >= len(idx.Items) {
 				continue
 			}
-			visit(&idx.Items[pos])
+			visit(idx.Items[pos])
 		}
 	} else {
 		for i := range idx.Items {
-			visit(&idx.Items[i])
+			visit(idx.Items[i])
 		}
 	}
 	if len(matches) == 0 {
@@ -231,7 +231,7 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 			removed++
 			continue
 		}
-		newItems = append(newItems, item)
+		newItems = append(newItems, *item)
 	}
 	if removed > 0 {
 		activeFilmSearchMetas.Store(sealSearchMetaIndex(version, newItems))
@@ -326,7 +326,7 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 			// 在传入的 mids 中但快照中已不存在（已删除/失效），从内存索引中剔除，防止幽灵数据残留
 			continue
 		} else {
-			newItems = append(newItems, it)
+			newItems = append(newItems, *it)
 		}
 	}
 	for mid, it := range upsertMap {

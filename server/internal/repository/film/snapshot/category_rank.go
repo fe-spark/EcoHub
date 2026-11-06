@@ -169,7 +169,7 @@ func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID
 			if !ok || pos < 0 || pos >= len(idx.Items) {
 				continue
 			}
-			cands = append(cands, rankFromMeta(&idx.Items[pos]))
+			cands = append(cands, rankFromMeta(idx.Items[pos]))
 		}
 	}
 	return midsOf(cands, sortType, limit)
@@ -178,7 +178,7 @@ func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID
 func scanLocalRanks(idx *filmSearchMetaIndex, field string, categoryID int64, sortType, limit int) []int64 {
 	pools := map[string][]rankCand{}
 	for i := range idx.Items {
-		item := &idx.Items[i]
+		item := idx.Items[i]
 		match := item.Pid == categoryID
 		if field == "cid" {
 			match = item.Cid == categoryID
@@ -201,7 +201,7 @@ func scanSourceRanks(idx *filmSearchMetaIndex, sourceID, field string, categoryI
 	}
 	pools := map[string][]rankCand{}
 	for i := range idx.Items {
-		item := &idx.Items[i]
+		item := idx.Items[i]
 		if _, ok := keys[item.CategoryKey]; !ok || !item.HasPlaySource(sourceID) {
 			continue
 		}

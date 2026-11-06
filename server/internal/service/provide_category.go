@@ -67,20 +67,6 @@ func resolveProvideListedRootType(snapshot model.FilmListSnapshot, sourceID stri
 	return resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot)
 }
 
-func providePlayFromName(link model.PlayLinkVo) string {
-	name := strings.TrimSpace(link.Name)
-	if !link.Proxy {
-		return name
-	}
-	if name == "" {
-		return "代理"
-	}
-	if strings.HasSuffix(name, "代理") {
-		return name
-	}
-	return name + "代理"
-}
-
 // resolveProvideSourceID 未指定订阅源时用当前主站。TVBox 没有全量入口。
 func resolveProvideSourceID(sourceID string) string {
 	sourceID = strings.TrimSpace(sourceID)

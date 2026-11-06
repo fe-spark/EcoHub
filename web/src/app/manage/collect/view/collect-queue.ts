@@ -5,7 +5,7 @@ export interface CollectQueueGroup {
   sourceIds: string[];
 }
 
-/** 检索索引封口的全局状态，只用来给队列条展示封口进度。 */
+/** 全库检索进度。只给独立的检索进度条用，不写进采集队列。 */
 export interface QueueSealState {
   status: string;
   percent: number;
@@ -29,19 +29,63 @@ export interface CollectQueueProgressView {
   running: boolean;
   /** 有站点采集完在等检索索引 */
   sealing: boolean;
-  /** 检索索引正在写入 */
-  sealIndexing: boolean;
   /** 检索索引封口已完成 */
   sealed: boolean;
-  sealPercent: number;
-  sealCurrent: number;
-  sealTotal: number;
   percent: number;
 }
 
 /** 抓取或封口未结束都算队列仍活跃。 */
 export function isActiveQueueView(view: CollectQueueProgressView): boolean {
   return view.running || view.sealing;
+}
+
+/**
+ * 采集队列条在还抓页、或已收成终态时出现。
+ * 全库检索进度出现之后，纯待检索不再占队列条。
+ */
+export function isCollectQueueBar(
+  view: { running: boolean; sealing: boolean },
+  sealBarVisible = false,
+): boolean {
+  if (view.running) return true;
+  if (view.sealing && sealBarVisible) return false;
+  return true;
+}
+
+export interface SearchSealBarView {
+  phase: "waiting" | "indexing";
+  percent: number;
+  current: number;
+  total: number;
+  sealingCount: number;
+}
+
+/**
+ * 检索进度是全库一条新进度，不挂在采集队列上。
+ * 还有队列在抓页时不出现；没有待检索站点时也不出现。
+ */
+export function resolveSearchSealBar(
+  sealingCount: number,
+  seal?: QueueSealState | null,
+  collectQueuesRunning = false,
+): SearchSealBarView | null {
+  if (collectQueuesRunning || sealingCount <= 0) return null;
+  if (seal?.status === "indexing") {
+    return {
+      phase: "indexing",
+      percent: Math.max(0, Math.min(seal.percent, 100)),
+      current: Math.max(0, seal.current),
+      total: Math.max(0, seal.total),
+      sealingCount,
+    };
+  }
+  return {
+    phase: "waiting",
+    percent: 0,
+    current: 0,
+    total: 0,
+    sealingCount,
+  };
 }
 
 export function collectQueueIdOf(progress?: CollectProgress | null): string | null {
@@ -70,7 +114,6 @@ export function groupCollectQueues(sites: FilmSource[]): CollectQueueGroup[] {
 export function computeCollectQueueProgress(
   sourceIds: string[],
   sites: FilmSource[],
-  seal?: QueueSealState | null,
 ): CollectQueueProgressView | null {
   if (sourceIds.length === 0) return null;
   const byId = new Map(sites.map((item) => [item.id, item]));
@@ -123,19 +166,14 @@ export function computeCollectQueueProgress(
 
   const running = runningCount + stoppingCount > 0;
   const sealing = sealingCount > 0;
-  const sealIndexing = sealing && seal?.status === "indexing";
-  // 封口已完成时进度条停在 100%，不再倒回抓页进度。
+  // 封口已完成时进度条停在 100%，不再倒回抓页进度。抓页进度不借用全库检索数字。
   const sealed = !running && !sealing && sealedCount > 0;
   const pagePercent = pageTotal > 0 ? Math.floor((pageDone / pageTotal) * 100) : 0;
   const percent = running
     ? Math.min(pagePercent, 99)
-    : sealIndexing
-      ? Math.max(0, Math.min(seal?.percent ?? 0, 100))
-      : sealing
-        ? 0
-        : sealed
-          ? 100
-          : Math.min(pagePercent, 100);
+    : sealed
+      ? 100
+      : Math.min(pagePercent, 100);
 
   return {
     total: sourceIds.length,
@@ -150,11 +188,7 @@ export function computeCollectQueueProgress(
     failed,
     running,
     sealing,
-    sealIndexing,
     sealed,
-    sealPercent: seal?.percent ?? 0,
-    sealCurrent: seal?.current ?? 0,
-    sealTotal: seal?.total ?? 0,
     percent,
   };
 }

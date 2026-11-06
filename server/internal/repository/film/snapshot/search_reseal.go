@@ -172,7 +172,7 @@ func loadSearchMetaUpserts(mids []int64, onBatch func(n int)) (map[int64]FilmSea
 }
 
 // patchSearchMetas 用变更覆盖旧条目，丢掉库里已经不存在的 mid，其余原样保留。
-func patchSearchMetas(items []FilmSearchMeta, upsert map[int64]FilmSearchMeta, drop map[int64]struct{}) []FilmSearchMeta {
+func patchSearchMetas(items []*FilmSearchMeta, upsert map[int64]FilmSearchMeta, drop map[int64]struct{}) []FilmSearchMeta {
 	out := make([]FilmSearchMeta, 0, len(items)+len(upsert))
 	seen := make(map[int64]struct{}, len(upsert))
 	for _, it := range items {
@@ -184,7 +184,7 @@ func patchSearchMetas(items []FilmSearchMeta, upsert map[int64]FilmSearchMeta, d
 		if _, gone := drop[it.Mid]; gone {
 			continue
 		}
-		out = append(out, it)
+		out = append(out, *it)
 	}
 	for mid, it := range upsert {
 		if _, ok := seen[mid]; !ok {

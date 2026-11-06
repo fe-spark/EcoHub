@@ -74,9 +74,6 @@ func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, de
 	}
 	next, err := ConvertFilmIndex(sourceID, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
-		if IsCategoryNotMapped(err) {
-			return false, nil
-		}
 		return false, err
 	}
 	updates := ownedFilmUpdates(existing, &next)
@@ -319,7 +316,7 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		if filmIndex != nil {
 			if filmIndex.FirstSourceId == source.Id && !support.IsCategoryVisible(filmIndex.Cid, filmIndex.Pid) {
 				mid = 0
-				return nil
+				return ErrCategoryDisabled
 			}
 			if filmIndex.FirstSourceId != source.Id {
 				filmIndex = nil
@@ -346,9 +343,6 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			}
 			fi, err := createNewFilmIndexTx(tx, source.Id, detail)
 			if err != nil {
-				if IsCategoryNotMapped(err) {
-					return nil
-				}
 				return err
 			}
 			mid = fi.Mid
@@ -435,15 +429,22 @@ func SaveCollectedPeerDetails(
 
 	var affected []int64
 	var notify []int64
+	var unmapped, disabled int
 	err := runPeerCollectTx(ctx, func(tx *gorm.DB) error {
 		var writeErr error
-		affected, notify, writeErr = writePeerPage(tx, source, details, sources)
+		affected, notify, unmapped, disabled, writeErr = writePeerPage(tx, source, details, sources)
 		return writeErr
 	})
 	if err == nil {
+		if unmapped > 0 || disabled > 0 {
+			log.Printf("[Spider][PeerCollect] 分类跳过 source=%s page=%d unmapped=%d disabled=%d",
+				source.Id, page, unmapped, disabled)
+		}
 		return scheduler.Mids{
 			Affected: uniqueMIDs(affected),
 			Notify:   uniqueMIDs(notify),
+			Unmapped: unmapped,
+			Disabled: disabled,
 		}, nil
 	}
 	if isDeterministicRowError(err) {
@@ -454,35 +455,6 @@ func SaveCollectedPeerDetails(
 	log.Printf("[Spider][PeerCollect] 整页入库失败 source=%s page=%d vods=%d err=%v",
 		source.Id, page, len(details), err)
 	return scheduler.Mids{}, err
-}
-
-func savePeerFilmsIsolated(source *model.FilmSource, page int, details []model.MovieDetail) (scheduler.Mids, error) {
-	affected := make([]int64, 0, len(details))
-	notify := make([]int64, 0, len(details))
-	for _, detail := range details {
-		mid, isNew, playChanged, stored, err := savePeerFilm(source, detail)
-		if err != nil {
-			if isDeterministicRowError(err) {
-				log.Printf("[Spider][PeerCollect] 单片入库跳过 source=%s page=%d vod=%d name=%s err=%v",
-					source.Id, page, detail.Id, detail.Name, err)
-				continue
-			}
-			log.Printf("[Spider][PeerCollect] 单片入库失败 source=%s page=%d vod=%d err=%v",
-				source.Id, page, detail.Id, err)
-			return scheduler.Mids{}, err
-		}
-		if mid <= 0 || !stored {
-			continue
-		}
-		affected = append(affected, mid)
-		if isNew || playChanged {
-			notify = append(notify, mid)
-		}
-	}
-	return scheduler.Mids{
-		Affected: uniqueMIDs(affected),
-		Notify:   uniqueMIDs(notify),
-	}, nil
 }
 
 // SaveDetailsForCollect 兼容采集调度层调用。

@@ -57,6 +57,7 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 		}
 	}
 
+	listGen := filmsnapshot.GetSearchCacheVersion()
 	var classList []model.FilmClass
 	filters := make(map[string][]map[string]any)
 
@@ -209,7 +210,7 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 			Filters   map[string][]map[string]any
 		}{classList, filters}
 		if data, err := json.Marshal(res); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*5)
+			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Minute*5, listGen)
 		}
 	}
 
@@ -258,13 +259,7 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 				var res tvboxListResult
 				if json.Unmarshal([]byte(data), &res) == nil {
-					filteredVodList := make([]model.FilmList, 0, len(res.VodList))
-					for _, item := range res.VodList {
-						if support.IsCategoryVisible(int64(item.TypeID), 0) {
-							filteredVodList = append(filteredVodList, item)
-						}
-					}
-					return res.Current, res.PageCount, res.Total, filteredVodList, nil
+					return res.Current, res.PageCount, res.Total, res.VodList, nil
 				}
 			}
 		}

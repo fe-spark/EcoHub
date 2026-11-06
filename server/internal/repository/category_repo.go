@@ -6,6 +6,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	filmcache "server/internal/repository/film/cache"
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
@@ -63,9 +64,6 @@ func GetParentId(id int64) int64 {
 func ClearCategoryCache() {
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
-		if keys, err := db.Rdb.Keys(db.Cxt, config.ActiveCategoryTreeKey+":src_*").Result(); err == nil && len(keys) > 0 {
-			db.Rdb.Del(db.Cxt, keys...)
-		}
 	}
 	RefreshCategoryCache()
 }
@@ -76,6 +74,7 @@ func MarkCategoryChanged() {
 	touchCategoryVersion()
 	support.TouchSearchTagsVersion()
 	ClearIndexPageCache()
+	filmcache.ClearPatterns(config.FilmRelatePrefix + ":*")
 }
 
 // SourceHasCategoryMapping 该采集站是否已经有分类映射。没有映射时入库写不出本地 pid。

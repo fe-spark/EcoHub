@@ -87,21 +87,6 @@ func pruneStale() {
 				return true
 			}
 		}
-		// 封口周期丢失（进程重启等）时把等检索的站点收成最终状态，避免状态悬着。
-		if status == StatusSealing && age >= staleAfter {
-			if state.sealOutcome == StatusStopped {
-				state.data.Status = StatusStopped
-			} else {
-				state.data.Status = StatusDone
-			}
-			state.data.Sealed = true
-			state.sealOutcome = ""
-			state.updated = now
-			state.mu.Unlock()
-			changed = true
-			log.Printf("[Spider] 待检索超时收尾 source=%s age=%s", id, age.Round(time.Second))
-			return true
-		}
 		state.mu.Unlock()
 		return true
 	})

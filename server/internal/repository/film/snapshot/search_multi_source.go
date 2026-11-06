@@ -3,7 +3,7 @@ package snapshot
 import "strings"
 
 // patchMultiSourceCounts 沿用上一版计数，只重算本次片名或播放线路有变动的聚合键。
-func patchMultiSourceCounts(prev map[string]int64, oldItems []FilmSearchMeta, upsert map[int64]FilmSearchMeta, pos map[int64]int) map[string]int64 {
+func patchMultiSourceCounts(prev map[string]int64, oldItems []*FilmSearchMeta, upsert map[int64]FilmSearchMeta, pos map[int64]int) map[string]int64 {
 	counts := make(map[string]int64, len(prev)+len(upsert))
 	for src, n := range prev {
 		if n > 0 {
@@ -19,7 +19,7 @@ func patchMultiSourceCounts(prev map[string]int64, oldItems []FilmSearchMeta, up
 			keys[key] = struct{}{}
 		}
 		if idx, ok := pos[mid]; ok && idx >= 0 && idx < len(oldItems) && oldItems[idx].Mid == mid {
-			if key := itemAggregateKey(&oldItems[idx]); key != "" {
+			if key := itemAggregateKey(oldItems[idx]); key != "" {
 				keys[key] = struct{}{}
 			}
 		}
@@ -29,7 +29,7 @@ func patchMultiSourceCounts(prev map[string]int64, oldItems []FilmSearchMeta, up
 	for mid, meta := range upsert {
 		newKey := itemAggregateKey(&meta)
 		if idx, ok := pos[mid]; ok && idx >= 0 && idx < len(oldItems) && oldItems[idx].Mid == mid {
-			old := &oldItems[idx]
+			old := oldItems[idx]
 			if itemAggregateKey(old) == "" {
 				if oldSrc := strings.TrimSpace(old.FirstSourceId); oldSrc != "" && len(old.PlaySources) >= 2 {
 					counts[oldSrc]--
@@ -55,7 +55,7 @@ type multiSourceFilm struct {
 	plays int
 }
 
-func filmsForKeys(oldItems []FilmSearchMeta, upsert map[int64]FilmSearchMeta, keys map[string]struct{}) map[string][]multiSourceFilm {
+func filmsForKeys(oldItems []*FilmSearchMeta, upsert map[int64]FilmSearchMeta, keys map[string]struct{}) map[string][]multiSourceFilm {
 	out := make(map[string][]multiSourceFilm)
 	note := func(item *FilmSearchMeta) {
 		key := itemAggregateKey(item)
@@ -70,11 +70,11 @@ func filmsForKeys(oldItems []FilmSearchMeta, upsert map[int64]FilmSearchMeta, ke
 			plays: len(item.PlaySources),
 		})
 	}
-	for i := range oldItems {
-		if _, replaced := upsert[oldItems[i].Mid]; replaced {
+	for _, item := range oldItems {
+		if _, replaced := upsert[item.Mid]; replaced {
 			continue
 		}
-		note(&oldItems[i])
+		note(item)
 	}
 	for mid, meta := range upsert {
 		item := meta

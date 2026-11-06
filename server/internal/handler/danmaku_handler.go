@@ -169,7 +169,8 @@ func resolveDanmuBaseURL(cfg model.DanmakuConfig) string {
 
 // fetchSniffedDanmaku 从公开弹幕库嗅探对应剧集弹幕
 func fetchSniffedDanmaku(cfg model.DanmakuConfig, title string, episode int) []model.DanmakuItem {
-	cacheKey := fmt.Sprintf("%s:Danmaku:%s:%d", config.RedisKeyPrefix, title, episode)
+	baseURL := resolveDanmuBaseURL(cfg)
+	cacheKey := fmt.Sprintf("%s:Danmaku:%s:%s:%d", config.RedisKeyPrefix, url.QueryEscape(baseURL), title, episode)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.DanmakuItem
@@ -179,7 +180,6 @@ func fetchSniffedDanmaku(cfg model.DanmakuConfig, title string, episode int) []m
 		}
 	}
 
-	baseURL := resolveDanmuBaseURL(cfg)
 	episodeID := searchDandanplayEpisode(cfg, baseURL, title, episode)
 	if episodeID <= 0 {
 		return nil

@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 
@@ -83,7 +84,10 @@ func TestSealSearchMetaIndexSharesSinglePlaySource(t *testing.T) {
 		t.Fatalf("多源应各自分配: %#v %#v", left, right)
 	}
 
-	again := append([]FilmSearchMeta(nil), idx.Items...)
+	again := make([]FilmSearchMeta, len(idx.Items))
+	for i, it := range idx.Items {
+		again[i] = *it
+	}
 	idx2 := sealSearchMetaIndex("v", again)
 	if idx.Items[0].PlaySources[0] != "src-a" || &idx2.Items[0].PlaySources[0] == &a[0] {
 		t.Fatal("再次封口改写了已发布切片")
@@ -217,6 +221,189 @@ func TestTagMetaMatch_DisabledCategoryHidden(t *testing.T) {
 	if matcher(disabledMeta) {
 		t.Fatal("expected disabledMeta to be filtered out")
 	}
+}
+
+func TestIncrementalSeal_ReusesUnchangedObjects(t *testing.T) {
+	cur := sealSearchMetaIndex("v", []FilmSearchMeta{
+		{Mid: 1, FirstSourceId: "src-a", CategoryKey: "cat-a", Item: utils.FilmSearchItem{Mid: 1, Name: "甲", UpdateStamp: 10}},
+		{Mid: 2, FirstSourceId: "src-a", CategoryKey: "cat-a", Item: utils.FilmSearchItem{Mid: 2, Name: "乙", UpdateStamp: 20}},
+	})
+	kept := cur.Items[1]
+	next := updateSearchMetaIndexIncremental(cur, "v", map[int64]FilmSearchMeta{
+		1: {Mid: 1, FirstSourceId: "src-a", CategoryKey: "cat-a", Item: utils.FilmSearchItem{Mid: 1, Name: "甲改", UpdateStamp: 30}},
+	})
+	if next.Pos != nil && fmtPos(next.Pos) != fmtPos(cur.Pos) {
+		t.Fatal("只更新已有影片时不应复制 Pos")
+	}
+	if fmtFilmCounts(next.FilmsBySource) != fmtFilmCounts(cur.FilmsBySource) {
+		t.Fatal("只更新已有影片时不应复制来源计数")
+	}
+	if fmtCategory(next.ByCategory) != fmtCategory(cur.ByCategory) {
+		t.Fatal("只更新已有影片时不应复制分类列表")
+	}
+	if next.Items[1] != kept {
+		t.Fatal("未变更条目应共用对象")
+	}
+	if next.Items[0] == cur.Items[0] {
+		t.Fatal("变更条目应换成新对象")
+	}
+	if cur.Items[0].Item.Name != "甲" || next.Items[0].Item.Name != "甲改" {
+		t.Fatalf("旧索引被改写: old=%q new=%q", cur.Items[0].Item.Name, next.Items[0].Item.Name)
+	}
+	if _, ok := cur.Pos[3]; ok {
+		t.Fatal("旧 Pos 被写入")
+	}
+
+	grown := updateSearchMetaIndexIncremental(next, "v", map[int64]FilmSearchMeta{
+		3: {Mid: 3, FirstSourceId: "src-b", CategoryKey: "cat-b", Item: utils.FilmSearchItem{Mid: 3, Name: "丙", UpdateStamp: 40}},
+	})
+	if fmtPos(grown.Pos) == fmtPos(next.Pos) {
+		t.Fatal("新增影片应复制 Pos")
+	}
+	if _, ok := next.Pos[3]; ok {
+		t.Fatal("新增影片写进了上一版 Pos")
+	}
+	if grown.Items[1] != kept {
+		t.Fatal("新增时未变更条目应继续共用对象")
+	}
+	if grown.FilmsBySource["src-b"] != 1 || next.FilmsBySource["src-b"] != 0 {
+		t.Fatalf("来源计数 old=%d new=%d", next.FilmsBySource["src-b"], grown.FilmsBySource["src-b"])
+	}
+}
+
+func TestIncrementalSeal_MovesCategoryAndSource(t *testing.T) {
+	cur := sealSearchMetaIndex("v", []FilmSearchMeta{
+		{
+			Mid: 1, FirstSourceId: "src-a", PlaySources: []string{"src-a"},
+			CategoryKey: "cat-a", RootCategoryKey: "root-a",
+			Item: utils.FilmSearchItem{Mid: 1, Name: "甲", UpdateStamp: 10, Hits: 5},
+		},
+		{
+			Mid: 2, FirstSourceId: "src-a", PlaySources: []string{"src-a"},
+			CategoryKey: "cat-a",
+			Item:        utils.FilmSearchItem{Mid: 2, Name: "乙", UpdateStamp: 20, Hits: 1},
+		},
+	})
+	oldCat := append([]int(nil), cur.ByCategory["cat-a"]...)
+	oldHot := append([]int64(nil), cur.HotPools[hotPoolMapKey("src-a", "cat-a")]...)
+	moved := updateSearchMetaIndexIncremental(cur, "v", map[int64]FilmSearchMeta{
+		1: {
+			Mid: 1, FirstSourceId: "src-a", PlaySources: []string{"src-a"},
+			CategoryKey: "cat-b", RootCategoryKey: "root-b",
+			Item: utils.FilmSearchItem{Mid: 1, Name: "甲", UpdateStamp: 30, Hits: 9},
+		},
+	})
+	if fmtPos(moved.Pos) != fmtPos(cur.Pos) {
+		t.Fatal("只改分类不应复制 Pos")
+	}
+	if fmtFilmCounts(moved.FilmsBySource) != fmtFilmCounts(cur.FilmsBySource) {
+		t.Fatal("分类变化不应复制来源计数")
+	}
+	if fmtCategory(moved.ByCategory) == fmtCategory(cur.ByCategory) {
+		t.Fatal("分类变化应复制分类列表")
+	}
+	if !sameInts(cur.ByCategory["cat-a"], oldCat) {
+		t.Fatalf("旧分类列表被改写 %v", cur.ByCategory["cat-a"])
+	}
+	if intsContain(moved.ByCategory["cat-a"], 0) || !intsContain(moved.ByCategory["cat-a"], 1) {
+		t.Fatalf("旧分类应只留下未变更影片 %v", moved.ByCategory["cat-a"])
+	}
+	if !intsContain(moved.ByCategory["cat-b"], 0) {
+		t.Fatalf("新分类缺少下标 %v", moved.ByCategory["cat-b"])
+	}
+	oldKey := hotPoolMapKey("src-a", "cat-a")
+	newKey := hotPoolMapKey("src-a", "cat-b")
+	oldRoot := hotPoolMapKey("src-a", "root-a")
+	newRoot := hotPoolMapKey("src-a", "root-b")
+	if midsContain(moved.HotPools[oldKey], 1) || !midsContain(moved.HotPools[newKey], 1) {
+		t.Fatalf("热榜未搬家 old=%v new=%v", moved.HotPools[oldKey], moved.HotPools[newKey])
+	}
+	if midsContain(moved.HotPools[oldRoot], 1) || !midsContain(moved.HotPools[newRoot], 1) {
+		t.Fatalf("一级分类热榜未搬家 old=%v new=%v", moved.HotPools[oldRoot], moved.HotPools[newRoot])
+	}
+	if !midsContain(cur.HotPools[oldKey], 1) || !sameMids(cur.HotPools[oldKey], oldHot) {
+		t.Fatalf("旧热榜被改写 %v", cur.HotPools[oldKey])
+	}
+
+	sourced := updateSearchMetaIndexIncremental(moved, "v", map[int64]FilmSearchMeta{
+		1: {
+			Mid: 1, FirstSourceId: "src-b", PlaySources: []string{"src-b"},
+			CategoryKey: "cat-b", RootCategoryKey: "root-b",
+			Item: utils.FilmSearchItem{Mid: 1, Name: "甲", UpdateStamp: 40, Hits: 9},
+		},
+	})
+	if fmtCategory(sourced.ByCategory) != fmtCategory(moved.ByCategory) {
+		t.Fatal("只改来源不应复制分类列表")
+	}
+	if fmtFilmCounts(sourced.FilmsBySource) == fmtFilmCounts(moved.FilmsBySource) {
+		t.Fatal("来源变化应复制来源计数")
+	}
+	if moved.FilmsBySource["src-a"] != 2 {
+		t.Fatalf("旧来源计数被改写 %d", moved.FilmsBySource["src-a"])
+	}
+	if sourced.FilmsBySource["src-a"] != 1 || sourced.FilmsBySource["src-b"] != 1 {
+		t.Fatalf("来源计数 a=%d b=%d", sourced.FilmsBySource["src-a"], sourced.FilmsBySource["src-b"])
+	}
+	if midsContain(sourced.SourceHot["src-a"], 1) || !midsContain(sourced.SourceHot["src-b"], 1) {
+		t.Fatalf("来源热榜未搬家 a=%v b=%v", sourced.SourceHot["src-a"], sourced.SourceHot["src-b"])
+	}
+	if !midsContain(moved.SourceHot["src-a"], 1) {
+		t.Fatal("旧来源热榜被改写")
+	}
+}
+
+func sameInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func intsContain(list []int, v int) bool {
+	for _, n := range list {
+		if n == v {
+			return true
+		}
+	}
+	return false
+}
+
+func sameMids(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func midsContain(list []int64, v int64) bool {
+	for _, n := range list {
+		if n == v {
+			return true
+		}
+	}
+	return false
+}
+
+func fmtPos(m map[int64]int) string {
+	return fmt.Sprintf("%p", m)
+}
+
+func fmtFilmCounts(m map[string]int64) string {
+	return fmt.Sprintf("%p", m)
+}
+
+func fmtCategory(m map[string][]int) string {
+	return fmt.Sprintf("%p", m)
 }
 
 func TestUpdateSearchMetaIndexIncremental_UpdatesRankPools(t *testing.T) {

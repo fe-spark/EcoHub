@@ -1,4 +1,5 @@
 package service
+
 import (
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -17,7 +19,6 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
 	"server/internal/utils"
-	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -65,10 +66,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 
 	cacheKey := fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, id)
 	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			if data == "{}" {
-				return model.MovieDetailVo{}, nil
-			}
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" && data != "{}" {
 			var cached model.MovieDetailVo
 			if json.Unmarshal([]byte(data), &cached) == nil {
 				if !support.IsCategoryVisible(cached.Cid, cached.Pid) {
@@ -81,10 +79,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 
 	val, err, _ := filmDetailSfGroup.Do(cacheKey, func() (any, error) {
 		if db.Rdb != nil {
-			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				if data == "{}" {
-					return model.MovieDetailVo{}, nil
-				}
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" && data != "{}" {
 				var cached model.MovieDetailVo
 				if json.Unmarshal([]byte(data), &cached) == nil {
 					if !support.IsCategoryVisible(cached.Cid, cached.Pid) {
@@ -105,7 +100,6 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			return model.MovieDetailVo{}, snapErr
 		}
 		if snapshot == nil {
-			storeFilmPlayInfoCache(cacheKey, "{}", 60*time.Second, playGen)
 			return model.MovieDetailVo{}, nil
 		}
 		if !support.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
@@ -116,7 +110,6 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
 		if movieDetail == nil {
 			filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
-			storeFilmPlayInfoCache(cacheKey, "{}", 60*time.Second, playGen)
 			return model.MovieDetailVo{}, nil
 		}
 
@@ -281,7 +274,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 
 	var playList []model.PlayLinkVo
 	var downloadList [][]model.MovieUrlInfo
-
+	failed := 0
 	for _, r := range rows {
 		source, hasSource := sourcesByID[r.SourceId]
 		var rules []utils.DomainReplaceRule
@@ -291,6 +284,8 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 
 		var links []model.MovieUrlInfo
 		if err := json.Unmarshal([]byte(r.Content), &links); err != nil {
+			skipBadPlaylist(r, err)
+			failed++
 			continue
 		}
 		if len(rules) > 0 {
@@ -339,32 +334,35 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		}
 	}
 
+	if err := playlistsAllBroken(mid, len(rows), failed); err != nil {
+		return nil, nil, err
+	}
 	sortPlayListSources(playList, sourceOrderMap)
 
 	return playList, downloadList, nil
 }
 
 // BatchGetPlayPlaylistsByMids 批量加载影片播放列表（TVBox 批量组装，无 N+1）。
-func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, error) {
+func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, map[int64]struct{}, error) {
 	result := make(map[int64][]model.PlayLinkVo, len(mids))
 	if len(mids) == 0 {
-		return result, nil
+		return result, nil, nil
 	}
 	rows, err := filmrepo.ListPlayPlaylistsByMids(mids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows, err = appendPeerPlayRows(mids, rows)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(rows) == 0 {
-		return result, nil
+		return result, nil, nil
 	}
 
 	sources, err := repository.GetEnabledCollectSourceList()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sourcesByID := make(map[string]model.FilmSource, len(sources))
 	sourceOrderMap := make(map[string]int, len(sources))
@@ -374,6 +372,8 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, er
 	}
 
 	sourcePlayGroupCounts := make(map[string]int)
+	seen := make(map[int64]int)
+	failedN := make(map[int64]int)
 	for _, r := range rows {
 		key := fmt.Sprintf("%d#%s", r.Mid, r.SourceId)
 		sourcePlayGroupCounts[key]++
@@ -386,8 +386,11 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, er
 			rules = utils.ParseDomainReplaceRules(source.DomainReplaceRules)
 		}
 
+		seen[r.Mid]++
 		var links []model.MovieUrlInfo
 		if err := json.Unmarshal([]byte(r.Content), &links); err != nil {
+			skipBadPlaylist(r, err)
+			failedN[r.Mid]++
 			continue
 		}
 		if len(rules) > 0 {
@@ -436,7 +439,7 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, er
 		result[mid] = lines
 	}
 
-	return result, nil
+	return result, brokenPlaylistMids(seen, failedN), nil
 }
 func sortPlayListSources(lines []model.PlayLinkVo, orderMap map[string]int) {
 	getOrder := func(s string) int {

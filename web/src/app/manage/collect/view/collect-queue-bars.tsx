@@ -3,7 +3,7 @@
 import React from "react";
 import { Button, Popconfirm, Progress, Space, Tag } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
-import type { CollectQueueProgressView } from "./collect-queue";
+import type { CollectQueueProgressView, SearchSealBarView } from "./collect-queue";
 import { queueProgressTitle, tourProgressPhase } from "./collect-queue";
 import styles from "./collect-queue-bars.module.less";
 
@@ -17,6 +17,7 @@ export interface CollectQueueBarItem {
 
 interface CollectQueueBarsProps {
   items: CollectQueueBarItem[];
+  sealBar?: SearchSealBarView | null;
   stoppingQueueId: string | null;
   canWrite: boolean;
   onStopQueue: (queueId: string, sourceIds: string[]) => void;
@@ -26,9 +27,53 @@ function pageCount(value: number) {
   return value.toLocaleString("zh-CN");
 }
 
+function SearchSealBar({ bar }: { bar: SearchSealBarView }) {
+  const indexing = bar.phase === "indexing";
+  const percent = indexing ? bar.percent : 0;
+  return (
+    <div className={`${styles.queueCard} ${styles.queueSealing}`}>
+      <div className={styles.queueMain}>
+        <div className={styles.queueHeader}>
+          <span className={`${styles.statusPill} ${styles.statusSealing}`}>
+            <span className={styles.statusDot} />
+            {indexing ? "检索封口中" : "待检索"}
+          </span>
+          <span className={styles.queueTitle}>检索进度</span>
+          <span className={styles.queuePages}>
+            <span className={styles.pageTotalNum}>
+              {indexing && bar.total > 0
+                ? `${pageCount(bar.current)} / ${pageCount(bar.total)} 部`
+                : "待检索"}
+            </span>
+          </span>
+          <Space size={4} wrap className={styles.queueTags}>
+            <Tag color="processing" variant="filled" className={styles.microTag}>
+              待检索 {bar.sealingCount} 站
+            </Tag>
+          </Space>
+        </div>
+        <div className={styles.progressRow}>
+          <Progress
+            percent={percent}
+            showInfo={false}
+            size={{ height: 6 }}
+            status="active"
+            strokeColor="#1677ff"
+            railColor="var(--ant-color-fill-secondary)"
+            className={styles.progressBar}
+          />
+          <span className={`${styles.percentNum} ${styles.percentSealing}`}>
+            {indexing ? `${percent}%` : "…"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CollectQueueBars(props: CollectQueueBarsProps) {
-  const { items, stoppingQueueId, canWrite, onStopQueue } = props;
-  if (items.length === 0) {
+  const { items, sealBar, stoppingQueueId, canWrite, onStopQueue } = props;
+  if (items.length === 0 && !sealBar) {
     return null;
   }
   const tourIndex = items.findIndex((item) => item.view.running);
@@ -36,22 +81,21 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
 
   return (
     <div className={styles.queueList}>
+      {sealBar ? <SearchSealBar bar={sealBar} /> : null}
       {items.map((item, index) => {
         const isRunning = item.view.running;
+        const waitingSeal = !isRunning && item.view.sealing;
         const stopping = item.view.stoppingCount > 0;
         // 只有全部在跑的站都进入停止中，队列才显示停止中；个别站停止不影响队列。
         const isStopping = stopping && item.view.runningCount === 0;
         const hasFailed = item.view.failedCount > 0;
         // 只有整队都没跑完才算「已停止」；个别站终止仍按完成收尾。
         const stoppedOnly = item.view.stoppedCount > 0 && item.view.doneCount === 0;
-        // 队列还在抓页时不展示封口状态，页面进度优先。
-        const sealing = !isRunning && item.view.sealing;
-        const sealIndexing = sealing && item.view.sealIndexing;
-        const busy = isRunning || item.view.sealing;
+        const busy = isRunning || waitingSeal;
 
         const cardStateClass = isRunning
           ? styles.queueRunning
-          : item.view.sealing
+          : waitingSeal
             ? styles.queueSealing
             : hasFailed
               ? styles.queueException
@@ -60,8 +104,10 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                 : styles.queueSuccess;
 
         const percentStateClass = isRunning
-          ? styles.percentRunning
-          : item.view.sealing
+          ? item.view.failed > 0
+            ? styles.percentException
+            : styles.percentRunning
+          : waitingSeal
             ? styles.percentSealing
             : hasFailed
               ? styles.percentException
@@ -73,7 +119,7 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
           ? item.view.failed > 0
             ? { "0%": "#fa8c16", "100%": "#ff4d4f" }
             : { "0%": "#fa8c16", "100%": "#ffa940" }
-          : item.view.sealing
+          : waitingSeal
             ? "#1677ff"
             : hasFailed
               ? "#ff4d4f"
@@ -85,8 +131,8 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
           ? isStopping
             ? "停止中"
             : "采集中"
-          : sealing
-            ? "检索封口中"
+          : waitingSeal
+            ? "待检索"
             : hasFailed
               ? "异常"
               : stoppedOnly
@@ -96,8 +142,10 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
         const statusClass = isRunning
           ? isStopping
             ? styles.statusStopping
-            : styles.statusRunning
-          : item.view.sealing
+            : item.view.failed > 0
+              ? styles.statusRunningFailed
+              : styles.statusRunning
+          : waitingSeal
             ? styles.statusSealing
             : hasFailed
               ? styles.statusException
@@ -106,9 +154,9 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                 : styles.statusSuccess;
 
         const title = queueProgressTitle(busy, items.length, index + 1);
-        const progressPercent = sealing && !sealIndexing ? 0 : item.view.percent;
-        const progressText = sealing && !sealIndexing ? "…" : `${item.view.percent}%`;
-        const progressStatus = busy
+        const progressPercent = item.view.percent;
+        const progressText = `${item.view.percent}%`;
+        const progressStatus = isRunning || waitingSeal
           ? "active"
           : hasFailed
             ? "exception"
@@ -136,22 +184,12 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                 <span className={styles.queueTitle}>{title}</span>
 
                 <span className={styles.queuePages}>
-                  {item.view.sealing ? (
-                    <span className={styles.pageTotalNum}>
-                      {sealIndexing && item.view.sealTotal
-                        ? `${pageCount(item.view.sealCurrent)} / ${pageCount(item.view.sealTotal)} 部`
-                        : "待检索"}
-                    </span>
-                  ) : (
-                    <>
-                      <strong className={styles.pageDoneNum}>
-                        {pageCount(item.view.pageDone)}
-                      </strong>
-                      <span className={styles.pageTotalNum}>
-                        / {pageCount(item.view.pageTotal)} 页
-                      </span>
-                    </>
-                  )}
+                  <strong className={styles.pageDoneNum}>
+                    {pageCount(item.view.pageDone)}
+                  </strong>
+                  <span className={styles.pageTotalNum}>
+                    / {pageCount(item.view.pageTotal)} 页
+                  </span>
                 </span>
 
                 <Space size={4} wrap className={styles.queueTags}>
@@ -205,7 +243,6 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                 </Space>
               </div>
 
-              {/* 第二行：进度条与末尾的进度百分比 */}
               <div className={styles.progressRow}>
                 <Progress
                   percent={progressPercent}

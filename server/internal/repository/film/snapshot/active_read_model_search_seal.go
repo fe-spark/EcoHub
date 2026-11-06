@@ -251,7 +251,7 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 	byUpdate, pos, films, multiSource, hotPools, yearPools, recentPools, sourceHot, byCategory := buildSearchMetaRanks(items)
 	return &filmSearchMetaIndex{
 		Version:             version,
-		Items:               items,
+		Items:               pointSearchMetas(items),
 		ByUpdate:            byUpdate,
 		Pos:                 pos,
 		FilmsBySource:       films,
@@ -264,7 +264,21 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		SearchPosts:         buildSearchPostings(items),
 	}
 }
-func patchSingleRankPool(pools map[string][]int64, key string, cand rankCand, items []FilmSearchMeta, pos map[int64]int, sortType, cap int) {
+
+func pointSearchMetas(items []FilmSearchMeta) []*FilmSearchMeta {
+	out := make([]*FilmSearchMeta, len(items))
+	for i := range items {
+		out[i] = &items[i]
+	}
+	return out
+}
+
+func detachMeta(meta FilmSearchMeta) *FilmSearchMeta {
+	copied := meta
+	return &copied
+}
+
+func patchSingleRankPool(pools map[string][]int64, key string, cand rankCand, items []*FilmSearchMeta, pos map[int64]int, sortType, cap int) {
 	if key == "" || cand.mid <= 0 || cap <= 0 {
 		return
 	}
@@ -281,7 +295,7 @@ func patchSingleRankPool(pools map[string][]int64, key string, cand rankCand, it
 		if !ok || p >= len(items) {
 			continue
 		}
-		other := rankFromMeta(&items[p])
+		other := rankFromMeta(items[p])
 		if rankBetter(sortType, cand, other) {
 			insertIdx = i
 			break
@@ -306,31 +320,55 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 		return sealSearchMetaIndex(version, items)
 	}
 
-	newItems := make([]FilmSearchMeta, len(cur.Items), len(cur.Items)+len(upsertMap))
+	newItems := make([]*FilmSearchMeta, len(cur.Items), len(cur.Items)+len(upsertMap))
 	copy(newItems, cur.Items)
 
-	newPos := make(map[int64]int, len(cur.Pos)+len(upsertMap))
-	for k, v := range cur.Pos {
-		newPos[k] = v
-	}
-
-	newByCategory := make(map[string][]int, len(cur.ByCategory))
-	for k, v := range cur.ByCategory {
-		newByCategory[k] = append([]int(nil), v...)
-	}
-
-	newFilms := make(map[string]int64, len(cur.FilmsBySource))
-	for k, v := range cur.FilmsBySource {
-		newFilms[k] = v
-	}
-
+	// 分类和首选来源都没变时，Pos、分类列表、来源计数与上一版共用。变了才复制对应的表并搬走下标。
+	newPos := cur.Pos
+	newByCategory := cur.ByCategory
+	newFilms := cur.FilmsBySource
+	updates := make([]keptSearchMeta, 0, len(upsertMap))
+	var added []FilmSearchMeta
+	var addedMids []int64
+	moveCategory := false
+	moveSource := false
 	for mid, meta := range upsertMap {
-		if idx, exists := newPos[mid]; exists {
-			newItems[idx] = meta
-		} else {
+		if idx, exists := newPos[mid]; exists && idx >= 0 && idx < len(newItems) {
+			old := newItems[idx]
+			if searchMetaCategoryMoved(old, meta) {
+				moveCategory = true
+			}
+			if searchMetaSourceMoved(old, meta) {
+				moveSource = true
+			}
+			updates = append(updates, keptSearchMeta{idx: idx, old: old, meta: meta})
+			continue
+		}
+		added = append(added, meta)
+		addedMids = append(addedMids, mid)
+	}
+	if len(added) > 0 {
+		internSearchMetas(added)
+		newPos = clonePosMap(cur.Pos, len(added))
+	}
+	if len(added) > 0 || moveCategory {
+		newByCategory = cloneCategoryLists(cur.ByCategory)
+	}
+	if len(added) > 0 || moveSource {
+		newFilms = cloneFilmCounts(cur.FilmsBySource)
+	}
+	for _, u := range updates {
+		if moveCategory || moveSource {
+			relocateSearchMeta(newByCategory, newFilms, moveCategory, moveSource, u.idx, u.old, u.meta)
+		}
+		newItems[u.idx] = detachMeta(u.meta)
+	}
+	if len(added) > 0 {
+		for i := range added {
 			newIdx := len(newItems)
-			newItems = append(newItems, meta)
-			newPos[mid] = newIdx
+			newItems = append(newItems, &added[i])
+			newPos[addedMids[i]] = newIdx
+			meta := &added[i]
 			if src := strings.TrimSpace(meta.FirstSourceId); src != "" {
 				newFilms[src]++
 			}
@@ -338,9 +376,6 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 				newByCategory[cKey] = append(newByCategory[cKey], newIdx)
 			}
 		}
-	}
-	if len(newItems) > len(cur.Items) {
-		internSearchMetas(newItems[len(cur.Items):])
 	}
 
 	newByUpdate := patchByUpdate(cur, newItems, upsertMap, newPos)
@@ -360,6 +395,10 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 	newSourceHot := make(map[string][]int64, len(cur.SourceHot))
 	for k, v := range cur.SourceHot {
 		newSourceHot[k] = v
+	}
+
+	for _, u := range updates {
+		dropLeftRankKeys(newHotPools, newYearPools, newRecentPools, newSourceHot, u.old, &u.meta)
 	}
 
 	for _, meta := range upsertMap {
@@ -439,7 +478,7 @@ func VisitSearchMetasByUpdate(visit func(*FilmSearchMeta) bool) error {
 		if i < 0 || i >= len(items) {
 			return errors.New("检索索引损坏")
 		}
-		if !visit(&items[i]) {
+		if !visit(items[i]) {
 			return nil
 		}
 	}

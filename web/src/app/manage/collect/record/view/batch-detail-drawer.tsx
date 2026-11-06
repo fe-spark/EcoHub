@@ -27,6 +27,7 @@ import {
   formatSourceWindow,
 } from "./record-format";
 import {
+  MarkedFailureText,
   RecordStatusMark,
   resolveBatchStatus,
 } from "./history-columns";
@@ -76,14 +77,18 @@ export function BatchDetailDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      width={720}
+      size={720}
       title={
         <div className={styles.drawerTitleRow}>
           <span className={styles.withIcon}>
             <CloudServerOutlined />
             <span>批次采集成果明细</span>
           </span>
-          <RecordStatusMark status={resolveBatchStatus(record)} scope="batch" />
+          <RecordStatusMark
+            status={resolveBatchStatus(record)}
+            scope="batch"
+            hasPageFailed={(record.pageFailed ?? 0) > 0}
+          />
         </div>
       }
       styles={{ body: { padding: "16px 20px" } }}
@@ -135,6 +140,7 @@ export function BatchDetailDrawer({
               const windowLabel = formatSourceWindow(item.hour, record.hour);
               const refTime = record.finishedAt || record.startedAt;
               const isWithinHalfHour = refTime ? dayjs().diff(dayjs(refTime), "minute") < 30 : false;
+              const failedPages = Math.max(0, item.failedCnt ?? 0, item.failedPages?.length ?? 0);
               const canRetryPages = isWithinHalfHour && Array.isArray(item.failedPages) && item.failedPages.length > 0;
 
               return (
@@ -148,7 +154,11 @@ export function BatchDetailDrawer({
                       </Text>
                     </div>
                     <div className={styles.sourceCardStatus}>
-                      <RecordStatusMark status={shownStatus} scope="source" />
+                      <RecordStatusMark
+                        status={shownStatus}
+                        scope="source"
+                        hasPageFailed={failedPages > 0}
+                      />
                       {retry && (
                         <Popconfirm
                           title={filmRetry ? "重试影片" : canRetryPages ? "重试失败页" : "重试该站"}
@@ -177,8 +187,11 @@ export function BatchDetailDrawer({
                     <span className={styles.withIcon}>
                       <FileTextOutlined />
                       <span>
-                        页码：{formatSourcePages({ ...item, status: shownStatus })}
-                        {windowLabel ? ` · ${windowLabel}` : ""}
+                        页码：
+                        <MarkedFailureText
+                          text={`${formatSourcePages({ ...item, status: shownStatus })}${windowLabel ? ` · ${windowLabel}` : ""}`}
+                          failClassName={styles.metricFail}
+                        />
                       </span>
                     </span>
                     <span className={styles.withIcon}>

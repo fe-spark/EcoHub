@@ -34,6 +34,8 @@ type Batch interface {
 	RecordSourceError(sourceID, reason string)
 	// TouchRecord 把已写入的影片和页数落到运行中的采集记录。
 	TouchRecord()
+	// AddCategorySkip 累计分类未映射或已停用而没有入库的部数。页请求仍算成功。
+	AddCategorySkip(sourceID string, unmapped, disabled int)
 }
 
 const (
@@ -263,14 +265,13 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					page := pg
 					items := list
 					writeWG.Add(1)
-					// 停站取消这次提交。已经开始的写事务仍用独立上下文写完。
 					submitErr := scheduler.Submit(ctx, scheduler.Job{
 						SourceID:   s.Id,
 						SourceName: s.Name,
 						Page:       page,
 						Write: func() (scheduler.Mids, error) {
-							writeCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-							defer cancel()
+							writeCtx, cancelWrite := context.WithTimeout(context.Background(), 30*time.Second)
+							defer cancelWrite()
 							return deps.SavePage(writeCtx, s, page, items)
 						},
 						Complete: func(completion scheduler.Completion) {
@@ -312,6 +313,9 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 			}
 			recordPageFailure(completion.Page, completion.Stage, completion.Err)
 			continue
+		}
+		if batch != nil && (completion.Unmapped > 0 || completion.Disabled > 0) {
+			batch.AddCategorySkip(s.Id, completion.Unmapped, completion.Disabled)
 		}
 		recordPageSuccess(completion.Page, completion.NotifyMIDs, completion.AffectedMIDs)
 	}

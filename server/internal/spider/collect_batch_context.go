@@ -69,6 +69,7 @@ type collectBatchContext struct {
 	pendingFilms      map[string][]int64
 	sourceHours       map[string]int
 	sourceErrors      map[string]string
+	sourceSkips       map[string]categorySkipCount
 	sourceTargetPages map[string][]int
 	progressDirty     bool
 	flushing          bool
@@ -104,6 +105,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		pendingFilms:     make(map[string][]int64),
 		sourceHours:      make(map[string]int),
 		sourceErrors:     make(map[string]string),
+		sourceSkips:      make(map[string]categorySkipCount),
 		finishedSources:  make(map[string]model.FilmSource),
 		sourceSnapshots:  make(map[string]model.CollectRecordSourceDetail),
 		occupyTokens:     snapshotOccupyTokens(sources),
@@ -205,6 +207,38 @@ func (b *collectBatchContext) AddNotifyMIDs(sourceID string, mids []int64) {
 		}
 	}
 	b.mu.Unlock()
+}
+
+type categorySkipCount struct {
+	unmapped int
+	disabled int
+}
+
+// AddCategorySkip 实现 fetcher.Batch：累计分类未入库的部数。
+func (b *collectBatchContext) AddCategorySkip(sourceID string, unmapped, disabled int) {
+	if b == nil || (unmapped <= 0 && disabled <= 0) {
+		return
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	b.mu.Lock()
+	got := b.sourceSkips[sourceID]
+	got.unmapped += unmapped
+	got.disabled += disabled
+	b.sourceSkips[sourceID] = got
+	b.mu.Unlock()
+}
+
+func (b *collectBatchContext) CategorySkip(sourceID string) (unmapped, disabled int) {
+	if b == nil {
+		return 0, 0
+	}
+	b.mu.Lock()
+	got := b.sourceSkips[sourceID]
+	b.mu.Unlock()
+	return got.unmapped, got.disabled
 }
 
 // RecordSourceError 实现 fetcher.Batch：记录单站采集错误信息。

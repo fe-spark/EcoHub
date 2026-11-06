@@ -330,8 +330,9 @@ func loadCollectRuntimeConfig() {
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集配置: 核数=%d 写并发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
+	fmt.Printf("[Config] 采集配置: 核数=%d 内存=%s 写并发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
 		runtime.GOMAXPROCS(0),
+		collectMemoryLimitLabel(),
 		CollectWriteMaxInflight,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, srcLimit, CollectFetchInFlight,

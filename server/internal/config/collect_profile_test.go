@@ -14,6 +14,7 @@ func TestResolveCollectProfile(t *testing.T) {
 		runtime.GOMAXPROCS(prevProcs)
 		restoreCollectProfile(prev)
 	})
+	useMemoryProbe(t, "MemTotal: 8388608 kB\n", "", "")
 
 	restoreCollectProfile(highCollectProfile())
 	runtime.GOMAXPROCS(3)
@@ -32,6 +33,57 @@ func TestResolveCollectProfile(t *testing.T) {
 	resolveCollectProfile()
 	if got := collectProfileSnapshot(); got != smallCollectProfile() {
 		t.Fatalf("启动后不再改回全速档: %+v", got)
+	}
+}
+
+func TestResolveCollectProfile_SmallMemory(t *testing.T) {
+	prevProcs := runtime.GOMAXPROCS(8)
+	prev := collectProfileSnapshot()
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prevProcs)
+		restoreCollectProfile(prev)
+	})
+
+	useMemoryProbe(t, "MemTotal: 2097152 kB\n", "", "")
+	restoreCollectProfile(highCollectProfile())
+	resolveCollectProfile()
+	if got := collectProfileSnapshot(); got != smallCollectProfile() {
+		t.Fatalf("2GiB 应使用小档: %+v", got)
+	}
+
+	useMemoryProbe(t, "MemTotal: 2097153 kB\n", "", "")
+	restoreCollectProfile(highCollectProfile())
+	resolveCollectProfile()
+	if got := collectProfileSnapshot(); got != highCollectProfile() {
+		t.Fatalf("超过 2GiB 应保持全速档: %+v", got)
+	}
+
+	useMemoryProbe(t, "MemTotal: 8388608 kB\n", "2147483648\n", "")
+	restoreCollectProfile(highCollectProfile())
+	resolveCollectProfile()
+	if got := collectProfileSnapshot(); got != smallCollectProfile() {
+		t.Fatalf("cgroup 限额 2GiB 应使用小档: %+v", got)
+	}
+
+	useMemoryProbe(t, "MemTotal: 8388608 kB\n", "max\n", "")
+	restoreCollectProfile(highCollectProfile())
+	resolveCollectProfile()
+	if got := collectProfileSnapshot(); got != highCollectProfile() {
+		t.Fatalf("cgroup 无限制且内存更大应保持全速档: %+v", got)
+	}
+
+	useMemoryProbe(t, "MemTotal: 2097152 kB\n", "max\n", "9223372036854771712\n")
+	restoreCollectProfile(highCollectProfile())
+	resolveCollectProfile()
+	if got := collectProfileSnapshot(); got != smallCollectProfile() {
+		t.Fatalf("cgroup 无限制时应回退 MemTotal: %+v", got)
+	}
+
+	useMemoryProbe(t, "", "", "")
+	restoreCollectProfile(highCollectProfile())
+	resolveCollectProfile()
+	if got := collectProfileSnapshot(); got != highCollectProfile() {
+		t.Fatalf("读不到内存且核数大于 2 应保持全速档: %+v", got)
 	}
 }
 
@@ -120,4 +172,28 @@ func restoreCollectProfile(v collectProfileValues) {
 	CollectWriteMaxInflight = v.write
 	CollectWriteMaxPendingPagesPerSource = v.perSrc
 	CollectWriteMaxPendingPagesGlobal = v.global
+}
+
+func useMemoryProbe(t *testing.T, meminfo, v2, v1 string) {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		if body == "" {
+			return filepath.Join(dir, name+"-missing")
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	prevInfo, prevV2, prevV1 := meminfoPath, cgroupV2MemoryPath, cgroupV1MemoryPath
+	meminfoPath = write("meminfo", meminfo)
+	cgroupV2MemoryPath = write("memory.max", v2)
+	cgroupV1MemoryPath = write("memory.limit_in_bytes", v1)
+	t.Cleanup(func() {
+		meminfoPath = prevInfo
+		cgroupV2MemoryPath = prevV2
+		cgroupV1MemoryPath = prevV1
+	})
 }
