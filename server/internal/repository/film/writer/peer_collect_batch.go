@@ -26,6 +26,7 @@ type peerPageItem struct {
 	create       bool
 	disabled     bool
 	stale        bool
+	skipKind     int
 }
 
 // filterPeerPageDetails 丢掉无效条目。过滤无片名或无有效播放链接的数据，同一源站 vod_id 在一页里出现多次时保留最后一条。
@@ -48,9 +49,9 @@ func filterPeerPageDetails(list []model.MovieDetail) []model.MovieDetail {
 	return out
 }
 
-func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, error) {
+func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, int, int, error) {
 	if len(details) == 0 || source == nil {
-		return nil, nil, nil
+		return nil, nil, 0, 0, nil
 	}
 	items := make([]peerPageItem, len(details))
 	sourceMids := make([]int64, len(details))
@@ -63,30 +64,30 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 
 	mapped, err := loadPageMappingsTx(tx, source.Id, sourceMids)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	if err = bindMappedFilmsTx(tx, items, mapped); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	dropForeignFilms(items, source.Id)
 	if err = detachSharedSourceVodsTx(tx, source.Id, items); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	markUnmappedCreates(items)
 	if err = createPageFilmsTx(tx, source, items); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	if err = insertPageMatchKeysTx(tx, items); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	if err = upsertPageMappingsTx(tx, source.Id, items, mapped); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	if err = savePagePlaylistsTx(tx, source.Id, items); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	if err = syncPageFilmsTx(tx, source, items); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
 	newMids := make(map[int64]struct{}, len(items))
 	for i := range items {
@@ -113,9 +114,26 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 		}
 	}
 	if err = refreshRemarksAndPlaySummaryWithStampTx(tx, remarkMids, stampMids, sources); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, 0, err
 	}
-	return affected, notify, nil
+	unmapped, disabled := countCategorySkips(items)
+	return affected, notify, unmapped, disabled, nil
+}
+
+func countCategorySkips(items []peerPageItem) (unmapped, disabled int) {
+	for i := range items {
+		switch items[i].skipKind {
+		case skipKindUnmapped:
+			unmapped++
+		case skipKindDisabled:
+			disabled++
+		default:
+			if items[i].disabled {
+				disabled++
+			}
+		}
+	}
+	return unmapped, disabled
 }
 
 func loadPageMappingsTx(tx *gorm.DB, sourceID string, sourceMids []int64) (map[int64]int64, error) {
@@ -196,9 +214,9 @@ func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageIt
 		}
 		fi, err := ConvertFilmIndex(source.Id, items[i].detail, categoryVersion, ruleVersion)
 		if err != nil {
-			if IsCategoryNotMapped(err) {
-				// 未映射分类的影片不入库：跳过本片创建，不阻断整页其他有效影片入库
+			if kind := categorySkipKind(err); kind != skipKindNone {
 				items[i].create = false
+				items[i].skipKind = kind
 				continue
 			}
 			return err
@@ -304,7 +322,8 @@ func syncPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem
 	for _, idx := range order {
 		changed, err := syncOwnedFilmTx(tx, items[idx].film, source.Id, items[idx].detail)
 		if err != nil {
-			if IsCategoryNotMapped(err) {
+			if kind := categorySkipKind(err); kind != skipKindNone {
+				items[idx].skipKind = kind
 				continue
 			}
 			return err

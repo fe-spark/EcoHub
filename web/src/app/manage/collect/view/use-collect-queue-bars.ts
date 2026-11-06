@@ -6,7 +6,9 @@ import {
   computeCollectQueueProgress,
   groupCollectQueues,
   isActiveQueueView,
+  isCollectQueueBar,
   queueEndNotice,
+  resolveSearchSealBar,
 } from "./collect-queue";
 import type { SearchIndexProgress } from "./use-collect-stream";
 import type { FilmSource } from "./types";
@@ -17,10 +19,10 @@ export function useCollectQueueBars(sites: FilmSource[], searchIndex?: SearchInd
   const seqRef = useRef(new Map<string, number>());
   const nextSeqRef = useRef(1);
 
-  const queueBars = useMemo<CollectQueueBarItem[]>(
+  const allBars = useMemo<CollectQueueBarItem[]>(
     () =>
       groupCollectQueues(sites).flatMap((group) => {
-        const view = computeCollectQueueProgress(group.sourceIds, sites, searchIndex);
+        const view = computeCollectQueueProgress(group.sourceIds, sites);
         if (!view) return [];
         let seq = seqRef.current.get(group.queueId);
         if (seq == null) {
@@ -37,7 +39,20 @@ export function useCollectQueueBars(sites: FilmSource[], searchIndex?: SearchInd
           },
         ];
       }),
-    [sites, searchIndex],
+    [sites],
+  );
+  const collectQueuesRunning = allBars.some((bar) => bar.view.running);
+  const sealBar = useMemo(
+    () => resolveSearchSealBar(
+      sites.filter((site) => site.progress?.status === "sealing").length,
+      searchIndex,
+      collectQueuesRunning,
+    ),
+    [collectQueuesRunning, searchIndex, sites],
+  );
+  const queueBars = useMemo(
+    () => allBars.filter((bar) => isCollectQueueBar(bar.view, sealBar != null)),
+    [allBars, sealBar],
   );
 
   // 队列从进行中变成结束时提示一次，完成态由服务端快照继续保留展示。
@@ -45,12 +60,12 @@ export function useCollectQueueBars(sites: FilmSource[], searchIndex?: SearchInd
   const notifiedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const active = new Set(
-      queueBars.filter((bar) => isActiveQueueView(bar.view)).map((bar) => bar.queueId),
+      allBars.filter((bar) => isActiveQueueView(bar.view)).map((bar) => bar.queueId),
     );
     for (const queueId of activeRef.current) {
       if (active.has(queueId) || notifiedRef.current.has(queueId)) continue;
       notifiedRef.current.add(queueId);
-      const bar = queueBars.find((item) => item.queueId === queueId);
+      const bar = allBars.find((item) => item.queueId === queueId);
       if (!bar) continue;
       const notice = queueEndNotice(bar.view);
       message[notice.level]({
@@ -60,7 +75,7 @@ export function useCollectQueueBars(sites: FilmSource[], searchIndex?: SearchInd
       });
     }
     activeRef.current = active;
-  }, [message, queueBars]);
+  }, [allBars, message]);
 
   useEffect(() => {
     if (!stoppingQueueId) return;
@@ -91,5 +106,5 @@ export function useCollectQueueBars(sites: FilmSource[], searchIndex?: SearchInd
     [message, queueBars],
   );
 
-  return { queueBars, stoppingQueueId, stopQueue };
+  return { queueBars, sealBar, stoppingQueueId, stopQueue };
 }

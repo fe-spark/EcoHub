@@ -32,6 +32,12 @@ func TestSettleSourceStatus(t *testing.T) {
 	if status != progress.StatusDone || errMsg != "" {
 		t.Fatalf("done without error should stay done, got %s %q", status, errMsg)
 	}
+
+	msg := formatCategorySkip(2, 1)
+	status, errMsg = settleSourceStatus(progress.StatusDone, msg, 4)
+	if status != model.CollectRecordStatusPartial || errMsg != "分类未映射，跳过 2 部；分类已停用，跳过 1 部" {
+		t.Fatalf("category skip should settle partial, got %s %q", status, errMsg)
+	}
 }
 
 func TestBatchCollectStatus(t *testing.T) {

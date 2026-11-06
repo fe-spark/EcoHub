@@ -198,9 +198,8 @@ func FilmZero() error {
 func RefreshMasterDataCaches() {
 	markCategoryChanged()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.BannersKey, config.DailyUpdatesCatCacheKey)
+		db.Rdb.Del(db.Cxt, config.BannersKey)
 	}
-	cache.ClearPatterns(fmt.Sprintf("%s:*", config.DailyUpdatesCachePrefix))
 	cache.ClearTVBoxListCache()
 	cache.ClearTVBoxConfigCache()
 }

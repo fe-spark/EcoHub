@@ -3,9 +3,10 @@ import {
   type FilmSource,
 } from "./types";
 
-/** 卡片只保留 4 类采集色调：进行中、待检索、已停止、失败。 */
+/** 卡片色调。采集中出现失败页时单独用 runningFailed，和正常采集中区分。 */
 export type StatusTone =
   | "running"
+  | "runningFailed"
   | "sealing"
   | "stopped"
   | "failed"
@@ -32,8 +33,9 @@ export function resolveSourceStatus(
     if (!record.state) {
       return { label: "已终止·等待完成", tone: "stopped" };
     }
-    // 排队、抓页、停止中统一显示为采集中，减少状态文案。
-    return { label: "采集中", tone: "running" };
+    // 排队、抓页、停止中统一显示为采集中。有失败页时换红色，圆点仍表示进行中。
+    const failed = record.progress?.failed ?? 0;
+    return { label: "采集中", tone: failed > 0 ? "runningFailed" : "running" };
   }
 
   // 非活跃态：残留进度反映真实终态

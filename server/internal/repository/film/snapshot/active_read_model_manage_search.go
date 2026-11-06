@@ -109,7 +109,7 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 		}
 		window := make([]FilmSearchMeta, 0, end-offset)
 		for _, hit := range hits[offset:end] {
-			window = append(window, idx.Items[hit])
+			window = append(window, *idx.Items[hit])
 		}
 		return window, total, nil
 	}
@@ -121,7 +121,7 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 		if i < 0 || i >= len(idx.Items) {
 			return nil, 0, fmt.Errorf("检索索引损坏")
 		}
-		meta := &idx.Items[i]
+		meta := idx.Items[i]
 		if !filterCtx.pass(meta) {
 			continue
 		}
@@ -247,7 +247,7 @@ func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, filterCtx *ma
 		if i < 0 || i >= len(idx.Items) {
 			return nil, fmt.Errorf("检索索引损坏")
 		}
-		meta := &idx.Items[i]
+		meta := idx.Items[i]
 		if !filterCtx.pass(meta) {
 			continue
 		}
@@ -258,7 +258,7 @@ func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, filterCtx *ma
 		hits = append(hits, scored{index: i, score: score})
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
-		a, b := &idx.Items[hits[i].index], &idx.Items[hits[j].index]
+		a, b := idx.Items[hits[i].index], idx.Items[hits[j].index]
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
 		}

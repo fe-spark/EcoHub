@@ -76,15 +76,12 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 
 		for mid, cmd := range cmds {
 			val, err := cmd.Result()
-			if err == nil && val != "" {
-				if val == "{}" {
-					cachedVos[mid] = &model.MovieDetailVo{}
-				} else {
-					var vo model.MovieDetailVo
-					if json.Unmarshal([]byte(val), &vo) == nil {
-						cachedVos[mid] = &vo
-					}
-				}
+			if err != nil || val == "" || val == "{}" {
+				continue
+			}
+			var vo model.MovieDetailVo
+			if json.Unmarshal([]byte(val), &vo) == nil {
+				cachedVos[mid] = &vo
 			}
 		}
 	}
@@ -100,9 +97,10 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 	}
 
 	var batchPlaylists map[int64][]model.PlayLinkVo
+	var broken map[int64]struct{}
 	if len(uncachedMids) > 0 {
 		var err error
-		batchPlaylists, err = BatchGetPlayPlaylistsByMids(uncachedMids)
+		batchPlaylists, broken, err = BatchGetPlayPlaylistsByMids(uncachedMids)
 		if err != nil {
 			return nil, err
 		}
@@ -115,6 +113,9 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 	}
 	for _, s := range snapshots {
 		if !support.IsCategoryVisible(s.Cid, s.Pid) {
+			continue
+		}
+		if _, bad := broken[s.Mid]; bad {
 			continue
 		}
 		voPtr, ok := cachedVos[s.Mid]
@@ -169,12 +170,11 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 	var playUrlList []string
 
 	for _, source := range movieDetailVo.List {
-		playFromList = append(playFromList, providePlayFromName(source))
+		playFromList = append(playFromList, strings.TrimSpace(source.Name))
 
 		var linkStrs []string
 		for _, link := range source.LinkList {
-			playLink := link.Link
-			linkStrs = append(linkStrs, fmt.Sprintf("%s$%s", link.Episode, strings.ReplaceAll(playLink, "$", "")))
+			linkStrs = append(linkStrs, providePlayItem(link.Episode, link.Link))
 		}
 		playUrlList = append(playUrlList, strings.Join(linkStrs, "#"))
 	}
@@ -221,4 +221,11 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		VodScore:    movieDetailVo.DbScore,
 		VodContent:  movieDetailVo.Content,
 	}, nil
+}
+
+// providePlayItem 把一集拼成电视端的「集名$地址」。集名里的分隔符改成全角，地址里的分隔符改成百分号编码。
+func providePlayItem(episode, link string) string {
+	episode = strings.NewReplacer("$", "＄", "#", "＃").Replace(episode)
+	link = strings.NewReplacer("$", "%24", "#", "%23").Replace(link)
+	return episode + "$" + link
 }

@@ -244,7 +244,7 @@ func pageTagMids(idx *filmSearchMetaIndex, match func(*FilmSearchMeta) bool, sor
 		total := 0
 		mids := make([]int64, 0, limit)
 		for _, pos := range idx.ByUpdate {
-			if pos < 0 || pos >= len(idx.Items) || !match(&idx.Items[pos]) {
+			if pos < 0 || pos >= len(idx.Items) || !match(idx.Items[pos]) {
 				continue
 			}
 			if total >= offset && len(mids) < limit {
@@ -263,13 +263,13 @@ func pageTagMids(idx *filmSearchMetaIndex, match func(*FilmSearchMeta) bool, sor
 	}
 	cands := make([]int, 0)
 	for _, pos := range iter {
-		if pos < 0 || pos >= len(idx.Items) || !match(&idx.Items[pos]) {
+		if pos < 0 || pos >= len(idx.Items) || !match(idx.Items[pos]) {
 			continue
 		}
 		cands = append(cands, pos)
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
-		return tagRankBefore(sortField, &idx.Items[cands[i]], &idx.Items[cands[j]])
+		return tagRankBefore(sortField, idx.Items[cands[i]], idx.Items[cands[j]])
 	})
 	return midsFromPositions(idx, cands, offset, limit), len(cands)
 }
@@ -357,13 +357,13 @@ func countSourceTypeTagsFromIndex(version string, keys []string) (map[string]map
 				if pos < 0 || pos >= len(idx.Items) {
 					continue
 				}
-				countItem(&idx.Items[pos])
+				countItem(idx.Items[pos])
 			}
 		}
 		return counts, nil
 	}
 	for i := range idx.Items {
-		item := &idx.Items[i]
+		item := idx.Items[i]
 		if _, ok := allow[item.CategoryKey]; !ok {
 			continue
 		}

@@ -29,6 +29,7 @@ import {
   formatCollectPages,
   formatDuration,
   formatStartedAt,
+  splitFailureMarks,
 } from "./record-format";
 import styles from "./index.module.less";
 
@@ -138,7 +139,30 @@ export function renderHourTag(hour: number, record?: { trigger?: string; tag?: s
 
 export { resolveBatchStatus };
 
-export function RecordStatusMark({ status, scope }: { status: string; scope: "batch" | "source" }) {
+export function MarkedFailureText({ text, failClassName }: { text: string; failClassName: string }) {
+  return (
+    <>
+      {splitFailureMarks(text).map((part, index) =>
+        part.fail ? (
+          <span key={index} className={failClassName}>{part.text}</span>
+        ) : (
+          part.text
+        ),
+      )}
+    </>
+  );
+}
+
+export function RecordStatusMark({
+  status,
+  scope,
+  hasPageFailed = false,
+}: {
+  status: string;
+  scope: "batch" | "source";
+  /** 仍在采集，但本轮已经有失败页。 */
+  hasPageFailed?: boolean;
+}) {
   const batch = scope === "batch";
   let icon = <ExclamationCircleOutlined />;
   let label = status || "未知";
@@ -167,12 +191,13 @@ export function RecordStatusMark({ status, scope }: { status: string; scope: "ba
     case "running":
       icon = <SyncOutlined spin />;
       label = batch ? "执行中" : "采集中";
-      className = styles.detailRun;
+      className = hasPageFailed ? styles.detailFail : styles.detailRun;
       break;
     case "starting":
     case "waiting":
       icon = <ClockCircleOutlined />;
       label = "排队中";
+      if (hasPageFailed) className = styles.detailFail;
       break;
     case "stopped":
       icon = <PauseCircleOutlined />;
@@ -280,7 +305,13 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       dataIndex: "status",
       key: "status",
       width: "9%",
-      render: (_: string, record) => renderStatusBadge(resolveBatchStatus(record)),
+      render: (_: string, record) => (
+        <RecordStatusMark
+          status={resolveBatchStatus(record)}
+          scope="batch"
+          hasPageFailed={(record.pageFailed ?? 0) > 0}
+        />
+      ),
     },
     {
       title: columnTitle(<CloudServerOutlined />, "站点"),
@@ -343,7 +374,9 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
               {pages.primary}
             </span>
             {pages.secondary ? (
-              <span className={`${styles.statRow} ${styles.statTotal}`}>{pages.secondary}</span>
+              <span className={`${styles.statRow} ${styles.statTotal}`}>
+                <MarkedFailureText text={pages.secondary} failClassName={styles.metricFail} />
+              </span>
             ) : null}
           </div>
         );

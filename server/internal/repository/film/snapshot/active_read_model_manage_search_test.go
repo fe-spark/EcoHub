@@ -49,9 +49,13 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 			CategoryKey: "source:3370810636:2",
 		}
 	}
+	ptrs := make([]*FilmSearchMeta, len(items))
+	for i := range items {
+		ptrs[i] = &items[i]
+	}
 	idx := &filmSearchMetaIndex{
 		Version:  "v_bench",
-		Items:    items,
+		Items:    ptrs,
 		ByUpdate: byUpdate,
 	}
 

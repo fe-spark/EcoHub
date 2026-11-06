@@ -15,6 +15,14 @@ export function formatDuration(ms: number): string {
   return `${hours} 小时 ${remainingMin} 分`;
 }
 
+/** 把文案里的「失败 N」和「失败 N 页」拆出来，方便单独上色。 */
+export function splitFailureMarks(text: string): { text: string; fail: boolean }[] {
+  return text.split(/(失败 \d+(?: 页)?)/).filter((part) => part !== "").map((part) => ({
+    text: part,
+    fail: /^失败 \d+/.test(part),
+  }));
+}
+
 function pageMissed(succ: number, fail: number, total: number): number {
   if (total <= 0) return 0;
   return Math.max(0, total - succ - fail);
@@ -64,7 +72,8 @@ export function formatCollectPages(record: {
     return {
       primary: total > 0 ? `成功 ${succ} / 共 ${total} 页` : `已拉取 ${succ} 页`,
       secondary: total > 0 ? `拉取中 · ${percent}%${failNote}` : "正在探测页码",
-      alert: fail > 0,
+      // 个别失败页不把成功进度整行标红，只在副文案里标出失败数。
+      alert: false,
     };
   }
   if (fail > 0) {

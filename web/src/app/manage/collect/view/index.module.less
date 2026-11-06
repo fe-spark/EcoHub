@@ -208,6 +208,11 @@
   --card-accent: #ff7a00;
 }
 
+/* 采集中且已有失败页 */
+.toneRunningFailed {
+  --card-accent: #ff4d4f;
+}
+
 /* 已启用：平静的绿色细条 */
 .toneEnabled {
   --card-accent: #52c41a;
@@ -368,6 +373,10 @@
   --card-accent: #ff7a00;
 }
 
+.sourceCardMaster.toneRunningFailed {
+  --card-accent: #ff4d4f;
+}
+
 .sourceCardMaster.toneEnabled {
   --card-accent: #faad14;
 }
@@ -426,6 +435,15 @@
 }
 
 .statusRunning .statusDot {
+  animation: statusPulse 1.2s ease-in-out infinite;
+}
+
+.statusRunningFailed {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.1);
+}
+
+.statusRunningFailed .statusDot {
   animation: statusPulse 1.2s ease-in-out infinite;
 }
 

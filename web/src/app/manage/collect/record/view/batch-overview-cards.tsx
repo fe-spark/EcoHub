@@ -14,6 +14,7 @@ import { CollectHistoryRecord, CollectRecordSourceDetail } from "./types";
 import { formatDuration, formatPageLedger } from "./record-format";
 import {
   isSingleFilmRecord,
+  MarkedFailureText,
   renderHourTag,
   renderTriggerTag,
   resolveBatchStatus,
@@ -54,7 +55,11 @@ function renderSourceKpi(
   let subText = "";
 
   if (isOngoing) {
-    tagNode = <Tag color="processing" bordered={false} className={styles.kpiTag}>采集中</Tag>;
+    tagNode = (
+      <Tag color={(record.pageFailed ?? 0) > 0 ? "error" : "processing"} bordered={false} className={styles.kpiTag}>
+        采集中
+      </Tag>
+    );
     subText = "尚未结算";
   } else if (isOk) {
     tagNode = <Tag color="success" bordered={false} className={styles.kpiTag}>全部成功</Tag>;
@@ -135,7 +140,11 @@ function renderPageKpi(record: CollectHistoryRecord) {
   let subText = "";
 
   if (isOngoing) {
-    tagNode = <Tag color="processing" bordered={false} className={styles.kpiTag}>拉取中</Tag>;
+    tagNode = (
+      <Tag color={fail > 0 ? "error" : "processing"} bordered={false} className={styles.kpiTag}>
+        拉取中
+      </Tag>
+    );
     if (total > 0) {
       heroNumberNode = (
         <>
@@ -224,7 +233,7 @@ function renderPageKpi(record: CollectHistoryRecord) {
           {heroNumberNode}
         </div>
         <div className={styles.kpiFooterSub} title={subText}>
-          {subText}
+          <MarkedFailureText text={subText} failClassName={styles.kpiFail} />
         </div>
       </div>
     </div>

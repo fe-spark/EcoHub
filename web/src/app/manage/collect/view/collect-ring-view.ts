@@ -63,6 +63,10 @@ export function resolveRingView(progress?: CollectProgress | null): RingView | n
   const failed = progress.failed ?? 0;
   const fullFail = progress.status === "failed" && (progress.success ?? 0) === 0;
   const partialFail = failed > 0 && !fullFail;
+  const scraping =
+    progress.status === "starting" ||
+    progress.status === "running" ||
+    progress.status === "stopping";
   const tooltip = collectTooltip(progress);
   if (fullFail) {
     return { percent: collectPercent(progress), tone: "error", solid: false, center: "fail", tooltip };
@@ -78,7 +82,8 @@ export function resolveRingView(progress?: CollectProgress | null): RingView | n
   }
   return {
     percent: collectPercent(progress),
-    tone: partialFail ? "warning" : "primary",
+    // 采集中的失败页用错误色，和正常采集的主色拉开。结束后的部分失败仍用警告色。
+    tone: partialFail ? (scraping ? "error" : "warning") : "primary",
     solid: false,
     center: "percent",
     tooltip,

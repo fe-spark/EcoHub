@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"log"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -25,29 +26,31 @@ func readCache(key string) (string, bool, error) {
 	return data, true, nil
 }
 
-// writeCache 写入配置缓存。写入失败时删除该键，删除也失败则返回错误。
+// writeCache 写入配置缓存。写入失败时删除旧键，避免落库后的新配置继续命中旧值。
+// 删除也失败才返回错误。
 func writeCache(key, payload string) error {
 	if db.Rdb == nil || key == "" {
 		return nil
 	}
 	if err := db.Rdb.Set(db.Cxt, key, payload, config.ConfigCacheTTL).Err(); err != nil {
-		if delErr := db.Rdb.Del(db.Cxt, key).Err(); delErr != nil {
-			return fmt.Errorf("写入缓存失败: %v; 删除缓存失败: %v", err, delErr)
+		if delErr := dropCache(key); delErr != nil {
+			log.Printf("[Config] 写入缓存失败且旧键删除失败 key=%s set=%v del=%v", key, err, delErr)
+			return fmt.Errorf("写入缓存失败: %v; 删除缓存失败: %w", err, delErr)
 		}
-		return fmt.Errorf("写入缓存失败: %w", err)
+		log.Printf("[Config] 写入缓存失败，已删除旧键 key=%s err=%v", key, err)
+		return nil
 	}
 	return nil
 }
 
-// fillCache 用数据库结果回填缓存。写入失败且旧键已删除时不阻断本次读取。
+// fillCache 用数据库结果回填缓存。写入失败只记日志，不挡住这次已经读到的结果。
 func fillCache(key, payload string) error {
 	if db.Rdb == nil || key == "" {
 		return nil
 	}
 	if err := db.Rdb.Set(db.Cxt, key, payload, config.ConfigCacheTTL).Err(); err != nil {
-		if delErr := db.Rdb.Del(db.Cxt, key).Err(); delErr != nil {
-			return fmt.Errorf("回填缓存失败: %v; 删除缓存失败: %v", err, delErr)
-		}
+		log.Printf("[Config] 回填缓存失败 key=%s err=%v", key, err)
+		return nil
 	}
 	return nil
 }

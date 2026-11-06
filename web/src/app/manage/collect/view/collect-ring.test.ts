@@ -33,15 +33,19 @@ test("完成时环和勾用同一个成功色", () => {
   assert.equal(view?.center, "success");
 });
 
-test("有失败页时环和中间内容都用警告色", () => {
-  const done = resolveRingView(progress({ status: "done", success: 8, failed: 2 }));
-  assert.equal(done?.tone, "warning");
-  assert.equal(done?.center, "success");
+test("采集中有失败页时环用错误色，完成后的部分失败仍用警告色", () => {
   const running = resolveRingView(
     progress({ status: "running", current: 4, success: 3, failed: 1 }),
   );
-  assert.equal(running?.tone, "warning");
+  assert.equal(running?.tone, "error");
   assert.equal(running?.center, "percent");
+  const stopping = resolveRingView(
+    progress({ status: "stopping", current: 4, success: 3, failed: 1 }),
+  );
+  assert.equal(stopping?.tone, "error");
+  const done = resolveRingView(progress({ status: "done", success: 8, failed: 2 }));
+  assert.equal(done?.tone, "warning");
+  assert.equal(done?.center, "success");
 });
 
 test("全部失败时环和叉用同一个错误色", () => {

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -154,19 +154,13 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 	}
 
 	sentinelKey := fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, nonExistentMid)
-	sentinelVal, err := mr.Get(sentinelKey)
-	if err != nil || sentinelVal != "{}" {
-		t.Fatalf("expected sentinel '{}' in redis, got %q, err: %v", sentinelVal, err)
-	}
-	sentinelTTL := mr.TTL(sentinelKey)
-	if sentinelTTL <= 0 || sentinelTTL > 60*time.Second {
-		t.Fatalf("expected sentinel ttl <= 60s, got %v", sentinelTTL)
+	if mr.Exists(sentinelKey) {
+		t.Fatalf("missing film must not be cached")
 	}
 
-	// 再次请求该不存在的影片，确认命中哨兵快速返回
 	res2, _ := IndexSvc.GetFilmDetail(nonExistentMid)
 	if res2.Id != 0 {
-		t.Fatalf("expected empty detail from sentinel")
+		t.Fatalf("expected empty detail for missing film")
 	}
 
 	// 2. 插入正常影片与详情
@@ -517,45 +511,28 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 	}
 
 	sentinelKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, nonExistentMid, 1, 10)
-	val, err := mr.Get(sentinelKey)
-	if err != nil || val != "[]" {
-		t.Fatalf("expected '[]' sentinel in redis, got %q, err: %v", val, err)
-	}
-	ttl := mr.TTL(sentinelKey)
-	if ttl <= 0 || ttl > 60*time.Second {
-		t.Fatalf("expected sentinel ttl <= 60s, got %v", ttl)
+	if mr.Exists(sentinelKey) {
+		t.Fatalf("relate must not write an empty front cache")
 	}
 
-	// 再次请求该不存在的影片，验证直接命中 "[]" 哨兵
 	resEmpty2, relateErr := IndexSvc.RelateMovie(nonExistentMid, page)
 	if relateErr != nil {
-		t.Fatalf("relate sentinel: %v", relateErr)
+		t.Fatalf("relate again: %v", relateErr)
 	}
 	if len(resEmpty2) != 0 {
-		t.Fatalf("expected empty relate from sentinel")
+		t.Fatalf("expected empty relate for missing film")
 	}
 
-	// 3. 请求相关推荐
 	relList, relateErr := IndexSvc.RelateMovie(validMid, page)
 	if relateErr != nil {
 		t.Fatalf("relate list: %v", relateErr)
 	}
 	relCacheKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, validMid, 1, 10)
-	cachedVal, err := mr.Get(relCacheKey)
-	if err != nil || cachedVal == "" {
-		t.Fatalf("expected relate cache key %s to exist", relCacheKey)
+	if mr.Exists(relCacheKey) {
+		t.Fatalf("relate result must not be cached again at %s", relCacheKey)
 	}
-	relTTL := mr.TTL(relCacheKey)
-	if len(relList) > 0 {
-		// 正常结果缓存 1 小时
-		if relTTL <= 50*time.Minute || relTTL > time.Hour {
-			t.Fatalf("expected normal relate cache ttl around 1h, got %v", relTTL)
-		}
-	} else {
-		// 无推荐缓存 60 秒
-		if relTTL <= 0 || relTTL > 60*time.Second {
-			t.Fatalf("expected empty relate ttl <= 60s, got %v", relTTL)
-		}
+	if len(relList) == 0 {
+		t.Fatalf("expected related films")
 	}
 }
 

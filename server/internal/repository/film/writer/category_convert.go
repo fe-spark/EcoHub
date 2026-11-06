@@ -18,6 +18,25 @@ var (
 	ErrCategoryDisabled  = errors.New("影片分类已停用")
 )
 
+const (
+	skipKindNone     = 0
+	skipKindUnmapped = 1
+	skipKindDisabled = 2
+)
+
+func categorySkipKind(err error) int {
+	if err == nil {
+		return skipKindNone
+	}
+	if errors.Is(err, ErrCategoryDisabled) || strings.Contains(err.Error(), "影片分类已停用") {
+		return skipKindDisabled
+	}
+	if IsCategoryNotMapped(err) {
+		return skipKindUnmapped
+	}
+	return skipKindNone
+}
+
 func IsCategoryNotMapped(err error) bool {
 	if err == nil {
 		return false

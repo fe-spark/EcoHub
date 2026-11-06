@@ -142,7 +142,7 @@ export function BatchFilmsModal({
       onCancel={onClose}
       footer={null}
       width={740}
-      destroyOnClose
+      destroyOnHidden
       title={
         <div className={styles.modalHeader}>
           <div className={styles.headerIconWrap}>

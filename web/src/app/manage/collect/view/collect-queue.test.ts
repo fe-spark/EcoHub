@@ -5,6 +5,8 @@ import {
   groupCollectQueues,
   isActiveQueueView,
   queueEndNotice,
+  isCollectQueueBar,
+  resolveSearchSealBar,
   sameCollectProgress,
 } from "./collect-queue";
 import type { FilmSource } from "./types";
@@ -90,33 +92,38 @@ test("computeCollectQueueProgress 按页数汇总进度", () => {
   assert.equal(view?.sealing, false);
 });
 
-test("采集完的站点进入待检索，队列保持活跃并复用封口进度", () => {
+test("还有采集队列时不出现检索进度，队列都结束后才单独成条", () => {
+  const indexing = { status: "indexing", percent: 30, current: 286000, total: 953221 };
+  assert.equal(resolveSearchSealBar(12, indexing, true), null);
+  assert.equal(isCollectQueueBar({ running: false, sealing: true }, false), true);
+  assert.equal(isCollectQueueBar({ running: true, sealing: true }, true), true);
+  assert.equal(isCollectQueueBar({ running: false, sealing: true }, true), false);
+  assert.equal(resolveSearchSealBar(0, indexing, false), null);
+  assert.deepEqual(resolveSearchSealBar(12, indexing, false), {
+    phase: "indexing",
+    percent: 30,
+    current: 286000,
+    total: 953221,
+    sealingCount: 12,
+  });
+  assert.equal(
+    resolveSearchSealBar(12, { status: "waiting", percent: 0, current: 0, total: 0 }, false)?.phase,
+    "waiting",
+  );
+});
+
+test("待检索队列按页数计进度，不借用全库检索数字", () => {
   const sites = [
     site("a", progress("a", "q-1", "sealing", { total: 10, success: 10, failed: 0 })),
     site("b", progress("b", "q-1", "sealing", { total: 5, success: 5, failed: 0 })),
   ];
-  const waiting = computeCollectQueueProgress(["a", "b"], sites, {
-    status: "waiting",
-    percent: 0,
-    current: 0,
-    total: 0,
-  });
+  const waiting = computeCollectQueueProgress(["a", "b"], sites);
   assert.equal(waiting?.sealing, true);
   assert.equal(waiting?.running, false);
   assert.equal(waiting?.sealingCount, 2);
-  assert.equal(waiting?.percent, 0);
+  assert.equal(waiting?.pageDone, 15);
+  assert.equal(waiting?.percent, 100);
   assert.equal(isActiveQueueView(waiting!), true);
-
-  const indexing = computeCollectQueueProgress(["a", "b"], sites, {
-    status: "indexing",
-    percent: 42,
-    current: 8400,
-    total: 20000,
-  });
-  assert.equal(indexing?.sealIndexing, true);
-  assert.equal(indexing?.percent, 42);
-  assert.equal(indexing?.sealCurrent, 8400);
-  assert.equal(indexing?.sealTotal, 20000);
 });
 
 test("封口完成收成 done 后队列才算结束", () => {

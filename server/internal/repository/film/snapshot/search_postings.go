@@ -75,9 +75,9 @@ func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 	return posts
 }
 
-func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMeta, upsertMap map[int64]FilmSearchMeta, posMap map[int64]int) *searchPostings {
+func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []*FilmSearchMeta, upsertMap map[int64]FilmSearchMeta, posMap map[int64]int) *searchPostings {
 	if cur == nil || cur.SearchPosts == nil || len(cur.SearchPosts.runes) == 0 && len(cur.SearchPosts.ascii) == 0 {
-		return buildSearchPostings(items)
+		return buildSearchPostingsPtrs(items)
 	}
 	type changed struct {
 		pos  int32
@@ -90,7 +90,7 @@ func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMet
 			continue
 		}
 		if pos < len(cur.Items) {
-			old := &cur.Items[pos]
+			old := cur.Items[pos]
 			if old.Item.CleanName == meta.Item.CleanName &&
 				old.Item.PinyinInitials == meta.Item.PinyinInitials &&
 				old.Item.PinyinInitialAlts == meta.Item.PinyinInitialAlts &&
@@ -117,6 +117,17 @@ func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMet
 	ownedA := make(map[string]struct{})
 	for _, ch := range modified {
 		appendSingleItemPostingsCOW(posts, ch.pos, &ch.meta, ownedR, ownedA)
+	}
+	return posts
+}
+
+func buildSearchPostingsPtrs(items []*FilmSearchMeta) *searchPostings {
+	posts := &searchPostings{
+		runes: make(map[rune][]int32, 4096),
+		ascii: make(map[string][]int32, 4096),
+	}
+	for i, item := range items {
+		appendSingleItemPostings(posts, int32(i), item)
 	}
 	return posts
 }
@@ -230,7 +241,7 @@ func TopSourceFilmNames(sourceID string, limit int) ([]string, error) {
 func namesByHits(idx *filmSearchMetaIndex, limit int, keep func(*FilmSearchMeta) bool) []string {
 	pools := map[string][]rankCand{}
 	for i := range idx.Items {
-		item := &idx.Items[i]
+		item := idx.Items[i]
 		if item.Mid <= 0 || !keep(item) {
 			continue
 		}

@@ -2,6 +2,7 @@ package spider
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -179,6 +180,17 @@ func emitBatchNotify(b *collectBatchContext) {
 		Sources:    results,
 		NotifyMIDs: mids,
 	})
+}
+
+func formatCategorySkip(unmapped, disabled int) string {
+	parts := make([]string, 0, 2)
+	if unmapped > 0 {
+		parts = append(parts, fmt.Sprintf("分类未映射，跳过 %d 部", unmapped))
+	}
+	if disabled > 0 {
+		parts = append(parts, fmt.Sprintf("分类已停用，跳过 %d 部", disabled))
+	}
+	return strings.Join(parts, "；")
 }
 
 func settleSourceStatus(status, errMsg string, successCnt int) (string, string) {

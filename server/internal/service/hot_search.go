@@ -91,6 +91,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) ([
 			}
 		}
 
+		listGen := filmsnapshot.GetSearchCacheVersion()
 		names, err := filmsnapshot.TopSourceFilmNames(sourceID, hotSearchMaxLimit*3)
 		if err != nil {
 			return nil, err
@@ -119,7 +120,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) ([
 				ttl = 60 * time.Second
 			}
 			if raw, err := json.Marshal(topKeywords); err == nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(raw), ttl, listGen)
 			}
 		}
 		return topKeywords, nil
