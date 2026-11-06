@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Descriptions, Select, Statistic, Tag, Typography } from "antd";
+import { Card, Descriptions, Select, Statistic, Tag, Tooltip, Typography } from "antd";
 import Link from "next/link";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -216,14 +216,16 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
               )}
             </Descriptions.Item>
             <Descriptions.Item label="接口地址">
-              <Typography.Link
-                href={topSite.uri}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={styles.masterLink}
-              >
-                {topSite.uri}
-              </Typography.Link>
+              <Tooltip title={topSite.uri}>
+                <Typography.Link
+                  href={topSite.uri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.masterLink}
+                >
+                  {topSite.uri}
+                </Typography.Link>
+              </Tooltip>
             </Descriptions.Item>
             <Descriptions.Item label="启用状态">
               <Tag color={topSite.state ? "success" : "default"} variant="filled">

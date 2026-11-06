@@ -38,6 +38,25 @@ func TestNoteCollectSourceStatsCoalescesPending(t *testing.T) {
 	}
 }
 
+func TestNoteCollectSourceStatsAtKeepsStartTime(t *testing.T) {
+	ResetCollectStatsCoalescer()
+	started := time.Date(2026, 11, 6, 10, 0, 0, 0, time.Local)
+	collectStats.mu.Lock()
+	collectStats.minInterval = time.Hour
+	collectStats.lastFlushed["src-start"] = time.Now()
+	collectStats.mu.Unlock()
+
+	NoteCollectSourceStatsAt("src-start", started)
+	NoteCollectSourceStatsAt("src-start", time.Time{})
+
+	collectStats.mu.Lock()
+	got := collectStats.pending["src-start"]
+	collectStats.mu.Unlock()
+	if !got.Equal(started) {
+		t.Fatalf("pending = %v, want %v", got, started)
+	}
+}
+
 func TestSuppressCollectSourceStatsIgnoresNote(t *testing.T) {
 	ResetCollectStatsCoalescer()
 	collectStats.mu.Lock()

@@ -61,14 +61,12 @@ func TestPersistCollectRecord(t *testing.T) {
 			PageCurrent: 2,
 			SuccessCnt:  1,
 			FailedCnt:   1,
+			FailedPages: []int{3, 4},
 			FilmsTotal:  3,
 			Error:       "连接超时",
 		},
 	}
-	mids := []int64{101, 102, 103}
-	errs := map[string]string{src2.Id: "连接超时"}
-
-	persistCollectRecord(batch, results, mids, errs)
+	persistCollectRecord(batch, results)
 
 	// 等待异步完成写入
 	time.Sleep(100 * time.Millisecond)
@@ -90,11 +88,14 @@ func TestPersistCollectRecord(t *testing.T) {
 	if rec.Hour != 24 {
 		t.Fatalf("expected hour 24, got %d", rec.Hour)
 	}
-	if rec.FilmCount != 3 {
-		t.Fatalf("expected film count 3, got %d", rec.FilmCount)
+	if rec.FilmCount != 28 {
+		t.Fatalf("expected film count 28, got %d", rec.FilmCount)
 	}
 	if rec.PageTotal != 15 || rec.PageSuccess != 11 || rec.PageFailed != 1 {
 		t.Fatalf("unexpected pages: total=%d, succ=%d, fail=%d", rec.PageTotal, rec.PageSuccess, rec.PageFailed)
+	}
+	if !strings.Contains(rec.DetailJson, `"failedPages":[3,4]`) {
+		t.Fatalf("detail dropped failed pages: %s", rec.DetailJson)
 	}
 }
 
@@ -286,7 +287,7 @@ func TestPersistCollectRecord_StopAfterDoneStaysStopped(t *testing.T) {
 	persistCollectRecord(batch, []model.SourceNotifyResult{
 		{SourceID: src1.Id, SourceName: src1.Name, Status: progress.StatusDone, PageTotal: 2, SuccessCnt: 2},
 		{SourceID: src2.Id, SourceName: src2.Name, Status: progress.StatusStopped, PageTotal: 2, PageCurrent: 1},
-	}, nil, nil)
+	})
 
 	list, _, err := repository.GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
 	if err != nil || len(list) != 1 {
@@ -448,10 +449,10 @@ func TestCheckpointKeepsWrittenFilmsAfterInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Status != model.CollectRecordStatusRunning || rec.FilmCount != 2 || rec.Hour != 48 {
+	if rec.Status != model.CollectRecordStatusRunning || rec.FilmCount != 2 || rec.Hour != 24 {
 		t.Fatalf("running record status=%s films=%d hour=%d", rec.Status, rec.FilmCount, rec.Hour)
 	}
-	if !strings.Contains(rec.DetailJson, `"filmsTotal":2`) {
+	if !strings.Contains(rec.DetailJson, `"filmsTotal":2`) || !strings.Contains(rec.DetailJson, `"hour":48`) {
 		t.Fatalf("detail = %s", rec.DetailJson)
 	}
 
@@ -462,7 +463,10 @@ func TestCheckpointKeepsWrittenFilmsAfterInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Status != model.CollectRecordStatusInterrupted || rec.FilmCount != 2 || rec.Hour != 48 {
+	if rec.Status != model.CollectRecordStatusInterrupted || rec.FilmCount != 2 || rec.Hour != 24 {
 		t.Fatalf("interrupted record status=%s films=%d hour=%d", rec.Status, rec.FilmCount, rec.Hour)
+	}
+	if !strings.Contains(rec.DetailJson, `"hour":48`) {
+		t.Fatalf("interrupt dropped source hour: %s", rec.DetailJson)
 	}
 }

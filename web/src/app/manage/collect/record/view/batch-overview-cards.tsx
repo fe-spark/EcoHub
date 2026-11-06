@@ -11,7 +11,7 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { CollectHistoryRecord, CollectRecordSourceDetail } from "./types";
-import { formatDuration } from "./record-format";
+import { formatDuration, formatPageLedger } from "./record-format";
 import {
   isSingleFilmRecord,
   renderHourTag,
@@ -34,10 +34,12 @@ function renderSourceKpi(
   record: CollectHistoryRecord,
   abnormalCount: number,
   stoppedSources: CollectRecordSourceDetail[],
-  doneSources: CollectRecordSourceDetail[]
+  doneSources: CollectRecordSourceDetail[],
+  interruptedCount: number,
 ) {
   const isOngoing = isBatchOngoing(record.status);
-  const isStopped = record.status === "stopped" || record.status === "interrupted";
+  const isStopped = record.status === "stopped";
+  const isInterrupted = record.status === "interrupted";
   const isFailed = resolveBatchStatus(record) === "failed";
   const isOk =
     abnormalCount === 0 &&
@@ -45,7 +47,8 @@ function renderSourceKpi(
     record.failedSources === 0 &&
     record.pageFailed === 0 &&
     !isOngoing &&
-    !isStopped;
+    !isStopped &&
+    !isInterrupted;
 
   let tagNode: React.ReactNode = null;
   let subText = "";
@@ -59,6 +62,11 @@ function renderSourceKpi(
   } else if (isFailed) {
     tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>采集失败</Tag>;
     subText = "未能完成采集";
+  } else if (isInterrupted) {
+    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>异常中断</Tag>;
+    subText = interruptedCount > 0
+      ? `${interruptedCount} 站中断`
+      : `${doneSources.length} / ${record.sourceCount} 站成功`;
   } else if (isStopped) {
     tagNode = <Tag color="default" bordered={false} className={styles.kpiTag}>已停止</Tag>;
     subText = `${doneSources.length} / ${record.sourceCount} 站成功`;
@@ -116,8 +124,11 @@ function renderPageKpi(record: CollectHistoryRecord) {
   const total = Math.max(0, record.pageTotal ?? 0);
   const fail = Math.max(0, record.pageFailed ?? 0);
   const isOngoing = isBatchOngoing(record.status);
-  const isStopped = record.status === "stopped" || record.status === "interrupted";
+  const isStopped = record.status === "stopped";
+  const isInterrupted = record.status === "interrupted";
   const isFailed = record.status === "failed";
+  const ledger = formatPageLedger(succ, fail, total);
+  const missed = total > 0 ? Math.max(0, total - succ - fail) : 0;
 
   let tagNode: React.ReactNode = null;
   let heroNumberNode: React.ReactNode = null;
@@ -133,7 +144,7 @@ function renderPageKpi(record: CollectHistoryRecord) {
         </>
       );
       const percent = Math.min(100, Math.floor((succ / total) * 100));
-      subText = `进度 ${percent}%${fail > 0 ? ` · ${fail} 页失败` : ""}`;
+      subText = `进度 ${percent}%${fail > 0 ? ` · 失败 ${fail}` : ""}`;
     } else {
       heroNumberNode = (
         <>
@@ -143,25 +154,15 @@ function renderPageKpi(record: CollectHistoryRecord) {
       );
       subText = "正在探测页码";
     }
-  } else if (fail > 0) {
-    tagNode = <Tag color="warning" bordered={false} className={styles.kpiTag}>{fail} 页失败</Tag>;
+  } else if (isInterrupted) {
+    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>异常中断</Tag>;
     heroNumberNode = (
       <>
-        <span className={styles.kpiHeroNumberWarn}>{succ.toLocaleString()}</span>
+        <span className={styles.kpiHeroNumber}>{succ.toLocaleString()}</span>
         <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : succ.toLocaleString()} 页</span>
       </>
     );
-    const percent = total > 0 ? Math.min(100, Number(((succ / total) * 100).toFixed(1))) : 0;
-    subText = `成功率 ${percent}%`;
-  } else if (isFailed) {
-    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>拉取失败</Tag>;
-    heroNumberNode = (
-      <>
-        <span className={styles.kpiHeroNumberFail}>0</span>
-        <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : "-"} 页</span>
-      </>
-    );
-    subText = total === 0 ? "探测失败" : "抓取失败";
+    subText = ledger;
   } else if (isStopped) {
     tagNode = <Tag color="default" bordered={false} className={styles.kpiTag}>已停止</Tag>;
     heroNumberNode = (
@@ -170,7 +171,34 @@ function renderPageKpi(record: CollectHistoryRecord) {
         <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : succ.toLocaleString()} 页</span>
       </>
     );
-    subText = "中途停止";
+    subText = ledger;
+  } else if (fail > 0) {
+    tagNode = <Tag color="warning" bordered={false} className={styles.kpiTag}>{fail} 页失败</Tag>;
+    heroNumberNode = (
+      <>
+        <span className={styles.kpiHeroNumberWarn}>{succ.toLocaleString()}</span>
+        <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : succ.toLocaleString()} 页</span>
+      </>
+    );
+    subText = ledger;
+  } else if (isFailed) {
+    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>拉取失败</Tag>;
+    heroNumberNode = (
+      <>
+        <span className={styles.kpiHeroNumberFail}>0</span>
+        <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : "-"} 页</span>
+      </>
+    );
+    subText = total === 0 ? "探测失败" : ledger;
+  } else if (missed > 0) {
+    tagNode = <Tag color="warning" bordered={false} className={styles.kpiTag}>{missed} 页未抓</Tag>;
+    heroNumberNode = (
+      <>
+        <span className={styles.kpiHeroNumber}>{succ.toLocaleString()}</span>
+        <span className={styles.kpiUnitSecondary}>/ {total.toLocaleString()} 页</span>
+      </>
+    );
+    subText = ledger;
   } else {
     tagNode = <Tag color="success" bordered={false} className={styles.kpiTag}>全部完成</Tag>;
     heroNumberNode = (
@@ -204,7 +232,7 @@ function renderPageKpi(record: CollectHistoryRecord) {
 }
 
 function renderFilmKpi(record: CollectHistoryRecord, onOpenModal: () => void) {
-  const count = record.filmCount ?? 0;
+  const count = Math.max(0, record.filmCount ?? 0);
   const isOngoing = isBatchOngoing(record.status);
 
   let tagNode: React.ReactNode = null;
@@ -221,7 +249,7 @@ function renderFilmKpi(record: CollectHistoryRecord, onOpenModal: () => void) {
         点击查看影片清单
       </a>
     ) : (
-      "正在统计影片"
+      "更新中"
     );
   } else if (count > 0) {
     tagNode = <Tag color="cyan" bordered={false} className={styles.kpiTag}>已更新</Tag>;
@@ -271,6 +299,7 @@ export function BatchOverviewCards({ record, details, onOpenFilmsModal }: BatchO
   const failedSources = details.filter((d) => d.status === "failed");
   const partialSources = details.filter((d) => d.status === "partial");
   const stoppedSources = details.filter((d) => d.status === "stopped");
+  const interruptedSources = details.filter((d) => d.status === "interrupted");
   const doneSources = details.filter((d) => d.status === "done" || d.status === "success");
   const abnormalCount = failedSources.length + partialSources.length;
   const isOngoing = isBatchOngoing(record.status);
@@ -316,7 +345,7 @@ export function BatchOverviewCards({ record, details, onOpenFilmsModal }: BatchO
       </div>
 
       <div className={styles.drawerKpiRow}>
-        {renderSourceKpi(record, abnormalCount, stoppedSources, doneSources)}
+        {renderSourceKpi(record, abnormalCount, stoppedSources, doneSources, interruptedSources.length)}
         {renderPageKpi(record)}
         {renderFilmKpi(record, onOpenFilmsModal)}
       </div>

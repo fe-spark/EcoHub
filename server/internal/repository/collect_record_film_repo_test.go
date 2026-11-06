@@ -56,7 +56,7 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 		BatchID:    batchID,
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
-		FilmCount:  3,
+		FilmCount:  4,
 		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":2}]`,
 		StartedAt:  time.Now(),
 	}).Error; err != nil {
@@ -196,5 +196,110 @@ func TestBatchSaveCollectRecordFilms_ContinuesAfterChunkError(t *testing.T) {
 	}
 	if len(saved) != 3 || saved[0] != 1 || saved[1] != 2 || saved[2] != 5 {
 		t.Fatalf("saved=%v", saved)
+	}
+}
+
+func TestGetCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
+	testDB := setupRecordFilmsTestDB(t)
+	batchID := "batch_running_test"
+	testDB.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 201},
+		FilmIndexContent:  model.FilmIndexContent{Name: "运行中测试影片"},
+	})
+	if err := BatchSaveCollectRecordFilms(batchID, map[string][]int64{"src_run": {201}}); err != nil {
+		t.Fatal(err)
+	}
+	// 清单行数写在记录上。没有站点明细时，单站总数为 0。
+	if err := testDB.Create(&model.CollectRecord{
+		BatchID:    batchID,
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusRunning,
+		FilmCount:  1,
+		DetailJson: "",
+		StartedAt:  time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	list, total, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, Page: 1, PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if total != 1 || len(list) != 1 || list[0].Mid != 201 {
+		t.Fatalf("expected total 1 and mid 201, got total=%d list=%+v", total, list)
+	}
+	if _, totalSrc, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, SourceID: "src_run", Page: 1, PageSize: 10,
+	}); err != nil || totalSrc != 0 {
+		t.Fatalf("source without detail total=%d err=%v", totalSrc, err)
+	}
+
+	if err := testDB.Model(&model.CollectRecord{}).Where("batch_id = ?", batchID).
+		Update("detail_json", `[{"sourceId":"src_run","filmsTotal":1}]`).Error; err != nil {
+		t.Fatal(err)
+	}
+	listSrc, totalSrc, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, SourceID: "src_run", Page: 1, PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("query src failed: %v", err)
+	}
+	if totalSrc != 1 || len(listSrc) != 1 || listSrc[0].Mid != 201 {
+		t.Fatalf("expected total 1 and mid 201, got total=%d list=%+v", totalSrc, listSrc)
+	}
+}
+
+func TestGetCollectRecordFilms_AllSitesTotalCountsRowsNotFilmCount(t *testing.T) {
+	testDB := setupRecordFilmsTestDB(t)
+	batchID := "batch_rows"
+	for _, item := range []struct {
+		mid  int64
+		name string
+	}{
+		{201, "甲"},
+		{202, "乙"},
+	} {
+		testDB.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: item.mid},
+			FilmIndexContent:  model.FilmIndexContent{Name: item.name},
+		})
+	}
+	if err := BatchSaveCollectRecordFilms(batchID, map[string][]int64{
+		"src_1": {201, 202},
+		"src_2": {202},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 同一影片在两站各算一行。总数用记录上的清单行数，单站用明细行数。
+	if err := testDB.Create(&model.CollectRecord{
+		BatchID:    batchID,
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusRunning,
+		FilmCount:  3,
+		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":1}]`,
+		StartedAt:  time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	all := model.CollectRecordFilmQuery{BatchID: batchID, Page: 1, PageSize: 10}
+	list, total, err := GetCollectRecordFilms(all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || len(list) != 3 {
+		t.Fatalf("all total=%d list=%d", total, len(list))
+	}
+	if _, total, err = GetCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, SourceID: "src_1", Page: 1, PageSize: 10,
+	}); err != nil || total != 2 {
+		t.Fatalf("src_1 total=%d err=%v", total, err)
+	}
+	if _, total, err = GetCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, SourceID: "src_2", Page: 1, PageSize: 10,
+	}); err != nil || total != 1 {
+		t.Fatalf("src_2 total=%d err=%v", total, err)
 	}
 }

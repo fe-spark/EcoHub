@@ -10,7 +10,6 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
   InboxOutlined,
-  InfoCircleOutlined,
   CloseCircleOutlined,
 } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
@@ -228,26 +227,18 @@ export function BatchFilmsModal({
                   {appliedKeyword.current ? <SearchOutlined /> : <InboxOutlined />}
                 </div>
                 <div className={styles.emptyTitle}>
-                  {appliedKeyword.current ? "未找到匹配影片" : "本次采集无更新影片"}
+                  {appliedKeyword.current ? "未找到匹配影片" : "暂无入库影片"}
                 </div>
                 <div className={styles.emptyDesc}>
                   {appliedKeyword.current ? (
                     <>
-                      未搜索到包含「<strong>{appliedKeyword.current}</strong>」的更新影片记录
+                      未搜索到包含「<strong>{appliedKeyword.current}</strong>」的影片
                     </>
                   ) : sourceName && sourceName !== "全部站点" ? (
-                    `「${sourceName}」在本次采集批次中未产生新增或更新影片`
+                    `「${sourceName}」暂无入库影片`
                   ) : (
-                    "本次批次采集的所有站点均未产生新增或增量更新影片"
+                    "暂无入库影片"
                   )}
-                </div>
-                <div className={styles.emptyHint}>
-                  <InfoCircleOutlined />
-                  <span>
-                    {appliedKeyword.current
-                      ? "建议精简片名关键词，或前往影片库进行全库模糊检索"
-                      : "本次采集可能仅拉取了已存在且无变更的影片，数据已是最新状态"}
-                  </span>
                 </div>
                 <div className={styles.emptyActions}>
                   {appliedKeyword.current ? (

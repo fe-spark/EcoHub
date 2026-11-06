@@ -67,6 +67,25 @@ func TestResolveCollectHoursNilLastKeepsRequested(t *testing.T) {
 	}
 }
 
+func TestShouldWriteCronAnchorOnlyOnCronSuccess(t *testing.T) {
+	started := time.Date(2026, 11, 6, 10, 0, 0, 0, time.Local)
+	if !shouldWriteCronAnchor(model.CollectTriggerCron, true, started) {
+		t.Fatal("定时成功应写锚点")
+	}
+	if shouldWriteCronAnchor(model.CollectTriggerManual, true, started) {
+		t.Fatal("手动全量不应写锚点")
+	}
+	if shouldWriteCronAnchor(model.CollectTriggerRetry, true, started) {
+		t.Fatal("重试不应写锚点")
+	}
+	if shouldWriteCronAnchor(model.CollectTriggerCron, false, started) {
+		t.Fatal("失败不应写锚点")
+	}
+	if shouldWriteCronAnchor(model.CollectTriggerCron, true, time.Time{}) {
+		t.Fatal("开始时间为空不应写锚点")
+	}
+}
+
 func TestShouldNoteCronCollectSuccess(t *testing.T) {
 	if !shouldNoteCronCollectSuccess(nil, context.Background(), "missing") {
 		t.Fatal("无错误且未停止应记成功")

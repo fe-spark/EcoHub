@@ -3,6 +3,7 @@ package spider
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -44,7 +45,9 @@ const sampleMacCMSXML = `<?xml version="1.0" encoding="utf-8"?>
 </rss>`
 
 func TestXmlCollect_GetPageCount(t *testing.T) {
+	var gotAc string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAc = r.URL.Query().Get("ac")
 		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 		_, _ = w.Write([]byte(sampleMacCMSXML))
 	}))
@@ -58,6 +61,30 @@ func TestXmlCollect_GetPageCount(t *testing.T) {
 	}
 	if pageCount != 42 {
 		t.Fatalf("expected pagecount 42, got %d", pageCount)
+	}
+	if gotAc != "videolist" {
+		t.Fatalf("探页 ac=%s，要与抓页一致", gotAc)
+	}
+}
+
+func TestJsonCollect_GetPageCountUsesDetailAction(t *testing.T) {
+	var gotAc string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAc = r.URL.Query().Get("ac")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":1,"pagecount":7,"total":140}`))
+	}))
+	defer server.Close()
+
+	pageCount, err := (&JsonCollect{}).GetPageCount(utils.RequestInfo{Uri: server.URL, Params: url.Values{}})
+	if err != nil {
+		t.Fatalf("GetPageCount failed: %v", err)
+	}
+	if pageCount != 7 {
+		t.Fatalf("expected pagecount 7, got %d", pageCount)
+	}
+	if gotAc != "detail" {
+		t.Fatalf("探页 ac=%s，要与抓页一致", gotAc)
 	}
 }
 

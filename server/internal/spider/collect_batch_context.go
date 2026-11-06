@@ -18,6 +18,7 @@ var publishMu sync.Mutex
 var (
 	activeBatchesMu sync.Mutex
 	activeBatches   = make(map[*collectBatchContext]struct{})
+	batchSeq        atomic.Uint64
 )
 
 func registerActiveBatch(b *collectBatchContext) {
@@ -47,6 +48,9 @@ func unregisterActiveBatch(b *collectBatchContext) {
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
 type collectBatchContext struct {
 	mu                sync.Mutex
+	recordMu          sync.Mutex
+	seq               uint64
+	droppedSources    map[string]struct{}
 	batchID           string
 	parentBatchID     string
 	hour              int
@@ -86,6 +90,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		standalone = isStandalone[0]
 	}
 	b := &collectBatchContext{
+		seq:              batchSeq.Add(1),
 		batchID:          generateBatchID(startedAt),
 		trigger:          trigger,
 		tag:              tag,
@@ -123,7 +128,16 @@ func (b *collectBatchContext) takeAffectedMIDs() []int64 {
 	defer b.mu.Unlock()
 	mids := b.affectedMIDs
 	b.affectedMIDs = nil
-	return mids
+	if len(b.droppedSources) == 0 {
+		return mids
+	}
+	kept := mids[:0]
+	for _, mid := range mids {
+		if b.midListedLocked(mid) {
+			kept = append(kept, mid)
+		}
+	}
+	return kept
 }
 
 func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, _ int, mids []int64) {
@@ -140,6 +154,10 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, _ int, mids [
 		return
 	}
 	b.mu.Lock()
+	if b.sourceDroppedLocked(s.Id) {
+		b.mu.Unlock()
+		return
+	}
 	b.affectedMIDs = append(b.affectedMIDs, kept...)
 	b.trackFilmsLocked(s.Id, kept)
 	b.mu.Unlock()
@@ -166,6 +184,10 @@ func (b *collectBatchContext) AddNotifyMIDs(sourceID string, mids []int64) {
 	}
 	sourceID = strings.TrimSpace(sourceID)
 	b.mu.Lock()
+	if b.sourceDroppedLocked(sourceID) {
+		b.mu.Unlock()
+		return
+	}
 	var srcSet map[int64]struct{}
 	if sourceID != "" {
 		srcSet = b.sourceNotifyMIDs[sourceID]
@@ -285,6 +307,9 @@ func (b *collectBatchContext) takeSourceMIDs(sourceID string) []int64 {
 	sourceID = strings.TrimSpace(sourceID)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.sourceDroppedLocked(sourceID) {
+		return nil
+	}
 	set := b.sourceFilmMIDs[sourceID]
 	if len(set) == 0 || len(b.affectedMIDs) == 0 {
 		return nil

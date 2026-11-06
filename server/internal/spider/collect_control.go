@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"server/internal/model"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
 )
 
-// deleteStopTimeout 删除前等待本次采集退出的上限。
+// deleteStopTimeout 删除前等待本次抓页退出的上限。
 const deleteStopTimeout = 3 * time.Minute
 
 // importStopTimeout 导入停采集的等待上限。只覆盖正在执行的写事务。
@@ -105,30 +106,42 @@ func StopCollectSource(sourceID, reason string) {
 	scheduler.CancelSource(sourceID)
 }
 
-// StopSourceForDelete 先停止该站并等到本次运行退出，再占住生命周期。
+// StopSourceForDelete 占住该站。采集中（含待检索）的删除已在入队前拒绝。
 // 调用方删除结束后必须调用 release，否则这个站无法再开采集。
 func StopSourceForDelete(sourceID string) (release func(), err error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return func() {}, nil
 	}
-	if err := stopAndWaitSource(sourceID); err != nil {
+	if err := collectLifecycle.beginSource(sourceID); err != nil {
+		log.Printf("[Spider] 删除站点占位失败 id=%s err=%v", sourceID, err)
 		return nil, err
 	}
-	if err := collectLifecycle.beginSource(sourceID); err != nil {
-		if err := stopAndWaitSource(sourceID); err != nil {
-			return nil, err
-		}
-		if err := collectLifecycle.beginSource(sourceID); err != nil {
-			return nil, err
-		}
-	}
+	log.Printf("[Spider] 删除站点已占位，开始清数据 id=%s", sourceID)
 	return func() { collectLifecycle.endSource(sourceID) }, nil
 }
 
-func stopAndWaitSource(sourceID string) error {
-	StopCollectSource(sourceID, "删除采集站，停止采集")
-	return collectLifecycle.waitSource(sourceID, deleteStopTimeout)
+// SearchWorkBusyReason 检索索引或封口还在进行时返回原因。空字符串表示空闲。
+func SearchWorkBusyReason() string {
+	parts := make([]string, 0, 4)
+	if filmsnapshot.IsSearchIndexBuilding() {
+		parts = append(parts, "索引构建中")
+	}
+	if filmsnapshot.SearchRebuildScheduled() {
+		parts = append(parts, "重建已排队")
+	}
+	if searchSealRunning.Load() {
+		parts = append(parts, "封口执行中")
+	}
+	searchReseal.mu.Lock()
+	running := searchReseal.running
+	pending := len(searchReseal.pending)
+	sealing := len(searchReseal.sealing)
+	searchReseal.mu.Unlock()
+	if running {
+		parts = append(parts, fmt.Sprintf("封口队列运行中 pending=%d sealing=%d", pending, sealing))
+	}
+	return strings.Join(parts, "，")
 }
 
 // StopAllTasks 用户一键终止全部采集。

@@ -143,7 +143,7 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 	}
 }
 
-func TestCollectService_DelFilmSource_StopsRunningThenCleans(t *testing.T) {
+func TestCollectService_DelFilmSource_RejectsWhileRunning(t *testing.T) {
 	gdb := setupCascadeCleanTestDB(t)
 	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true, Sort: 0})
 	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true, Sort: 1})
@@ -160,22 +160,19 @@ func TestCollectService_DelFilmSource_StopsRunningThenCleans(t *testing.T) {
 		progress.MarkStopped("src2")
 	})
 
-	if _, err := new(CollectService).DelFilmSource("src1"); err != nil {
-		t.Fatalf("delete while collecting: %v", err)
+	_, err := new(CollectService).DelFilmSource("src1")
+	if err == nil || err.Error() != "采集中，暂不可删除" {
+		t.Fatalf("err = %v", err)
 	}
 	var sourceCount int64
 	gdb.Model(&model.FilmSource{}).Where("id = ?", "src1").Count(&sourceCount)
-	if sourceCount != 0 {
-		t.Fatal("src1 should be deleted")
+	if sourceCount != 1 {
+		t.Fatal("采集中不应删除 src1")
 	}
-	var raw int64
-	var mapped int64
 	var lines int64
-	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src1").Count(&raw)
-	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src1").Count(&mapped)
 	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", "src1").Count(&lines)
-	if raw != 0 || mapped != 0 || lines != 0 {
-		t.Fatalf("src1 data left raw=%d map=%d lines=%d", raw, mapped, lines)
+	if lines != 1 {
+		t.Fatalf("采集中不应清线路，lines=%d", lines)
 	}
 	gdb.Model(&model.FilmSource{}).Where("id = ?", "src2").Count(&sourceCount)
 	if sourceCount != 1 {

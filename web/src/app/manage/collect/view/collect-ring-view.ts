@@ -39,7 +39,12 @@ function collectTooltip(progress: CollectProgress): string {
           : progress.status === "starting"
             ? "排队中"
             : "即将开始采集";
-  const countLine = `${progressText}${failed > 0 ? ` · 失败 ${failed} 页` : ""}`;
+  const failedPages = progress.failedPages ?? [];
+  const failedInfo =
+    failed > 0
+      ? ` · 失败 ${failed} 页${failedPages.length > 0 ? `（${failedPages.join("、")}）` : ""}`
+      : "";
+  const countLine = `${progressText}${failedInfo}`;
   return `${resolveCollectProgressStatusText(progress)} · ${countLine}`;
 }
 

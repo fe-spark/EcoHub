@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -405,5 +406,73 @@ func TestRepository_ReplaceCollectSources_PreservesOrderWithoutCreatedAt(t *test
 		if i > 0 && !list[i].CreatedAt.After(list[i-1].CreatedAt) {
 			t.Errorf("expected list[%d] CreatedAt (%v) to be strictly after list[%d] CreatedAt (%v)", i, list[i].CreatedAt, i-1, list[i-1].CreatedAt)
 		}
+	}
+}
+
+func markSourceSealing(t *testing.T, id, name string) {
+	t.Helper()
+	progress.Ensure(id, name)
+	progress.Update(id, func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+	t.Cleanup(func() { progress.MarkSealed([]string{id}) })
+}
+
+func TestUpdateFilmSource_RejectsAddressChangeWhileSealing(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	src := model.FilmSource{Id: "seal_edit", Name: "待检索站", Uri: "https://old.example/api", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	markSourceSealing(t, src.Id, src.Name)
+	if !progress.IsTaskRunning(src.Id) {
+		t.Fatal("待检索应算采集中")
+	}
+
+	next := src
+	next.Uri = "https://new.example/api"
+	err := (&CollectService{}).UpdateFilmSource(next)
+	if err == nil || !strings.Contains(err.Error(), "待检索") {
+		t.Fatalf("err = %v", err)
+	}
+	var saved model.FilmSource
+	if err := gdb.First(&saved, "id = ?", src.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Uri != src.Uri {
+		t.Fatalf("uri = %s", saved.Uri)
+	}
+
+	next = src
+	next.Name = "新名称"
+	if err := (&CollectService{}).UpdateFilmSource(next); err != nil {
+		t.Fatalf("改名应放行: %v", err)
+	}
+}
+
+func TestTriggerDelFilmSource_RejectsWhileCollecting(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	src := model.FilmSource{Id: "seal_del", Name: "待检索站", Uri: "https://seal.example/api", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RefreshCollectSourceCatalog(); err != nil {
+		t.Fatal(err)
+	}
+	markSourceSealing(t, src.Id, src.Name)
+
+	err := (&CollectService{}).TriggerDelFilmSource(src.Id)
+	if err == nil || err.Error() != "采集中，暂不可删除" {
+		t.Fatalf("err = %v", err)
+	}
+	var n int64
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", src.Id).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("采集中不应删除，剩余 %d", n)
+	}
+	if progress.IsSourceDeleting(src.Id) {
+		t.Fatal("拒绝后不应进入删除中")
 	}
 }

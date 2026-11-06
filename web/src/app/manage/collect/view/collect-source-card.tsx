@@ -1,19 +1,17 @@
-import React, { useState } from "react";
-import { Button, Checkbox, Popconfirm, Select, Switch, Tag, Tooltip } from "antd";
+import React from "react";
+import { Button, Checkbox, Popconfirm, Switch, Tag, Tooltip } from "antd";
 import {
-  CheckOutlined, CloseOutlined, DeleteOutlined, DisconnectOutlined, EditOutlined,
-  ExclamationCircleOutlined, GlobalOutlined, LoadingOutlined, PoweroffOutlined,
+  DeleteOutlined, EditOutlined,
+  ExclamationCircleOutlined, LoadingOutlined, PoweroffOutlined,
   ReloadOutlined, StopOutlined, SyncOutlined,
 } from "@ant-design/icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import dayjs from "dayjs";
-import { collectDuration, type FilmSource, type SourceIncident } from "./types";
+import type { FilmSource, SourceIncident } from "./types";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
+import CollectSourceCardMeta from "./collect-source-card-meta";
 import { useManagePermission } from "@/lib/manage-permission";
-import { useAppMessage } from "@/lib/useAppMessage";
-import { ApiPost } from "@/lib/client-api";
 import styles from "./index.module.less";
 
 const toneClassMap: Record<StatusTone, string> = {
@@ -76,8 +74,9 @@ export default function CollectSourceCard({
   const phase = record.progress?.status;
   const isStopping = phase === "stopping";
   const isRunning = active;
-  const busy = isRunning || isStopping;
   const sealing = phase === "sealing";
+  // 抓页、停止收尾、待检索都算这次采集还没结束。
+  const busy = isRunning || isStopping || sealing;
   const { canWrite } = useManagePermission();
   const resolved = resolveSourceStatus(record, active || isStopping, isDeleting);
   const statusLabel = resolved.label;
@@ -108,39 +107,17 @@ export default function CollectSourceCard({
     : record.categoryReady === false
       ? "获取分类"
       : "重新获取分类";
+  const editTitle = sealing
+    ? "待检索"
+    : busy
+      ? "采集进行中，禁止编辑"
+      : "编辑采集站";
 
   const hasProxy = Boolean(record.proxyCollect);
   const displaySuccessPages =
     record.progress && record.progress.success > 0
       ? record.progress.success
       : record.lastRunPageCount;
-
-
-  const { message } = useAppMessage();
-  const [refreshingPageTotal, setRefreshingPageTotal] = useState(false);
-
-  const handleRefreshPageTotal = async (event: React.MouseEvent) => {
-    event.stopPropagation();
-    if (refreshingPageTotal) return;
-    setRefreshingPageTotal(true);
-    try {
-      const resp = await ApiPost<{ pageTotal: number }>("/manage/collect/page-total", {
-        id: record.id,
-      });
-      if (resp.code === 0 && resp.data) {
-        const total = resp.data.pageTotal;
-        onUpdateSite?.(record.id, (prev) => ({ ...prev, sitePageTotal: total }));
-        message.success(`${record.name} 最新采集站总页：${total.toLocaleString()} 页`);
-      } else {
-        message.error(resp.msg || "获取最新总页失败");
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "获取最新总页失败";
-      message.error(msg);
-    } finally {
-      setRefreshingPageTotal(false);
-    }
-  };
 
   const cardClassNames = [
     styles.sourceCard,
@@ -151,13 +128,6 @@ export default function CollectSourceCard({
     .filter(Boolean)
     .join(" ");
 
-  // 卡片上的本轮采集情况：成功页、失败页、完成页，失败页码收在悬停提示里。
-  const progress = record.progress;
-  const successPages = progress?.success ?? 0;
-  const failedPages = progress?.failed ?? 0;
-  const finishedPages = successPages + failedPages;
-  const totalPages = Math.max(progress?.total ?? 0, 0);
-  const failedPageList = progress?.failedPages ?? [];
 
   return (
     <div className={cardClassNames}>
@@ -241,10 +211,10 @@ export default function CollectSourceCard({
               {statusLabel}
             </span>
           )}
-          <Tooltip title={!canWrite ? "无操作权限" : isRunning ? "任务运行中不可切换" : record.state ? "点击禁用采集站" : "点击启用采集站"}>
+          <Tooltip title={!canWrite ? "无操作权限" : busy ? "任务运行中不可切换" : record.state ? "点击禁用采集站" : "点击启用采集站"}>
             <Switch
               checked={Boolean(record.state)}
-              disabled={!canWrite || isDeleting || isRunning || isStopping || toggling}
+              disabled={!canWrite || isDeleting || busy || toggling}
               loading={toggling}
               checkedChildren="启用"
               unCheckedChildren="禁用"
@@ -267,156 +237,23 @@ export default function CollectSourceCard({
               {record.uri}
             </a>
           </Tooltip>
-          {progress ? (
-            <div className={styles.cardProgress}>
-              <span className={styles.cardProgressLabel}>本次采集</span>
-              <span>
-                {finishedPages}/{totalPages}
-              </span>
-              <Tooltip title={`成功 ${successPages} 页`}>
-                <span className={styles.cardProgressItem}>
-                  <CheckOutlined className={styles.cardProgressSuccess} />
-                  {successPages}
-                </span>
-              </Tooltip>
-              <Tooltip
-                title={
-                  failedPageList.length > 0
-                    ? `失败 ${failedPages} 页：${failedPageList.join("、")}`
-                    : `失败 ${failedPages} 页`
-                }
-              >
-                <span className={styles.cardProgressItem}>
-                  <CloseOutlined
-                    className={failedPages > 0 ? styles.cardProgressFailed : undefined}
-                  />
-                  {failedPages}
-                </span>
-              </Tooltip>
-            </div>
-          ) : null}
         </div>
       </div>
 
       {/* 底部信息/操作沉底：进度改为环形固定占位，卡片高度恒定 */}
       <div className={styles.cardFoot}>
-
-        <div
-          className={styles.cardMeta}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className={styles.metaItem}>
-            <dt className={styles.metaLabel}>上次采集：</dt>
-            <dd
-              className={`${styles.metaValue}${
-                record.lastRunTime ? "" : ` ${styles.metaValueMuted}`
-              }`}
-            >
-              {record.lastRunTime
-                ? dayjs(record.lastRunTime).format("YYYY-MM-DD HH:mm")
-                : "暂无"}
-            </dd>
-          </div>
-          <div className={styles.metaItem}>
-            <dt className={styles.metaLabel}>上次采集页：</dt>
-            <dd
-              className={`${styles.metaValue}${
-                displaySuccessPages && displaySuccessPages > 0
-                  ? ""
-                  : ` ${styles.metaValueMuted}`
-              }`}
-            >
-              {displaySuccessPages && displaySuccessPages > 0
-                ? `${displaySuccessPages.toLocaleString()} 页`
-                : "暂无"}
-            </dd>
-          </div>
-          <div className={styles.metaItem}>
-            <dt className={styles.metaLabel}>采集站总页：</dt>
-            <dd
-              className={styles.metaValue}
-              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-            >
-              <span
-                className={
-                  record.sitePageTotal && record.sitePageTotal > 0
-                    ? ""
-                    : styles.metaValueMuted
-                }
-              >
-                {record.sitePageTotal && record.sitePageTotal > 0
-                  ? `${record.sitePageTotal.toLocaleString()} 页`
-                  : "暂无"}
-              </span>
-              <Tooltip title="刷新获取该采集站最新全量总页数">
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<ReloadOutlined spin={refreshingPageTotal} />}
-                  loading={refreshingPageTotal}
-                  onClick={handleRefreshPageTotal}
-                  disabled={!canWrite || isDeleting}
-                  style={{
-                    width: 18,
-                    height: 18,
-                    padding: 0,
-                    fontSize: 11,
-                    minWidth: 18,
-                    color: "var(--ant-color-text-tertiary)",
-                  }}
-                />
-              </Tooltip>
-            </dd>
-          </div>
-          <div className={styles.metaItem}>
-            <dt className={styles.metaLabel}>网络代理：</dt>
-            <dd className={styles.metaValue}>
-              {hasProxy ? (
-                <Tooltip
-                  title={
-                    globalSpiderProxyReady
-                      ? "采集接口走系统网络代理"
-                      : "代理未开启（系统网络代理或爬虫模块未启用）"
-                  }
-                >
-                  <Tag
-                    icon={globalSpiderProxyReady ? <GlobalOutlined /> : <DisconnectOutlined />}
-                    color={globalSpiderProxyReady ? "cyan" : "default"}
-                    variant="filled"
-                    style={{ marginInlineEnd: 0 }}
-                  >
-                    代理
-                  </Tag>
-                </Tooltip>
-              ) : (
-                <span className={styles.metaValueMuted}>直连</span>
-              )}
-            </dd>
-          </div>
-          <div className={styles.metaItem}>
-            <dt className={styles.metaLabel}>采集时长：</dt>
-            <dd className={styles.metaValue}>
-              <Select
-                size="small"
-                value={record.cd}
-                disabled={
-                  !canWrite ||
-                  busy ||
-                  deleting ||
-                  !record.state ||
-                  record.categoryReady === false ||
-                  Boolean(record.categorySyncing)
-                }
-                style={{ width: "100%" }}
-                options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
-                onChange={(value) => {
-                  onChangeCollectDuration(record.id, value);
-                }}
-              />
-            </dd>
-          </div>
-        </div>
+        <CollectSourceCardMeta
+          record={record}
+          canWrite={canWrite}
+          isDeleting={isDeleting}
+          busy={busy}
+          deleting={deleting}
+          hasProxy={hasProxy}
+          globalSpiderProxyReady={globalSpiderProxyReady}
+          displaySuccessPages={displaySuccessPages}
+          onChangeCollectDuration={onChangeCollectDuration}
+          onUpdateSite={onUpdateSite}
+        />
 
         <div
           className={styles.cardActions}
@@ -428,10 +265,14 @@ export default function CollectSourceCard({
               <Button danger icon={<LoadingOutlined spin />} disabled>
                 删除中
               </Button>
-            ) : isStopping ? (
-              <Button danger icon={<StopOutlined />} loading>
-                停止采集
-              </Button>
+            ) : isStopping || sealing ? (
+              <Tooltip title={sealing ? "待检索" : undefined}>
+                <span>
+                  <Button danger icon={<StopOutlined />} loading={isStopping} disabled>
+                    停止采集
+                  </Button>
+                </span>
+              </Tooltip>
             ) : isRunning ? (
               canStop ? (
                 <Popconfirm
@@ -483,27 +324,33 @@ export default function CollectSourceCard({
                 />
               </span>
             </Tooltip>
-            <Tooltip title={busy ? "采集进行中，禁止编辑" : "编辑采集站"}>
-              <Button
-                icon={<EditOutlined />}
-                disabled={!canWrite || busy || isDeleting || Boolean(record.categorySyncing)}
-                onClick={() => onEditSource(record.id)}
-              />
+            <Tooltip title={editTitle}>
+              <span>
+                <Button
+                  icon={<EditOutlined />}
+                  disabled={!canWrite || busy || isDeleting || Boolean(record.categorySyncing)}
+                  onClick={() => onEditSource(record.id)}
+                />
+              </span>
             </Tooltip>
             <Popconfirm
               title="确认删除该采集站？"
               okText="删除"
               cancelText="取消"
               okButtonProps={{ danger: true, loading: isDeleting }}
-              disabled={!canWrite || isDeleting}
+              disabled={!canWrite || isDeleting || busy}
               onConfirm={() => onDeleteSource(record.id)}
             >
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                loading={isDeleting}
-                disabled={!canWrite || isDeleting}
-              />
+              <Tooltip title={busy ? "采集中" : undefined}>
+                <span>
+                  <Button
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={isDeleting}
+                    disabled={!canWrite || isDeleting || busy}
+                  />
+                </span>
+              </Tooltip>
             </Popconfirm>
           </div>
 

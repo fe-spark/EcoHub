@@ -88,21 +88,26 @@ func DropCollectSourceStatsPending(sourceID string) {
 	collectStats.mu.Unlock()
 }
 
-// NoteCollectSourceStats 记录「有数据写入」的采集站活动；距上次落盘超过最小间隔时才写库。
+// NoteCollectSourceStats 把 last_collect_time 记成当前时间。
 func NoteCollectSourceStats(sourceID string) {
+	NoteCollectSourceStatsAt(sourceID, time.Now())
+}
+
+// NoteCollectSourceStatsAt 把 last_collect_time 记成 at。定时成功时 at 用本次开始时间，让下一轮窗口盖住整次采集。
+// at 为零不写。采集中被 Suppress 的调用直接丢掉。
+func NoteCollectSourceStatsAt(sourceID string, at time.Time) {
 	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
+	if sourceID == "" || at.IsZero() {
 		return
 	}
-	now := time.Now()
 	collectStats.mu.Lock()
 	if _, held := collectStats.suppressed[sourceID]; held {
 		collectStats.mu.Unlock()
 		return
 	}
-	collectStats.pending[sourceID] = now
+	collectStats.pending[sourceID] = at
 	last := collectStats.lastFlushed[sourceID]
-	shouldFlush := last.IsZero() || now.Sub(last) >= collectStats.minInterval
+	shouldFlush := last.IsZero() || time.Since(last) >= collectStats.minInterval
 	collectStats.mu.Unlock()
 	if shouldFlush {
 		FlushCollectSourceStats(sourceID)

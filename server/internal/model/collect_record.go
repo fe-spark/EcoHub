@@ -13,6 +13,29 @@ const (
 	CollectRecordStatusInterrupted = "interrupted"
 )
 
+// CollectBatchStatus 由各站终态和页数得到批次状态。有站点异常中断时，整批就是中断。
+func CollectBatchStatus(done, partial, failed, stopped, interrupted, total, succPages, failPages int) string {
+	if interrupted > 0 {
+		return CollectRecordStatusInterrupted
+	}
+	if total <= 0 || (failed == 0 && partial == 0 && stopped == 0 && done == total && failPages == 0) {
+		return CollectRecordStatusSuccess
+	}
+	if failed == 0 && partial == 0 && stopped > 0 {
+		return CollectRecordStatusStopped
+	}
+	if failPages > 0 || failed > 0 || partial > 0 {
+		if succPages > 0 || done > 0 || partial > 0 {
+			return CollectRecordStatusPartial
+		}
+		return CollectRecordStatusFailed
+	}
+	if done == total {
+		return CollectRecordStatusSuccess
+	}
+	return CollectRecordStatusFailed
+}
+
 // 批次 Tag 常量
 const (
 	CollectTagBatchCollect  = "batch_collect"  // 批量采集
@@ -34,7 +57,7 @@ type CollectRecord struct {
 	SourceCount    int                 `gorm:"not null;default:0" json:"sourceCount"`    // 覆盖站点数
 	SuccessSources int                 `gorm:"not null;default:0" json:"successSources"` // 成功站点数
 	FailedSources  int                 `gorm:"not null;default:0" json:"failedSources"`  // 失败站点数
-	FilmCount      int                 `gorm:"not null;default:0" json:"filmCount"`      // 影响影片数
+	FilmCount      int                 `gorm:"not null;default:0" json:"filmCount"`      // 清单行数，同一影片在多站各算一行
 	FilmIDs        string              `gorm:"size:1024" json:"filmIds,omitempty"`       // 单片更新要重放的全局影片编号
 	FilmName       string              `gorm:"-" json:"filmName,omitempty"`              // 单片更新的片名，按 filmIds 从影片库回填
 	Films          []CollectRecordFilm `gorm:"-" json:"films,omitempty"`                 // 单片更新可跳转的影片
