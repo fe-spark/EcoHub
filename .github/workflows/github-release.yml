@@ -72,7 +72,8 @@ jobs:
           fi
 
           prerelease=false
-          if [[ "$version" =~ - ]]; then
+          # preview 要出现在 Releases 最新位置。beta / rc / alpha 仍标预发布。
+          if [[ "$version" =~ -(beta|rc|alpha)([.]|$) ]]; then
             prerelease=true
           fi
 
@@ -90,7 +91,7 @@ jobs:
           if [ "$PRERELEASE" = "true" ]; then
             extra_flags+=(--prerelease)
           else
-            extra_flags+=(--latest)
+            extra_flags+=(--latest --prerelease=false)
           fi
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
