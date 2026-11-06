@@ -225,8 +225,9 @@ type FilmIndex struct {
 	FilmIndexContent  `gorm:"embedded"`
 	FilmIndexVersion  `gorm:"embedded"`
 	FilmIndexDerived  `gorm:"embedded"`
-	IsScraped         bool  `json:"isScraped" gorm:"-"` // 是否已启用 TMDB 刮削（动态合成，不落库）
-	TmdbID            int64 `json:"tmdbId" gorm:"-"`    // TMDB 词条 ID（动态合成，不落库）
+	IsScraped         bool  `json:"isScraped" gorm:"-"`           // 是否已启用 TMDB 刮削（动态合成，不落库）
+	TmdbID            int64 `json:"tmdbId" gorm:"-"`              // TMDB 词条 ID（动态合成，不落库）
+	SourceMid         int64 `json:"sourceMid,omitempty" gorm:"-"` // 当前列表来源的源站 vod_id，只用于展示
 }
 
 func (FilmIndex) TableName() string {
