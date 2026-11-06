@@ -1,7 +1,7 @@
-import { Alert, Button, Card, Drawer, Flex, Form, Input, Select, Space, Tag } from "antd";
+import { Alert, Button, Card, Drawer, Form, Input, Select, Space, Tag } from "antd";
 import type { FormInstance } from "antd/es/form";
-import type { ConflictCheckResult, MappingRuleRecord, RuleFormValues } from "./types";
-import { CATEGORY_GROUPS, ROOT_GROUP, regexPreviewSamples, resolveGroupLabel } from "./types";
+import type { ConflictCheckResult, MappingRuleRecord, RuleFormValues, RuleMergePreview } from "./types";
+import { CATEGORY_GROUPS, ROOT_GROUP, resolveGroupLabel } from "./types";
 import styles from "./index.module.less";
 
 interface RuleEditorDrawerProps {
@@ -11,12 +11,8 @@ interface RuleEditorDrawerProps {
   form: FormInstance<RuleFormValues>;
   conflictRules: ConflictCheckResult[];
   checkingConflict: boolean;
-  watchedMatchType?: string;
-  regexPreview: {
-    valid: boolean;
-    matches: string[];
-    error: string;
-  };
+  watchedRaw?: string;
+  mergePreview: RuleMergePreview;
   onSubmit: () => void;
   onCancel: () => void;
   onAfterOpenChange: (open: boolean) => void;
@@ -30,12 +26,13 @@ export default function RuleEditorDrawer(props: RuleEditorDrawerProps) {
     form,
     conflictRules,
     checkingConflict,
-    watchedMatchType,
-    regexPreview,
+    watchedRaw,
+    mergePreview,
     onSubmit,
     onCancel,
     onAfterOpenChange,
   } = props;
+  const hasRaw = Boolean(String(watchedRaw || "").trim());
 
   return (
     <Drawer
@@ -99,31 +96,47 @@ export default function RuleEditorDrawer(props: RuleEditorDrawerProps) {
           <Alert style={{ marginBottom: 16 }} type="info" showIcon title="正在检查冲突..." />
         ) : null}
 
-        {watchedMatchType === "regex" ? (
-          <Card size="small" title="正则命中预览" style={{ marginBottom: 16 }}>
-            {!regexPreview.valid ? (
-              <Alert type="error" showIcon title={`正则无效：${regexPreview.error}`} />
+        {hasRaw ? (
+          <Card
+            size="small"
+            title="合并预览"
+            extra={mergePreview.sourceName || undefined}
+            style={{ marginBottom: 16 }}
+          >
+            {mergePreview.loading ? (
+              <Alert type="info" showIcon title="正在预览命中分类..." />
+            ) : !mergePreview.valid ? (
+              <Alert type="error" showIcon title={mergePreview.error || "正则无效"} />
+            ) : mergePreview.hits.length === 0 ? (
+              <Alert type="warning" showIcon title="该站这一层没有分类命中" />
             ) : (
               <Space direction="vertical" size={12} style={{ width: "100%" }}>
                 <div className={styles.previewTags}>
-                  {regexPreviewSamples.map((sample) => {
-                    const matched = regexPreview.matches.includes(sample);
-                    return (
-                      <Tag key={sample} color={matched ? "purple" : "default"}>
-                        {sample}
-                      </Tag>
-                    );
-                  })}
+                  {mergePreview.hits.map((hit) => (
+                    <Tag key={`${hit.id}-${hit.name}`} color="purple">
+                      {hit.name}
+                    </Tag>
+                  ))}
                 </div>
                 <Alert
-                  type={regexPreview.matches.length > 0 ? "success" : "warning"}
+                  type="success"
                   showIcon
-                  title={
-                    regexPreview.matches.length > 0
-                      ? `命中 ${regexPreview.matches.length} 个示例`
-                      : "未命中任何示例"
-                  }
+                  title={`${mergePreview.hits.map((hit) => hit.name).join("、")} → ${mergePreview.target || "未设置目标"}`}
                 />
+                {mergePreview.keep.length > 0 ? (
+                  <Alert
+                    type="info"
+                    showIcon
+                    title={`源站已有「${mergePreview.target}」会并进同一组`}
+                    description={
+                      <div className={styles.previewTags}>
+                        {mergePreview.keep.map((item) => (
+                          <Tag key={`${item.id}-${item.name}`}>{item.name}</Tag>
+                        ))}
+                      </div>
+                    }
+                  />
+                ) : null}
               </Space>
             )}
           </Card>

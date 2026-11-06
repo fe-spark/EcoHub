@@ -233,6 +233,8 @@ func DelCollectResource(id string) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
+	TouchRuleVersion()
+	ReloadMappingRules()
 	if err := RefreshCollectSourceCatalog(); err != nil {
 		forgetCollectSource(id)
 		return orphanMids, err

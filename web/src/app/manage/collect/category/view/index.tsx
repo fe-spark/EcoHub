@@ -41,7 +41,7 @@ export default function CategoryWorkspacePageView() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="分类管理"
-        description="按采集源查看该站分类，调整排序和显示。分类不能删除，只能隐藏或显示。"
+        description="按该站分类规则展示，调整排序和显示。分类不能删除，只能隐藏或显示。"
       />
 
       <CategoryTreeCard

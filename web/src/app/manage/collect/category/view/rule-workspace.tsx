@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button, Form, Input, Pagination, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
@@ -9,20 +9,23 @@ import {
   deleteCategoryRule,
   getCategoryRules,
   getCategoryRuleTotals,
+  getFilmClassTree,
+  previewCategoryRule,
   saveCategoryRule,
 } from "./api";
 import RuleEditorDrawer from "./rule-editor-drawer";
 import styles from "./index.module.less";
 import {
   CATEGORY_GROUPS,
+  emptyRuleMergePreview,
   ROOT_GROUP,
   SUB_GROUP,
-  regexPreviewSamples,
   resolveGroupLabel,
   type ConflictCheckResult,
   type MappingRuleRecord,
   type PagingState,
   type RuleFormValues,
+  type RuleMergePreview,
 } from "./types";
 
 interface RuleWorkspaceProps {
@@ -47,45 +50,37 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   const [ruleForm] = Form.useForm<RuleFormValues>();
   const watchedGroup = Form.useWatch("group", ruleForm);
   const watchedRaw = Form.useWatch("raw", ruleForm);
+  const watchedTarget = Form.useWatch("target", ruleForm);
   const watchedMatchType = Form.useWatch("matchType", ruleForm);
+  const [sources, setSources] = useState<{ id: string; name: string; state?: boolean }[]>([]);
+  const [sourceId, setSourceId] = useState("");
+  const [mergePreview, setMergePreview] = useState<RuleMergePreview>(emptyRuleMergePreview);
 
-  const regexPreview = useMemo(() => {
-    if (watchedMatchType !== "regex") {
-      return { valid: true, matches: [] as string[], error: "" };
-    }
-    const source = String(watchedRaw || "").trim();
-    if (!source) {
-      return { valid: true, matches: [] as string[], error: "" };
-    }
-    try {
-      const tester = new RegExp(source);
-      return {
-        valid: true,
-        matches: regexPreviewSamples.filter((item) => tester.test(item)),
-        error: "",
-      };
-    } catch (error) {
-      return {
-        valid: false,
-        matches: [] as string[],
-        error: error instanceof Error ? error.message : "正则表达式无效",
-      };
-    }
-  }, [watchedMatchType, watchedRaw]);
-
-  const fetchRuleTotals = useCallback(async () => {
-    try {
-      onRuleTotalsChange(await getCategoryRuleTotals());
-    } catch {
-      // 规则统计只用于摘要展示，失败不阻断主流程。
-    }
-  }, [onRuleTotalsChange]);
+  const fetchRuleTotals = useCallback(
+    async (nextSourceId: string) => {
+      if (!nextSourceId) {
+        onRuleTotalsChange({ [ROOT_GROUP]: 0, [SUB_GROUP]: 0 });
+        return;
+      }
+      try {
+        onRuleTotalsChange(await getCategoryRuleTotals(nextSourceId));
+      } catch {
+        // 规则统计只用于摘要展示，失败不阻断主流程。
+      }
+    },
+    [onRuleTotalsChange],
+  );
 
   const fetchRules = useCallback(
-    async (page: number, pageSize: number, nextKeyword: string, nextGroup: string) => {
+    async (page: number, pageSize: number, nextKeyword: string, nextGroup: string, nextSourceId: string) => {
+      if (!nextSourceId) {
+        setRules([]);
+        setPaging({ current: 1, pageSize, total: 0 });
+        return;
+      }
       setRulesLoading(true);
       try {
-        const { resp, parsed } = await getCategoryRules(page, pageSize, nextKeyword, nextGroup);
+        const { resp, parsed } = await getCategoryRules(page, pageSize, nextKeyword, nextGroup, nextSourceId);
         if (resp.code !== 0) {
           message.error(resp.msg || "分类规则加载失败");
           return;
@@ -100,40 +95,63 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   );
 
   useEffect(() => {
-    void fetchRuleTotals();
-  }, [fetchRuleTotals]);
+    void (async () => {
+      try {
+        const { sources: nextSources, defaultSourceId, currentSourceId } = await getFilmClassTree("");
+        setSources(nextSources);
+        setSourceId(currentSourceId || defaultSourceId);
+      } catch {
+        message.error("采集站列表加载失败");
+      }
+    })();
+  }, [message]);
 
   useEffect(() => {
-    void fetchRules(1, paging.pageSize, keyword, ruleGroup);
-  }, [fetchRules, keyword, paging.pageSize, ruleGroup]);
+    void fetchRuleTotals(sourceId);
+  }, [fetchRuleTotals, sourceId]);
+
+  useEffect(() => {
+    if (!sourceId) {
+      return;
+    }
+    void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId);
+  }, [fetchRules, keyword, paging.pageSize, ruleGroup, sourceId]);
 
   useEffect(() => {
     if (!editorVisible) {
       setCheckingConflict(false);
       setConflictRules([]);
+      setMergePreview(emptyRuleMergePreview);
       return;
     }
     const group = String(watchedGroup || "").trim();
     const raw = String(watchedRaw || "").trim();
     const matchType = String(watchedMatchType || "").trim();
-    if (!group || !raw || !matchType) {
+    const target = String(watchedTarget || "").trim();
+    if (!group || !raw || !matchType || !sourceId) {
       setCheckingConflict(false);
       setConflictRules([]);
+      setMergePreview(emptyRuleMergePreview);
       return;
     }
     const timer = window.setTimeout(async () => {
       setCheckingConflict(true);
+      setMergePreview((prev) => ({ ...prev, loading: true }));
       try {
-        const { resp, rules: conflictList } = await checkCategoryRuleConflict({ id: editingRule?.id, group, raw, matchType });
+        const [{ resp, rules: conflictList }, previewResult] = await Promise.all([
+          checkCategoryRuleConflict({ id: editingRule?.id, sourceId, group, raw, matchType }),
+          previewCategoryRule({ sourceId, group, raw, matchType, target }),
+        ]);
         if (resp.code === 0) {
           setConflictRules(conflictList);
         }
+        setMergePreview(previewResult.preview);
       } finally {
         setCheckingConflict(false);
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [editorVisible, editingRule?.id, watchedGroup, watchedRaw, watchedMatchType]);
+  }, [editorVisible, editingRule?.id, sourceId, watchedGroup, watchedRaw, watchedMatchType, watchedTarget]);
 
   const openCreateModal = () => {
     setEditingRule(null);
@@ -149,6 +167,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
     setEditorVisible(false);
     setEditingRule(null);
     setConflictRules([]);
+    setMergePreview(emptyRuleMergePreview);
     ruleForm.resetFields();
   };
 
@@ -170,11 +189,16 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   };
 
   const handleRuleSubmit = async () => {
+    if (!sourceId) {
+      message.error("请先选择采集站");
+      return;
+    }
     const values = await ruleForm.validateFields();
     setRulesSubmitting(true);
     try {
       const resp = await saveCategoryRule({
         ...(editingRule ? { id: editingRule.id } : {}),
+        sourceId,
         group: values.group,
         raw: values.raw.trim(),
         target: values.target.trim(),
@@ -187,7 +211,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       }
       message.success(resp.msg || "分类规则已保存");
       closeRuleEditor();
-      await Promise.all([fetchRules(paging.current, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()]);
+      await Promise.all([fetchRules(paging.current, paging.pageSize, keyword, ruleGroup, sourceId), fetchRuleTotals(sourceId)]);
     } finally {
       setRulesSubmitting(false);
     }
@@ -201,7 +225,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
     }
     message.success(resp.msg || "分类规则已删除");
     const nextPage = paging.current > 1 && rules.length === 1 ? paging.current - 1 : paging.current;
-    await Promise.all([fetchRules(nextPage, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()]);
+    await Promise.all([fetchRules(nextPage, paging.pageSize, keyword, ruleGroup, sourceId), fetchRuleTotals(sourceId)]);
   };
 
   const ruleColumns: ColumnsType<MappingRuleRecord> = [
@@ -287,6 +311,22 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   return (
     <div className={styles.ruleWorkspace}>
       <Space size={[8, 8]} wrap className={styles.filterBar}>
+        <div className={styles.sourceField}>
+          <span className={styles.sourceLabel}>采集源</span>
+          <Select
+            placeholder="选择采集源"
+            className={styles.sourceSelect}
+            value={sourceId || undefined}
+            onChange={(value) => setSourceId(value)}
+            options={sources.map((source) => ({
+              label: source.state === false ? `${source.name} (已停用)` : source.name,
+              value: source.id,
+            }))}
+            showSearch
+            optionFilterProp="label"
+            popupMatchSelectWidth={false}
+          />
+        </div>
         <Select
           value={ruleGroup}
           options={CATEGORY_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
@@ -298,10 +338,10 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
           placeholder="搜索原始值、目标值或说明"
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
-          onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)}
+          onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId)}
           className={styles.searchInput}
         />
-        <Button type="primary" icon={<SearchOutlined />} onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)} className={styles.searchButton}>
+        <Button type="primary" icon={<SearchOutlined />} onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId)} className={styles.searchButton}>
           搜索
         </Button>
         <Button
@@ -310,7 +350,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
             setKeyword("");
             const defaultGroup = CATEGORY_GROUPS[0] || "all";
             setRuleGroup(defaultGroup);
-            void fetchRules(1, paging.pageSize, "", defaultGroup);
+            void fetchRules(1, paging.pageSize, "", defaultGroup, sourceId);
           }}
         >
           重置
@@ -330,10 +370,10 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
             <div className={styles.tableTitle}>分类规则</div>
             <Space size={[8, 8]} wrap className={styles.tableActions}>
               <Tag color="processing">一级 {ruleTotals[ROOT_GROUP] || 0} / 二级 {ruleTotals[SUB_GROUP] || 0}</Tag>
-              <Button icon={<ReloadOutlined />} onClick={() => void Promise.all([fetchRules(1, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()])}>
+              <Button icon={<ReloadOutlined />} onClick={() => void Promise.all([fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId), fetchRuleTotals(sourceId)])}>
                 刷新规则
               </Button>
-              <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={openCreateModal}>
+              <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite || !sourceId} onClick={openCreateModal}>
                 新增规则
               </Button>
             </Space>
@@ -348,7 +388,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
               showSizeChanger
               pageSizeOptions={[10, 20, 50, 100, 500]}
               showTotal={(total) => `共 ${total} 条`}
-              onChange={(page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup)}
+              onChange={(page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup, sourceId)}
             />
           </div>
         )}
@@ -361,8 +401,8 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         form={ruleForm}
         conflictRules={conflictRules}
         checkingConflict={checkingConflict}
-        watchedMatchType={watchedMatchType}
-        regexPreview={regexPreview}
+        watchedRaw={watchedRaw}
+        mergePreview={mergePreview}
         onSubmit={() => {
           if (!canWrite) return;
           void handleRuleSubmit();

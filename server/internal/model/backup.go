@@ -21,6 +21,7 @@ type ConfigBackup struct {
 
 // MappingRuleExport 映射规则导出结构（不带数据库 ID）
 type MappingRuleExport struct {
+	SourceId  string `json:"sourceId,omitempty"`
 	Group     string `json:"group"`
 	Raw       string `json:"raw"`
 	Target    string `json:"target"`

@@ -129,6 +129,9 @@ func ClearSourceCategoryDataTx(tx *gorm.DB, sourceID string) error {
 	if err := tx.Where("source_id = ?", sourceID).Delete(&model.CategoryMapping{}).Error; err != nil {
 		return err
 	}
+	if err := DeleteMappingRulesBySourceTx(tx, sourceID); err != nil {
+		return err
+	}
 	if len(categoryIDs) == 0 {
 		return nil
 	}

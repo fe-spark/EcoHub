@@ -40,10 +40,8 @@ func ReloadMappingRules() {
 	newFilter := make(map[string]bool)
 	newAttr := make(map[string]string)
 	newPlot := make(map[string]string)
-	newCategoryRoots := make(map[string]string)
-	newCategorySubs := make(map[string]string)
-	newCategoryRootRegex := make([]categoryRuleMatcher, 0)
-	newCategorySubRegex := make([]categoryRuleMatcher, 0)
+	newCategoryRoots := make(map[string]sourceCategoryRules)
+	newCategorySubs := make(map[string]sourceCategoryRules)
 
 	for _, r := range rules {
 		matchType := normalizeRuleMatchType(r.MatchType)
@@ -59,40 +57,22 @@ func ReloadMappingRules() {
 		case "Plot":
 			newPlot[r.Raw] = r.Target
 		case "CategoryRoot":
-			if matchType == "regex" {
-				pattern, err := regexp.Compile(strings.TrimSpace(r.Raw))
-				if err != nil {
-					continue
-				}
-				newCategoryRootRegex = append(newCategoryRootRegex, categoryRuleMatcher{Pattern: pattern, Target: r.Target})
-				continue
-			}
-			newCategoryRoots[r.Raw] = r.Target
+			appendSourceCategoryRule(newCategoryRoots, r.SourceId, r.Raw, r.Target, matchType)
 		case "CategorySub":
-			if matchType == "regex" {
-				pattern, err := regexp.Compile(strings.TrimSpace(r.Raw))
-				if err != nil {
-					continue
-				}
-				newCategorySubRegex = append(newCategorySubRegex, categoryRuleMatcher{Pattern: pattern, Target: r.Target})
-				continue
-			}
-			newCategorySubs[r.Raw] = r.Target
+			appendSourceCategoryRule(newCategorySubs, r.SourceId, r.Raw, r.Target, matchType)
 		}
 	}
 
 	mappingState.Store(&MappingSnapshot{
-		Area:              newArea,
-		Lang:              newLang,
-		Filter:            newFilter,
-		Attribute:         newAttr,
-		Plot:              newPlot,
-		CategoryRoot:      newCategoryRoots,
-		CategorySub:       newCategorySubs,
-		CategoryRootRegex: newCategoryRootRegex,
-		CategorySubRegex:  newCategorySubRegex,
-		Source:            newSourceMap,
-		SourceCategories:  newSrcCats,
+		Area:             newArea,
+		Lang:             newLang,
+		Filter:           newFilter,
+		Attribute:        newAttr,
+		Plot:             newPlot,
+		CategoryRoot:     newCategoryRoots,
+		CategorySub:      newCategorySubs,
+		Source:           newSourceMap,
+		SourceCategories: newSrcCats,
 	})
 
 	RefreshCategoryCache()
@@ -113,18 +93,49 @@ func CurrentMappingSnapshotForTest() *MappingSnapshot {
 // StoreMappingSnapshotForTest 换上测试用的规则快照。
 func StoreMappingSnapshotForTest(snapshot *MappingSnapshot) {
 	if snapshot == nil {
-		snapshot = &MappingSnapshot{
-			Area:         map[string]string{},
-			Lang:         map[string]string{},
-			Filter:       map[string]bool{},
-			Attribute:    map[string]string{},
-			Plot:         map[string]string{},
-			CategoryRoot: map[string]string{},
-			CategorySub:  map[string]string{},
-			Source:       map[string]int64{},
-		}
+		snapshot = emptyMappingSnapshot()
 	}
 	mappingState.Store(snapshot)
+}
+
+func appendSourceCategoryRule(dst map[string]sourceCategoryRules, sourceID, raw, target, matchType string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	rules := dst[sourceID]
+	if rules.Exact == nil {
+		rules.Exact = map[string]string{}
+	}
+	if matchType == "regex" {
+		pattern, err := regexp.Compile(strings.TrimSpace(raw))
+		if err != nil {
+			return
+		}
+		rules.Regex = append(rules.Regex, categoryRuleMatcher{Pattern: pattern, Target: target})
+	} else {
+		rules.Exact[raw] = target
+	}
+	dst[sourceID] = rules
+}
+
+func applySourceCategoryRules(rules sourceCategoryRules, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if mapped, ok := rules.Exact[name]; ok && strings.TrimSpace(mapped) != "" {
+		return strings.TrimSpace(mapped)
+	}
+	for _, matcher := range rules.Regex {
+		if matcher.Pattern != nil && matcher.Pattern.MatchString(name) {
+			if strings.TrimSpace(matcher.Target) != "" {
+				return strings.TrimSpace(matcher.Target)
+			}
+			return name
+		}
+	}
+	return name
 }
 
 func GetRuleVersion() string {
@@ -194,44 +205,14 @@ func GetPlotMapping() map[string]string {
 	return res
 }
 
-func NormalizeRootCategoryName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
+func NormalizeRootCategoryName(sourceID, name string) string {
 	snap := getMappingSnapshot()
-	if mapped, ok := snap.CategoryRoot[name]; ok && strings.TrimSpace(mapped) != "" {
-		return strings.TrimSpace(mapped)
-	}
-	for _, matcher := range snap.CategoryRootRegex {
-		if matcher.Pattern != nil && matcher.Pattern.MatchString(name) {
-			if strings.TrimSpace(matcher.Target) != "" {
-				return strings.TrimSpace(matcher.Target)
-			}
-			return name
-		}
-	}
-	return name
+	return applySourceCategoryRules(snap.CategoryRoot[strings.TrimSpace(sourceID)], name)
 }
 
-func NormalizeSubCategoryName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
+func NormalizeSubCategoryName(sourceID, name string) string {
 	snap := getMappingSnapshot()
-	if mapped, ok := snap.CategorySub[name]; ok && strings.TrimSpace(mapped) != "" {
-		return strings.TrimSpace(mapped)
-	}
-	for _, matcher := range snap.CategorySubRegex {
-		if matcher.Pattern != nil && matcher.Pattern.MatchString(name) {
-			if strings.TrimSpace(matcher.Target) != "" {
-				return strings.TrimSpace(matcher.Target)
-			}
-			return name
-		}
-	}
-	return name
+	return applySourceCategoryRules(snap.CategorySub[strings.TrimSpace(sourceID)], name)
 }
 
 func GetCategoryNameFromCache(id int64) (string, bool) {
@@ -265,7 +246,6 @@ func ResetCategoryStableKeyCache() {
 	categoryStableKeyCache.Clear()
 }
 
-
 func GetLocalCategoryId(sourceId string, sourceTypeId int64) int64 {
 	key := fmt.Sprintf("%s_%d", sourceId, sourceTypeId)
 	snap := getMappingSnapshot()
@@ -280,7 +260,6 @@ func GetSourceCategoryInfo(sourceId string, sourceTypeId int64) (SourceCategoryI
 	info, ok := snap.SourceCategories[key]
 	return info, ok
 }
-
 
 func GetMainCategoryName(pid int64) string {
 	if pid <= 0 {

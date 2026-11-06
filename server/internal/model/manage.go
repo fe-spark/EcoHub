@@ -53,13 +53,13 @@ func DefaultTipConfig() TipConfig {
 type BasicConfig struct {
 	SiteName string `json:"siteName"` // 网站名称
 	// SiteURL 网站访问地址（公网根地址，如 https://example.com），用于 Logo 跳转与外部引用链接等
-	SiteURL       string       `json:"siteUrl"`
-	Logo          string       `json:"logo"`          // 网站logo
-	Keyword       string       `json:"keyword"`       // seo关键字
-	Describe      string       `json:"describe"`      // 网站描述信息
-	State         bool         `json:"state"`         // 网站状态 开启 || 关闭
-	Hint          string       `json:"hint"`          // 网站关闭提示
-	PrivateAccess bool         `json:"privateAccess"` // 私有化访问控制（仅登录可用）
+	SiteURL       string        `json:"siteUrl"`
+	Logo          string        `json:"logo"`          // 网站logo
+	Keyword       string        `json:"keyword"`       // seo关键字
+	Describe      string        `json:"describe"`      // 网站描述信息
+	State         bool          `json:"state"`         // 网站状态 开启 || 关闭
+	Hint          string        `json:"hint"`          // 网站关闭提示
+	PrivateAccess bool          `json:"privateAccess"` // 私有化访问控制（仅登录可用）
 	ProvideKey    string        `json:"provideKey"`    // TVBox/订阅专属访问密钥
 	Danmaku       DanmakuConfig `json:"danmaku"`       // 弹幕系统配置
 	Tip           TipConfig     `json:"tip"`           // 前台赞赏
@@ -143,11 +143,12 @@ type MappingRule struct {
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
-	Group     string         `gorm:"uniqueIndex:uidx_group_raw_match_type;size:32" json:"group"`                   // Area, Language, Blacklist
-	Raw       string         `gorm:"uniqueIndex:uidx_group_raw_match_type;size:128" json:"raw"`                    // 原始值 (采集源)
-	Target    string         `gorm:"size:128" json:"target"`                                                       // 标准值 (如果为空则视为黑名单项)
-	MatchType string         `gorm:"uniqueIndex:uidx_group_raw_match_type;size:16;default:exact" json:"matchType"` // exact | regex
-	Remarks   string         `gorm:"size:256" json:"remarks"`                                                      // 备注
+	SourceId  string         `gorm:"uniqueIndex:uidx_source_group_raw_match_type;size:32;default:''" json:"sourceId"`     // 分类规则绑定采集站，其它规则为空
+	Group     string         `gorm:"uniqueIndex:uidx_source_group_raw_match_type;size:32" json:"group"`                   // Area, Language, CategoryRoot
+	Raw       string         `gorm:"uniqueIndex:uidx_source_group_raw_match_type;size:128" json:"raw"`                    // 原始值 (采集源)
+	Target    string         `gorm:"size:128" json:"target"`                                                              // 标准值 (如果为空则视为黑名单项)
+	MatchType string         `gorm:"uniqueIndex:uidx_source_group_raw_match_type;size:16;default:exact" json:"matchType"` // exact | regex
+	Remarks   string         `gorm:"size:256" json:"remarks"`                                                             // 备注
 }
 
 func (MappingRule) TableName() string {

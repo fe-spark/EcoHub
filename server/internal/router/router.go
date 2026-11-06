@@ -128,6 +128,7 @@ func SetupRouter() *gin.Engine {
 			mapping.GET(`/group/list`, handler.ManageHd.MappingRuleGroups)
 			mapping.GET(`/rule/list`, handler.ManageHd.MappingRuleList)
 			mapping.POST(`/rule/check`, handler.ManageHd.MappingRuleCheck)
+			mapping.POST(`/rule/preview`, handler.ManageHd.MappingRulePreview)
 			mapping.POST(`/rule/save`, handler.ManageHd.MappingRuleSave)
 			mapping.POST(`/rule/delete`, handler.ManageHd.MappingRuleDelete)
 			mapping.POST(`/rule/reload`, handler.ManageHd.MappingRuleReload)
@@ -158,8 +159,6 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)
 			collect.POST(`/category/sync`, handler.CollectHd.FilmSourceSyncCategory)
 			collect.POST(`/page-total`, handler.CollectHd.RefreshSitePageTotal)
-
-
 
 			collect.GET(`/history/list`, handler.CollectRecordHd.HistoryList)
 			collect.GET(`/history/films`, handler.CollectRecordHd.HistoryFilms)

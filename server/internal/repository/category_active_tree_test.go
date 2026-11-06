@@ -394,8 +394,8 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 		t.Fatalf("create source categories: %v", err)
 	}
 	rules := []model.MappingRule{
-		{Group: "CategoryRoot", Raw: "片$", Target: "测试", MatchType: "regex"},
-		{Group: "CategorySub", Raw: "片$", Target: "影片", MatchType: "regex"},
+		{SourceId: "src1", Group: "CategoryRoot", Raw: "片$", Target: "测试", MatchType: "regex"},
+		{SourceId: "src1", Group: "CategorySub", Raw: "片$", Target: "影片", MatchType: "regex"},
 	}
 	if err := gdb.Create(&rules).Error; err != nil {
 		t.Fatalf("create rules: %v", err)
@@ -422,6 +422,13 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	if len(byName["电影"].Children) != 2 || byName["电影"].Children[0].Name != "影片" || byName["电影"].Children[0].Id != 11 || byName["电影"].Children[1].Name != "剧情" {
 		t.Fatalf("电影 children = %v, want 影片#11 and 剧情", movieChildren)
 	}
+	testChildren := make([]string, 0)
+	for _, child := range byName["测试"].Children {
+		testChildren = append(testChildren, fmt.Sprintf("%s#%d", child.Name, child.Id))
+	}
+	if len(byName["测试"].Children) != 2 || byName["测试"].Children[0].Name != "纪录片" || byName["测试"].Children[0].Id != 21 || byName["测试"].Children[1].Name != "动画片" || byName["测试"].Children[1].Id != 30 {
+		t.Fatalf("测试 children = %v, want 纪录片#21 and 动画片#30", testChildren)
+	}
 
 	merged := LookupRootSourceType("src1", 30)
 	if merged == nil || merged.Id != 21 || merged.Name != "测试" {
@@ -446,4 +453,99 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	if len(childIDs) != 2 || childIDs[0] != 11 || childIDs[1] != 12 {
 		t.Fatalf("影片 members = %v, want 11 and 12", childIDs)
 	}
+	if got := LookupRootSourceType("src1", 12); got != nil {
+		t.Fatalf("child 12 lookup = %+v, want nil", got)
+	}
+	promotedIDs := PublicSourceTypeIDs("src1", "cid", 30)
+	if len(promotedIDs) != 1 || promotedIDs[0] != 30 {
+		t.Fatalf("动画片 cid = %v, want [30]", promotedIDs)
+	}
+}
+
+func TestSourceTypeTree_PromotesRenamedRootsAsChildren(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() {
+		db.Rdb = origRdb
+		support.StoreMappingSnapshotForTest(prev)
+	})
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	rows := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 5, ParentSourceTypeId: 0, RawName: "福利视频", Sort: 5, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 18, ParentSourceTypeId: 0, RawName: "网红主播", Sort: 7, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 37, ParentSourceTypeId: 0, RawName: "海外抖音", Sort: 12, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 51, ParentSourceTypeId: 5, RawName: "自拍", Sort: 1, Depth: 1},
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+	if err := gdb.Create(&model.MappingRule{SourceId: "src1", Group: "CategoryRoot", Raw: "福利视频|海外抖音|网红主播", Target: "男人帮", MatchType: "regex"}).Error; err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+	ReloadMappingRules()
+
+	tree, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*model.CategoryTree{}
+	for _, child := range tree.Children {
+		byName[child.Name] = child
+	}
+	root := byName["男人帮"]
+	if root == nil || root.Id != 5 || byName["福利视频"] != nil || byName["网红主播"] != nil || byName["海外抖音"] != nil {
+		t.Fatalf("roots = %v, want 男人帮#5 as only merged root", rootNames(tree))
+	}
+	got := childNames(root)
+	if len(root.Children) != 4 || got[0] != "自拍#51" || got[1] != "福利视频#5" || got[2] != "网红主播#18" || got[3] != "海外抖音#37" {
+		t.Fatalf("男人帮 children = %v, want 自拍#51 福利视频#5 网红主播#18 海外抖音#37", got)
+	}
+
+	merged := LookupRootSourceType("src1", 18)
+	if merged == nil || merged.Id != 5 || merged.Name != "男人帮" {
+		t.Fatalf("member 18 lookup = %+v, want 男人帮#5", merged)
+	}
+	nodes := PublicSourceChildNodes("src1", 5)
+	if len(nodes) != 4 || nodes[0].Name != "自拍" || nodes[1].Name != "福利视频" || nodes[2].Name != "网红主播" || nodes[3].Name != "海外抖音" {
+		t.Fatalf("filter children = %v", childNames(&model.CategoryTree{Children: nodes}))
+	}
+	pidIDs := PublicSourceTypeIDs("src1", "pid", 5)
+	if len(pidIDs) != 4 || pidIDs[0] != 5 || pidIDs[1] != 18 || pidIDs[2] != 37 || pidIDs[3] != 51 {
+		t.Fatalf("男人帮 pid members = %v, want [5 18 37 51]", pidIDs)
+	}
+	cidIDs := PublicSourceTypeIDs("src1", "cid", 18)
+	if len(cidIDs) != 1 || cidIDs[0] != 18 {
+		t.Fatalf("网红主播 cid = %v, want [18]", cidIDs)
+	}
+}
+
+func rootNames(tree model.CategoryTree) []string {
+	names := make([]string, 0, len(tree.Children))
+	for _, child := range tree.Children {
+		if child == nil {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s#%d", child.Name, child.Id))
+	}
+	return names
+}
+
+func childNames(node *model.CategoryTree) []string {
+	if node == nil {
+		return nil
+	}
+	names := make([]string, 0, len(node.Children))
+	for _, child := range node.Children {
+		if child == nil {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s#%d", child.Name, child.Id))
+	}
+	return names
 }

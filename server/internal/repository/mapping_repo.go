@@ -15,6 +15,7 @@ import (
 const (
 	mappingRuleLegacyUniqueIndex = "uidx_group_raw"
 	mappingRuleEffectUniqueIndex = "uidx_group_raw_match_type"
+	mappingRuleSourceUniqueIndex = "uidx_source_group_raw_match_type"
 )
 
 // InitMappingEngine 从数据库加载映射规则并初始化内存缓存
@@ -56,19 +57,23 @@ func EnsureMappingRuleIndexes() error {
 	}
 
 	isSQLite := db.Mdb.Dialector != nil && db.Mdb.Dialector.Name() == "sqlite"
+	table := model.MappingRule{}.TableName()
 	if isSQLite {
 		_ = db.Mdb.Exec(fmt.Sprintf("DROP INDEX IF EXISTS %s", mappingRuleLegacyUniqueIndex)).Error
-		createIndexSQL := fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (`group`, raw, match_type)", mappingRuleEffectUniqueIndex, model.MappingRule{}.TableName())
+		_ = db.Mdb.Exec(fmt.Sprintf("DROP INDEX IF EXISTS %s", mappingRuleEffectUniqueIndex)).Error
+		createIndexSQL := fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (source_id, `group`, raw, match_type)", mappingRuleSourceUniqueIndex, table)
 		if err := db.Mdb.Exec(createIndexSQL).Error; err != nil && !isIgnorableMappingRuleIndexError(err) {
 			return err
 		}
 		return nil
 	}
 
-	if err := db.Mdb.Exec(fmt.Sprintf("ALTER TABLE %s DROP INDEX %s", model.MappingRule{}.TableName(), mappingRuleLegacyUniqueIndex)).Error; err != nil && !isIgnorableMappingRuleIndexError(err) {
-		return err
+	for _, name := range []string{mappingRuleLegacyUniqueIndex, mappingRuleEffectUniqueIndex} {
+		if err := db.Mdb.Exec(fmt.Sprintf("ALTER TABLE %s DROP INDEX %s", table, name)).Error; err != nil && !isIgnorableMappingRuleIndexError(err) {
+			return err
+		}
 	}
-	createIndexSQL := fmt.Sprintf("CREATE UNIQUE INDEX %s ON %s (`group`, raw, match_type)", mappingRuleEffectUniqueIndex, model.MappingRule{}.TableName())
+	createIndexSQL := fmt.Sprintf("CREATE UNIQUE INDEX %s ON %s (source_id, `group`, raw, match_type)", mappingRuleSourceUniqueIndex, table)
 	if err := db.Mdb.Exec(createIndexSQL).Error; err != nil && !isIgnorableMappingRuleIndexError(err) {
 		return err
 	}
@@ -87,9 +92,10 @@ func isIgnorableMappingRuleIndexError(err error) bool {
 }
 
 type MappingRuleQuery struct {
-	Group   string
-	Keyword string
-	Paging  *dto.Page
+	Group    string
+	Keyword  string
+	SourceId string
+	Paging   *dto.Page
 }
 
 func buildMappingRuleQuery(query MappingRuleQuery) *gorm.DB {
@@ -97,6 +103,16 @@ func buildMappingRuleQuery(query MappingRuleQuery) *gorm.DB {
 	group := strings.TrimSpace(query.Group)
 	if group != "" {
 		dbQuery = dbQuery.Where("`group` = ?", group)
+	}
+	sourceID := strings.TrimSpace(query.SourceId)
+	if IsCategoryMappingGroup(group) {
+		if sourceID == "" {
+			dbQuery = dbQuery.Where("1 = 0")
+		} else {
+			dbQuery = dbQuery.Where("source_id = ?", sourceID)
+		}
+	} else if sourceID != "" {
+		dbQuery = dbQuery.Where("source_id = ?", sourceID)
 	}
 	keyword := strings.TrimSpace(query.Keyword)
 	if keyword != "" {
@@ -128,11 +144,11 @@ func ListAllMappingRules(query MappingRuleQuery) ([]model.MappingRule, error) {
 	return list, err
 }
 
-func FindMappingRulesByEffectPoint(group, raw, matchType string, excludeID uint) ([]model.MappingRule, error) {
+func FindMappingRulesByEffectPoint(sourceID, group, raw, matchType string, excludeID uint) ([]model.MappingRule, error) {
 	list := make([]model.MappingRule, 0)
 	query := db.Mdb.Unscoped().Model(&model.MappingRule{}).
 		Where("deleted_at IS NULL").
-		Where("`group` = ? AND raw = ? AND match_type = ?", strings.TrimSpace(group), strings.TrimSpace(raw), strings.TrimSpace(matchType))
+		Where("source_id = ? AND `group` = ? AND raw = ? AND match_type = ?", strings.TrimSpace(sourceID), strings.TrimSpace(group), strings.TrimSpace(raw), strings.TrimSpace(matchType))
 	if excludeID > 0 {
 		query = query.Where("id <> ?", excludeID)
 	}
@@ -185,6 +201,7 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 		rule.MatchType = "exact"
 	}
 	if err := db.Mdb.Model(&model.MappingRule{}).Where("id = ?", rule.ID).Updates(map[string]any{
+		"source_id":  rule.SourceId,
 		"group":      rule.Group,
 		"raw":        rule.Raw,
 		"target":     rule.Target,
@@ -209,6 +226,14 @@ func DeleteMappingRule(id uint) error {
 	return nil
 }
 
+func DeleteMappingRulesBySourceTx(tx *gorm.DB, sourceID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if tx == nil || sourceID == "" || !tx.Migrator().HasTable(&model.MappingRule{}) {
+		return nil
+	}
+	return tx.Unscoped().Where("source_id = ?", sourceID).Delete(&model.MappingRule{}).Error
+}
+
 // ReplaceMappingRules 用导出规则整体替换映射规则表
 func ReplaceMappingRules(exports []model.MappingRuleExport) error {
 	if err := EnsureMappingRuleIndexes(); err != nil {
@@ -223,17 +248,30 @@ func ReplaceMappingRules(exports []model.MappingRuleExport) error {
 		}
 		rows := make([]model.MappingRule, 0, len(exports))
 		for _, item := range exports {
+			group := strings.TrimSpace(item.Group)
 			matchType := strings.TrimSpace(item.MatchType)
 			if matchType == "" {
 				matchType = "exact"
 			}
+			sourceID := strings.TrimSpace(item.SourceId)
+			if IsCategoryMappingGroup(group) {
+				if sourceID == "" {
+					continue
+				}
+			} else {
+				sourceID = ""
+			}
 			rows = append(rows, model.MappingRule{
-				Group:     strings.TrimSpace(item.Group),
+				SourceId:  sourceID,
+				Group:     group,
 				Raw:       strings.TrimSpace(item.Raw),
 				Target:    strings.TrimSpace(item.Target),
 				MatchType: matchType,
 				Remarks:   strings.TrimSpace(item.Remarks),
 			})
+		}
+		if len(rows) == 0 {
+			return nil
 		}
 		return tx.Create(&rows).Error
 	}); err != nil {
