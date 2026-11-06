@@ -90,7 +90,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Pin a formal tag with `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1` in `.env` or compose. A formal release deletes every beta tag and image, so do not pin a beta tag. `:latest` follows formal releases only.
+Pin a formal tag with `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:<formal-tag>` in `.env` or compose. A formal release deletes every beta tag and image, so do not pin a beta tag. `:latest` follows formal releases only.
 
 > [!WARNING]
 > **Notice on Upgrading from v2.x to v3.0**: v3.0 is a major architectural rewrite and is completely incompatible with v2.x legacy databases. Do NOT upgrade by simply running `docker compose pull` on an existing `./data/mysql` directory. v2.x operators must deploy in a brand new directory from scratch and re-run full collection.

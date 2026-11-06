@@ -90,7 +90,7 @@ docker compose pull
 docker compose up -d
 ```
 
-固定版本：在 `.env` 指定 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1`。正式版发布会删除全部 beta tag 和镜像，不要固定 beta。`:latest` 只跟正式版。
+固定版本：在 `.env` 指定 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:<正式版 tag>`。正式版发布会删除全部 beta tag 和镜像，不要固定 beta。`:latest` 只跟正式版。
 
 > [!WARNING]
 > **v2.x 升级至 v3.0 注意事项**：v3.0 为底层架构重大重构版本，完全不兼容 v2.x 历史数据库。禁止在现有 `./data/mysql` 目录下直接 pull 升级；v2.x 用户必须使用全新目录从零部署并重新全量采集。
