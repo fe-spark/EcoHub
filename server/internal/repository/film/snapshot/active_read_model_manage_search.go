@@ -76,8 +76,33 @@ func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), s.Pid, s.Cid, page.Total, page.Current, len(snaps), time.Since(startedAt))
-	return convertSnapshotsToFilmIndexes(snaps), nil
+	list := convertSnapshotsToFilmIndexes(snaps)
+	if err := fillFilmSourceMids(strings.TrimSpace(s.SourceId), list); err != nil {
+		return nil, err
+	}
+	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q source=%s pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), strings.TrimSpace(s.SourceId), s.Pid, s.Cid, page.Total, page.Current, len(list), time.Since(startedAt))
+	return list, nil
+}
+
+// fillFilmSourceMids 把当前来源的源站编号写到列表上。库内 mid 是入库序号，不给后台当 ID 展示。
+func fillFilmSourceMids(sourceID string, list []model.FilmIndex) error {
+	if sourceID == "" || len(list) == 0 {
+		return nil
+	}
+	mids := make([]int64, 0, len(list))
+	for i := range list {
+		if list[i].Mid > 0 {
+			mids = append(mids, list[i].Mid)
+		}
+	}
+	byGlobal, err := shared.LoadSourceMidsByGlobalMids(sourceID, mids)
+	if err != nil {
+		return err
+	}
+	for i := range list {
+		list[i].SourceMid = byGlobal[list[i].Mid]
+	}
+	return nil
 }
 
 // pageManageMetas 无关键词时只拷贝当前页；有关键词时先打分再切页。

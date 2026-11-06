@@ -24,6 +24,7 @@ const { Text } = Typography;
 
 export interface FilmItem {
   mid: number;
+  sourceMid?: number;
   ID: number;
   name: string;
   cName: string;
@@ -57,14 +58,14 @@ export function useFilmColumns({
     () => [
       {
         title: "ID",
-        dataIndex: "mid",
-        key: "mid",
-        width: 80,
+        dataIndex: "sourceMid",
+        key: "sourceMid",
+        width: 96,
         fixed: "left",
         align: "center",
-        render: (v) => (
+        render: (_, record) => (
           <Tag color="#8b40ff" style={{ borderRadius: 4 }}>
-            #{v}
+            #{record.sourceMid || record.mid}
           </Tag>
         ),
       },
