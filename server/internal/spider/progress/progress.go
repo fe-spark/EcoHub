@@ -251,13 +251,21 @@ func IsTerminalStatus(status string) bool {
 	}
 }
 
-func shouldMarkStale(sourceID, status string, live bool, age, staleAfter time.Duration) bool {
+// staleOccupied 排队超时才查占用。调用方不能持有该站点的进度锁，占用查询会再读进度。
+func staleOccupied(id, status string, live bool, age, staleAfter time.Duration) bool {
+	if age < staleAfter || live || status != StatusStarting {
+		return false
+	}
+	return sourceOccupied(id)
+}
+
+func shouldMarkStale(status string, live, occupied bool, age, staleAfter time.Duration) bool {
 	if age < staleAfter {
 		return false
 	}
 	// 占用中的 starting = 排队等并发槽；无占用且无 live 才是遗弃进度。
 	if status == StatusStarting {
-		return !live && !sourceOccupied(sourceID)
+		return !live && !occupied
 	}
 	if live && status == StatusRunning {
 		return false
@@ -310,23 +318,39 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	staleAfter := staleDuration()
 
 	state.mu.Lock()
-	if !isActiveStatus(state.data.Status) {
+	status := state.data.Status
+	if !isActiveStatus(status) {
 		state.mu.Unlock()
 		return false
 	}
 	_, live := tasks.Load(sourceID)
 	age := now.Sub(state.updated)
-	if live && (state.data.Status == StatusRunning || state.data.Status == StatusStarting) {
+	if live && (status == StatusRunning || status == StatusStarting) {
 		state.mu.Unlock()
 		return true
 	}
-	if shouldMarkStale(sourceID, state.data.Status, live, age, staleAfter) {
-		old := state.data.Status
+	state.mu.Unlock()
+
+	occupied := staleOccupied(sourceID, status, live, age, staleAfter)
+
+	state.mu.Lock()
+	status = state.data.Status
+	if !isActiveStatus(status) {
+		state.mu.Unlock()
+		return false
+	}
+	_, live = tasks.Load(sourceID)
+	age = now.Sub(state.updated)
+	if live && (status == StatusRunning || status == StatusStarting) {
+		state.mu.Unlock()
+		return true
+	}
+	if shouldMarkStale(status, live, occupied, age, staleAfter) {
 		state.data.Status = StatusFailed
 		state.updated = now
 		state.mu.Unlock()
-		log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed",
-			sourceID, old, age.Round(time.Second))
+		log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s live=%t occupied=%t -> failed",
+			sourceID, status, age.Round(time.Second), live, occupied)
 		return false
 	}
 	state.mu.Unlock()

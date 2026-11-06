@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -21,11 +22,16 @@ type CollectHandler struct{}
 var CollectHd = new(CollectHandler)
 
 func (h *CollectHandler) FilmSourceList(c *gin.Context) {
+	start := time.Now()
+	log.Printf("[Collect][List] 进入")
 	list, err := service.CollectSvc.GetFilmSourceList()
+	cost := time.Since(start).Round(time.Millisecond)
 	if err != nil {
+		log.Printf("[Collect][List] 失败 cost=%s err=%v", cost, err)
 		dto.Failed(err.Error(), c)
 		return
 	}
+	log.Printf("[Collect][List] 完成 count=%d cost=%s", len(list), cost)
 	dto.Success(list, "影视源站点信息获取成功", c)
 }
 

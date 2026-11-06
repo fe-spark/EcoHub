@@ -151,7 +151,7 @@ func highCollectProfile() collectProfileValues {
 }
 
 func smallCollectProfile() collectProfileValues {
-	return collectProfileValues{source: 2, pages: 4, fetch: 8, write: 2, perSrc: 32, global: 64}
+	return collectProfileValues{source: 0, pages: 4, fetch: 8, write: 16, perSrc: 32, global: 64}
 }
 
 func collectProfileSnapshot() collectProfileValues {

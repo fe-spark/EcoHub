@@ -66,7 +66,7 @@ func applyContainerCPUQuota() {
 
 // resolveCollectProfile 按 CPU 与内存确定采集并发。
 // 启动时把容器 CPU 限额算进 GOMAXPROCS。2 核及以下，或可用内存不超过 2GiB，使用小档。
-// 3 核及以上且内存更大时保持当前档，不会把已经收紧的小档改回全速。
+// 小档只收紧取数和写队列，写并发与站并发保持初值。3 核及以上且内存更大时保持全速，不会把已经收紧的小档改回。
 func resolveCollectProfile() {
 	applyContainerCPUQuota()
 	if runtime.GOMAXPROCS(0) > 2 && !memoryWithinSmallProfile() {
@@ -76,10 +76,8 @@ func resolveCollectProfile() {
 }
 
 func applySmallCollectProfile() {
-	CollectSourceConcurrency = 2
 	CollectPageWorkers = 4
 	CollectFetchInFlight = 8
-	CollectWriteMaxInflight = 2
 	CollectWriteMaxPendingPagesPerSource = 32
 	CollectWriteMaxPendingPagesGlobal = 64
 }
