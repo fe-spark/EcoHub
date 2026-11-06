@@ -74,7 +74,7 @@ test("没有 queueId 的站点不进采集队列", () => {
   );
 });
 
-test("computeCollectQueueProgress 按页数汇总进度", () => {
+test("computeCollectQueueProgress 按站均分进度，页数仍相加", () => {
   const view = computeCollectQueueProgress(
     ["a", "b"],
     [
@@ -82,7 +82,7 @@ test("computeCollectQueueProgress 按页数汇总进度", () => {
       site("b", progress("b", "q-1", "done", { total: 50, success: 50, failed: 0 })),
     ],
   );
-  assert.equal(view?.percent, 60);
+  assert.equal(view?.percent, 70);
   assert.equal(view?.pageDone, 90);
   assert.equal(view?.pageTotal, 150);
   assert.equal(view?.doneCount, 1);
@@ -110,6 +110,45 @@ test("还有采集队列时不出现检索进度，队列都结束后才单独�
     resolveSearchSealBar(12, { status: "waiting", percent: 0, current: 0, total: 0 }, false)?.phase,
     "waiting",
   );
+});
+
+test("排队站记 0，总进度按站平均，开跑后不因探页倒退", () => {
+  const queued = computeCollectQueueProgress(
+    ["a", "b", "c", "d"],
+    [
+      site("a", progress("a", "q-1", "running", { total: 100, success: 27, failed: 0 })),
+      site("b", progress("b", "q-1", "running", { total: 100, success: 59, failed: 0 })),
+      site("c", progress("c", "q-1", "starting", { total: 0, success: 0, failed: 0 })),
+      site("d", progress("d", "q-1", "starting", { total: 0, success: 0, failed: 0 })),
+    ],
+  );
+  assert.equal(queued?.percent, 21);
+  assert.equal(queued?.pageDone, 86);
+  assert.equal(queued?.pageTotal, 200);
+  assert.equal(queued?.total, 4);
+
+  const probed = computeCollectQueueProgress(
+    ["a", "b", "c", "d"],
+    [
+      site("a", progress("a", "q-1", "running", { total: 100, success: 27, failed: 0 })),
+      site("b", progress("b", "q-1", "running", { total: 100, success: 59, failed: 0 })),
+      site("c", progress("c", "q-1", "running", { total: 4000, success: 0, failed: 0 })),
+      site("d", progress("d", "q-1", "starting", { total: 0, success: 0, failed: 0 })),
+    ],
+  );
+  assert.equal(probed?.percent, 21);
+});
+
+test("探页失败的站算走完这一份", () => {
+  const view = computeCollectQueueProgress(
+    ["a", "b"],
+    [
+      site("a", progress("a", "q-1", "done", { total: 10, success: 10, failed: 0 })),
+      site("b", progress("b", "q-1", "failed", { total: 0, success: 0, failed: 0 })),
+    ],
+  );
+  assert.equal(view?.percent, 100);
+  assert.equal(view?.running, false);
 });
 
 test("待检索队列按页数计进度，不借用全库检索数字", () => {

@@ -111,6 +111,22 @@ export function groupCollectQueues(sites: FilmSource[]): CollectQueueGroup[] {
   return order.map((queueId) => ({ queueId, sourceIds: byId.get(queueId) ?? [] }));
 }
 
+/** 单站在队列总进度里占的一份。有页按已处理页比例，排队为 0，结束但没有页视为这份走完。 */
+function siteCollectShare(progress: CollectProgress): number {
+  const pages = progress.total;
+  if (pages > 0) {
+    return Math.min(progress.success + progress.failed, pages) / pages;
+  }
+  switch (progress.status) {
+    case "starting":
+    case "running":
+    case "stopping":
+      return 0;
+    default:
+      return 1;
+  }
+}
+
 export function computeCollectQueueProgress(
   sourceIds: string[],
   sites: FilmSource[],
@@ -128,11 +144,13 @@ export function computeCollectQueueProgress(
   let stoppedCount = 0;
   let sealedCount = 0;
   let counted = 0;
+  let shareSum = 0;
 
   for (const id of sourceIds) {
     const progress = byId.get(id)?.progress;
     if (!progress) continue;
     counted += 1;
+    shareSum += siteCollectShare(progress);
     failed += progress.failed;
     if (progress.sealed) sealedCount += 1;
     const pages = progress.total;
@@ -168,12 +186,13 @@ export function computeCollectQueueProgress(
   const sealing = sealingCount > 0;
   // 封口已完成时进度条停在 100%，不再倒回抓页进度。抓页进度不借用全库检索数字。
   const sealed = !running && !sealing && sealedCount > 0;
-  const pagePercent = pageTotal > 0 ? Math.floor((pageDone / pageTotal) * 100) : 0;
+  // 每个站占同样一份。未探到页的排队站记 0，结束后没有页的站记走完。
+  const stationPercent = Math.floor((shareSum / counted) * 100);
   const percent = running
-    ? Math.min(pagePercent, 99)
+    ? Math.min(stationPercent, 99)
     : sealed
       ? 100
-      : Math.min(pagePercent, 100);
+      : Math.min(stationPercent, 100);
 
   return {
     total: sourceIds.length,

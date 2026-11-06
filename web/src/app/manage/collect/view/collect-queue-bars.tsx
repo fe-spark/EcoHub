@@ -184,12 +184,11 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                 <span className={styles.queueTitle}>{title}</span>
 
                 <span className={styles.queuePages}>
+                  <span className={styles.pageTotalNum}>已采</span>
                   <strong className={styles.pageDoneNum}>
                     {pageCount(item.view.pageDone)}
                   </strong>
-                  <span className={styles.pageTotalNum}>
-                    / {pageCount(item.view.pageTotal)} 页
-                  </span>
+                  <span className={styles.pageTotalNum}>页</span>
                 </span>
 
                 <Space size={4} wrap className={styles.queueTags}>
