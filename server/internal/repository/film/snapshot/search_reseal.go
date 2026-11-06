@@ -8,9 +8,6 @@ import (
 	"server/internal/model"
 )
 
-// minSealDisplay 封口状态的最短展示时间，避免前端一闪而过。
-const minSealDisplay = 1200 * time.Millisecond
-
 // ResealSearchIndexMids 一条采集队列的变动只封口一次。
 // 库里仍在的影片走增量；有物理删除时才在内存里重算倒排和榜单，不扫全库。
 // 没有可用内存索引时才请求全库重建。
@@ -74,10 +71,6 @@ func ResealSearchIndexMids(mids []int64) bool {
 			log.Printf("[ActiveReadModel] 检索索引按需封口完成 mids=%d drop=%d seal=%t total=%d 耗时=%s (读库=%s 构建=%s)",
 				len(mids), len(drop), hasDrop, len(idx.Items),
 				time.Since(startedAt).Round(time.Millisecond), dbCost.Round(time.Millisecond), buildCost.Round(time.Millisecond))
-			// 封口本身只要几百毫秒，留一个最短展示窗口，让前端看得到「检索封口中」。
-			if elapsed := time.Since(startedAt); elapsed < minSealDisplay {
-				time.Sleep(minSealDisplay - elapsed)
-			}
 			NotifySearchIndexProgress(total, total, "done")
 			return true
 		}

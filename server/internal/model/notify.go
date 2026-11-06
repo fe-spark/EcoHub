@@ -51,6 +51,7 @@ type SourceNotifyResult struct {
 	PageCurrent int    `json:"pageCurrent"`
 	SuccessCnt  int    `json:"successCnt"`
 	FailedCnt   int    `json:"failedCnt"`
+	FailedPages []int  `json:"failedPages,omitempty"`
 	FilmsTotal  int    `json:"filmsTotal"`
 }
 

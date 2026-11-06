@@ -5,7 +5,7 @@ import {
   formatSkipSummary,
   isSourceSelectable,
 } from "./collect-selection";
-import type { DelBatchResult, FilmSource } from "./types";
+import { isCollectingStatus, type DelBatchResult, type FilmSource } from "./types";
 
 export function useCollectBatchActions(
   siteList: FilmSource[],
@@ -96,18 +96,27 @@ export function useCollectBatchActions(
       message.warning("请先选择采集站");
       return;
     }
-    const ids = selectedSources.map((item) => item.id);
+    const skipped = selectedSources
+      .filter((item) => isCollectingStatus(item.progress?.status))
+      .map((item) => ({ name: item.name, reason: "采集中" }));
+    const targets = selectedSources.filter((item) => !isCollectingStatus(item.progress?.status));
+    if (targets.length === 0) {
+      message.warning(`没有可删除的站点：${formatSkipSummary(skipped)}`);
+      return;
+    }
+    const ids = targets.map((item) => item.id);
     const idSet = new Set(ids);
     setSiteList((current) =>
       current.map((item) => (idSet.has(item.id) ? { ...item, deleting: true } : item)),
     );
-    setSelectedSourceIds([]);
+    setSelectedSourceIds((current) => current.filter((id) => !idSet.has(String(id))));
     setBatchDeleting(true);
     try {
       const resp = await ApiPost("/manage/collect/delete", { ids });
       if (resp.code === 0) {
-        onDeleteSubmitted?.(selectedSources.map((s) => ({ id: s.id, name: s.name })));
-        message.success("已提交批量删除");
+        onDeleteSubmitted?.(targets.map((s) => ({ id: s.id, name: s.name })));
+        const skipText = skipped.length > 0 ? `，跳过：${formatSkipSummary(skipped)}` : "";
+        message.success(`已提交批量删除${skipText}`);
         return;
       }
       setSiteList((current) =>

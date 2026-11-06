@@ -107,9 +107,16 @@ func (q *searchResealQueue) run() {
 			applySearchReseal(mids)
 			searchSealRunning.Store(false)
 		}
-		// 封口失败会转全量重建，等重建终态由进度监听收尾。
+		// 增量封口失败会转全量重建。已交出的站点等重建结束再收口。
+		// 重建期间新进来的编号还在 pending，继续封。
 		if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
 			q.mu.Lock()
+			pendingLeft := len(q.pending) > 0
+			stillRebuilding := filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled()
+			if pendingLeft || !stillRebuilding {
+				q.mu.Unlock()
+				continue
+			}
 			q.running = false
 			q.mu.Unlock()
 			return

@@ -194,7 +194,8 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 	return out, total, nil
 }
 
-// collectRecordListedFilmTotal 打开清单时不扫清单表。记录不存在则总数为 0。
+// collectRecordListedFilmTotal 全部站点用记录上的清单行数，单站用明细里的行数。不扫清单表。
+// 记录不存在或该站不在明细里则总数为 0。明细损坏直接返回错误。
 func collectRecordListedFilmTotal(batchID, sourceID string) (int64, error) {
 	var rec model.CollectRecord
 	err := db.Mdb.Select("film_count", "detail_json").Where("batch_id = ?", batchID).Take(&rec).Error
@@ -204,6 +205,10 @@ func collectRecordListedFilmTotal(batchID, sourceID string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return int64(rec.FilmCount), nil
+	}
 	raw := strings.TrimSpace(rec.DetailJson)
 	if raw == "" {
 		return 0, nil
@@ -211,15 +216,6 @@ func collectRecordListedFilmTotal(batchID, sourceID string) (int64, error) {
 	var details []model.CollectRecordSourceDetail
 	if err := json.Unmarshal([]byte(raw), &details); err != nil {
 		return 0, fmt.Errorf("批次明细损坏: %w", err)
-	}
-	if sourceID == "" {
-		total := 0
-		for _, detail := range details {
-			if detail.FilmsTotal > 0 {
-				total += detail.FilmsTotal
-			}
-		}
-		return int64(total), nil
 	}
 	for _, detail := range details {
 		if detail.SourceID == sourceID {
@@ -229,34 +225,30 @@ func collectRecordListedFilmTotal(batchID, sourceID string) (int64, error) {
 	return 0, nil
 }
 
-func collectRecordStoredFilmCounts(batchID string) (int, map[string]int, error) {
+// filmRowCounts 按站点统计清单行数。总数是各站行数之和，同一影片在多站各算一行。
+func filmRowCounts(tx *gorm.DB, batchID string) (int, map[string]int, error) {
 	bySource := map[string]int{}
 	batchID = strings.TrimSpace(batchID)
-	if batchID == "" || db.Mdb == nil {
+	if tx == nil || batchID == "" {
 		return 0, bySource, nil
-	}
-	var total int64
-	if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).
-		Where("batch_id = ?", batchID).
-		Distinct("mid").
-		Count(&total).Error; err != nil {
-		return 0, nil, err
 	}
 	var rows []struct {
 		SourceID string `gorm:"column:source_id"`
 		N        int    `gorm:"column:n"`
 	}
-	if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).
+	if err := tx.Model(&model.CollectRecordFilmItem{}).
 		Select("source_id, COUNT(*) AS n").
 		Where("batch_id = ?", batchID).
 		Group("source_id").
 		Scan(&rows).Error; err != nil {
 		return 0, nil, err
 	}
+	total := 0
 	for _, row := range rows {
 		bySource[row.SourceID] = row.N
+		total += row.N
 	}
-	return int(total), bySource, nil
+	return total, bySource, nil
 }
 
 // applyStoredFilmTotals 把已经落库的影片数写回站点明细，并把还在跑的站标成中断。

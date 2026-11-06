@@ -8,7 +8,7 @@ import (
 	"server/internal/spider/progress"
 )
 
-// shouldNoteCronCollectSuccess 仅整次定时跑完才记 last_collect_time。
+// shouldNoteCronCollectSuccess 整次跑完且未被停止，才算成功。
 // 用户停止、ctx 取消、返回错误都不算成功，避免补窗被截断。
 func shouldNoteCronCollectSuccess(runErr error, ctx context.Context, sourceID string) bool {
 	if runErr != nil {
@@ -18,6 +18,11 @@ func shouldNoteCronCollectSuccess(runErr error, ctx context.Context, sourceID st
 		return false
 	}
 	return !progress.IsStopped(sourceID)
+}
+
+// shouldWriteCronAnchor 只有定时整次成功才写 last_collect_time。手动全量和重试不移动补窗锚点。
+func shouldWriteCronAnchor(trigger string, runOK bool, startedAt time.Time) bool {
+	return runOK && trigger == model.CollectTriggerCron && !startedAt.IsZero()
 }
 
 const (

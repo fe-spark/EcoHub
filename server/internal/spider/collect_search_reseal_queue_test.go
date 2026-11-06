@@ -127,3 +127,112 @@ func TestBeginSource_RejectsWhileSearchIndexBuilding(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestResealQueue_StaysSealingUntilRebuildDone(t *testing.T) {
+	prevWait := waitCollectIdle
+	prevApply := applySearchReseal
+	t.Cleanup(func() {
+		waitCollectIdle = prevWait
+		applySearchReseal = prevApply
+		collectLifecycle.endSource("rebuild-seal")
+		resetSearchReseal()
+	})
+	if err := collectLifecycle.beginSource("rebuild-seal"); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	waitCollectIdle = func() { <-release }
+	applySearchReseal = func(mids []int64) bool {
+		filmsnapshot.NotifySearchIndexProgress(10, 0, "indexing")
+		return false
+	}
+
+	progress.Ensure("rebuild-seal", "RebuildSealSource")
+	progress.Update("rebuild-seal", func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+	searchReseal.addSealing("rebuild-seal")
+	scheduleSearchReseal([]int64{999})
+	collectLifecycle.endSource("rebuild-seal")
+	close(release)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		searchReseal.mu.Lock()
+		running := searchReseal.running
+		searchReseal.mu.Unlock()
+		if !running {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if snap, _ := progress.Snapshot("rebuild-seal"); snap.Status != progress.StatusSealing {
+		t.Fatalf("重建未结束时应保持待检索, got %q", snap.Status)
+	}
+
+	filmsnapshot.NotifySearchIndexProgress(10, 10, "done")
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if snap, _ := progress.Snapshot("rebuild-seal"); snap.Status == progress.StatusDone {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snap, _ := progress.Snapshot("rebuild-seal")
+	t.Fatalf("重建结束后应收入完成, got %q", snap.Status)
+}
+
+func TestResealQueue_SealsMidsArrivedDuringFailedSeal(t *testing.T) {
+	prevWait := waitCollectIdle
+	prevApply := applySearchReseal
+	t.Cleanup(func() {
+		waitCollectIdle = prevWait
+		applySearchReseal = prevApply
+		collectLifecycle.endSource("rebuild-more")
+		resetSearchReseal()
+	})
+	if err := collectLifecycle.beginSource("rebuild-more"); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	waitCollectIdle = func() { <-release }
+
+	second := make(chan []int64, 1)
+	applySearchReseal = func(mids []int64) bool {
+		if len(mids) == 1 && mids[0] == 999 {
+			filmsnapshot.NotifySearchIndexProgress(10, 0, "indexing")
+			scheduleSearchReseal([]int64{1000})
+			return false
+		}
+		filmsnapshot.NotifySearchIndexProgress(1, 1, "done")
+		second <- append([]int64(nil), mids...)
+		return true
+	}
+
+	progress.Ensure("rebuild-more", "RebuildMore")
+	progress.Update("rebuild-more", func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+	searchReseal.addSealing("rebuild-more")
+	scheduleSearchReseal([]int64{999})
+	collectLifecycle.endSource("rebuild-more")
+	close(release)
+
+	select {
+	case mids := <-second:
+		if len(mids) != 1 || mids[0] != 1000 {
+			t.Fatalf("second seal = %v", mids)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failed seal did not seal mids that arrived during rebuild")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if snap, _ := progress.Snapshot("rebuild-more"); snap.Status == progress.StatusDone {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snap, _ := progress.Snapshot("rebuild-more")
+	t.Fatalf("后续编号封完后应收入完成, got %q", snap.Status)
+}

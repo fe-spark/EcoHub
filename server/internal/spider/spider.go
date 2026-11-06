@@ -199,12 +199,18 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			batchCtx.RecordSourceError(s.Id, originalErr.Error())
 		}
 		runOK := shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id)
+		trigger := ""
+		startedAt := time.Time{}
+		if batchCtx != nil {
+			trigger = batchCtx.trigger
+			startedAt = batchCtx.startedAt
+		}
 		if statsOwned {
 			repository.UnsuppressCollectSourceStats(s.Id)
 		}
-		if runOK {
-			repository.NoteCollectSourceStats(s.Id)
-			log.Printf("[Spider] 站点 %s 采集成功，已记录 last_collect_time", s.Name)
+		if shouldWriteCronAnchor(trigger, runOK, startedAt) {
+			repository.NoteCollectSourceStatsAt(s.Id, startedAt)
+			log.Printf("[Spider] 站点 %s 定时采集成功，last_collect_time=%s（本次开始）", s.Name, startedAt.Format("2006-01-02 15:04:05"))
 		} else if statsOwned {
 			repository.DropCollectSourceStatsPending(s.Id)
 		}

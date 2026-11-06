@@ -91,7 +91,8 @@ func savePagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) err
 	return tx.Clauses(playlistUpsertClause()).CreateInBatches(&upserts, peerPagePlaylistBatch).Error
 }
 
-// claimSourceVodTimeTx 采纳不早于已存档的源站 vod_time。小时列表会把同一 vod 的旧页再交来一次，旧页不能覆盖新片单。
+// claimSourceVodTimeTx 只收下不早于已存档的源站 vod_time。更旧的页不是这次的更新，不能覆盖新片单。
+// 时间相同或更新时返回 true，再由片单签名判断内容是否真的变了。
 func claimSourceVodTimeTx(tx *gorm.DB, sourceID string, sourceMid int64, updateTime string) (bool, error) {
 	if sourceMid <= 0 {
 		return true, nil

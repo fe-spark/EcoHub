@@ -1,13 +1,11 @@
 package spider
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"server/internal/model"
@@ -15,6 +13,13 @@ import (
 	"server/internal/spider/progress"
 	"server/internal/utils"
 )
+
+func copyFailedPages(pages []int) []int {
+	if len(pages) == 0 {
+		return nil
+	}
+	return append([]int(nil), pages...)
+}
 
 func generateBatchID(startedAt time.Time) string {
 	salt, err := utils.RandomString(4)
@@ -113,6 +118,9 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 
 	details := make([]model.CollectRecordSourceDetail, 0, len(b.sources))
 	for _, src := range b.sources {
+		if _, dropped := b.droppedSources[src.Id]; dropped {
+			continue
+		}
 		detail, hasDetail := b.sourceSnapshots[src.Id]
 		if !hasDetail {
 			snap, ok := progress.Snapshot(src.Id)
@@ -145,6 +153,7 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 				PageCurrent: snap.Success,
 				SuccessCnt:  snap.Success,
 				FailedCnt:   snap.Failed,
+				FailedPages: copyFailedPages(snap.FailedPages),
 				FilmsTotal:  len(b.sourceFilmMIDs[src.Id]),
 				Error:       errMsg,
 			}
@@ -171,7 +180,7 @@ func (b *collectBatchContext) LiveProgress() *model.CollectRecordProgressPayload
 	}
 
 	detailBytes, _ := json.Marshal(details)
-	filmCount := len(b.filmMIDs)
+	filmCount := b.listedFilmCountLocked()
 	durationMs := time.Since(b.startedAt).Milliseconds()
 
 	return &model.CollectRecordProgressPayload{
@@ -203,10 +212,7 @@ func (b *collectBatchContext) noteSourceHour(sourceID string, hour int) {
 	}
 	changed := b.sourceHours[sourceID] != hour
 	b.sourceHours[sourceID] = hour
-	if hour > b.hour {
-		b.hour = hour
-		changed = true
-	}
+	// 批次 hour 保持配置跨度。各站实际窗口只写在明细 hour 上，列表才对得上点选的档位。
 	if changed {
 		b.progressDirty = true
 	}
@@ -241,6 +247,9 @@ func (b *collectBatchContext) sourceFilmCount(sourceID string) int {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.sourceDroppedLocked(sourceID) {
+		return 0
+	}
 	return len(b.sourceFilmMIDs[sourceID])
 }
 
@@ -254,6 +263,9 @@ func (b *collectBatchContext) batchHour() int {
 }
 
 func (b *collectBatchContext) trackFilmsLocked(sourceID string, mids []int64) {
+	if b.sourceDroppedLocked(sourceID) {
+		return
+	}
 	if b.sourceFilmMIDs == nil {
 		b.sourceFilmMIDs = map[string]map[int64]struct{}{}
 	}
@@ -371,7 +383,7 @@ func (b *collectBatchContext) requeuePending(films map[string][]int64) {
 }
 
 // abandonUnstored 结算时丢掉最终仍没写上的编号，让影片数和清单行一致。
-func (b *collectBatchContext) abandonUnstored(films map[string][]int64) (int, map[string]int) {
+func (b *collectBatchContext) abandonUnstored(films map[string][]int64) map[string]int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for sourceID, mids := range films {
@@ -407,19 +419,29 @@ func (b *collectBatchContext) abandonUnstored(films map[string][]int64) (int, ma
 	next := make(map[int64]struct{})
 	bySource := make(map[string]int, len(b.sourceFilmMIDs))
 	for sourceID, set := range b.sourceFilmMIDs {
+		if b.sourceDroppedLocked(sourceID) {
+			continue
+		}
 		bySource[sourceID] = len(set)
 		for mid := range set {
 			next[mid] = struct{}{}
 		}
 	}
 	b.filmMIDs = next
-	return len(next), bySource
+	return bySource
 }
 
 func (b *collectBatchContext) writeCheckpoint(films map[string][]int64) map[string][]int64 {
 	if b == nil || strings.TrimSpace(b.batchID) == "" {
 		return nil
 	}
+	b.recordMu.Lock()
+	defer b.recordMu.Unlock()
+	return b.writeCheckpointLocked(films)
+}
+
+func (b *collectBatchContext) writeCheckpointLocked(films map[string][]int64) map[string][]int64 {
+	films = b.withoutDroppedFilms(films)
 	var missed map[string][]int64
 	if len(films) > 0 {
 		if err := repository.BatchSaveCollectRecordFilms(b.batchID, films); err != nil {
@@ -464,41 +486,4 @@ func GetActiveBatchesLiveProgress(batchIDs map[string]struct{}) []*model.Collect
 		}
 	}
 	return out
-}
-
-var (
-	recordCompletionMu          sync.RWMutex
-	recordCompletionSubscribers = make(map[chan *model.CollectRecordProgressPayload]struct{})
-)
-
-// SubscribeRecordCompletion 订阅批次结算完成通知
-func SubscribeRecordCompletion(ctx context.Context) <-chan *model.CollectRecordProgressPayload {
-	ch := make(chan *model.CollectRecordProgressPayload, 16)
-	recordCompletionMu.Lock()
-	recordCompletionSubscribers[ch] = struct{}{}
-	recordCompletionMu.Unlock()
-
-	go func() {
-		<-ctx.Done()
-		recordCompletionMu.Lock()
-		delete(recordCompletionSubscribers, ch)
-		recordCompletionMu.Unlock()
-		close(ch)
-	}()
-	return ch
-}
-
-// BroadcastRecordCompletion 广播批次终态更新事件
-func BroadcastRecordCompletion(p *model.CollectRecordProgressPayload) {
-	if p == nil {
-		return
-	}
-	recordCompletionMu.RLock()
-	defer recordCompletionMu.RUnlock()
-	for ch := range recordCompletionSubscribers {
-		select {
-		case ch <- p:
-		default:
-		}
-	}
 }

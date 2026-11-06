@@ -31,8 +31,8 @@ func TestOlderSourcePageDoesNotOverwriteNewerPlaylist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("older page: %v", err)
 	}
-	if len(second.Notify) != 0 {
-		t.Fatalf("older page should not notify: %v", second.Notify)
+	if len(second.Notify) != 0 || len(second.Affected) != 0 {
+		t.Fatalf("older page is not an update: notify=%v affected=%v", second.Notify, second.Affected)
 	}
 	var lines []model.FilmSourcePlaylist
 	if err := gdb.Where("source_id = ? AND line_kind = ?", source.Id, "play").Find(&lines).Error; err != nil {
@@ -46,8 +46,8 @@ func TestOlderSourcePageDoesNotOverwriteNewerPlaylist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replay newer: %v", err)
 	}
-	if len(again.Notify) != 0 {
-		t.Fatalf("identical newer replay should not notify: %v", again.Notify)
+	if len(again.Notify) != 0 || len(again.Affected) != 0 {
+		t.Fatalf("identical replay is not an update: notify=%v affected=%v", again.Notify, again.Affected)
 	}
 }
 
@@ -72,17 +72,16 @@ func TestSaveSinglePeerDetail_StaleSnapshotRejected(t *testing.T) {
 		t.Fatalf("save older film: %v", err)
 	}
 	if staleMid != 0 || staleIsNew || staleChanged {
-		t.Fatalf("expected stale film to return zero: mid=%d isNew=%v changed=%v", staleMid, staleIsNew, staleChanged)
+		t.Fatalf("older snapshot is not an update: mid=%d isNew=%v changed=%v", staleMid, staleIsNew, staleChanged)
 	}
 }
 
-func TestClaimSourceVodTimeTx_ConcurrentRaceWonByNewer(t *testing.T) {
+func TestClaimSourceVodTimeTx_OlderTimeIsNotAnUpdate(t *testing.T) {
 	gdb := openPeerPageDB(t)
 	prev := db.Mdb
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
 
-	// 初始状态：source_vod_unix = 1000
 	mapping := model.MovieSourceMapping{
 		SourceId:      "src-race",
 		SourceMid:     2001,
@@ -93,24 +92,19 @@ func TestClaimSourceVodTimeTx_ConcurrentRaceWonByNewer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Worker B (新版本: 2026-11-02 13:00:00) 抢先成功写入
 	wonNew, err := claimSourceVodTimeTx(gdb, "src-race", 2001, "2026-11-02 13:00:00")
 	if err != nil || !wonNew {
 		t.Fatalf("newer update should win: won=%v err=%v", wonNew, err)
 	}
-
-	// Worker A (旧版本: 2026-11-02 12:00:00) 随后尝试写入，必须被 CAS 拒绝
 	wonOld, err := claimSourceVodTimeTx(gdb, "src-race", 2001, "2026-11-02 12:00:00")
 	if err != nil {
 		t.Fatalf("older update check error: %v", err)
 	}
 	if wonOld {
-		t.Fatalf("older update must be rejected when newer update already committed")
+		t.Fatal("older vod_time is not an update")
 	}
-
-	// 再次验证同时间更新允许放行
 	wonSame, err := claimSourceVodTimeTx(gdb, "src-race", 2001, "2026-11-02 13:00:00")
 	if err != nil || !wonSame {
-		t.Fatalf("same timestamp update should pass without blocking: won=%v err=%v", wonSame, err)
+		t.Fatalf("same timestamp can be compared for content change: won=%v err=%v", wonSame, err)
 	}
 }

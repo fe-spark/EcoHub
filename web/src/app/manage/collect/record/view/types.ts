@@ -3,6 +3,7 @@ export type CollectRecordSourceStatus =
   | "done"
   | "failed"
   | "stopped"
+  | "interrupted"
   | "running"
   | "partial"
   | "starting"

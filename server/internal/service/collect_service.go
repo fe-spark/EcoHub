@@ -323,15 +323,20 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	// 排序只走排序接口。编辑请求不带 sort，不能写成 0 把别的站顶成主站。
 	source.Sort = old.Sort
 
-	// 安全校验：如果当前采集站有任务正在运行，禁止修改 URI 或数据协议，防止引发解析错乱
+	// 拉页、停止中、待检索都不许改地址或协议。待检索时清空数据会和封口抢同一批影片。
 	isUriChanged := old.Uri != source.Uri
 	isFormatChanged := old.ResolveFormat() != source.ResolveFormat()
-	if (isUriChanged || isFormatChanged) && spider.IsTaskRunning(source.Id) {
+	if isUriChanged || isFormatChanged {
 		name := strings.TrimSpace(source.Name)
 		if name == "" {
 			name = old.Name
 		}
-		return fmt.Errorf("采集站「%s」当前有采集任务正在运行或正在停止退出中，请稍候几秒后再修改地址或协议", name)
+		if progress.IsSealing(source.Id) {
+			return fmt.Errorf("采集站「%s」待检索，暂不可修改地址或协议", name)
+		}
+		if spider.IsTaskRunning(source.Id) {
+			return fmt.Errorf("采集站「%s」当前有采集任务正在运行或正在停止退出中，请稍候几秒后再修改地址或协议", name)
+		}
 	}
 
 	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged)

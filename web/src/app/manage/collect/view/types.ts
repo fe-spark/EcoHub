@@ -64,6 +64,11 @@ export function isCollectBusyStatus(status?: string | null): boolean {
   return isActiveCollectStatus(status) || status === "stopping";
 }
 
+/** 抓页、停止收尾、待检索都算采集中。 */
+export function isCollectingStatus(status?: string | null): boolean {
+  return isCollectBusyStatus(status) || isSealingStatus(status);
+}
+
 export function isPartialCollectFailure(progress?: CollectProgress | null): boolean {
   return (progress?.success ?? 0) > 0 && (progress?.failed ?? 0) > 0;
 }
