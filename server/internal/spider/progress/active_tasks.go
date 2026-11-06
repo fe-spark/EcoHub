@@ -24,7 +24,6 @@ func GetActiveTaskProgress() []model.CollectProgress {
 
 	list := make([]model.CollectProgress, 0)
 	seen := make(map[string]struct{})
-	staleAfter := staleDuration()
 	now := time.Now()
 
 	tasks.Range(func(key, value any) bool {
@@ -45,7 +44,6 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		state := value.(*progressState)
 		state.mu.Lock()
 		progress := state.data
-		age := now.Sub(state.updated)
 
 		if progress.Status == StatusStopping {
 			state.mu.Unlock()
@@ -57,18 +55,21 @@ func GetActiveTaskProgress() []model.CollectProgress {
 			_, live := tasks.Load(id)
 			status := progress.Status
 			state.mu.Unlock()
-			occupied := staleOccupied(id, status, live, age, staleAfter)
+			if live {
+				list = append(list, progress)
+				return true
+			}
+			occupied := abandonedOccupied(id, status, live)
 			state.mu.Lock()
 			progress = state.data
-			age = now.Sub(state.updated)
 			_, live = tasks.Load(id)
-			if isActiveStatus(progress.Status) && shouldMarkStale(progress.Status, live, occupied, age, staleAfter) {
+			if isActiveStatus(progress.Status) && shouldMarkAbandoned(progress.Status, live, occupied) {
 				old := progress.Status
 				progress.Status = StatusFailed
 				state.data.Status = StatusFailed
 				state.updated = now
-				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s live=%t occupied=%t -> failed",
-					id, old, age.Round(time.Second), live, occupied)
+				log.Printf("[Spider] 进度清理 source=%s status=%s live=%t occupied=%t -> failed",
+					id, old, live, occupied)
 				state.mu.Unlock()
 				list = append(list, progress)
 				return true

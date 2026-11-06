@@ -47,9 +47,6 @@ const (
 	// DefaultCollectProgressRetainSec done/failed/stopped 在快照中保留秒数。
 	// 前端只按快照渲染，结束后保留这段时间展示完成态，过后自动清除。
 	DefaultCollectProgressRetainSec = 8
-	// DefaultCollectProgressStaleSec 无 live task 的 running，以及无占用的 starting，超时秒数。
-	// 占用中的 starting 是排队等槽，不算僵尸。不含 waiting_publish / finalizing / page_done。
-	DefaultCollectProgressStaleSec = 30 * 60
 
 	FilmPictureAccess = "/api/upload/pic/poster/"
 )
@@ -72,8 +69,6 @@ var (
 	CollectStatsFlushIntervalSec = DefaultCollectStatsFlushIntervalSec
 	// CollectProgressRetainSec done/failed 进度保留秒数。
 	CollectProgressRetainSec = DefaultCollectProgressRetainSec
-	// CollectProgressStaleSec 活跃进度超时秒数。
-	CollectProgressStaleSec = DefaultCollectProgressStaleSec
 )
 
 // -------------------------redis key-----------------------------------
@@ -330,13 +325,13 @@ func loadCollectRuntimeConfig() {
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集配置: 核数=%d 内存=%s 写并发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
+	fmt.Printf("[Config] 采集配置: 核数=%d 内存=%s 写并发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds\n",
 		runtime.GOMAXPROCS(0),
 		collectMemoryLimitLabel(),
 		CollectWriteMaxInflight,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, srcLimit, CollectFetchInFlight,
-		CollectProgressRetainSec, CollectProgressStaleSec)
+		CollectProgressRetainSec)
 }
 
 // GetRootMysqlDsn 获取不带数据库名的 DSN，用于 CREATE DATABASE 等管理操作
