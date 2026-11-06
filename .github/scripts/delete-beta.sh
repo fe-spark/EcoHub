@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 正式版发布后删除全部 beta Release、tag 和 GHCR 镜像。
-# 只删 tag 名含 -beta 的版本。latest 和正式版 tag 不动。
+# 只删 tag 名含 -beta 的版本。preview、latest 和正式版 tag 不动。
 # 同一镜像版本若同时挂了 beta 和正式 tag，直接失败，避免误删正式版。
 set -euo pipefail
 
