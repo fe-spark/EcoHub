@@ -18,14 +18,6 @@ func retainDuration() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-func staleDuration() time.Duration {
-	sec := config.CollectProgressStaleSec
-	if sec <= 0 {
-		sec = config.DefaultCollectProgressStaleSec
-	}
-	return time.Duration(sec) * time.Second
-}
-
 func maybePurgeTerminal(now time.Time) bool {
 	retain := retainDuration()
 	activeQueues := make(map[string]struct{})
@@ -67,31 +59,28 @@ func maybePurgeTerminal(now time.Time) bool {
 
 func pruneStale() {
 	now := time.Now()
-	staleAfter := staleDuration()
 	var changed bool
 	store.Range(func(key, value any) bool {
 		id, _ := key.(string)
 		state := value.(*progressState)
 		state.mu.Lock()
 		status := state.data.Status
-		age := now.Sub(state.updated)
 		_, live := tasks.Load(id)
 		state.mu.Unlock()
-		if !isActiveStatus(status) {
+		if !isActiveStatus(status) || live {
 			return true
 		}
-		occupied := staleOccupied(id, status, live, age, staleAfter)
+		occupied := abandonedOccupied(id, status, live)
 		state.mu.Lock()
 		status = state.data.Status
-		age = now.Sub(state.updated)
 		_, live = tasks.Load(id)
-		if isActiveStatus(status) && shouldMarkStale(status, live, occupied, age, staleAfter) {
+		if isActiveStatus(status) && shouldMarkAbandoned(status, live, occupied) {
 			state.data.Status = StatusFailed
 			state.updated = now
 			state.mu.Unlock()
 			changed = true
-			log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s live=%t occupied=%t -> failed",
-				id, status, age.Round(time.Second), live, occupied)
+			log.Printf("[Spider] 进度清理 source=%s status=%s live=%t occupied=%t -> failed",
+				id, status, live, occupied)
 			return true
 		}
 		state.mu.Unlock()

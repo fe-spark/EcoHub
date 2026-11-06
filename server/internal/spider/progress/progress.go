@@ -251,24 +251,21 @@ func IsTerminalStatus(status string) bool {
 	}
 }
 
-// staleOccupied 排队超时才查占用。调用方不能持有该站点的进度锁，占用查询会再读进度。
-func staleOccupied(id, status string, live bool, age, staleAfter time.Duration) bool {
-	if age < staleAfter || live || status != StatusStarting {
+// abandonedOccupied 没任务的排队才查占用。调用方不能持有该站点的进度锁，占用查询会再读进度。
+func abandonedOccupied(id, status string, live bool) bool {
+	if live || status != StatusStarting {
 		return false
 	}
 	return sourceOccupied(id)
 }
 
-func shouldMarkStale(status string, live, occupied bool, age, staleAfter time.Duration) bool {
-	if age < staleAfter {
+// shouldMarkAbandoned 没任务的采集中，以及没任务也没占用的排队，当场清掉。
+func shouldMarkAbandoned(status string, live, occupied bool) bool {
+	if live {
 		return false
 	}
-	// 占用中的 starting = 排队等并发槽；无占用且无 live 才是遗弃进度。
 	if status == StatusStarting {
-		return !live && !occupied
-	}
-	if live && status == StatusRunning {
-		return false
+		return !occupied
 	}
 	return status == StatusRunning
 }
@@ -314,9 +311,6 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 		return false
 	}
 	state := val.(*progressState)
-	now := time.Now()
-	staleAfter := staleDuration()
-
 	state.mu.Lock()
 	status := state.data.Status
 	if !isActiveStatus(status) {
@@ -324,14 +318,13 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 		return false
 	}
 	_, live := tasks.Load(sourceID)
-	age := now.Sub(state.updated)
-	if live && (status == StatusRunning || status == StatusStarting) {
+	if live {
 		state.mu.Unlock()
 		return true
 	}
 	state.mu.Unlock()
 
-	occupied := staleOccupied(sourceID, status, live, age, staleAfter)
+	occupied := abandonedOccupied(sourceID, status, live)
 
 	state.mu.Lock()
 	status = state.data.Status
@@ -340,17 +333,16 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 		return false
 	}
 	_, live = tasks.Load(sourceID)
-	age = now.Sub(state.updated)
-	if live && (status == StatusRunning || status == StatusStarting) {
+	if live {
 		state.mu.Unlock()
 		return true
 	}
-	if shouldMarkStale(status, live, occupied, age, staleAfter) {
+	if shouldMarkAbandoned(status, live, occupied) {
 		state.data.Status = StatusFailed
-		state.updated = now
+		state.updated = time.Now()
 		state.mu.Unlock()
-		log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s live=%t occupied=%t -> failed",
-			sourceID, status, age.Round(time.Second), live, occupied)
+		log.Printf("[Spider] 进度清理 source=%s status=%s live=%t occupied=%t -> failed",
+			sourceID, status, live, occupied)
 		return false
 	}
 	state.mu.Unlock()

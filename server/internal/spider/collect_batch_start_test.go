@@ -45,10 +45,14 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	}
 
 	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "busy", Name: "在采"}}, "q-test-busy")
+	if _, err := progress.TryRegisterTask("busy", "req-busy", nil); err != nil {
+		t.Fatal(err)
+	}
 	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "halt", Name: "收尾"}}, "q-test-halt")
 	progress.Update("halt", func(p *model.CollectProgress) { p.Status = progress.StatusStopping })
 	progress.BroadcastCategoryStatus("sync", "syncing")
 	t.Cleanup(func() {
+		progress.UnregisterTask("busy", "req-busy")
 		for _, id := range []string{"ready", "busy", "halt", "sync"} {
 			releaseCollectSourceIDs(id)
 			progress.Update(id, func(p *model.CollectProgress) { p.Status = progress.StatusStopped })

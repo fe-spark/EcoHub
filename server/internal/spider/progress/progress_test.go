@@ -20,67 +20,58 @@ func TestIsAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 		t.Fatal("expected not blocking when no progress")
 	}
 
-	// 2) 新鲜 running → 阻挡
+	// 2) 无 live 的 running 当场失败，不阻挡
 	state := ensure(sourceID, "T")
 	state.mu.Lock()
 	state.data.Status = StatusRunning
 	state.updated = time.Now()
 	state.mu.Unlock()
-	if !IsAlreadyQueuedOrRunning(sourceID) {
-		t.Fatal("expected blocking on fresh running")
-	}
-
-	// 3) 无 live 的 running 超时 → failed 且不阻挡
-	state.mu.Lock()
-	state.data.Status = StatusRunning
-	state.updated = time.Now().Add(-staleDuration() - time.Second)
-	state.mu.Unlock()
 	if IsAlreadyQueuedOrRunning(sourceID) {
-		t.Fatal("expected not blocking after stale running without live task")
+		t.Fatal("expected not blocking on running without live task")
 	}
 	snap, ok := Snapshot(sourceID)
 	if !ok || snap.Status != StatusFailed {
-		t.Fatalf("expected status failed after stale running, got ok=%v status=%q", ok, snap.Status)
+		t.Fatalf("expected status failed for running without live task, got ok=%v status=%q", ok, snap.Status)
 	}
 
-	// 4) live tasks + running → 阻挡（即使 updated 很旧）
+	// 3) live tasks + running → 阻挡
 	tasks.Store(sourceID, task{cancel: func() {}, reqID: "req"})
 	state.mu.Lock()
 	state.data.Status = StatusRunning
-	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.updated = time.Now()
 	state.mu.Unlock()
 	if !IsAlreadyQueuedOrRunning(sourceID) {
 		t.Fatal("expected blocking while live tasks running")
 	}
 	tasks.Delete(sourceID)
 
-	// 5) 占用中的 starting 即使很久仍是排队
+	// 4) 占用中的 starting 仍是排队
 	SetOccupyChecker(func(id string) bool { return id == sourceID })
 	state.mu.Lock()
 	state.data.Status = StatusStarting
 	state.data.QueueId = "q-queued"
-	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.updated = time.Now()
 	state.mu.Unlock()
 	if !IsAlreadyQueuedOrRunning(sourceID) {
-		t.Fatal("expected blocking on occupied long starting")
+		t.Fatal("expected blocking on occupied starting")
 	}
 	snap, ok = Snapshot(sourceID)
 	if !ok || snap.Status != StatusStarting {
-		t.Fatalf("occupied starting must not stale-fail, got ok=%v status=%q", ok, snap.Status)
+		t.Fatalf("occupied starting must stay starting, got ok=%v status=%q", ok, snap.Status)
 	}
 	SetOccupyChecker(nil)
 
-	// 6) 无占用、无 live 的 starting 超时 → failed，不阻挡
+	// 5) 无占用、无 live 的 starting 当场失败，不阻挡
 	state.mu.Lock()
 	state.data.Status = StatusStarting
-	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.updated = time.Now()
 	state.mu.Unlock()
 	if IsAlreadyQueuedOrRunning(sourceID) {
-		t.Fatal("abandoned starting should not block after stale")
+		t.Fatal("abandoned starting should not block")
 	}
 	snap, ok = Snapshot(sourceID)
 	if !ok || snap.Status != StatusFailed {
-		t.Fatalf("abandoned starting should stale-fail, got ok=%v status=%q", ok, snap.Status)
+		t.Fatalf("abandoned starting should fail, got ok=%v status=%q", ok, snap.Status)
 	}
 	store.Delete(sourceID)
 }
@@ -110,6 +101,7 @@ func TestGetActiveTaskProgressPurgesTerminalPerSource(t *testing.T) {
 	s1.mu.Unlock()
 
 	s2 := ensure(activeID, "Active")
+	tasks.Store(activeID, task{cancel: func() {}, reqID: "req"})
 	s2.mu.Lock()
 	s2.data.Status = StatusRunning
 	s2.data.Total = 5
@@ -298,7 +290,7 @@ func TestGetActiveTaskProgressMarksStaleRunningWithoutLive(t *testing.T) {
 	state := ensure(sourceID, "StaleRun")
 	state.mu.Lock()
 	state.data.Status = StatusRunning
-	state.updated = time.Now().Add(-staleDuration() - time.Second)
+	state.updated = time.Now()
 	state.mu.Unlock()
 
 	list := GetActiveTaskProgress()
@@ -338,7 +330,7 @@ func TestGetActiveTaskProgressDoesNotStaleQueuedStarting(t *testing.T) {
 	state.mu.Lock()
 	state.data.Status = StatusStarting
 	state.data.QueueId = queueID
-	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.updated = time.Now()
 	state.mu.Unlock()
 
 	list := GetActiveTaskProgress()
@@ -395,7 +387,7 @@ func TestGetActiveTaskProgressOccupiedStartingDoesNotDeadlock(t *testing.T) {
 	state.mu.Lock()
 	state.data.Status = StatusStarting
 	state.data.QueueId = "q-deadlock"
-	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.updated = time.Now()
 	state.mu.Unlock()
 
 	done := make(chan struct{})
@@ -426,7 +418,7 @@ func TestGetActiveTaskProgressMarksStaleAbandonedStarting(t *testing.T) {
 	state := ensure(sourceID, "Gone")
 	state.mu.Lock()
 	state.data.Status = StatusStarting
-	state.updated = time.Now().Add(-staleDuration() - time.Second)
+	state.updated = time.Now()
 	state.mu.Unlock()
 
 	list := GetActiveTaskProgress()
