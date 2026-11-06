@@ -1,5 +1,14 @@
 import { ApiGet, ApiPost } from "@/lib/client-api";
-import { CATEGORY_GROUPS, normalizeRuleRecord, normalizeTree, parseRuleList, type FilmClassNode } from "./types";
+import {
+  CATEGORY_GROUPS,
+  emptyRuleMergePreview,
+  normalizePreviewHits,
+  normalizeRuleRecord,
+  normalizeTree,
+  parseRuleList,
+  type FilmClassNode,
+  type RuleMergePreview,
+} from "./types";
 
 export async function getFilmClassTree(sourceId = "") {
   const resp = await ApiGet("/manage/film/class/tree", {
@@ -20,12 +29,13 @@ export async function saveFilmClassTree(children: FilmClassNode[], sourceId: str
   return ApiPost("/manage/film/class/tree", { children, sourceId });
 }
 
-export async function getCategoryRules(page: number, pageSize: number, keyword: string, group: string) {
+export async function getCategoryRules(page: number, pageSize: number, keyword: string, group: string, sourceId: string) {
   const resp = await ApiGet("/manage/mapping/rule/list", {
     current: page,
     pageSize,
     group,
     keyword: keyword.trim(),
+    sourceId,
   });
   return {
     resp,
@@ -33,7 +43,7 @@ export async function getCategoryRules(page: number, pageSize: number, keyword: 
   };
 }
 
-export async function getCategoryRuleTotals() {
+export async function getCategoryRuleTotals(sourceId: string) {
   const [rootResp, subResp] = await Promise.all(
     CATEGORY_GROUPS.map((group) =>
       ApiGet("/manage/mapping/rule/list", {
@@ -41,6 +51,7 @@ export async function getCategoryRuleTotals() {
         pageSize: 1,
         group,
         keyword: "",
+        sourceId,
       }),
     ),
   );
@@ -50,7 +61,13 @@ export async function getCategoryRuleTotals() {
   }, {});
 }
 
-export async function checkCategoryRuleConflict(payload: { id?: number; group: string; raw: string; matchType: string }) {
+export async function checkCategoryRuleConflict(payload: {
+  id?: number;
+  sourceId: string;
+  group: string;
+  raw: string;
+  matchType: string;
+}) {
   const resp = await ApiPost("/manage/mapping/rule/check", payload);
   const list = Array.isArray(resp.data?.rules) ? resp.data.rules : Array.isArray(resp.data) ? resp.data : [];
   return {
@@ -59,8 +76,42 @@ export async function checkCategoryRuleConflict(payload: { id?: number; group: s
   };
 }
 
+export async function previewCategoryRule(payload: {
+  sourceId: string;
+  group: string;
+  raw: string;
+  matchType: string;
+  target: string;
+}): Promise<{ resp: Awaited<ReturnType<typeof ApiPost>>; preview: RuleMergePreview }> {
+  const resp = await ApiPost("/manage/mapping/rule/preview", payload);
+  if (resp.code !== 0) {
+    return {
+      resp,
+      preview: {
+        ...emptyRuleMergePreview,
+        valid: false,
+        error: String(resp.msg || "预览失败"),
+      },
+    };
+  }
+  const data = (resp.data || {}) as Record<string, unknown>;
+  return {
+    resp,
+    preview: {
+      loading: false,
+      valid: true,
+      error: "",
+      sourceName: String(data.sourceName ?? ""),
+      target: String(data.target ?? payload.target),
+      hits: normalizePreviewHits(data.hits),
+      keep: normalizePreviewHits(data.keep),
+    },
+  };
+}
+
 export async function saveCategoryRule(payload: {
   id?: number;
+  sourceId: string;
   group: string;
   raw: string;
   target: string;

@@ -259,6 +259,7 @@ func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
 	}
 	dto.Success(backup, "配置备份导出成功", c)
 }
+
 // ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）
 func (h *ManageHandler) ImportConfigBackup(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
@@ -311,6 +312,7 @@ func (h *ManageHandler) MappingRuleList(c *gin.Context) {
 	result, err := service.ManageSvc.ListMappingRules(
 		c.DefaultQuery("group", ""),
 		c.DefaultQuery("keyword", ""),
+		c.DefaultQuery("sourceId", ""),
 		dto.GetPageParams(c),
 	)
 	if err != nil {
@@ -389,6 +391,27 @@ func (h *ManageHandler) MappingRuleDelete(c *gin.Context) {
 		}
 	}
 	dto.SuccessOnlyMsg("映射规则删除成功", c)
+}
+
+// MappingRulePreview 用该站真实分类预览本条规则的合并命中。
+func (h *ManageHandler) MappingRulePreview(c *gin.Context) {
+	var req struct {
+		SourceId  string `json:"sourceId"`
+		Group     string `json:"group"`
+		Raw       string `json:"raw"`
+		MatchType string `json:"matchType"`
+		Target    string `json:"target"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("映射规则参数异常", c)
+		return
+	}
+	result, err := service.ManageSvc.PreviewMappingRule(req.SourceId, req.Group, req.Raw, req.MatchType, req.Target)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(result, "映射规则预览成功", c)
 }
 
 // ------------------------------------------------------ 参数校验 ------------------------------------------------------

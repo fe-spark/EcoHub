@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +61,7 @@ func ResolveBannerSourceCategories(sourceID string, selected []int64) (ids []int
 
 // sourceTypeCategoryTree 前台分类树。节点 id 是当前采集站自己的 type_id。
 // 首选站套用分类规则：命中的改名，同一父级下目标名相同的 type 合成一个节点。
+// 一级分类被改名后，原名落到目标分类下作为二级筛选。
 func sourceTypeCategoryTree(sourceId string) (model.CategoryTree, error) {
 	root := model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
@@ -156,7 +156,7 @@ func LookupRootSourceType(sourceId string, typeId int64) *model.CategoryTree {
 	if err != nil {
 		return nil
 	}
-	if group, ok := view.groupByMember(typeId); ok && group.Show && group.Parent == 0 {
+	if group, ok := view.rootByMember(typeId); ok && group.Show && group.Parent == 0 {
 		node := group.treeNode(0)
 		return node
 	}
@@ -183,18 +183,16 @@ func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	if err != nil {
 		return nil
 	}
-	if group, ok := view.groupByMember(typeID); ok && group.Show {
-		if field == "cid" {
+	if field == "cid" {
+		if group, ok := view.groupByMember(typeID); ok && group.Show {
 			if group.Parent == 0 && len(group.Children) > 0 {
 				return []int64{typeID}
 			}
-			out := make([]int64, len(group.Members))
-			copy(out, group.Members)
-			return out
+			return append([]int64{}, group.Members...)
 		}
-		if group.Parent != 0 {
-			return []int64{typeID}
-		}
+		return []int64{typeID}
+	}
+	if group, ok := view.rootByMember(typeID); ok && group.Show {
 		return group.allTypeIDs()
 	}
 	return []int64{typeID}
@@ -224,8 +222,8 @@ func PublicSourceChildNodes(sourceID string, parentTypeID int64) []*model.Catego
 	if err != nil {
 		return nil
 	}
-	group, ok := view.groupByMember(parentTypeID)
-	if !ok || !group.Show || group.Parent != 0 {
+	group, ok := view.rootByMember(parentTypeID)
+	if !ok || !group.Show {
 		return []*model.CategoryTree{}
 	}
 	nodes := make([]*model.CategoryTree, 0, len(group.Children))
@@ -299,15 +297,18 @@ func (g publicTypeGroup) treeNode(parentID int64) *model.CategoryTree {
 type publicSourceView struct {
 	Groups  []publicTypeGroup
 	members map[int64]publicTypeGroup
+	roots   map[int64]publicTypeGroup
 	Hidden  map[int64]sourceTypeRow
 }
 
 func (v publicSourceView) groupByMember(typeID int64) (publicTypeGroup, bool) {
 	group, ok := v.members[typeID]
-	if !ok {
-		return publicTypeGroup{}, false
-	}
-	return group, true
+	return group, ok
+}
+
+func (v publicSourceView) rootByMember(typeID int64) (publicTypeGroup, bool) {
+	group, ok := v.roots[typeID]
+	return group, ok
 }
 
 type publicSourceCacheEntry struct {
@@ -355,7 +356,6 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 	if err != nil {
 		return publicSourceView{}, err
 	}
-	useRules := publicRulesForSource(sourceID)
 	parsed := make([]sourceTypeRow, 0, len(rows))
 	hidden := map[int64]sourceTypeRow{}
 	for _, row := range rows {
@@ -380,99 +380,11 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 		parsed = append(parsed, item)
 	}
 	view := publicSourceView{
-		Groups:  groupPublicTypes(parsed, useRules),
+		Groups:  groupPublicTypes(parsed, sourceID),
 		Hidden:  hidden,
 		members: map[int64]publicTypeGroup{},
+		roots:   map[int64]publicTypeGroup{},
 	}
-	indexPublicGroups(view.Groups, view.members)
+	indexPublicGroups(view.Groups, view.members, view.roots)
 	return view, nil
-}
-
-func publicRulesForSource(sourceID string) bool {
-	primary := PickPrimarySourceForCategory()
-	if primary == nil || strings.TrimSpace(primary.Id) == "" {
-		return true
-	}
-	return strings.TrimSpace(primary.Id) == sourceID
-}
-
-func groupPublicTypes(rows []sourceTypeRow, useRules bool) []publicTypeGroup {
-	childrenOf := map[int64][]sourceTypeRow{}
-	roots := make([]sourceTypeRow, 0)
-	for _, row := range rows {
-		if row.Parent > 0 {
-			childrenOf[row.Parent] = append(childrenOf[row.Parent], row)
-			continue
-		}
-		roots = append(roots, row)
-	}
-	groups := groupTypeRows(roots, useRules, true)
-	for i := range groups {
-		var children []sourceTypeRow
-		for _, member := range groups[i].Members {
-			children = append(children, childrenOf[member]...)
-		}
-		groups[i].Children = groupTypeRows(children, useRules, false)
-		for j := range groups[i].Children {
-			groups[i].Children[j].Parent = groups[i].ID
-		}
-	}
-	return groups
-}
-
-func groupTypeRows(rows []sourceTypeRow, useRules bool, root bool) []publicTypeGroup {
-	order := make([]string, 0)
-	buckets := map[string][]sourceTypeRow{}
-	for _, row := range rows {
-		name := row.Name
-		if useRules {
-			if root {
-				name = support.NormalizeRootCategoryName(name)
-			} else {
-				name = support.NormalizeSubCategoryName(name)
-			}
-		}
-		name = strings.TrimSpace(name)
-		if name == "" {
-			name = row.Name
-		}
-		if _, ok := buckets[name]; !ok {
-			order = append(order, name)
-		}
-		buckets[name] = append(buckets[name], row)
-	}
-	groups := make([]publicTypeGroup, 0, len(order))
-	for _, name := range order {
-		members := buckets[name]
-		group := publicTypeGroup{ID: members[0].ID, Name: name, Sort: members[0].Sort, Show: true, Members: make([]int64, 0, len(members))}
-		for _, row := range members {
-			group.Members = append(group.Members, row.ID)
-			if row.ID < group.ID {
-				group.ID = row.ID
-			}
-			if row.Sort < group.Sort {
-				group.Sort = row.Sort
-			}
-		}
-		sort.Slice(group.Members, func(i, j int) bool { return group.Members[i] < group.Members[j] })
-		groups = append(groups, group)
-	}
-	sort.SliceStable(groups, func(i, j int) bool {
-		if groups[i].Sort != groups[j].Sort {
-			return groups[i].Sort < groups[j].Sort
-		}
-		return groups[i].ID < groups[j].ID
-	})
-	return groups
-}
-
-func indexPublicGroups(groups []publicTypeGroup, byID map[int64]publicTypeGroup) {
-	for i := range groups {
-		group := groups[i]
-		for _, member := range group.Members {
-			byID[member] = group
-		}
-		byID[group.ID] = group
-		indexPublicGroups(group.Children, byID)
-	}
 }

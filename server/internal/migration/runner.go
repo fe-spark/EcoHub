@@ -25,6 +25,11 @@ var migrations = []Migration{
 		Name:    "当前版本基线，无结构变更",
 		Run:     migrateBaseline,
 	},
+	{
+		Version: "20261106_mapping_rule_source",
+		Name:    "分类规则绑定采集站",
+		Run:     migrateMappingRuleSource,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

@@ -11,11 +11,12 @@ import (
 )
 
 type categoryPlacement struct {
-	Id    int64
-	Pid   int64
-	Sort  int
-	Show  bool
-	Depth int
+	Id        int64
+	Pid       int64
+	Sort      int
+	Show      bool
+	Depth     int
+	MemberIds []int64
 }
 
 func flattenCategoryPlacements(nodes []*model.CategoryTree, parentId int64, depth int, out *[]categoryPlacement) error {
@@ -25,14 +26,43 @@ func flattenCategoryPlacements(nodes []*model.CategoryTree, parentId int64, dept
 			return fmt.Errorf("分类节点数据异常")
 		}
 		*out = append(*out, categoryPlacement{
-			Id:    node.Id,
-			Pid:   item.ParentId,
-			Sort:  item.Sort,
-			Show:  node.Show,
-			Depth: item.Depth,
+			Id:        node.Id,
+			Pid:       item.ParentId,
+			Sort:      item.Sort,
+			Show:      node.Show,
+			Depth:     item.Depth,
+			MemberIds: node.MemberIds,
 		})
 		return nil
 	})
+}
+
+func expandSourceOrderPlacements(placements []categoryPlacement) []categoryPlacement {
+	out := make([]categoryPlacement, 0, len(placements))
+	for _, placement := range placements {
+		ids := []int64{placement.Id}
+		seen := map[int64]struct{}{placement.Id: {}}
+		for _, id := range placement.MemberIds {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+		for _, id := range ids {
+			out = append(out, categoryPlacement{
+				Id:    id,
+				Pid:   placement.Pid,
+				Sort:  placement.Sort,
+				Show:  placement.Show,
+				Depth: placement.Depth,
+			})
+		}
+	}
+	return out
 }
 
 func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
@@ -99,7 +129,7 @@ func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
 	return nil
 }
 
-// SaveSourceCategoryOrder 只改该采集站分类的排序和显示。其它站的分类保持不动，也不改父子关系。
+// SaveSourceCategoryOrder 只改该采集站分类的排序和显示。规则决定层级，这里不写父子关系。
 func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
@@ -109,6 +139,7 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 	if err := flattenCategoryPlacements(nodes, 0, 0, &placements); err != nil {
 		return err
 	}
+	placements = expandSourceOrderPlacements(placements)
 
 	allowed := sourceMappedCategoryIDs(sourceID)
 	if len(allowed) == 0 {
@@ -132,20 +163,13 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 		if _, ok := allowed[placement.Id]; !ok {
 			return fmt.Errorf("分类 %d 不属于该采集站", placement.Id)
 		}
-		item, ok := oldMap[placement.Id]
-		if !ok {
+		if _, ok := oldMap[placement.Id]; !ok {
 			return fmt.Errorf("分类 %d 不存在", placement.Id)
 		}
 		if _, ok := seen[placement.Id]; ok {
 			return fmt.Errorf("分类结构中存在重复节点: %d", placement.Id)
 		}
 		seen[placement.Id] = struct{}{}
-		if item.Pid != placement.Pid {
-			_, oldParentHere := allowed[item.Pid]
-			if item.Pid == 0 || oldParentHere {
-				return fmt.Errorf("分类 %s 只允许同级排序，不能移动到其他父级", item.Name)
-			}
-		}
 	}
 	for id := range allowed {
 		if _, ok := seen[id]; ok {

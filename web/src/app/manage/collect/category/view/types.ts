@@ -6,10 +6,12 @@ export interface FilmClassNode {
   show: boolean;
   sort?: number;
   children?: FilmClassNode[];
+  memberIds?: number[];
 }
 
 export interface MappingRuleRecord {
   id: number;
+  sourceId: string;
   group: string;
   raw: string;
   target: string;
@@ -39,22 +41,34 @@ export interface RuleFormValues {
   remarks?: string;
 }
 
+export interface RulePreviewHit {
+  id: number;
+  name: string;
+}
+
+export interface RuleMergePreview {
+  loading: boolean;
+  valid: boolean;
+  error: string;
+  sourceName: string;
+  target: string;
+  hits: RulePreviewHit[];
+  keep: RulePreviewHit[];
+}
+
 export const ROOT_GROUP = "CategoryRoot";
 export const SUB_GROUP = "CategorySub";
 export const CATEGORY_GROUPS = [ROOT_GROUP, SUB_GROUP];
 
-export const regexPreviewSamples = [
-  "电视剧",
-  "连续剧",
-  "国产剧",
-  "日本剧",
-  "日剧",
-  "国漫",
-  "国产动漫",
-  "日韩综艺",
-  "体育赛事",
-  "篮球",
-];
+export const emptyRuleMergePreview: RuleMergePreview = {
+  loading: false,
+  valid: true,
+  error: "",
+  sourceName: "",
+  target: "",
+  hits: [],
+  keep: [],
+};
 
 const groupLabelMap: Record<string, string> = {
   [ROOT_GROUP]: "一级分类规则",
@@ -68,12 +82,26 @@ export function resolveGroupLabel(group: string) {
 export function normalizeRuleRecord(record: Record<string, unknown>): MappingRuleRecord {
   return {
     id: Number(record.id ?? record.ID ?? 0),
+    sourceId: String(record.sourceId ?? record.SourceId ?? ""),
     group: String(record.group ?? record.Group ?? ""),
     raw: String(record.raw ?? record.Raw ?? ""),
     target: String(record.target ?? record.Target ?? ""),
     matchType: String(record.matchType ?? record.MatchType ?? "exact"),
     remarks: String(record.remarks ?? record.Remarks ?? ""),
   };
+}
+
+export function normalizePreviewHits(list: unknown): RulePreviewHit[] {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return list.map((item) => {
+    const row = (item || {}) as Record<string, unknown>;
+    return {
+      id: Number(row.id ?? row.ID ?? 0),
+      name: String(row.name ?? row.Name ?? ""),
+    };
+  });
 }
 
 export function normalizeTree(nodes: FilmClassNode[], parentId = 0): FilmClassNode[] {
@@ -113,6 +141,7 @@ export function serializeTree(nodes: FilmClassNode[]) {
     id: node.id,
     name: node.name,
     show: node.show,
+    memberIds: node.memberIds || [],
     children: serializeTree(node.children || []),
   }));
 }

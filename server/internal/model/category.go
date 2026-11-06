@@ -60,5 +60,6 @@ type CategoryTree struct {
 	Sort      int             `json:"sort"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
-	Children  []*CategoryTree `json:"children"` // 子分類信息
+	Children  []*CategoryTree `json:"children"`            // 子分類信息
+	MemberIds []int64         `json:"memberIds,omitempty"` // 规则合并后同一展示节点覆盖的分类 ID
 }

@@ -77,6 +77,7 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 	exports := make([]model.MappingRuleExport, 0, len(rules))
 	for _, r := range rules {
 		exports = append(exports, model.MappingRuleExport{
+			SourceId:  r.SourceId,
 			Group:     r.Group,
 			Raw:       r.Raw,
 			Target:    r.Target,
