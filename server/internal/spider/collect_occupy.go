@@ -137,16 +137,18 @@ func isOccupiedCollectSource(sourceID string) bool {
 		return false
 	}
 	collectingSourcesMu.Lock()
-	defer collectingSourcesMu.Unlock()
 	_, ok := collectingSources[sourceID]
+	collectingSourcesMu.Unlock()
 	if !ok {
 		return false
 	}
-	// 真实终态校验：若站点在 progress 中已明确处于完成、失败或已停止等终态，且没有活跃任务在运行，
-	// 说明该站点采集已完结退出，立即清理占用标记并放行
+	// 先放开占用锁再读进度。读进度的人可能正在等这把占用锁，反过来拿会卡住。
 	snap, hasSnap := progress.Snapshot(sourceID)
 	if hasSnap && progress.IsTerminalStatus(snap.Status) && !progress.IsTaskRunning(sourceID) {
+		collectingSourcesMu.Lock()
 		delete(collectingSources, sourceID)
+		collectingSourcesMu.Unlock()
+		log.Printf("[Spider] 占用释放 source=%s status=%s 原因=已终态且无任务", sourceID, snap.Status)
 		return false
 	}
 	return true

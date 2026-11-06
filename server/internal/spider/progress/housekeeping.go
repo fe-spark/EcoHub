@@ -74,18 +74,25 @@ func pruneStale() {
 		state := value.(*progressState)
 		state.mu.Lock()
 		status := state.data.Status
-		updated := state.updated
-		age := now.Sub(updated)
-		if isActiveStatus(status) {
-			_, live := tasks.Load(id)
-			if shouldMarkStale(id, status, live, age, staleAfter) {
-				state.data.Status = StatusFailed
-				state.updated = now
-				state.mu.Unlock()
-				changed = true
-				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed", id, status, age.Round(time.Second))
-				return true
-			}
+		age := now.Sub(state.updated)
+		_, live := tasks.Load(id)
+		state.mu.Unlock()
+		if !isActiveStatus(status) {
+			return true
+		}
+		occupied := staleOccupied(id, status, live, age, staleAfter)
+		state.mu.Lock()
+		status = state.data.Status
+		age = now.Sub(state.updated)
+		_, live = tasks.Load(id)
+		if isActiveStatus(status) && shouldMarkStale(status, live, occupied, age, staleAfter) {
+			state.data.Status = StatusFailed
+			state.updated = now
+			state.mu.Unlock()
+			changed = true
+			log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s live=%t occupied=%t -> failed",
+				id, status, age.Round(time.Second), live, occupied)
+			return true
 		}
 		state.mu.Unlock()
 		return true

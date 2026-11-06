@@ -374,6 +374,46 @@ func TestGetActiveTaskProgressDoesNotStaleQueuedStarting(t *testing.T) {
 	}
 }
 
+func TestGetActiveTaskProgressOccupiedStartingDoesNotDeadlock(t *testing.T) {
+	const sourceID = "progress-occupy-snapshot"
+	store.Delete(sourceID)
+	tasks.Delete(sourceID)
+	SetOccupyChecker(func(id string) bool {
+		if id != sourceID {
+			return false
+		}
+		_, _ = Snapshot(id)
+		return true
+	})
+	t.Cleanup(func() {
+		SetOccupyChecker(nil)
+		store.Delete(sourceID)
+		tasks.Delete(sourceID)
+	})
+
+	state := ensure(sourceID, "排队")
+	state.mu.Lock()
+	state.data.Status = StatusStarting
+	state.data.QueueId = "q-deadlock"
+	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		_ = GetActiveTaskProgress()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("GetActiveTaskProgress deadlocked while checking occupied starting")
+	}
+	snap, ok := Snapshot(sourceID)
+	if !ok || snap.Status != StatusStarting {
+		t.Fatalf("occupied starting must stay starting, ok=%v status=%q", ok, snap.Status)
+	}
+}
+
 func TestGetActiveTaskProgressMarksStaleAbandonedStarting(t *testing.T) {
 	const sourceID = "progress-abandoned-starting"
 	store.Delete(sourceID)

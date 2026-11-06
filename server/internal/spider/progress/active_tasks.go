@@ -55,12 +55,20 @@ func GetActiveTaskProgress() []model.CollectProgress {
 
 		if isActiveStatus(progress.Status) {
 			_, live := tasks.Load(id)
-			if shouldMarkStale(id, progress.Status, live, age, staleAfter) {
+			status := progress.Status
+			state.mu.Unlock()
+			occupied := staleOccupied(id, status, live, age, staleAfter)
+			state.mu.Lock()
+			progress = state.data
+			age = now.Sub(state.updated)
+			_, live = tasks.Load(id)
+			if isActiveStatus(progress.Status) && shouldMarkStale(progress.Status, live, occupied, age, staleAfter) {
 				old := progress.Status
 				progress.Status = StatusFailed
 				state.data.Status = StatusFailed
 				state.updated = now
-				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed", id, old, age.Round(time.Second))
+				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s live=%t occupied=%t -> failed",
+					id, old, age.Round(time.Second), live, occupied)
 				state.mu.Unlock()
 				list = append(list, progress)
 				return true
