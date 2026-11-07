@@ -166,6 +166,16 @@ func TestGetSourceBoundCategoryTree_AppliesCategoryRules(t *testing.T) {
 	if welfare.Pid != 0 || anchor.Pid != 0 {
 		t.Fatalf("save must not rewrite pid, welfare=%d anchor=%d", welfare.Pid, anchor.Pid)
 	}
+
+	publicTree, err := GetActiveCategoryTree("src_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, child := range publicTree.Children {
+		if child != nil && (child.Name == "男人帮" || child.Id == 5 || child.Name == "网红主播" || child.Name == "海外抖音") {
+			t.Fatalf("hidden 男人帮 still on public tree: %v", rootNames(publicTree))
+		}
+	}
 }
 
 func TestSaveSourceCategoryOrder_KeepsOtherSource(t *testing.T) {

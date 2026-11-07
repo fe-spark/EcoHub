@@ -9,6 +9,7 @@ import (
 
 // groupPublicTypes 按规则合成前台分类树。
 // 一级改名后原名落到目标下作为二级；二级只改名合并，不再往下挂一层。
+// 隐藏的 type 仍参与合并，组是否上前台看代表分类的 show。
 func groupPublicTypes(rows []sourceTypeRow, sourceID string) []publicTypeGroup {
 	childrenOf := map[int64][]sourceTypeRow{}
 	roots := make([]sourceTypeRow, 0)
@@ -86,12 +87,16 @@ func groupTypeRows(rows []sourceTypeRow) []publicTypeGroup {
 }
 
 func makePublicGroup(name string, members []sourceTypeRow) publicTypeGroup {
-	group := publicTypeGroup{ID: members[0].ID, Name: name, Sort: members[0].Sort, Show: true, Members: make([]int64, 0, len(members))}
+	group := publicTypeGroup{
+		ID: members[0].ID, Name: name, Sort: members[0].Sort, Show: members[0].Show,
+		Members: make([]int64, 0, len(members)),
+	}
 	for _, row := range members {
 		group.Members = append(group.Members, row.ID)
 		if row.ID < group.ID {
 			group.ID = row.ID
 			group.Sort = row.Sort
+			group.Show = row.Show
 		}
 	}
 	sort.Slice(group.Members, func(i, j int) bool { return group.Members[i] < group.Members[j] })

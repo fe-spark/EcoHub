@@ -7,8 +7,8 @@ import (
 	"server/internal/model"
 )
 
-// GetSourceBoundCategoryTree 按该采集站分类规则展示合并树。
-// 节点 ID 仍是 film_category.id，方便分类管理改显示和排序。
+// GetSourceBoundCategoryTree 分类管理树。分组、排序、显示与前台同一套规则。
+// 节点 ID 仍是 film_category.id，供保存；代表分类不再重复挂成子节点，避免表格 rowKey 冲突。
 func GetSourceBoundCategoryTree(sourceID string) model.CategoryTree {
 	root := model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
@@ -18,34 +18,11 @@ func GetSourceBoundCategoryTree(sourceID string) model.CategoryTree {
 	if db.Mdb == nil || sourceID == "" {
 		return root
 	}
-
-	var rows []model.SourceCategory
-	if err := db.Mdb.Where("source_id = ?", sourceID).
-		Order("depth ASC, sort ASC, source_type_id ASC").
-		Find(&rows).Error; err != nil || len(rows) == 0 {
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil || len(view.Groups) == 0 {
 		return root
 	}
-
-	parsed := make([]sourceTypeRow, 0, len(rows))
-	for _, row := range rows {
-		name := strings.TrimSpace(row.RawName)
-		if row.SourceTypeId <= 0 || name == "" {
-			continue
-		}
-		parsed = append(parsed, sourceTypeRow{
-			ID:     row.SourceTypeId,
-			Parent: row.ParentSourceTypeId,
-			Name:   name,
-			Sort:   row.Sort,
-			Show:   true,
-		})
-	}
-	if len(parsed) == 0 {
-		return root
-	}
-
-	root.Children = adminTreeFromGroups(groupPublicTypes(parsed, sourceID), 0, loadSourceTypeCategories(sourceID), 0)
-	sortCategoryTreeNodes(root.Children)
+	root.Children = adminTreeFromGroups(view.Groups, 0, loadSourceTypeCategories(sourceID), 0)
 	return root
 }
 
@@ -111,8 +88,8 @@ func adminNodeFromGroup(group publicTypeGroup, parentID int64, typeToCat map[int
 		Name:      group.Name,
 		StableKey: item.StableKey,
 		Alias:     item.Alias,
-		Show:      item.Show,
-		Sort:      item.Sort,
+		Show:      group.Show,
+		Sort:      group.Sort,
 		CreatedAt: item.CreatedAt,
 		UpdatedAt: item.UpdatedAt,
 		Children:  make([]*model.CategoryTree, 0),

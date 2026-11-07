@@ -166,9 +166,8 @@ func LookupRootSourceType(sourceId string, typeId int64) *model.CategoryTree {
 	if err != nil {
 		return nil
 	}
-	if group, ok := view.rootByMember(typeId); ok && group.Show && group.Parent == 0 {
-		node := group.treeNode(0)
-		return node
+	if group, ok := view.rootByMember(typeId); ok && group.Parent == 0 {
+		return group.treeNode(0)
 	}
 	if row, ok := view.Hidden[typeId]; ok && row.Parent == 0 {
 		return &model.CategoryTree{
@@ -184,7 +183,7 @@ func LookupRootSourceType(sourceId string, typeId int64) *model.CategoryTree {
 }
 
 // PublicSourceTypeIDs 前台这个分类要包含的本站 type_id。
-// 一级分类返回自身成员及下属可见子类成员；二级分类返回自身合并成员。隐藏分类和未建组的 type 只返回自己。
+// 一级分类返回自身成员及下属子类成员；二级分类返回自身合并成员。未建组的 type 只返回自己。
 func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	if typeID <= 0 {
 		return nil
@@ -202,7 +201,7 @@ func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 		}
 		return []int64{typeID}
 	}
-	if group, ok := view.rootByMember(typeID); ok && group.Show {
+	if group, ok := view.rootByMember(typeID); ok {
 		return group.allTypeIDs()
 	}
 	return []int64{typeID}
@@ -236,11 +235,7 @@ func PublicSourceChildNodes(sourceID string, parentTypeID int64) []*model.Catego
 	if !ok || !group.Show {
 		return []*model.CategoryTree{}
 	}
-	nodes := make([]*model.CategoryTree, 0, len(group.Children))
-	for i := range group.Children {
-		nodes = append(nodes, group.Children[i].treeNode(group.ID))
-	}
-	return nodes
+	return group.treeNode(0).Children
 }
 
 type sourceTypeRow struct {
@@ -294,11 +289,14 @@ func (g publicTypeGroup) treeNode(parentID int64) *model.CategoryTree {
 		Id:       g.ID,
 		Pid:      parentID,
 		Name:     g.Name,
-		Show:     true,
+		Show:     g.Show,
 		Sort:     g.Sort,
 		Children: make([]*model.CategoryTree, 0, len(g.Children)),
 	}
 	for i := range g.Children {
+		if !g.Children[i].Show {
+			continue
+		}
 		node.Children = append(node.Children, g.Children[i].treeNode(g.ID))
 	}
 	return node
@@ -386,7 +384,6 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 		}
 		if !item.Show {
 			hidden[item.ID] = item
-			continue
 		}
 		parsed = append(parsed, item)
 	}
