@@ -77,6 +77,9 @@ func TestSourceTypeTree_HiddenMergedRootStaysOffNav(t *testing.T) {
 		t.Fatalf("public roots = %v, want only 电影", rootNames(tree))
 	}
 	for _, id := range []int64{5, 18, 37} {
+		if PublicSourceTypeVisible("src1", id) {
+			t.Fatalf("hidden 男人帮 type %d still visible", id)
+		}
 		if got := LookupRootSourceType("src1", id); got != nil {
 			t.Fatalf("hidden 男人帮 lookup %d = %+v, want nil", id, got)
 		}
@@ -133,6 +136,12 @@ func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 	ids := PublicSourceTypeIDs("src1", "pid", 5)
 	if len(ids) != 2 || ids[0] != 5 || ids[1] != 37 {
 		t.Fatalf("男人帮 pid members = %v, want [5 37]", ids)
+	}
+	if PublicSourceTypeVisible("src1", 18) {
+		t.Fatal("hidden 网红主播 still visible")
+	}
+	if !PublicSourceTypeVisible("src1", 5) || !PublicSourceTypeVisible("src1", 37) {
+		t.Fatal("shown 男人帮 members should stay visible")
 	}
 	if got := LookupRootSourceType("src1", 18); got != nil {
 		t.Fatalf("hidden 网红主播 lookup = %+v, want nil", got)

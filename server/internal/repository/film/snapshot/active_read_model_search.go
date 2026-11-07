@@ -157,7 +157,7 @@ func memoryKeywordSnapshots(version, sourceID, keyword, sortField string, pid, c
 	if err != nil {
 		return nil, err
 	}
-	hits := searchFilmMetas(idx, keyword, sortField, pid, cid)
+	hits := searchFilmMetas(idx, keyword, sortField, sourceID, pid, cid)
 	if sourceID != "" {
 		filtered := make([]scoredMetaHit, 0, len(hits))
 		for _, h := range hits {

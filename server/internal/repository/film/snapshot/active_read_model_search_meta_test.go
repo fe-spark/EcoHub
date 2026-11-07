@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"server/internal/model"
+	"server/internal/repository"
 	"server/internal/repository/support"
 	"server/internal/utils"
 )
@@ -191,7 +192,7 @@ func TestSearchFilmMetas_DisabledCategoryHidden(t *testing.T) {
 	}
 	idx := sealSearchMetaIndex("v_test_hidden", items)
 
-	hits := searchFilmMetas(idx, "复仇者", "relate", 0, 0)
+	hits := searchFilmMetas(idx, "复仇者", "relate", "", 0, 0)
 	if len(hits) != 1 {
 		t.Fatalf("expected 1 hit, got %d hits", len(hits))
 	}
@@ -199,6 +200,53 @@ func TestSearchFilmMetas_DisabledCategoryHidden(t *testing.T) {
 		t.Fatalf("expected mid 101, got %d", hits[0].mid)
 	}
 }
+
+func TestSearchFilmMetas_HiddenSourceCategory(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	if err := gdb.AutoMigrate(&model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() {
+		support.StoreMappingSnapshotForTest(prev)
+	})
+	if err := gdb.Create([]model.Category{
+		{Id: 1, Pid: 0, Name: "电影", Show: true, StableKey: "src_search_hide:1"},
+		{Id: 17, Pid: 0, Name: "公告", Show: true, StableKey: "src_search_hide:17"},
+	}).Error; err != nil {
+		t.Fatalf("create categories: %v", err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 17).Update("show", false).Error; err != nil {
+		t.Fatalf("hide 公告: %v", err)
+	}
+	if err := gdb.Create([]model.CategoryMapping{
+		{SourceId: "src_search_hide", SourceTypeId: 1, CategoryId: 1},
+		{SourceId: "src_search_hide", SourceTypeId: 17, CategoryId: 17},
+	}).Error; err != nil {
+		t.Fatalf("create mappings: %v", err)
+	}
+	if err := gdb.Create([]model.SourceCategory{
+		{SourceId: "src_search_hide", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src_search_hide", SourceTypeId: 17, ParentSourceTypeId: 0, RawName: "公告", Sort: 2, Depth: 0},
+	}).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+	repository.ReloadMappingRules()
+
+	item1 := utils.FilmSearchItem{Mid: 101, Name: "复仇者联盟"}
+	utils.FillSearchDerivedFields(&item1)
+	item2 := utils.FilmSearchItem{Mid: 102, Name: "复仇者公告"}
+	utils.FillSearchDerivedFields(&item2)
+	idx := sealSearchMetaIndex("v_src_hidden", []FilmSearchMeta{
+		{Mid: 101, CategoryKey: "source:src_search_hide:1", Item: item1},
+		{Mid: 102, CategoryKey: "source:src_search_hide:17", Item: item2},
+	})
+	hits := searchFilmMetas(idx, "复仇者", "relate", "src_search_hide", 0, 0)
+	if len(hits) != 1 || hits[0].mid != 101 {
+		t.Fatalf("hits=%v, want only 101", hits)
+	}
+}
+
 func TestTagMetaMatch_DisabledCategoryHidden(t *testing.T) {
 	support.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
 	support.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用

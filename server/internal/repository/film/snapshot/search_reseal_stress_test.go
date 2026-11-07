@@ -133,7 +133,7 @@ func TestResealSearchIndexMids_FullScaleSimulation(t *testing.T) {
 	}
 	for _, targetMid := range testMids {
 		targetName := fmt.Sprintf("全量新片%d", targetMid)
-		hits := searchFilmMetas(idx, targetName, "", 0, 0)
+		hits := searchFilmMetas(idx, targetName, "", "", 0, 0)
 		if len(hits) == 0 {
 			t.Fatalf("film %s (mid=%d) was not recalled by searchFilmMetas", targetName, targetMid)
 		}

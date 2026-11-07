@@ -204,6 +204,18 @@ func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	return []int64{typeID}
 }
 
+// PublicSourceTypeVisible 当前站这个 type_id 对前台是否可见。隐藏组、隐藏子类、隐藏父级下的成员都为 false。
+func PublicSourceTypeVisible(sourceID string, typeID int64) bool {
+	if typeID <= 0 {
+		return false
+	}
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil {
+		return false
+	}
+	return view.publiclyVisible(typeID)
+}
+
 // PublicSourceTypeName 当前站这个 type_id 的前台名。合并后的成员共用合成名。隐藏分类为空。
 func PublicSourceTypeName(sourceID string, typeID int64) string {
 	if typeID <= 0 {
