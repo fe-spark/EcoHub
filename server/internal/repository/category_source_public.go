@@ -106,32 +106,42 @@ func sourceTypeCategoryTree(sourceId string) (model.CategoryTree, error) {
 	return root, nil
 }
 
-// sourceTypeShown 分类管理里的显示开关。键是该站 type_id。没有映射的分类保持显示。
-func sourceTypeShown(sourceId string) (map[int64]bool, error) {
+type sourceTypePlacement struct {
+	Sort int
+	Show bool
+}
+
+// sourceTypePlacements 分类管理里的排序和显示。键是该站 type_id。没有映射的分类沿用来源排序并保持显示。
+func sourceTypePlacements(sourceId string) (map[int64]sourceTypePlacement, error) {
 	type pair struct {
 		SourceTypeId int64 `gorm:"column:source_type_id"`
+		Sort         int   `gorm:"column:sort"`
 		Show         bool  `gorm:"column:show"`
 	}
 	var pairs []pair
 	if err := db.Mdb.Model(&model.CategoryMapping{}).
-		Select("category_mappings.source_type_id, film_category.show").
+		Select("category_mappings.source_type_id, film_category.sort, film_category.show").
 		Joins("JOIN film_category ON film_category.id = category_mappings.category_id").
 		Where("category_mappings.source_id = ?", sourceId).
 		Scan(&pairs).Error; err != nil {
 		return nil, err
 	}
-	flags := make(map[int64]bool, len(pairs))
+	out := make(map[int64]sourceTypePlacement, len(pairs))
 	for _, pair := range pairs {
 		if pair.SourceTypeId <= 0 {
 			continue
 		}
-		if prev, ok := flags[pair.SourceTypeId]; ok {
-			flags[pair.SourceTypeId] = prev && pair.Show
+		if prev, ok := out[pair.SourceTypeId]; ok {
+			prev.Show = prev.Show && pair.Show
+			if pair.Sort < prev.Sort {
+				prev.Sort = pair.Sort
+			}
+			out[pair.SourceTypeId] = prev
 			continue
 		}
-		flags[pair.SourceTypeId] = pair.Show
+		out[pair.SourceTypeId] = sourceTypePlacement{Sort: pair.Sort, Show: pair.Show}
 	}
-	return flags, nil
+	return out, nil
 }
 
 func validSourceTypeTree(tree model.CategoryTree) bool {
@@ -352,7 +362,7 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 		Find(&rows).Error; err != nil {
 		return publicSourceView{}, err
 	}
-	shown, err := sourceTypeShown(sourceID)
+	placements, err := sourceTypePlacements(sourceID)
 	if err != nil {
 		return publicSourceView{}, err
 	}
@@ -370,8 +380,9 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 			Sort:   row.Sort,
 			Show:   true,
 		}
-		if flag, ok := shown[row.SourceTypeId]; ok {
-			item.Show = flag
+		if placement, ok := placements[row.SourceTypeId]; ok {
+			item.Sort = placement.Sort
+			item.Show = placement.Show
 		}
 		if !item.Show {
 			hidden[item.ID] = item
