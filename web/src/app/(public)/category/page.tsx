@@ -27,6 +27,15 @@ export default async function CategoryPage({
 
   const data = await getCategoryData(pid || "");
   if (!data || !data.title || data.title.id === undefined || data.title.id === null) {
+    if (pid) {
+      return (
+        <Alert
+          type="warning"
+          showIcon
+          title="当前分类已失效，请从最新分类导航重新进入"
+        />
+      );
+    }
     return <Alert type="error" showIcon title="分类页面数据获取失败" />;
   }
 

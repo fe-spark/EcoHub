@@ -77,17 +77,21 @@ func TestSourceTypeTree_HiddenMergedRootStaysOffNav(t *testing.T) {
 		t.Fatalf("public roots = %v, want only 电影", rootNames(tree))
 	}
 	for _, id := range []int64{5, 18, 37} {
-		got := LookupRootSourceType("src1", id)
-		if got == nil || got.Name != "男人帮" || got.Id != 5 || got.Show {
-			t.Fatalf("hidden 男人帮 lookup %d = %+v", id, got)
+		if got := LookupRootSourceType("src1", id); got != nil {
+			t.Fatalf("hidden 男人帮 lookup %d = %+v, want nil", id, got)
+		}
+		if ids := PublicSourceTypeIDs("src1", "pid", id); len(ids) != 0 {
+			t.Fatalf("hidden 男人帮 pid %d = %v, want empty", id, ids)
+		}
+		if ids := PublicSourceTypeIDs("src1", "cid", id); len(ids) != 0 {
+			t.Fatalf("hidden 男人帮 cid %d = %v, want empty", id, ids)
+		}
+		if name := PublicSourceTypeName("src1", id); name != "" {
+			t.Fatalf("hidden 男人帮 name %d = %q, want empty", id, name)
 		}
 	}
 	if nodes := PublicSourceChildNodes("src1", 5); len(nodes) != 0 {
 		t.Fatalf("hidden 男人帮 chips = %v", childNames(&model.CategoryTree{Children: nodes}))
-	}
-	ids := PublicSourceTypeIDs("src1", "pid", 5)
-	if len(ids) != 3 || ids[0] != 5 || ids[1] != 18 || ids[2] != 37 {
-		t.Fatalf("hidden 男人帮 pid members = %v, want [5 18 37]", ids)
 	}
 
 	admin := GetSourceBoundCategoryTree("src1")
@@ -125,6 +129,22 @@ func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 	nodes := PublicSourceChildNodes("src1", 5)
 	if len(nodes) != 2 || nodes[0].Name != "福利视频" || nodes[1].Name != "海外抖音" {
 		t.Fatalf("filter children = %v", childNames(&model.CategoryTree{Children: nodes}))
+	}
+	ids := PublicSourceTypeIDs("src1", "pid", 5)
+	if len(ids) != 2 || ids[0] != 5 || ids[1] != 37 {
+		t.Fatalf("男人帮 pid members = %v, want [5 37]", ids)
+	}
+	if got := LookupRootSourceType("src1", 18); got != nil {
+		t.Fatalf("hidden 网红主播 lookup = %+v, want nil", got)
+	}
+	if got := PublicSourceTypeIDs("src1", "cid", 18); len(got) != 0 {
+		t.Fatalf("hidden 网红主播 cid = %v, want empty", got)
+	}
+	if name := PublicSourceTypeName("src1", 18); name != "" {
+		t.Fatalf("hidden 网红主播 name = %q, want empty", name)
+	}
+	if nodes := PublicSourceChildNodes("src1", 18); len(nodes) != 0 {
+		t.Fatalf("hidden 网红主播 chips via pid 18 = %v, want empty", childNames(&model.CategoryTree{Children: nodes}))
 	}
 
 	admin := GetSourceBoundCategoryTree("src1")
