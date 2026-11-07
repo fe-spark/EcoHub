@@ -122,7 +122,7 @@ func TestCategoryTreeSync_EmptyNewTreeWhenOldExists_Errors(t *testing.T) {
 	// 确认旧数据还在
 	var count int64
 	db.Mdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src_test").Count(&count)
-	if count != 1 {
+	if count != 2 {
 		t.Fatalf("old category rows should remain, count=%d", count)
 	}
 }

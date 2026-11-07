@@ -14,10 +14,13 @@ func ensureMasterCategoriesReady(s *model.FilmSource) error {
 	if s == nil {
 		return nil
 	}
-	if repository.SourceHasCategoryMapping(s.Id) {
-		return nil
+	if !repository.SourceHasCategoryMapping(s.Id) {
+		return fmt.Errorf("采集站 %s 还没有分类，请在采集中心重新保存该站后再采集", s.Name)
 	}
-	return fmt.Errorf("采集站 %s 还没有分类，请在采集中心重新保存该站后再采集", s.Name)
+	if _, _, err := repository.EnsureOtherCategory(s.Id); err != nil {
+		return fmt.Errorf("采集站 %s 补建「其他」分类失败: %w", s.Name, err)
+	}
+	return nil
 }
 
 // CollectCategory 影视分类采集

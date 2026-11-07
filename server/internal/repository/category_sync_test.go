@@ -45,7 +45,7 @@ func TestSaveCategoryTree_SameNameStaysPerSource(t *testing.T) {
 		t.Fatalf("same name must stay two categories, got %d", len(categories))
 	}
 	var mappings []model.CategoryMapping
-	if err := gdb.Order("source_id ASC").Find(&mappings).Error; err != nil {
+	if err := gdb.Where("source_type_id IN ?", []int64{4, 17}).Order("source_id ASC").Find(&mappings).Error; err != nil {
 		t.Fatalf("load mappings: %v", err)
 	}
 	if len(mappings) != 2 || mappings[0].CategoryId == mappings[1].CategoryId {

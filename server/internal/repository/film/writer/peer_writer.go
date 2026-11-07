@@ -294,7 +294,20 @@ func runPeerCollectTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return conn.Transaction(fn)
 }
 
+func prepareSourceOtherCategory(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || sourceID == "manual" {
+		return
+	}
+	if _, _, err := repository.EnsureOtherCategory(sourceID); err != nil {
+		log.Printf("[FilmWrite] 补建「其他」分类失败 source=%s err=%v", sourceID, err)
+	}
+}
+
 func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, stored bool, err error) {
+	if source != nil {
+		prepareSourceOtherCategory(source.Id)
+	}
 	var linesChanged bool
 	var metaChanged bool
 	err = runPeerCollectTx(context.Background(), func(tx *gorm.DB) error {
@@ -423,6 +436,7 @@ func SaveCollectedPeerDetails(
 	if source == nil {
 		return scheduler.Mids{}, errNilCollectSource
 	}
+	prepareSourceOtherCategory(source.Id)
 	sources := support.GetCollectSourceList()
 	unlock := lockPeerCollectPage(source, details)
 	defer unlock()
