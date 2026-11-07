@@ -336,7 +336,8 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 		pid, _ = strconv.ParseInt(pidStr, 10, 64)
 	}
 	title := service.IndexSvc.GetPidCategory(pid, sourceId)
-	if title == nil {
+	// 没带 pid 才落到第一个可见一级分类。带了却查不到说明已隐藏或失效，不再换成别的分类。
+	if title == nil && pidStr == "" {
 		tree, err := repository.GetActiveCategoryTree(sourceId)
 		if err == nil && len(tree.Children) > 0 {
 			for _, child := range tree.Children {

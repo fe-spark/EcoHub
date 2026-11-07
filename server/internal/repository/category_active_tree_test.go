@@ -340,9 +340,14 @@ func TestSourceTypeTree_UsesMappedShowFlag(t *testing.T) {
 		t.Fatalf("visible roots = %+v, want 电影 and 纪录片", shown)
 	}
 	for _, id := range []int64{17, 18} {
-		got := LookupRootSourceType("src1", id)
-		if got == nil || got.Show {
-			t.Fatalf("hidden type %d lookup = %+v", id, got)
+		if got := LookupRootSourceType("src1", id); got != nil {
+			t.Fatalf("hidden type %d lookup = %+v, want nil", id, got)
+		}
+		if ids := PublicSourceTypeIDs("src1", "pid", id); len(ids) != 0 {
+			t.Fatalf("hidden type %d pid = %v, want empty", id, ids)
+		}
+		if name := PublicSourceTypeName("src1", id); name != "" {
+			t.Fatalf("hidden type %d name = %q, want empty", id, name)
 		}
 	}
 }
@@ -435,8 +440,8 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 		t.Fatalf("member 30 lookup = %+v, want 测试#21", merged)
 	}
 	hidden := LookupRootSourceType("src1", 17)
-	if hidden == nil || hidden.Name != "公告" || hidden.Show {
-		t.Fatalf("hidden 公告 lookup = %+v", hidden)
+	if hidden != nil {
+		t.Fatalf("hidden 公告 lookup = %+v, want nil", hidden)
 	}
 	movieIDs := PublicSourceTypeIDs("src1", "pid", 1)
 	if len(movieIDs) != 4 || movieIDs[0] != 1 || movieIDs[1] != 11 || movieIDs[2] != 12 || movieIDs[3] != 13 {
@@ -446,8 +451,8 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	if len(rootIDs) != 2 || rootIDs[0] != 21 || rootIDs[1] != 30 {
 		t.Fatalf("测试 members = %v, want 21 and 30", rootIDs)
 	}
-	if ids := PublicSourceTypeIDs("src1", "pid", 17); len(ids) != 1 || ids[0] != 17 {
-		t.Fatalf("hidden members = %v, want only 17", ids)
+	if ids := PublicSourceTypeIDs("src1", "pid", 17); len(ids) != 0 {
+		t.Fatalf("hidden members = %v, want empty", ids)
 	}
 	childIDs := PublicSourceTypeIDs("src1", "cid", 12)
 	if len(childIDs) != 2 || childIDs[0] != 11 || childIDs[1] != 12 {

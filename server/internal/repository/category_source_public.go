@@ -157,7 +157,7 @@ func validSourceTypeTree(tree model.CategoryTree) bool {
 }
 
 // LookupRootSourceType 按当前采集站的一级 type_id 取分类。不是该站的一级分类时返回空。
-// 合并后的成员 type 返回合成节点。隐藏的一级分类仍返回，方便直接打开原地址。
+// 合并后的成员 type 返回合成节点。隐藏的分类（含规则合并组及其隐藏子类）不返回。
 func LookupRootSourceType(sourceId string, typeId int64) *model.CategoryTree {
 	if typeId <= 0 {
 		return nil
@@ -166,24 +166,18 @@ func LookupRootSourceType(sourceId string, typeId int64) *model.CategoryTree {
 	if err != nil {
 		return nil
 	}
+	if !view.publiclyVisible(typeId) {
+		return nil
+	}
 	if group, ok := view.rootByMember(typeId); ok && group.Parent == 0 {
 		return group.treeNode(0)
-	}
-	if row, ok := view.Hidden[typeId]; ok && row.Parent == 0 {
-		return &model.CategoryTree{
-			Id:       row.ID,
-			Pid:      0,
-			Name:     row.Name,
-			Show:     false,
-			Sort:     row.Sort,
-			Children: []*model.CategoryTree{},
-		}
 	}
 	return nil
 }
 
 // PublicSourceTypeIDs 前台这个分类要包含的本站 type_id。
-// 一级分类返回自身成员及下属子类成员；二级分类返回自身合并成员。未建组的 type 只返回自己。
+// 一级分类返回自身成员及下属可见子类成员；二级分类返回自身可见合并成员。
+// 隐藏的分类（含规则合并组及其隐藏子类）不返回。未建组的 type 只返回自己。
 func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	if typeID <= 0 {
 		return nil
@@ -192,22 +186,25 @@ func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	if err != nil {
 		return nil
 	}
+	if !view.publiclyVisible(typeID) {
+		return nil
+	}
 	if field == "cid" {
-		if group, ok := view.groupByMember(typeID); ok && group.Show {
+		if group, ok := view.groupByMember(typeID); ok {
 			if group.Parent == 0 && len(group.Children) > 0 {
 				return []int64{typeID}
 			}
-			return append([]int64{}, group.Members...)
+			return group.publicMembers(view.Hidden)
 		}
 		return []int64{typeID}
 	}
 	if group, ok := view.rootByMember(typeID); ok {
-		return group.allTypeIDs()
+		return group.publicTypeIDs(view.Hidden)
 	}
 	return []int64{typeID}
 }
 
-// PublicSourceTypeName 当前站这个 type_id 的前台名。合并后的成员共用合成名。
+// PublicSourceTypeName 当前站这个 type_id 的前台名。合并后的成员共用合成名。隐藏分类为空。
 func PublicSourceTypeName(sourceID string, typeID int64) string {
 	if typeID <= 0 {
 		return ""
@@ -216,11 +213,11 @@ func PublicSourceTypeName(sourceID string, typeID int64) string {
 	if err != nil {
 		return ""
 	}
+	if !view.publiclyVisible(typeID) {
+		return ""
+	}
 	if group, ok := view.groupByMember(typeID); ok {
 		return strings.TrimSpace(group.Name)
-	}
-	if row, ok := view.Hidden[typeID]; ok {
-		return strings.TrimSpace(row.Name)
 	}
 	return ""
 }
@@ -231,8 +228,11 @@ func PublicSourceChildNodes(sourceID string, parentTypeID int64) []*model.Catego
 	if err != nil {
 		return nil
 	}
+	if !view.publiclyVisible(parentTypeID) {
+		return []*model.CategoryTree{}
+	}
 	group, ok := view.rootByMember(parentTypeID)
-	if !ok || !group.Show {
+	if !ok {
 		return []*model.CategoryTree{}
 	}
 	return group.treeNode(0).Children
@@ -256,29 +256,59 @@ type publicTypeGroup struct {
 	Children []publicTypeGroup
 }
 
-func (g publicTypeGroup) allTypeIDs() []int64 {
-	out := make([]int64, 0, len(g.Members)+len(g.Children)*2)
-	seen := make(map[int64]struct{}, len(g.Members)+len(g.Children)*2)
+func (g publicTypeGroup) publicMembers(hidden map[int64]sourceTypeRow) []int64 {
+	out := make([]int64, 0, len(g.Members))
 	for _, id := range g.Members {
 		if id <= 0 {
 			continue
 		}
-		if _, ok := seen[id]; ok {
+		if _, skip := hidden[id]; skip {
 			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+func (g publicTypeGroup) publicTypeIDs(hidden map[int64]sourceTypeRow) []int64 {
+	skip := make(map[int64]struct{}, len(hidden)+len(g.Children)*2)
+	for id := range hidden {
+		skip[id] = struct{}{}
+	}
+	for i := range g.Children {
+		if g.Children[i].Show {
+			continue
+		}
+		for _, id := range g.Children[i].Members {
+			if id > 0 {
+				skip[id] = struct{}{}
+			}
+		}
+	}
+	out := make([]int64, 0, len(g.Members)+len(g.Children)*2)
+	seen := make(map[int64]struct{}, len(g.Members)+len(g.Children)*2)
+	add := func(id int64) {
+		if id <= 0 {
+			return
+		}
+		if _, blocked := skip[id]; blocked {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
 		}
 		seen[id] = struct{}{}
 		out = append(out, id)
 	}
+	for _, id := range g.Members {
+		add(id)
+	}
 	for i := range g.Children {
+		if !g.Children[i].Show {
+			continue
+		}
 		for _, id := range g.Children[i].Members {
-			if id <= 0 {
-				continue
-			}
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			out = append(out, id)
+			add(id)
 		}
 	}
 	return out
@@ -317,6 +347,31 @@ func (v publicSourceView) groupByMember(typeID int64) (publicTypeGroup, bool) {
 func (v publicSourceView) rootByMember(typeID int64) (publicTypeGroup, bool) {
 	group, ok := v.roots[typeID]
 	return group, ok
+}
+
+func (v publicSourceView) typeHidden(typeID int64) bool {
+	_, ok := v.Hidden[typeID]
+	return ok
+}
+
+func (v publicSourceView) publiclyVisible(typeID int64) bool {
+	if v.typeHidden(typeID) {
+		return false
+	}
+	if group, ok := v.groupByMember(typeID); ok {
+		if !group.Show {
+			return false
+		}
+		if group.Parent == 0 {
+			return true
+		}
+		root, ok := v.roots[group.Parent]
+		return ok && root.Show
+	}
+	if root, ok := v.rootByMember(typeID); ok {
+		return root.Show
+	}
+	return true
 }
 
 type publicSourceCacheEntry struct {
