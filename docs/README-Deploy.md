@@ -2,68 +2,56 @@
 
 中文 | [English](./README-Deploy_EN.md)
 
-发布镜像 `ghcr.io/fe-spark/ecohub`（All-in-One：同容器 Supervisord 托管 Go API `:8080` 与 Next.js `:3000`）。可选用 **安装脚本**、**1Panel** 或 **手动部署**。
+`ghcr.io/fe-spark/ecohub:latest` 不是 v3，目前仍是上一正式版 v2。装 v3 必须指定 `ghcr.io/fe-spark/ecohub:v3.0.0-preview`。不写 `ECOHUB_IMAGE` 时，compose 用的就是 `:latest`。
 
-> Compose：[deploy/release/compose.yml](../deploy/release/compose.yml) · 环境变量模板：[.env.example](../.env.example) · 版本：[RELEASE.md](./RELEASE.md)
+发布镜像是 All-in-One：同一容器里跑 Go API `:8080` 和 Next.js `:3000`。旧的 `ecohub-web` / `ecohub-server` 双镜像已废弃。
 
-旧的 `ecohub-web` / `ecohub-server` 双镜像已废弃（v2.0+）。
+编排：[deploy/release/compose.yml](../deploy/release/compose.yml) · 变量模板：[.env.example](../.env.example) · 版本：[RELEASE.md](./RELEASE.md)
 
----
+`ecohub` 通过 Docker Compose 拉起应用、MySQL 和 Redis。本机开发不走这条命令，见 [README](../README.md)。
 
-## 方式选择
+## 前提
 
-| 场景 | 章节 |
-| --- | --- |
-| 命令行一键 | [安装脚本](#方式-1安装脚本推荐) |
-| 1Panel 图形化 | [1Panel](#方式-21panel) |
-| 直接运行镜像 | [手动部署](#方式-3手动部署) |
+Docker 20+。安装脚本和 1Panel 还要 Compose 2+。建议 2 核 2 GB。需要能拉取 `ghcr.io` 和 `docker.io`。
 
-自备 MySQL / Redis 时：在默认 compose 中去掉 `mysql` / `redis` 服务及 `depends_on`，把 `.env` 的 `MYSQL_*` / `REDIS_*` 指到你的实例（容器内勿用 `127.0.0.1`，宿主机库可用 `host.docker.internal`）。完整变量字典见 [环境变量速查](#环境变量速查)。
-
----
-
-## 前置条件
-
-| 项 | 说明 |
-| --- | --- |
-| Docker | 20+；方式 1 / 2 还需 Compose 2+（1Panel 自带） |
-| 网络 | 能拉 `ghcr.io`、`docker.io`（国内可配镜像加速） |
-| 端口 | 至少空闲 Web 端口（默认 `3000`） |
-| 资源 | 建议 ≥ 2 核 2G；采集任务多时适当加内存 |
-
-正式上线前至少修改：`JWT_SECRET`、MySQL/Redis 密码。
+Web 默认 `3000`，前台、后台和订阅都走它。API 直连默认 `18080`，只给播放器，订阅不要填这个端口。
 
 ```bash
 openssl rand -hex 32
 ```
 
-可选：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`。详见 [环境变量速查](#环境变量速查)。
+自备 MySQL / Redis：从编排里去掉 `mysql`、`redis` 和 `depends_on`，把 `MYSQL_*`、`REDIS_*` 指到你的实例。容器里不要写 `127.0.0.1`。库在宿主机上时用 `host.docker.internal`。
 
----
+从 v2 过来见 [从 v2 升级到 v3](./v2-to-v3.md)。
 
-## 方式 1：安装脚本（推荐）
-
-默认三个容器：`Eco-hub`（应用）、`Eco-mysql`、`Eco-redis`。
-
-### 1. 安装
+## 安装脚本
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
+  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 ```
 
-写入 `~/ecohub`：下载 `docker-compose.yml`（来自 `deploy/release/compose.yml`）、`.env.example`；无 `.env` 时自动复制一份。
+数据目录默认 `~/ecohub`。换目录时在命令前加 `ECOHUB_INSTALL_DIR=~/ecohub-v3`。脚本写入编排和 `.env`，安装 `ecohub`，启动，并打印端口、前台、后台、三条订阅和初始账号。之后直接执行 `ecohub`。
 
-### 2. 改配置并启动
+`/usr/local/bin` 不可写时，命令装到 `~/.local/bin`，按提示加入 `PATH`。
+
+第一次启动前设好 `JWT_SECRET`、`ECOHUB_ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD`。`install` 和 `update` 会把当时导出的这些变量，以及 `ECOHUB_IMAGE`、`WEB_PORT`、`SERVER_PORT`，写进 `.env`。已有 `.env` 的其余行保留。内置库保持 `MYSQL_HOST=mysql`、`REDIS_HOST=redis`。
+
+库目录一旦初始化，再改 `ECOHUB_ADMIN_PASSWORD` 或 `MYSQL_PASSWORD` 不会改掉已经写入的密码。改了 MySQL 密码再执行 `ecohub restart`，应用会连不上数据库。`JWT_SECRET`、端口和 `REDIS_PASSWORD` 改完 `.env` 后执行 `ecohub restart` 生效。`start` 和 `restart` 不会用当前环境变量覆盖 `.env`。
 
 ```bash
-cd ~/ecohub
-# 编辑 .env：JWT_SECRET、MYSQL_*、REDIS_PASSWORD 等
-docker compose up -d
+ecohub status
+ecohub logs
+ecohub logs -f
+ecohub restart
+ecohub update
+ecohub stop
+ecohub start
+ecohub uninstall
+ecohub uninstall --purge
 ```
 
-内置库时保持 `MYSQL_HOST=mysql`、`REDIS_HOST=redis`（Compose 服务名）。
-
-### 3. 访问
+`uninstall` 删除容器，保留数据。`uninstall --purge` 再删除 `data/mysql`、`data/redis`、`data/uploads`。两种都保留 `.env` 和 `ecohub`。`ecohub update` 沿用 `.env` 里的 `ECOHUB_IMAGE`。后台「立即升级」拉的是 `:latest`，v3 预览用 `ecohub update`。
 
 | 地址 | 说明 |
 | --- | --- |
@@ -71,189 +59,48 @@ docker compose up -d
 | `http://服务器:3000/manage` | 管理后台 |
 | `http://服务器:3000/api/provide/app` | 客户端软件源 |
 | `http://服务器:3000/api/provide/tvbox` | TVBox / 影视仓 |
+| `http://服务器:3000/api/provide/vod` | MacCMS |
 
-默认账号（**立刻改密**）：`admin` / `admin`。其它角色在账号管理中新建。
+`3000` 是默认 Web 端口，以终端打印的地址为准。账号 `admin`，密码是 `ECOHUB_ADMIN_PASSWORD`，没配就是 `admin`。登录后立刻修改。
 
-首次需在后台检查或配置 **采集站** 并执行采集，否则前台无影片。内置 12 个预设采集站批量采集通常在 10~20 分钟内完成；入库成功的页会按窗口刷进快照，前台按主站边采边展示。
+数据在 `~/ecohub/data/mysql`、`data/redis`、`data/uploads`。
 
-### 4. 数据与更新
+前台一开始没有影片。到采集中心核对 12 个预设站，执行全量采集。影片随窗口出现，首次可能要数小时。
 
-```text
-~/ecohub/data/mysql
-~/ecohub/data/redis
-~/ecohub/data/uploads
-```
+生产环境把反代指到 `127.0.0.1:3000` 并开 HTTPS。不要把 `/api` 单独指到 `18080`。不想公网直连时，把端口写成 `127.0.0.1:${WEB_PORT:-3000}:3000`。播放器不直连就去掉 `18080`。防火墙只放行 `80` / `443`。
 
-```bash
-cd ~/ecohub
-docker compose pull
-docker compose up -d
-```
+这套容器会出现在 1Panel 的容器列表里。继续用 `ecohub` 管理，不要再用同一组容器名建第二套编排。
 
-固定版本：在 `.env` 指定 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:<正式版 tag>`。正式版发布会删除全部 beta tag 和镜像，不要固定 beta。`:latest` 只跟正式版。
+## 1Panel
 
-> [!WARNING]
-> **v2.x 升级至 v3.0 注意事项**：v3.0 为底层架构重大重构版本，完全不兼容 v2.x 历史数据库。禁止在现有 `./data/mysql` 目录下直接 pull 升级；v2.x 用户必须使用全新目录从零部署并重新全量采集。
-
----
-
-## 方式 2：1Panel
-
-### 1. 新建编排
-
-1. **容器** → **编排** → **创建**，名称如 `ecohub`。  
-2. 工作目录例如 `/opt/1panel/apps/ecohub`。  
-3. 粘贴与 [deploy/release/compose.yml](../deploy/release/compose.yml) 一致的内容：
-
-```yaml
-services:
-  mysql:
-    container_name: Eco-mysql
-    image: mysql:8.4
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ecohub}
-      MYSQL_DATABASE: ${MYSQL_DBNAME:-eco}
-      MYSQL_USER: ${MYSQL_USER:-eco}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecohub}
-    volumes:
-      - ./data/mysql:/var/lib/mysql
-    networks:
-      - Eco-network
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  redis:
-    container_name: Eco-redis
-    image: redis:7.4-alpine
-    restart: always
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-ecohub}"]
-    volumes:
-      - ./data/redis:/data
-    networks:
-      - Eco-network
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep PONG"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  ecohub:
-    container_name: Eco-hub
-    image: ${ECOHUB_IMAGE:-ghcr.io/fe-spark/ecohub:latest}
-    restart: always
-    environment:
-      JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
-      MYSQL_HOST: ${MYSQL_HOST:-mysql}
-      MYSQL_PORT: ${MYSQL_PORT:-3306}
-      MYSQL_USER: ${MYSQL_USER:-eco}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecohub}
-      MYSQL_DBNAME: ${MYSQL_DBNAME:-eco}
-      REDIS_HOST: ${REDIS_HOST:-redis}
-      REDIS_PORT: ${REDIS_PORT:-6379}
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
-      REDIS_DB: ${REDIS_DB:-0}
-      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      ALL_PROXY: ${ALL_PROXY:-}
-    ports:
-      - ${WEB_PORT:-3000}:3000
-      - 0.0.0.0:${SERVER_PORT:-18080}:8080
-    volumes:
-      - ./data/uploads:/app/static/upload
-      # 后台「立即升级」通过 socket 拉 latest 并重建本容器
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - Eco-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test:
-        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/config/basic"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-networks:
-  Eco-network:
-    driver: bridge
-```
-
-### 2. 环境变量
+1. **容器** → **编排** → **创建**。工作目录例如 `/opt/1panel/apps/ecohub`。
+2. 贴入 [deploy/release/compose.yml](../deploy/release/compose.yml) 全文。
+3. 环境变量：
 
 ```env
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview
 WEB_PORT=3000
 SERVER_PORT=18080
 JWT_SECRET=请替换为长随机串
-ECOHUB_ADMIN_PASSWORD=请改成强密码（首次初始化生效；默认admin）
+ECOHUB_ADMIN_PASSWORD=请改成强密码
 MYSQL_ROOT_PASSWORD=请改成强密码
 MYSQL_HOST=mysql
 MYSQL_PORT=3306
 MYSQL_USER=eco
 MYSQL_PASSWORD=请改成强密码
 MYSQL_DBNAME=eco
-
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_PASSWORD=请改成强密码
 REDIS_DB=0
 ```
 
-- 内置库：`MYSQL_HOST=mysql` / `REDIS_HOST=redis`，不要写成 `127.0.0.1`。  
-- 发布版 **无需** `API_URL`。  
-- 端口占用时改 `WEB_PORT`，反代同步改。
+4. 保存并启动。确认 `Eco-hub`、`Eco-mysql`、`Eco-redis` 在运行。
+5. **网站** → **反向代理** → `http://127.0.0.1:3000`。更新在该目录执行 `docker compose pull && docker compose up -d`。
 
-### 3. 启动
+## 手动部署
 
-保存 → 启动；确认 `Eco-hub`、`Eco-mysql`、`Eco-redis` 运行中。访问同方式 1。
-
-也可先跑安装脚本，再在 1Panel 容器列表中查看/接管。
-
-### 4. 网站、HTTPS 与不对外开放裸端口
-
-1. **网站** → **创建网站** → **反向代理** → `http://127.0.0.1:3000`（或你的 `WEB_PORT`）。  
-2. 申请 Let's Encrypt 或上传证书，开启 HTTPS。  
-3. `/api/*` **不要**单独指到 `18080`；整站走 `3000`，由容器内 Next 转发到 Go。  
-4. **不对外开放裸端口（安全推荐）**：
-   - Docker 默认规则会穿透系统防火墙（如 UFW）。若要**禁止公网直接访问 3000 端口**，请在 `compose.yml` 中显式指定 `127.0.0.1:` 绑定（如 `127.0.0.1:${WEB_PORT:-3000}:3000`），此时公网无法直连，仅本机反向代理可用；
-   - 若无播放器直连需求，直接在 `compose.yml` 中注释或删除 `18080:8080` 端口映射；
-   - 防火墙放行 `80`/`443`；**不要**公网放行 `18080`、MySQL、Redis。
-
-### 5. 更新
-
-编排中改镜像 tag（可选）→ 拉取 → 重建，或：
-
-```bash
-docker compose pull && docker compose up -d
-```
-
-数据在 `./data/mysql`、`./data/redis`、`./data/uploads`。
-
----
-
-## 方式 3：手动部署
-
-不使用 Compose。自行创建网络与数据目录，依次运行 MySQL、Redis 与 `ghcr.io/fe-spark/ecohub`。访问地址与默认账号同方式 1。
-
-将下面的密码与密钥换成强随机值后再执行。
+不用 Compose。先把密码换成强随机值。
 
 ```bash
 mkdir -p ~/ecohub/data/mysql ~/ecohub/data/redis ~/ecohub/data/uploads
@@ -266,7 +113,7 @@ JWT_SECRET="$(openssl rand -hex 32)"
 
 docker pull mysql:8.4
 docker pull redis:7.4-alpine
-docker pull ghcr.io/fe-spark/ecohub:latest
+docker pull ghcr.io/fe-spark/ecohub:v3.0.0-preview
 
 docker run -d --name Eco-mysql --restart always --network Eco-network \
   -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -303,109 +150,44 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -e REDIS_DB=0 \
   -v ~/ecohub/data/uploads:/app/static/upload \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/fe-spark/ecohub:latest
+  ghcr.io/fe-spark/ecohub:v3.0.0-preview
 ```
 
-容器内访问数据库须用容器名 `Eco-mysql` / `Eco-redis`，不要写 `127.0.0.1`。自备库时不要创建上述 MySQL / Redis 容器，把 `MYSQL_HOST` / `REDIS_HOST` 改成可达地址（宿主机上的库可用 `host.docker.internal`）。首次初始化 MySQL 数据目录可能需要数十秒，就绪探测失败时查看 `docker logs Eco-mysql`。
+容器内数据库主机名是 `Eco-mysql`、`Eco-redis`。自备库时不要启动上面两个数据库容器。MySQL 第一次初始化可能要几十秒，失败看 `docker logs Eco-mysql`。
 
-查看日志：`docker logs -f Eco-hub`。更新镜像：`docker pull ghcr.io/fe-spark/ecohub:latest` 后删除并按上面的参数重新 `docker run` Eco-hub（或使用后台「立即升级并重启」，需挂载 `/var/run/docker.sock`）。
+日志：`docker logs -f Eco-hub`。更新：`docker pull` 当前 tag，删掉 `Eco-hub`，用同样参数再 `docker run`。
 
----
+## 环境变量
 
-## 环境变量速查
-
-支持在 `.env` 或 Docker Compose / 容器运行命令中注入的环境变量完整字典如下：
-
-### 1. 服务与端口映射
-
-| 环境变量 | 必填 | 默认值 | 说明 |
-| --- | :---: | --- | --- |
-| `ECOHUB_IMAGE` | 否 | `ghcr.io/fe-spark/ecohub:latest` | 镜像地址。默认为 latest；固定版本只写正式版 tag。正式版发布会删除全部 beta tag 和镜像。 |
-| `WEB_PORT` | 否 | `3000` | 宿主机 Web 访问入口端口（包含前台页面与 `/manage` 管理后台）。 |
-| `SERVER_PORT` | 否 | `18080` | 宿主机后端 API 直连端口（供 TVBox 或外部播放器直连；生产环境建议不映射或绑定 `127.0.0.1`）。 |
-
-> **安全提示**：Docker 默认规则会绕过系统防火墙（如 UFW）。若要**禁止公网直接访问裸端口**，请在 `compose.yml` 中将端口映射写为 `127.0.0.1:${WEB_PORT:-3000}:3000`，仅允许本机反向代理（如 Nginx / 1Panel）访问。
-
-### 2. 安全与核心密钥
-
-| 环境变量 | 必填 | 默认值 | 说明 |
-| --- | :---: | --- | --- |
-| `JWT_SECRET` | **是** | - | 用户与管理员登录态 JWT 签名密钥，同时作为访问分析数据脱敏的 Salt 派生源。生产部署**必须**修改为长随机字符串（可通过 `openssl rand -hex 32` 生成）。 |
-| `ECOHUB_ADMIN_PASSWORD` | 否 | `admin` | 首次初始化超级管理员 `admin` 的密码。若未配置默认使用 `admin`（生产环境对外部署前**强烈建议修改为强密码**）。数据库已初始化内置管理员时忽略。 |
-### 3. 数据存储（MySQL & Redis）
-
-| 环境变量 | 必填 | 默认值 | 说明 |
-| --- | :---: | --- | --- |
-| `MYSQL_HOST` | **是** | `mysql` | MySQL 数据库连接地址。自带 Compose 填服务名 `mysql`；自备外部数据库填对应 IP 或域名（宿主机上的库可用 `host.docker.internal`，容器内请勿填写 `127.0.0.1`）。 |
-| `MYSQL_PORT` | 否 | `3306` | MySQL 服务端口。 |
-| `MYSQL_USER` | **是** | `eco` | MySQL 业务数据库连接用户名。 |
-| `MYSQL_PASSWORD` | **是** | `ecohub` | MySQL 业务数据库连接密码（必须修改为强密码）。 |
-| `MYSQL_DBNAME` | 否 | `eco` | MySQL 业务数据库名称。 |
-| `MYSQL_ROOT_PASSWORD` | 否 | `ecohub` | 内置 `Eco-mysql` 容器初始化所需 root 密码（仅自带 MySQL 容器初始化使用；自备外部数据库时无需配置）。 |
-| `REDIS_HOST` | **是** | `redis` | Redis 服务连接地址。自带 Compose 填服务名 `redis`；自备外部 Redis 填对应 IP 或域名。 |
-| `REDIS_PORT` | 否 | `6379` | Redis 服务端口。 |
-| `REDIS_PASSWORD` | **是** | `ecohub` | Redis 认证密码（必须修改为强密码）。 |
-| `REDIS_DB` | 否 | `0` | Redis 数据库索引号（默认使用 0 号数据库）。 |
-
-### 4. 网络代理（可选）
-
-| 环境变量 | 必填 | 默认值 | 说明 |
-| --- | :---: | --- | --- |
-| `HTTPS_PROXY` | 否 | 空 | 容器全局 HTTPS 出网代理（用于采集外部源、解析影片元数据等，防止直连外部站点超时）。 |
-| `HTTP_PROXY` | 否 | 空 | 容器全局 HTTP 出网代理。 |
-| `ALL_PROXY` | 否 | 空 | 容器全局出网代理（通常用于 SOCKS 协议代理）。 |
-
-### 5. 采集调优与扩展功能（可选）
-
-| 环境变量 | 必填 | 默认值 | 说明 |
-| --- | :---: | --- | --- |
-| `NODE_NAME` | 否 | 主机名 | 多节点分布式部署时当前节点的标识名称（单机部署无需配置）。 |
-| `ECOHUB_LOG_DIR` | 否 | 容器内 `logs/` | 自定义日志落盘目录（容器部署默认挂载或保留即可，无需修改）。 |
-
----
-
-## 常用命令
-
-方式 1 / 2：
-
-```bash
-docker compose ps
-docker compose logs -f ecohub
-docker compose restart ecohub
-docker compose down
-```
-
-方式 3：
-
-```bash
-docker logs -f Eco-hub
-docker restart Eco-hub
-docker inspect Eco-hub --format '{{range .Config.Env}}{{println .}}{{end}}'
-```
-
-数据在安装目录 `data/`（方式 3 默认 `~/ecohub/data`）。
-
----
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest` | 镜像 tag。见文首 |
+| `WEB_PORT` | `3000` | 前台、后台、订阅 |
+| `SERVER_PORT` | `18080` | API 直连。订阅不用这个端口 |
+| `JWT_SECRET` | 无，必填 | 登录签名 |
+| `ECOHUB_ADMIN_PASSWORD` | `admin` | 只在首次创建管理员时写入 |
+| `MYSQL_HOST` | `mysql` | 容器内不要写 `127.0.0.1` |
+| `MYSQL_PORT` | `3306` | |
+| `MYSQL_USER` | `eco` | |
+| `MYSQL_PASSWORD` | `ecohub` | 只在数据目录首次初始化时生效 |
+| `MYSQL_DBNAME` | `eco` | |
+| `MYSQL_ROOT_PASSWORD` | `ecohub` | 只给内置 MySQL 第一次初始化 |
+| `REDIS_HOST` | `redis` | |
+| `REDIS_PORT` | `6379` | |
+| `REDIS_PASSWORD` | `ecohub` | 改 `.env` 后 `ecohub restart` 生效 |
+| `REDIS_DB` | `0` | |
+| `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` | 空 | 采集出网代理 |
+| `NODE_NAME` | 主机名 | 多节点才需要 |
+| `ECOHUB_LOG_DIR` | `logs/` | 日志目录 |
 
 ## 排障
 
-- 探活：`http://主机:18080/api/config/basic`
-- 方式 1 / 2 反复重启：查 `.env` 密码、`JWT_SECRET`、端口占用、`docker pull ghcr.io/fe-spark/ecohub:latest`
-- 方式 3 反复重启：`docker logs Eco-hub`，用 `docker inspect Eco-hub` 核对环境变量与端口
-- 前台开、接口挂：反代是否只指 Web、是否误配 `API_URL`
-更多：[README-FAQ.md](./README-FAQ.md)
+- 探活：`http://主机:3000/api/config/basic`。映射了 `18080` 时该端口也能探。
+- 反复重启：`ecohub logs` 或 `docker logs Eco-hub`。核对 `JWT_SECRET` 和数据库密码是否仍是第一次初始化的值，端口是否被占用。
+- 前台能开、接口失败：反代指向 Web 端口。发布镜像不要设 `API_URL`。
 
----
+行为问题见 [常见问题](./README-FAQ.md)。
 
-## 安全
+## 相关
 
-- 立刻改默认账号密码  
-- 每环境单独 `JWT_SECRET`  
-- 勿提交生产密码  
-- 优先 HTTPS；勿公网暴露库与 `18080`  
-
----
-
-## 相关文档
-
-- [README.md](../README.md) · [RELEASE.md](./RELEASE.md) · [README-FAQ.md](./README-FAQ.md) · [English](./README-Deploy_EN.md)
+[README](../README.md) · [版本说明](./RELEASE.md) · [从 v2 升级到 v3](./v2-to-v3.md)

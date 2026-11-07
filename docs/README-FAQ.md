@@ -2,6 +2,8 @@
 
 中文 | [English](./README-FAQ_EN.md)
 
+安装、端口和密码见 [部署指南](./README-Deploy.md)。
+
 ## 采集与数据
 
 ### 搭建完成后为什么看不到影片？
@@ -67,4 +69,4 @@
 
 ### 访客账号与默认账号如何使用？
 
-初始化只创建超级管理员 `admin` / `admin`。普通用户和访客在账号管理中新建。访客可调用管理端 GET；POST / PUT / PATCH / DELETE 会被 `WriteAccess` 拒绝。对外部署后须立即修改默认密码。
+初始化只创建超级管理员 `admin`。密码来自 `ECOHUB_ADMIN_PASSWORD`，没配就是 `admin`。已有管理员时不会改密码。普通用户和访客在账号管理中新建。访客可调用管理端 GET；POST / PUT / PATCH / DELETE 会被 `WriteAccess` 拒绝。登录后立刻在后台修改密码。

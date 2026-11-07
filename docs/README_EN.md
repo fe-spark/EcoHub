@@ -15,127 +15,75 @@
 
 [中文](../README.md) | English
 
-[Demo](https://eco.fe-spark.cn) · [v3 Preview](http://148.135.106.141:3000) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram Group](https://t.me/ecohub_club)
+[Demo](https://eco.fe-spark.cn) · [v3 Preview](http://148.135.106.141:3000) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram](https://t.me/ecohub_club)
 
 </div>
 
 > [!WARNING]
-> ### ⚠️ v3.0 Major Release Notice (Clean Deployment Required)
-> **EcoHub v3.0 is a complete architectural rewrite that is NOT backward-compatible with v2.x historical data or database schemas. No migration path is provided.**
-> - **Do NOT upgrade in-place**: Do not mount or reuse v2.x database volumes/directories (such as `./data/mysql`). Reusing legacy databases will cause schema conflicts and service crashes.
-> - **Deployment Guide**: Upgrading to v3.0 **requires deploying from scratch in a fresh directory** (or completely clearing legacy MySQL/Redis data volumes), then re-configuring sources and running full collection.
-> - See [Release Notes](./RELEASE.md) for details.
+> v3.0 does not read v2.x databases and there is no migration. Do not pull on an old `./data/mysql`, and do not use in-app upgrade. Deploy in a new directory or after wiping data, then run a full collect. Steps: [v2 to v3](./v2-to-v3.md). This preview is `3.0.0-preview`. File problems as [Issues](https://github.com/fe-spark/EcoHub/issues).
 
-> **Maintenance**  
-> The author has limited time, so updates are slow. Please bear with that. Issues are fixed when time allows. Useful features are welcome as [pull requests](https://github.com/fe-spark/EcoHub/pulls).
+Updates are slow. Pull requests are welcome.
 
 ## Overview
 
-EcoHub is a high-performance, modern full-stack multi-source media aggregation system. It delivers a smooth web viewing experience and includes automated collection plus an admin panel, so developers and enthusiasts can quickly set up a private media library.
+Multi-source collect, a web player, and an admin panel. Clients are separate repos:
 
-Client apps live in separate repos, not this repo's server or web UI:
-
-- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (HAP)
+- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)
 - [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)
 
-## Online demo
+## Demo
 
 | Entry | URL |
 | --- | --- |
 | Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
-| v3 Preview | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
-| v3 Preview Admin | [http://148.135.106.141:3000/manage](http://148.135.106.141:3000/manage) |
+| v3 preview | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
 
-Visitors log in with `guest` / `guest`. This account is read-only and cannot save settings. For a real deployment, use your own accounts and change the default passwords.
-
-> **Network Note**: The official demo site does not support China Mobile networks due to overseas hosting providers. Please use China Unicom, China Telecom, or other networks to access.
+Visitor login is `guest` / `guest` (read-only). The demo does not work on China Mobile. Use China Unicom or China Telecom.
 
 ## Recommendations
 
-### Server
-
-| Provider | Description | Link |
+| Kind | Provider | Link |
 | --- | --- | --- |
-| CloudCone | 1. Host of the demonstration site<br>2. Affordable VPS with unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
+| Server | CloudCone (hosts the demo; unthrottled disk I/O) | [Visit](https://app.cloudcone.com/?ref=14393) |
+| Network | LiangXinYun, from ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| Network | PeiQian, from ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| Network | DOVE | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
-### Network Service
+## Install
 
-| Provider | Features / Price | Link |
-| --- | --- | --- |
-| LiangXinYun | As low as ¥2/mo <br>New users receive trial traffic | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| PeiQian Airport | As low as ¥1.5/mo <br>Suitable for high traffic and backup use | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| DOVE | Suitable for long-term stability | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
-
-## Quick start
-
-Docker 20+ and Compose 2+ are required. A minimum of 2 CPU cores and 2 GB RAM is recommended.
+Docker 20+ and Compose 2+. Aim for 2 CPU cores and 2 GB RAM.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
-cd ~/ecohub
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
+  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 ```
 
-Edit `.env`: put the output of `openssl rand -hex 32` into `JWT_SECRET`, customize `ECOHUB_ADMIN_PASSWORD` as needed, update MySQL / Redis passwords, then start:
+Data goes to `~/ecohub`. The command is `ecohub`. Install prints the web port, site, admin, and three subscription URLs. The default web port is `3000`. Passwords, reverse proxy, and 1Panel: [Deploy guide](./README-Deploy_EN.md).
 
-```bash
-docker compose up -d
-```
-
-| URL | Purpose |
-| --- | --- |
-| `http://<host>:3000` | Public site |
-| `http://<host>:3000/manage` | Administration panel |
-| `http://<host>:3000/api/provide/app` | EcoHub native client software source URL |
-| `http://<host>:3000/api/provide/tvbox` | TVBox / YingShiCang subscription URL |
-| `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
-
-Default account: `admin` / `admin` (unless customized via `ECOHUB_ADMIN_PASSWORD` in `.env`). Create other roles in account management. Change the default password before any public deployment.
-
-> **Security & Network**: In production, it is recommended to use Nginx / 1Panel reverse proxy with HTTPS (80/443). To **avoid exposing raw ports to the public internet**, explicitly bind `127.0.0.1:` in `docker-compose.yml` (or `compose.yml`) (e.g. `127.0.0.1:3000:3000`), preventing Docker from bypassing system firewalls. If direct player access is not needed, comment out the `18080` port mapping.
-
-An empty public site after installation is expected. Films appear only after a full collect has completed and been published in **Collect**. For 1Panel, an external database, or a reverse proxy, see the [Deploy guide](./README-Deploy_EN.md).
+The site has no films until you run a full collect in admin. Films appear as each window is published. The first run can take several hours.
 
 ## Local development
 
-Start MySQL 8 and Redis 7 locally. Run the API and the web app in two terminals, both from the repository root.
-
-API:
+Start MySQL 8 and Redis 7 first.
 
 ```bash
-cd server
-cp .env.example .env
-go run ./cmd/server
+cd server && cp .env.example .env && go run ./cmd/server
+cd web && cp .env.example .env.local && npm install && npm run dev
 ```
 
-Web:
-
-```bash
-cd web
-cp .env.example .env.local
-npm install
-npm run dev
-```
-
-Public site: `http://127.0.0.1:3000`. Administration panel: `/manage`. API: `http://127.0.0.1:8080`. [Server](../server/README.md) · [Web](../web/README.md)
+Site `http://127.0.0.1:3000`, admin `/manage`, API `http://127.0.0.1:8080`. See [Server](../server/README.md) and [Web](../web/README.md).
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
-| [Deploy](./README-Deploy_EN.md) | Install script, 1Panel, manual deploy, reverse proxy, upgrades |
-| [FAQ](./README-FAQ_EN.md) | Empty catalog, collect, cache, authentication |
-| [Release notes](./RELEASE.md) | Changelog, image tags |
-| [Server](../server/README.md) / [Web](../web/README.md) | Environment variables, APIs, local startup |
-| [Chinese README](../README.md) | 中文总览 |
+| [Deploy](./README-Deploy_EN.md) | Install, commands, passwords, 1Panel, proxy |
+| [v2 to v3](./v2-to-v3.md) | Stop the old stack, empty database, full collect |
+| [FAQ](./README-FAQ_EN.md) | Empty catalog, main source, collect, cache, login |
+| [Release notes](./RELEASE.md) | This release |
+| [Chinese](../README.md) | 中文总览 |
 
-## Community
+EcoHub does not provide or store media files. Sources come from collect APIs the operator configures.
 
-- Telegram Group: [https://t.me/ecohub_club](https://t.me/ecohub_club)
-
-> **Notice**  
-> EcoHub does not provide or store media files. Sources originate from collect APIs configured by the operator. Comply with applicable laws and the terms of each source. The operator assumes all related risk. This project is intended for study and technical exchange.
-
----
-
-[PolyForm Noncommercial 1.0.0](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram Group](https://t.me/ecohub_club)
+[PolyForm Noncommercial 1.0.0](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram](https://t.me/ecohub_club)

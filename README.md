@@ -20,26 +20,16 @@
 </div>
 
 > [!WARNING]
-> ### ⚠️ v3.0 重大版本升级说明（必须从零部署）
-> **当前 `3.0.0-preview` 仅作为尝鲜版本，如遇问题请提交 [Issues](https://github.com/fe-spark/EcoHub/issues)。**
->
-> **EcoHub v3.0 为全新重大架构重构版本，完全不向后兼容 v2.x 历史数据与数据库结构，不提供任何数据迁移通道。**
-> - **严禁直接挂载旧库升级**：请勿直接挂载 v2.x 历史数据库数据目录（如 `./data/mysql` 或对应 Docker 数据卷）升级运行，否则会导致数据库结构冲突并引发程序异常崩溃。
-> - **全新部署指引**：从旧版本升级至 v3.0 时，**必须使用全新目录重新部署**（或彻底清空旧版 MySQL/Redis 数据卷后从零部署），启动后重新在后台添加站点并执行全量采集。
-> - 详细变更说明请参阅 [版本说明](./docs/RELEASE.md)。
+> v3.0 与 v2.x 不兼容，没有数据迁移。不要在旧的 `./data/mysql` 上 pull，也不要使用后台「立即升级」。用新目录或清空数据后重装，再全量采集。步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。当前预览为 `3.0.0-preview`，问题请提 [Issues](https://github.com/fe-spark/EcoHub/issues)。
 
-> **维护说明**  
-> 作者时间有限，更新较慢，请体谅。问题会不定期修复。如果有好的功能可以直接提 [PR](https://github.com/fe-spark/EcoHub/pulls)。
+作者时间有限，更新较慢。欢迎提 [PR](https://github.com/fe-spark/EcoHub/pulls)。
 
 ## 简介
 
-EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不仅提供极致流畅的 Web 观影体验，还集成了强大的自动化采集与管理后台，旨在帮助开发者和影视爱好者快速搭建属于自己的私人影视库。
+多源采集、Web 观影和管理后台。客户端是独立仓库，以 submodule 放在 `app-for-ohos/`、`app-for-android/`：
 
-客户端是独立 App 仓库（本项目以 Git Submodule 形式接入在 `app-for-ohos/` 与 `app-for-android/`）：
-
-- **EcoHub for OHOS** (鸿蒙客户端): [fe-spark/EcoHub-for-OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)
-- **EcoHub for Android** (安卓客户端): [fe-spark/EcoHub-for-Android](https://github.com/fe-spark/EcoHub-for-Android)
-
+- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)
+- [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)
 
 ## 在线演示
 
@@ -47,98 +37,53 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 | --- | --- |
 | 前台 | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | 管理后台 | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
-| v3 体验地址 | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
-| v3 体验管理后台 | [http://148.135.106.141:3000/manage](http://148.135.106.141:3000/manage) |
+| v3 体验 | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
 
-访客登录使用 `guest` / `guest`。该账号只读，不能保存配置。正式部署请使用自有账号并修改默认密码。
-
-> **网络提示**：官方网站因海外服务商不支持移动线路，请使用联通/电信等网络访问。
+访客 `guest` / `guest`，只读。演示站不支持移动线路，请用联通或电信。
 
 ## 推荐
 
-### 服务器
-
-| 服务商 | 说明 | 链接 |
+| 类型 | 服务商 | 链接 |
 | --- | --- | --- |
-| CloudCone | 1. 演示站点所用服务商<br>2. 高性价比 VPS，磁盘 I/O 不受限 | [前往选购](https://app.cloudcone.com/?ref=14393) |
+| 服务器 | CloudCone（演示站所用，磁盘 I/O 不限） | [选购](https://app.cloudcone.com/?ref=14393) |
+| 网络 | 良心云，低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| 网络 | 赔钱机场，低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| 网络 | DOVE | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
-### 网络服务
+## 安装
 
-| 服务商 | 特点 / 价格 | 链接 |
-| --- | --- | --- |
-| 良心云 | 低至 2 元/月 <br>新用户注册即获体验流量 | [前往注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| 赔钱机场 | 低至 1.5 元/月 <br>适合高流量与备用需求 | [前往注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| DOVE | 适合长期稳定 | [前往注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
-
-## 快速开始
-
-要求 Docker 20+、Compose 2+，建议配置不低于 2 核 2 GB 内存。
+需要 Docker 20+ 和 Compose 2+，建议 2 核 2 GB。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
-cd ~/ecohub
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
+  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 ```
 
-编辑 `.env`：将 `openssl rand -hex 32` 的输出写入 `JWT_SECRET`，按需修改超级管理员密码 `ECOHUB_ADMIN_PASSWORD` 与 MySQL / Redis 密码，然后启动：
+数据在 `~/ecohub`，命令是 `ecohub`。装完终端会打印 Web 端口、前台、后台和三条订阅。默认 Web 端口 `3000`。密码、反代、1Panel 见 [部署指南](./docs/README-Deploy.md)。
 
-```bash
-docker compose up -d
-```
-
-| 地址 | 说明 |
-| --- | --- |
-| `http://<主机>:3000` | 前台 |
-| `http://<主机>:3000/manage` | 管理后台 |
-| `http://<主机>:3000/api/provide/app` | 客户端（[EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) / [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)）软件源地址 |
-| `http://<主机>:3000/api/provide/tvbox` | TVBox / 影视仓 订阅地址 |
-| `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
-
-默认账号：`admin` / `admin`（如未在 `.env` 中配置 `ECOHUB_ADMIN_PASSWORD`）。其它角色在账号管理中新建。对外部署前须立即修改默认密码。
-
-> **安全与网络建议**：生产环境建议通过 Nginx / 1Panel 配置反向代理与 HTTPS（80/443）。如需**不对公网暴露裸端口**，请在 `docker-compose.yml`（或 `compose.yml`）的 `ports` 中显式绑定 `127.0.0.1:`（如 `127.0.0.1:3000:3000`），避免 Docker 默认规则绕过系统防火墙直接暴露端口；若无播放器直连需求，可直接注释 `18080` 端口映射。
-
-安装完成后前台无数据，属预期行为。须在管理后台 **采集中心** 完成全量采集并发布后，前台才会展示影片。1Panel、外部数据库与反向代理见 [部署指南](./docs/README-Deploy.md)。
+前台一开始没有影片。到后台采集中心做全量采集，影片随窗口出现，首次可能要数小时。
 
 ## 本地开发
 
-请先在本地启动 MySQL 8 与 Redis 7。后端与前端需两个终端，均从仓库根目录执行。
-
-API：
+本机先启动 MySQL 8 和 Redis 7。
 
 ```bash
-cd server
-cp .env.example .env
-go run ./cmd/server
+cd server && cp .env.example .env && go run ./cmd/server
+cd web && cp .env.example .env.local && npm install && npm run dev
 ```
 
-Web：
-
-```bash
-cd web
-cp .env.example .env.local
-npm install
-npm run dev
-```
-
-前台 `http://127.0.0.1:3000`，后台 `/manage`，API `http://127.0.0.1:8080`。[服务端](./server/README.md) · [前端](./web/README.md)
+前台 `http://127.0.0.1:3000`，后台 `/manage`，API `http://127.0.0.1:8080`。说明见 [服务端](./server/README.md)、[前端](./web/README.md)。
 
 ## 文档
 
 | 文档 | 内容 |
 | --- | --- |
-| [部署指南](./docs/README-Deploy.md) | 安装脚本、1Panel、手动部署、反向代理与升级 |
-| [常见问题](./docs/README-FAQ.md) | 空站、采集、缓存、登录 |
-| [版本说明](./docs/RELEASE.md) | 变更记录、镜像 tag |
-| [服务端](./server/README.md) / [前端](./web/README.md) | 环境变量、接口、本地启动 |
+| [部署指南](./docs/README-Deploy.md) | 安装、命令、密码、1Panel、反代 |
+| [从 v2 升级到 v3](./docs/v2-to-v3.md) | 停旧栈、空库、全量采集 |
+| [常见问题](./docs/README-FAQ.md) | 空站、主站、采集、缓存、登录 |
+| [版本说明](./docs/RELEASE.md) | 本次变更 |
 | [English](./docs/README_EN.md) | English overview |
 
-## 交流社区
+EcoHub 不提供、不存储影视文件。片源来自使用者自己的采集接口。请遵守当地法律和源站约定。
 
-- Telegram 交流群：[https://t.me/ecohub_club](https://t.me/ecohub_club)
-
-> **使用须知**  
-> EcoHub 不提供、不存储任何影视文件。片源来自使用者自行配置的采集接口。请遵守所在地区的法律法规以及各源站的使用约定，由此产生的风险由使用者自行承担。本项目仅供学习与技术交流。
-
----
-
-[PolyForm Noncommercial 1.0.0](./LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram Group](https://t.me/ecohub_club)
+[PolyForm Noncommercial 1.0.0](./LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram](https://t.me/ecohub_club)

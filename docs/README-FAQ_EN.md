@@ -2,6 +2,8 @@
 
 [中文](./README-FAQ.md) | English
 
+Install, ports, and passwords: [Deploy guide](./README-Deploy_EN.md).
+
 ## Collect and data
 
 ### Why is the site empty after setup?
@@ -67,4 +69,4 @@ The edge middleware only checks that the `ecohub_auth_token` cookie exists. Open
 
 ### How do guest and default accounts work?
 
-First boot creates only the super admin `admin` / `admin`. Create normal users and visitors in account management. Visitors may call admin GET; POST / PUT / PATCH / DELETE are rejected by `WriteAccess`. Change the default password before any public deployment.
+First boot creates only the super admin `admin`. The password is `ECOHUB_ADMIN_PASSWORD`, or `admin` when unset. An existing admin keeps the current password. Create normal users and visitors in account management. Visitors may call admin GET; POST / PUT / PATCH / DELETE are rejected by `WriteAccess`. Change the password in admin after login.

@@ -1,324 +1,127 @@
 # Server
 
-`server/` 是 EcoHub 的 Go API 服务，负责采集、归并、列表快照、缓存、开放接口和后台鉴权。
+`server/` 是 EcoHub 的 Go API：采集、片库、列表、缓存、开放接口和后台鉴权。
 
-## 职责边界
-
-- 采集源管理与 Spider 调度。
-- 各采集站写入影片档案、线路和匹配键。主站是启用站里排序最前的一座，前台片单和分类跟它走。
-- 影片搜索、详情聚合、播放源聚合。
-- 分类映射、筛选标签、列表快照和倒排索引。
-- 管理后台 API、登录态、访客只读权限。
-- TVBox / MacCMS 兼容接口。
-
-## 架构概览
-
-```mermaid
-flowchart LR
-    Router["router"] --> Middleware["middleware"]
-    Middleware --> Handler["handler"]
-    Handler --> Service["service"]
-    Service --> Repo["repository"]
-    Service --> Spider["spider"]
-    Repo --> MySQL["MySQL"]
-    Repo --> Redis["Redis"]
-```
-
-## 运行要求
-
-- Go 1.27+
-- MySQL 8+
-- Redis 7+
+采集、主站、匹配、刮削和缓存行为见 [常见问题](../docs/README-FAQ.md)。计划任务冲突见 [计划任务运行冲突](../docs/cron-task-conflict.md)。部署变量见 [部署指南](../docs/README-Deploy.md)。
 
 ## 本地启动
 
-### 1. 准备环境变量
+要求 Go 1.27+、MySQL 8+、Redis 7+。
 
 ```bash
 cd server
 cp .env.example .env
+go run ./cmd/server
 ```
-
-最小配置示例：
 
 ```env
 PORT=8080
 JWT_SECRET=change_me_to_a_long_random_string
-
 MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_USER=eco
 MYSQL_PASSWORD=your_mysql_password
 MYSQL_DBNAME=eco
-
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 REDIS_PASSWORD=your_redis_password
 REDIS_DB=0
 ```
 
-`JWT_SECRET` 必须使用高强度随机值，可用下面命令生成：
+`JWT_SECRET` 用 `openssl rand -hex 32` 生成。API 默认 `:8080`。MySQL 或 Redis 不可达会直接退出。首次启动会建表，并写入基础配置、管理员、默认站点和定时任务。
 
-```bash
-openssl rand -hex 32
-```
-
-### 2. 启动服务
-
-```bash
-cd server
-go run ./cmd/server
-```
-
-服务启动时会自动读取 `server/.env`。
-
-### 3. 启动结果
-
-- API 默认监听 `8080`，由 `PORT` 决定。
-- 启动阶段会连接 MySQL 和 Redis，不可达会直接退出。
-- 首次启动会自动建表、初始化基础配置、默认站点、内置账号和定时任务。
+进程读 `server/.env`。发布版容器读编排注入的环境变量，宿主机 `SERVER_PORT` 映射到容器内 `8080`。
 
 ## 环境变量
 
-本地 `go run` 使用 `server/.env`（见 [server/.env.example](./.env.example)）。Docker / 1Panel 使用仓库根目录 [.env.example](../.env.example)；发布版 compose 将宿主机 `SERVER_PORT` 映射到容器内固定的 `8080` 端口。
-
-### 服务与鉴权
-
 | 变量 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `PORT` | 否 | `8080` | API 监听端口；未设置时默认回退 `8080`。发布版容器内固定监听 8080 |
-| `JWT_SECRET` | 是 | 无 | JWT 签名密钥；未设置启动 panic。生产必须用高强度随机串 |
-| `ECOHUB_ADMIN_PASSWORD` | 否 | `admin` | 首次初始化超级管理员密码（仅在首次建库无 admin 账号时生效） |
+| `PORT` | 否 | `8080` | API 端口。发布版容器内固定 8080 |
+| `JWT_SECRET` | 是 | 无 | 未设置会 panic |
+| `ECOHUB_ADMIN_PASSWORD` | 否 | `admin` | 仅首次创建 `admin` 时写入 |
+| `MYSQL_HOST` | 是 | 无 | 本机 `127.0.0.1`，Compose 服务名 `mysql`，容器访问宿主机 `host.docker.internal` |
+| `MYSQL_PORT` | 是 | 无 | 通常 `3306` |
+| `MYSQL_USER` | 是 | 无 | |
+| `MYSQL_PASSWORD` | 否 | 空 | |
+| `MYSQL_DBNAME` | 是 | 无 | |
+| `REDIS_HOST` | 是 | 无 | 本机 `127.0.0.1`，Compose 服务名 `redis` |
+| `REDIS_PORT` | 是 | 无 | 通常 `6379` |
+| `REDIS_PASSWORD` | 否 | 空 | |
+| `REDIS_DB` | 否 | `0` | 非数字时忽略 |
+| `ECOHUB_LOG_DIR` | 否 | 模块根 `logs/` | 找不到 `go.mod` 时回退到进程工作目录 |
 
-### MySQL
+`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_USER`、`MYSQL_DBNAME` 任一为空会 panic。`REDIS_HOST`、`REDIS_PORT` 为空也会 panic。
 
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `MYSQL_HOST` | 是 | 无 | 主机；本机 `127.0.0.1`，Compose 内置库 `mysql`，容器访宿主机 `host.docker.internal` |
-| `MYSQL_PORT` | 是 | 无 | 端口，通常 `3306` |
-| `MYSQL_USER` | 是 | 无 | 用户名 |
-| `MYSQL_PASSWORD` | 否 | 空 | 密码；空密码仅适合本地无鉴权实例 |
-| `MYSQL_DBNAME` | 是 | 无 | 业务库名 |
+`WEB_PORT`、`SERVER_PORT`、`MYSQL_ROOT_PASSWORD` 只给 Compose 用，server 进程不读。
 
-`MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_DBNAME` 任一为空会启动 panic。
+## 启动时做什么
 
-### Redis
+等待 MySQL 和 Redis，执行 `AutoMigrate`，清自身缓存，初始化分类、管理员、默认站点、默认采集源和定时任务，加载读模型，启动 cron。
 
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `REDIS_HOST` | 是 | 无 | 主机；本机 `127.0.0.1`，Compose 内置 `redis` |
-| `REDIS_PORT` | 是 | 无 | 端口，通常 `6379` |
-| `REDIS_PASSWORD` | 否 | 空 | 密码；无密码可留空 |
-| `REDIS_DB` | 否 | `0` | DB 编号；非数字时忽略并保持默认 |
+初始化只创建超级管理员 `admin`。已有管理员时不改密码。普通用户和访客在账号管理里新建。
 
-`REDIS_HOST` / `REDIS_PORT` 为空会启动 panic。
+## 接口
 
-### 日志存储（可选）
+公共：
 
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `ECOHUB_LOG_DIR` | 否 | 模块根 `logs/` | 系统日志输出目录，支持相对或绝对路径。未设置时写入自当前工作目录上溯找到的模块根下 `logs/` 绝对路径（在任意子包内执行测试/命令都落到同一目录）；找不到 `go.mod` 时才回退进程工作目录下的相对 `logs/` |
+- `/api/home`
+- `/api/daily-updates`
+- `/api/categories`
+- `/api/categories/overview`
+- `/api/films/play-info`
+- `/api/films/related`
+- `/api/films/search`
+- `/api/films/filter`
+- `/api/search/hot-keywords`
+- `/api/stats/view`
+- `/api/film/danmaku`（GET / POST）
+- `/api/config/basic`
+- `/api/provide/app`
+- `/api/provide/tvbox`
+- `/api/provide/vod`
+- `/api/upload/pic/poster/*name`
 
-### Docker 根目录变量对照（非 server 进程直接读取）
+登录：`POST /api/login`、`POST /api/logout`。后台：`/api/manage/*`。
 
-发布版 / 源码版 compose 还使用下列变量，**注入或映射**到容器，与 `server` 进程内变量对应关系：
+登录态是 HttpOnly cookie `ecohub_auth_token`。`/api/manage/*` 和 `/api/logout` 校验 JWT 和 Redis 里的当前 token。JWT 过期但 Redis token 仍有效时会刷新 cookie。访客可以 GET，写操作由 `WriteAccess` 拒绝。
 
-| 根目录 `.env` | 作用 |
-| --- | --- |
-| `WEB_PORT` | 宿主机暴露 Web（Next）访问端口，默认 `3000` |
-| `SERVER_PORT` | 宿主机暴露 API 直连端口，默认 `18080`（映射到容器内 8080） |
-| `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
-| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `ECOHUB_ADMIN_PASSWORD` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
-
-完整部署说明见 [部署指南](../docs/README-Deploy.md)。
-
-### 地址写法小结
-
-- 本机开发：`127.0.0.1`
-- 其它机器：内网 IP / 域名
-- Compose 服务名：`mysql`、`redis`
-- 容器访问宿主机：`host.docker.internal`
-
-## 启动初始化
-
-服务启动后会执行这些初始化动作：
-
-- 等待 MySQL 和 Redis 可用。
-- 执行 `AutoMigrate`。
-- 清理项目自身缓存。
-- 初始化映射引擎、标准大类、分类缓存。
-- 初始化内置账号、基础站点配置、默认轮播图。
-- 初始化默认采集源和定时任务。
-- 加载或构建前台列表快照、筛选项和读模型。
-- 启动 cron 调度器。
-
-## 采集模型
-
-```mermaid
-flowchart TD
-    Trigger["定时任务 / 手动触发"] --> Spider["Spider"]
-    Spider --> Write["写入 film_index / 线路 / 匹配键"]
-    Write --> Index["增量更新内存检索索引"]
-    Index --> PublicAPI["前台 / 后台 / Provide 接口"]
-```
-
-核心约束：
-
-- 启用站里 `sort` 最小的是主站。前台首页、分类、搜索、每日更新只展示该站自己的档案和分类。切换主站立刻换成新主站已采集的数据，不重采、不删片。
-- 各站各有一份 `film_index`。播放线路挂在自己的 `mid` 上。播放页按匹配键补其他已启用站的线路，线路按站分开。
-- **站内身份**：`movie_source_mapping`（采集站 + 源站 `vod_id`）。再次采集只更新自己的档案。
-- **跨站匹配**（`movie_match_key`）：只在播放页查找。豆瓣 ID+片名 / 片名#大类 / 纯片名。不合并档案。
-- 前台封面读取时用海报源那部影片的当前展示图。不另存海报表。影片刮削直接改本片选中的列，片名和分类不改，没有还原。词条只留在 `film_tmdb_scrapes`。
-- 首页轮播刮削写在 `banners_record` 本行，不改影片，没有轮播刮削表。首页用本行的图和简介，更新状态跟片库。
-- 删除或更换地址只清这一站，没有线路的档案也删。切换主站只清空轮播和排片规则。采集中可以切换。
-- 后台支持对单部影片触发全部站点更新。
-
-## 快照与缓存
-
-前台列表直接读 `film_index`，成员关系看 `film_source_playlists`：
-
-- `film_index` 保存影片档案与播放摘要。
-- 活跃读版本记录在 Redis，当前固定为 `live`。
-- 采集提交后按 mid 增量更新内存检索索引，并刷新 Redis 列表缓存。
-
-缓存策略：
-
-- 服务启动时只清理 EcoHub 自身缓存。
-- 分类重建、主站切换、快照发布后会刷新相关缓存。
-- 首页、筛选配置、TVBox 列表会跟随快照发布收敛。
-
-## 分类、筛选与排序
-
-公共分类搜索、后台列表和 TVBox 列表使用同一套后端语义：
-
-- 分类优先使用来源分类映射。
-- 剧情、地区、语言、年份支持“其他”。
-- 排序包含最近更新、人气、评分、时间。
-- 最近更新按 `update_stamp`。已入库影片在播放线路内容变化时刷新该时间；新片保留源站时间。
-
-## 接口分组
-
-公共接口：
-
-- `/api/home` (首页聚合数据)
-- `/api/daily-updates` (每日更新)
-- `/api/categories` (前台分类导航树)
-- `/api/categories/overview` (分类专区精选概览)
-- `/api/films/play-info` (影片播放与线路详情)
-- `/api/films/related` (关联影片推荐)
-- `/api/films/search` (综合影片搜索)
-- `/api/films/filter` (片库多维标签筛选与分页)
-- `/api/search/hot-keywords` (搜索热搜词榜单)
-- `/api/stats/view` (浏览与点播访问埋点)
-- `/api/film/danmaku` (弹幕列表获取与发送，GET / POST)
-- `/api/config/basic` (站点基础信息 / 探活)
-- `/api/provide/app` (EcoHub 客户端软件源)
-- `/api/provide/tvbox` (TVBox / 影视仓配置)
-- `/api/provide/vod` (MacCMS 兼容接口)
-- `/api/upload/pic/poster/*name` (海报与图库静态素材访问)
-
-登录接口：
-
-- `POST /api/login`
-- `POST /api/logout`
-
-后台接口：
-
-- `/api/manage/*`
-
-后台接口覆盖首页概览、站点配置、轮播、用户、采集源、失败记录、定时任务、Spider 操作、影片管理和文件管理。
-
-## 鉴权模型
-
-```mermaid
-sequenceDiagram
-    participant Browser
-    participant API as Go API
-    participant Redis
-
-    Browser->>API: POST /api/login
-    API->>Redis: 保存当前有效 token
-    API-->>Browser: Set-Cookie ecohub_auth_token
-    Browser->>API: 请求 /api/manage/*
-    API->>API: 校验 JWT
-    API->>Redis: 校验 token 一致性
-    API-->>Browser: 返回数据 / 401 / 403
-```
-
-- 登录态使用 `HttpOnly` cookie：`ecohub_auth_token`。
-- 后端是最终鉴权边界。
-- `/api/manage/*` 和 `/api/logout` 会校验 JWT 与 Redis 中的当前 token。
-- JWT 过期但 Redis token 仍有效时，会自动刷新 cookie。
-- 访客账号可以读取后台数据，写操作会被 `WriteAccess` 拦截。
-
-## 默认账号
-
-| 类型 | 账号 | 密码 | 权限 |
-| --- | --- | --- | --- |
-| 超级管理员 | `admin` | `admin` | 可读可写，可新建任意角色 |
-
-初始化只创建这一账号。普通用户和访客在账号管理中新建。对外部署后请立即修改密码。
-
-## 主要目录
+## 目录
 
 ```text
 server/
-├── cmd/server/             # 入口
-├── internal/config/        # 配置与常量
-├── internal/router/        # 路由
-├── internal/middleware/    # CORS / JWT / 写权限
-├── internal/handler/       # HTTP 处理层
-├── internal/service/       # 业务逻辑
-├── internal/repository/    # 数据访问层
-│   └── film/               # 影片领域仓储（根包为统一门面）
-│       ├── shared/         # 跨域共享原语（匹配键读写与派生 / 海报展示与匹配 / 分页 / 分类根解析）
-│       ├── cache/          # 影片缓存键与失效（检索标签 / TVBox / 提供列表）
-│       ├── query/          # 分类维度过滤与相关性排序
-│       ├── snapshot/       # 前台快照生命周期、活跃读模型、筛选快照与播放列表摘要
-│       └── writer/         # 采集入库写路径：分类树推导、主从指纹比对、播放列表分页写与标签聚合
-├── internal/model/         # 数据模型与 DTO
-├── internal/spider/        # 采集编排与对外 API
-│   ├── converter/          # 三方接口数据转换
-│   ├── fetcher/            # 分页取数：页数探测、固定页并发、全局在途与零成功停站
-│   ├── progress/           # 采集进度状态机、超时清理与活跃任务注册表
-│   └── scheduler/          # 采集写库调度（反压 / 跨站轮转 / 同站串行）
-├── internal/migration/     # 数据库结构版本迁移。当前只有空基线，新变更在末尾追加
-├── internal/infra/         # 基础设施
-│   ├── db/                 # MySQL / Redis 客户端初始化与健康探测
-│   └── syslog/             # 系统运行与调试日志
-├── internal/utils/         # 工具函数
-└── test/                   # 独立测试工程（集成 / 压测）
+├── cmd/server/
+├── internal/config/
+├── internal/router/
+├── internal/middleware/
+├── internal/handler/
+├── internal/service/
+├── internal/repository/film/   # shared cache query snapshot writer
+├── internal/model/
+├── internal/spider/            # converter fetcher progress scheduler
+├── internal/migration/         # 空基线，新变更只在末尾追加
+├── internal/infra/             # db syslog
+├── internal/utils/
+└── test/integration/
 ```
 
-`internal/` 只保留高内聚、轻量级的纯单元测试；跨模块全链路集成测试统一放在独立的 `test/` 测试工程（压测目录 `test/benchmark/` 待有实际基准用例时再建，当前尚未创建）：
+`internal/` 放单元测试。跨模块测试放 `test/integration/`。
 
-```text
-test/
-└── integration/            # 跨模块 / 全链路集成测试（自包含 DB、Redis 初始化与销毁）
-```
-
-## 常用命令
+## 命令
 
 ```bash
 cd server
 go run ./cmd/server
-
-go test ./internal/...      # 业务包纯单测
-go test ./test/...          # 集成测试与压测
-go test ./...               # 全量
+go test ./internal/...
+go test ./test/...
+go test ./...
 ```
 
-如果本地 Go 缓存目录受限：
+本机 Go 缓存目录受限时：
 
 ```bash
-cd server
 GOCACHE=/tmp/ecohub-go-cache go test ./...
 ```
 
-## 相关文档
+## 相关
 
-- [根目录总览](../README.md)
-- [前端说明](../web/README.md)
-- [部署指南](../docs/README-Deploy.md)
-- [FAQ 与排障](../docs/README-FAQ.md)
-- [版本变更](../docs/RELEASE.md)
+[总览](../README.md) · [前端](../web/README.md) · [部署](../docs/README-Deploy.md) · [常见问题](../docs/README-FAQ.md)
