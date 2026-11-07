@@ -55,8 +55,8 @@
 需要 Docker 20+ 和 Compose 2+，建议 2 核 2 GB。
 
 ```bash
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
-  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
 ```
 
 数据在 `~/ecohub`，命令是 `ecohub`。装完终端会打印 Web 端口、前台、后台和三条订阅。默认 Web 端口 `3000`。密码、反代、1Panel 见 [部署指南](./docs/README-Deploy.md)。
@@ -84,6 +84,6 @@ cd web && cp .env.example .env.local && npm install && npm run dev
 | [版本说明](./docs/RELEASE.md) | 本次变更 |
 | [English](./docs/README_EN.md) | English overview |
 
-EcoHub 不提供、不存储影视文件。片源来自使用者自己的采集接口。请遵守当地法律和源站约定。
+> EcoHub 不提供、不存储影视文件。片源来自使用者自己的采集接口。请遵守当地法律和源站约定。
 
 [PolyForm Noncommercial 1.0.0](./LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram](https://t.me/ecohub_club)

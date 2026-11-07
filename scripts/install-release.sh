@@ -190,63 +190,39 @@ primary_ip() {
 
 print_access() {
   web_port=$(env_get WEB_PORT 3000)
-  api_port=$(env_get SERVER_PORT 18080)
   admin_password=$(env_get ECOHUB_ADMIN_PASSWORD admin)
+  image=$(env_get ECOHUB_IMAGE "ghcr.io/fe-spark/ecohub:latest")
   host=$(primary_ip)
   if [ -z "$host" ]; then
     host="127.0.0.1"
   fi
   web="http://${host}:${web_port}"
 
-  printf '\nEcoHub 已就绪\n\n'
-  printf '命令        ecohub\n'
-  printf '安装目录    %s\n' "$install_dir"
-  printf 'Web 端口    %s     前台、后台、订阅都走这个端口\n' "$web_port"
-  printf 'API 端口    %s    仅播放器直连后端时使用，订阅不要填这个端口\n' "$api_port"
-  printf '\n访问\n'
-  printf '  前台          %s\n' "$web"
-  printf '  管理后台      %s/manage\n' "$web"
-  if [ "$host" != "127.0.0.1" ]; then
-    printf '  本机前台      http://127.0.0.1:%s\n' "$web_port"
-    printf '  本机后台      http://127.0.0.1:%s/manage\n' "$web_port"
+  printf '\nEcoHub 已就绪\n'
+  printf '%s\n' "$image"
+  printf '%s\n\n' "$install_dir"
+  printf '前台    %s\n' "$web"
+  printf '后台    %s/manage\n' "$web"
+  printf '账号    admin\n'
+  printf '密码    %s\n\n' "$admin_password"
+  printf '客户端  %s/api/provide/app\n' "$web"
+  printf 'TVBox   %s/api/provide/tvbox\n' "$web"
+  printf 'MacCMS  %s/api/provide/vod\n' "$web"
+  if [ "${1:-}" = "services" ]; then
+    printf '\n'
+    compose ps --format '{{.Service}}  {{.Status}}' || true
   fi
-  printf '\n订阅\n'
-  printf '  客户端软件源    %s/api/provide/app\n' "$web"
-  printf '  TVBox / 影视仓  %s/api/provide/tvbox\n' "$web"
-  printf '  MacCMS          %s/api/provide/vod\n' "$web"
-  printf '\n登录\n'
-  printf '  账号    admin\n'
-  printf '  密码    %s\n' "$admin_password"
-  printf '  该密码只在数据库第一次初始化时生效。登录后请立即修改。\n'
-  printf '\n数据目录\n'
-  printf '  %s/data/mysql\n' "$install_dir"
-  printf '  %s/data/redis\n' "$install_dir"
-  printf '  %s/data/uploads\n' "$install_dir"
-  printf '\n容器\n'
-  compose ps || true
-  printf '\n常用命令\n'
-  printf '  ecohub status              查看状态、端口和订阅\n'
-  printf '  ecohub logs                最近日志\n'
-  printf '  ecohub logs -f             跟踪日志\n'
-  printf '  ecohub restart             改 .env 后重启\n'
-  printf '  ecohub update              拉取镜像并重建\n'
-  printf '  ecohub stop                停止\n'
-  printf '  ecohub start               启动\n'
-  printf '  ecohub uninstall           卸载容器，保留数据\n'
-  printf '  ecohub uninstall --purge   卸载并删除数据库数据\n'
+  if [ "$host" = "127.0.0.1" ]; then
+    printf '\n远程访问时把 127.0.0.1 换成服务器 IP。\n'
+  fi
   if [ -n "$cli_bin" ]; then
     bindir=$(dirname "$cli_bin")
     case ":${PATH}:" in
       *":${bindir}:"*) ;;
       *)
-        printf '\n当前终端还找不到 ecohub。先执行：\n'
-        printf '  export PATH="%s:$PATH"\n' "$bindir"
+        printf '\n当前终端还找不到 ecohub：\nexport PATH="%s:$PATH"\n' "$bindir"
         ;;
     esac
-  fi
-  printf '\n前台没有影片时，打开管理后台的采集中心，执行全量采集。\n'
-  if [ "$host" = "127.0.0.1" ]; then
-    printf '未探测到局域网地址。远程访问时把 127.0.0.1 换成服务器 IP。\n'
   fi
   printf '\n'
 }
@@ -255,13 +231,19 @@ fetch_bundle() {
   mkdir -p "$install_dir/data/mysql" "$install_dir/data/redis" "$install_dir/data/uploads"
   download "${raw_base}/deploy/release/compose.yml" "${install_dir}/docker-compose.yml"
   download "${raw_base}/.env.example" "${install_dir}/.env.example"
+  fresh=0
   if [ ! -f "${install_dir}/.env" ]; then
     cp "${install_dir}/.env.example" "${install_dir}/.env"
+    fresh=1
     printf '已创建 %s/.env\n' "$install_dir"
   else
     printf '已保留 %s/.env\n' "$install_dir"
   fi
   apply_env_overrides
+  # 模板里镜像是注释掉的，不写时 compose 会落到 :latest。新安装默认钉预览版。
+  if [ "$fresh" -eq 1 ] && [ -z "$(env_get ECOHUB_IMAGE "")" ]; then
+    set_env_key ECOHUB_IMAGE "ghcr.io/fe-spark/ecohub:v3.0.0-preview"
+  fi
   install_cli
 }
 
@@ -297,7 +279,7 @@ cmd_restart() {
 cmd_status() {
   need_docker
   need_layout
-  print_access
+  print_access services
 }
 
 cmd_logs() {
@@ -359,14 +341,14 @@ cmd_help() {
   uninstall --purge       删除容器，并删除 data 下的数据库和上传文件
   help                    显示本说明
 
-首次安装：
+首次安装（变量要写在 sh 前面，写在 curl 前面不会进脚本）：
 
-  curl -fsSL ${raw_base}/scripts/install-release.sh | sh
+  curl -fsSL ${raw_base}/scripts/install-release.sh | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
 
 命令安装到 /usr/local/bin/ecohub；该目录不可写时安装到 ~/.local/bin/ecohub。
-数据目录默认 \$HOME/ecohub，可用 ECOHUB_INSTALL_DIR 修改。命令会记住上次的数据目录。
-安装和 update 时，若已导出 ECOHUB_IMAGE、WEB_PORT、JWT_SECRET、ECOHUB_ADMIN_PASSWORD、
-MYSQL_PASSWORD、REDIS_PASSWORD，会写回 .env 再启动。
+数据目录默认 \$HOME/ecohub。换目录把 ECOHUB_INSTALL_DIR 写在 sh 前面。命令会记住上次的数据目录。
+安装和 update 时，写在 sh 前面的 ECOHUB_IMAGE、WEB_PORT、JWT_SECRET、ECOHUB_ADMIN_PASSWORD、
+MYSQL_PASSWORD、REDIS_PASSWORD 会进 .env 再启动。
 EOF
 }
 
