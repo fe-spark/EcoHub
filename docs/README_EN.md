@@ -55,8 +55,8 @@ Visitor login is `guest` / `guest` (read-only). The demo does not work on China 
 Docker 20+ and Compose 2+. Aim for 2 CPU cores and 2 GB RAM.
 
 ```bash
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
-  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
 ```
 
 Data goes to `~/ecohub`. The command is `ecohub`. Install prints the web port, site, admin, and three subscription URLs. The default web port is `3000`. Passwords, reverse proxy, and 1Panel: [Deploy guide](./README-Deploy_EN.md).

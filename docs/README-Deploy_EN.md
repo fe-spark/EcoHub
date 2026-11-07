@@ -27,11 +27,11 @@ Upgrading from v2: [v2 to v3](./v2-to-v3.md).
 ## Install script
 
 ```bash
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
-  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
 ```
 
-Data defaults to `~/ecohub`. Set `ECOHUB_INSTALL_DIR=~/ecohub-v3` in front of the command to use another directory. The script writes compose and `.env`, installs `ecohub`, starts the stack, and prints ports, the site, admin, three subscription URLs, and the initial account. Later commands are just `ecohub`.
+Data defaults to `~/ecohub`. Put `ECOHUB_INSTALL_DIR=~/ecohub-v3` before `sh` to use another directory. A variable before `curl` does not reach the script. The script writes compose and `.env`, installs `ecohub`, starts the stack, and prints the site, admin, three subscription URLs, and the initial account. Later commands are just `ecohub`.
 
 If `/usr/local/bin` is not writable, the command goes to `~/.local/bin`. Add that directory to `PATH` when the shell says so.
 

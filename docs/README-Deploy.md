@@ -27,11 +27,11 @@ openssl rand -hex 32
 ## 安装脚本
 
 ```bash
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
-  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
 ```
 
-数据目录默认 `~/ecohub`。换目录时在命令前加 `ECOHUB_INSTALL_DIR=~/ecohub-v3`。脚本写入编排和 `.env`，安装 `ecohub`，启动，并打印端口、前台、后台、三条订阅和初始账号。之后直接执行 `ecohub`。
+数据目录默认 `~/ecohub`。换目录把 `ECOHUB_INSTALL_DIR=~/ecohub-v3` 写在 `sh` 前面。变量写在 `curl` 前面不会进脚本。脚本写入编排和 `.env`，安装 `ecohub`，启动，并打印前台、后台、三条订阅和初始账号。之后直接执行 `ecohub`。
 
 `/usr/local/bin` 不可写时，命令装到 `~/.local/bin`，按提示加入 `PATH`。
 

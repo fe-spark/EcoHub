@@ -24,12 +24,11 @@ docker compose down
 旧目录还在时换一个路径。确认新站能采到片之后再删旧目录。
 
 ```bash
-ECOHUB_INSTALL_DIR=~/ecohub-v3 \
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
-  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
+  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
 ```
 
-要在第一次初始化前改密码，把 `JWT_SECRET`、`ECOHUB_ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD` 加在命令前面。内置库保持 `MYSQL_HOST=mysql`、`REDIS_HOST=redis`。密码何时生效见部署指南。
+要在第一次初始化前改密码，把 `JWT_SECRET`、`ECOHUB_ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD` 写在 `sh` 前面。内置库保持 `MYSQL_HOST=mysql`、`REDIS_HOST=redis`。密码何时生效见部署指南。
 
 1Panel 新建一套编排和工作目录，内容用 [deploy/release/compose.yml](../deploy/release/compose.yml)，不要复用旧的 `./data`。
 
@@ -43,12 +42,11 @@ docker compose down
 rm -rf data/mysql data/redis data/uploads
 ```
 
-已有 `.env` 会保留。把预览镜像加在命令前面再装：
+已有 `.env` 会保留。把预览镜像写在 `sh` 前面再装：
 
 ```bash
-ECOHUB_INSTALL_DIR=~/ecohub \
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview \
-  curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
+  | ECOHUB_INSTALL_DIR=~/ecohub ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
 ```
 
 ## 自备数据库
