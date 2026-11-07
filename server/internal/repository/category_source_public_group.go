@@ -91,8 +91,6 @@ func makePublicGroup(name string, members []sourceTypeRow) publicTypeGroup {
 		group.Members = append(group.Members, row.ID)
 		if row.ID < group.ID {
 			group.ID = row.ID
-		}
-		if row.Sort < group.Sort {
 			group.Sort = row.Sort
 		}
 	}
