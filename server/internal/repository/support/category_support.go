@@ -2,6 +2,7 @@ package support
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,29 @@ func BuildSourceCategoryKey(sourceId string, sourceTypeId int64) string {
 		return ""
 	}
 	return fmt.Sprintf("source:%s:%d", sourceId, sourceTypeId)
+}
+
+// ParseSourceCategoryKey 解析 source:{sourceId}:{typeId}。对不上返回 false。
+func ParseSourceCategoryKey(key string) (sourceID string, typeID int64, ok bool) {
+	key = strings.TrimSpace(key)
+	const prefix = "source:"
+	if !strings.HasPrefix(key, prefix) {
+		return "", 0, false
+	}
+	rest := key[len(prefix):]
+	idx := strings.LastIndex(rest, ":")
+	if idx <= 0 || idx >= len(rest)-1 {
+		return "", 0, false
+	}
+	parsed, err := strconv.ParseInt(rest[idx+1:], 10, 64)
+	if err != nil || parsed <= 0 {
+		return "", 0, false
+	}
+	sourceID = strings.TrimSpace(rest[:idx])
+	if sourceID == "" {
+		return "", 0, false
+	}
+	return sourceID, parsed, true
 }
 
 func GetCategoryStableKeyByID(id int64) string {

@@ -1,33 +1,15 @@
 package service
 
 import (
-	"strconv"
 	"strings"
 
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/repository/support"
 )
 
 func parseProvideSourceCategoryKey(key string) (string, int64, bool) {
-	key = strings.TrimSpace(key)
-	const prefix = "source:"
-	if !strings.HasPrefix(key, prefix) {
-		return "", 0, false
-	}
-	rest := key[len(prefix):]
-	idx := strings.LastIndex(rest, ":")
-	if idx <= 0 || idx >= len(rest)-1 {
-		return "", 0, false
-	}
-	typeID, err := strconv.ParseInt(rest[idx+1:], 10, 64)
-	if err != nil || typeID <= 0 {
-		return "", 0, false
-	}
-	sourceID := strings.TrimSpace(rest[:idx])
-	if sourceID == "" {
-		return "", 0, false
-	}
-	return sourceID, typeID, true
+	return support.ParseSourceCategoryKey(key)
 }
 
 func provideTypeFromKey(sourceID, key string) (int64, string, bool) {

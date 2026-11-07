@@ -265,3 +265,15 @@ func TestIsCategoryVisible_Cascade(t *testing.T) {
 	}
 }
 
+func TestParseSourceCategoryKey(t *testing.T) {
+	sid, typeID, ok := ParseSourceCategoryKey("source:src1:18")
+	if !ok || sid != "src1" || typeID != 18 {
+		t.Fatalf("got %s %d %v", sid, typeID, ok)
+	}
+	if _, _, ok := ParseSourceCategoryKey("source:src1:"); ok {
+		t.Fatal("trailing colon should fail")
+	}
+	if _, _, ok := ParseSourceCategoryKey("movie"); ok {
+		t.Fatal("plain name should fail")
+	}
+}

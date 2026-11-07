@@ -11,6 +11,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 	"server/internal/utils"
@@ -69,7 +70,21 @@ type scoredMetaHit struct {
 	updateStamp int64
 }
 
-func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, cid int64) []scoredMetaHit {
+func sourceCategoryVisible(sourceID, categoryKey, rootKey string, cid, pid int64) bool {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return support.IsCategoryVisible(cid, pid)
+	}
+	if sid, typeID, ok := support.ParseSourceCategoryKey(categoryKey); ok && sid == sourceID {
+		return repository.PublicSourceTypeVisible(sourceID, typeID)
+	}
+	if sid, typeID, ok := support.ParseSourceCategoryKey(rootKey); ok && sid == sourceID {
+		return repository.PublicSourceTypeVisible(sourceID, typeID)
+	}
+	return support.IsCategoryVisible(cid, pid)
+}
+
+func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField, sourceID string, pid, cid int64) []scoredMetaHit {
 	if idx == nil || len(idx.Items) == 0 {
 		return nil
 	}
@@ -77,7 +92,7 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, c
 	positions, narrowed := idx.SearchPosts.lookup(q)
 	matches := make([]scoredMetaHit, 0, 64)
 	visit := func(meta *FilmSearchMeta) {
-		if !support.IsCategoryVisible(meta.Cid, meta.Pid) {
+		if !sourceCategoryVisible(sourceID, meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
 			return
 		}
 		if pid > 0 && meta.Pid != pid {
