@@ -19,7 +19,7 @@ func TestEnsureMasterCategoriesReady_RequiresSavedCategories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CategoryMapping{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CategoryMapping{}, &model.Category{}, &model.SourceCategory{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	db.Mdb = gdb

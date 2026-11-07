@@ -289,8 +289,29 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 	}
 }
 
+func bindOtherCategory(sourceId string, current resolvedSearchCategory, typeID, categoryID int64) resolvedSearchCategory {
+	key := support.BuildSourceCategoryKey(sourceId, typeID)
+	name := model.TagOthersName
+	if info, ok := support.GetSourceCategoryInfo(sourceId, typeID); ok {
+		if raw := strings.TrimSpace(info.RawName); raw != "" {
+			name = raw
+		}
+	}
+	current.Pid = categoryID
+	current.Cid = categoryID
+	current.CName = name
+	current.PKey = key
+	current.CKey = key
+	return current
+}
+
 func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) (model.FilmIndex, error) {
 	category := resolveSearchCategory(sourceId, detail)
+	if category.Pid <= 0 && strings.TrimSpace(sourceId) != "manual" {
+		if typeID, categoryID, ok := support.LookupOtherSourceCategory(sourceId); ok {
+			category = bindOtherCategory(sourceId, category, typeID, categoryID)
+		}
+	}
 	if category.Pid <= 0 {
 		return model.FilmIndex{}, fmt.Errorf("%w: %s", ErrCategoryNotMapped, strings.TrimSpace(detail.Name))
 	}

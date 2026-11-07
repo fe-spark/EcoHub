@@ -130,6 +130,7 @@ func PreviewSourceCategoryChanges(sourceId string, tree *model.CategoryTree) ([]
 	if len(oldList) > 0 && len(plans) == 0 {
 		return nil, errors.New("采集站返回的分类为空，未更新")
 	}
+	plans = appendOtherCategoryPlan(plans, oldList)
 
 	// 该站还没有分类，直接保存无差异
 	if len(oldList) == 0 {

@@ -85,6 +85,7 @@ func applyCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preser
 		if len(oldSourceCategories) > 0 && len(plans) == 0 {
 			return errors.New("采集站返回的分类为空，未更新")
 		}
+		plans = appendOtherCategoryPlan(plans, oldSourceCategories)
 
 		if clearCollected && len(oldSourceCategories) > 0 {
 			changes := DiffSourceCategoryTree(oldSourceCategories, plans)
