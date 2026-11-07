@@ -72,4 +72,16 @@ func TestSourceTypeTree_UsesMappedSort(t *testing.T) {
 	if len(tree.Children[0].Children) != 3 || got[0] != "福利视频#5" || got[1] != "海外抖音#37" || got[2] != "网红主播#18" {
 		t.Fatalf("男人帮 children = %v, want 福利视频#5 海外抖音#37 网红主播#18", got)
 	}
+
+	admin := GetSourceBoundCategoryTree("src1")
+	if len(admin.Children) != 2 || admin.Children[0].Name != "男人帮" || admin.Children[0].Id != 547 || admin.Children[0].Sort != 1 {
+		t.Fatalf("admin first = %+v, want 男人帮#547 sort 1", admin.Children[0])
+	}
+	if admin.Children[1].Name != "电影" || admin.Children[1].Id != 9 || admin.Children[1].Sort != 3 {
+		t.Fatalf("admin second = %+v, want 电影#9 sort 3", admin.Children[1])
+	}
+	adminKids := childNames(admin.Children[0])
+	if len(admin.Children[0].Children) != 2 || adminKids[0] != "海外抖音#550" || adminKids[1] != "网红主播#549" {
+		t.Fatalf("admin 男人帮 children = %v, want 海外抖音#550 网红主播#549", adminKids)
+	}
 }

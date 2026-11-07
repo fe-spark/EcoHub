@@ -91,6 +91,13 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
   const tableBodyRectRef = useRef<DOMRect | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const sortableItems = useMemo(() => flattenVisibleNodes(classTree, expandedKeys).map(String), [classTree, expandedKeys]);
+  const rootShowById = useMemo(() => {
+    const out: Record<number, boolean> = {};
+    for (const node of classTree) {
+      out[node.id] = node.show;
+    }
+    return out;
+  }, [classTree]);
 
   const collisionDetection = useCallback<CollisionDetection>((args) => {
     const pointer = args.pointerCoordinates;
@@ -235,7 +242,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
         <Switch
           size="small"
           checked={value}
-          disabled={!canWrite || savingTree}
+          disabled={!canWrite || savingTree || (record.pid > 0 && rootShowById[record.pid] === false)}
           onChange={(checked) => onShowChange(record.id, checked)}
         />
       ),
