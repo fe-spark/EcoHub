@@ -45,7 +45,41 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	if bc.Notice.Title != "" || bc.Notice.Content != "" {
 		curr.Notice = bc.Notice
 	}
-	return repository.SaveSiteBasic(curr)
+	if bc.MediaProxy.Enabled || strings.TrimSpace(bc.MediaProxy.Template) != "" {
+		curr.MediaProxy = bc.MediaProxy
+	}
+	if err := repository.SaveSiteBasic(curr); err != nil {
+		return err
+	}
+	UpdateMediaProxyRuntime(curr.MediaProxy, curr.SiteURL)
+	return nil
+}
+
+// GetSiteMediaProxyConfig 获取媒体图片边缘反向代理配置
+func (s *ManageService) GetSiteMediaProxyConfig() (model.MediaProxyConfig, error) {
+	b, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.MediaProxyConfig{}, err
+	}
+	return b.MediaProxy, nil
+}
+
+// UpdateSiteMediaProxyConfig 更新媒体图片边缘反向代理配置
+func (s *ManageService) UpdateSiteMediaProxyConfig(cfg model.MediaProxyConfig) error {
+	if err := ValidateMediaProxyConfig(cfg); err != nil {
+		return err
+	}
+	curr, err := repository.GetSiteBasic()
+	if err != nil {
+		return err
+	}
+	curr.MediaProxy = cfg
+	if err := repository.SaveSiteBasic(curr); err != nil {
+		return err
+	}
+	UpdateMediaProxyRuntime(curr.MediaProxy, curr.SiteURL)
+	repository.ClearIndexPageCache()
+	return nil
 }
 
 // GetSiteAccessConfig 获取网站访问控制配置

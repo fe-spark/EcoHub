@@ -23,9 +23,13 @@ import (
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
+	"server/internal/service"
 )
 
 func TestNormalizeMediaURL(t *testing.T) {
+	service.UpdateMediaProxyMemoryCache(model.MediaProxyConfig{Enabled: false})
+	defer service.InvalidateMediaProxyMemoryCache()
+
 	tests := []struct {
 		name    string
 		raw     string
@@ -90,6 +94,14 @@ func TestNormalizeMediaURL(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("media proxy enabled wraps external urls", func(t *testing.T) {
+		service.UpdateMediaProxyMemoryCache(model.MediaProxyConfig{Enabled: true})
+		got := normalizeMediaURL("https://img.test.com/pic.jpg", "https://example.com")
+		if !strings.HasPrefix(got, "https://i") || !strings.Contains(got, ".wp.com/img.test.com/pic.jpg") {
+			t.Errorf("expected proxied url, got %q", got)
+		}
+	})
 }
 
 func TestHandleProvideConfig_RedisNilSafety(t *testing.T) {

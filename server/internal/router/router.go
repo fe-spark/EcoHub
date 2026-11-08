@@ -78,6 +78,9 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/access`, handler.ManageHd.SiteAccessConfig)
 			sysConfig.POST(`/access`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteAccess)
 
+			sysConfig.GET(`/media-proxy`, handler.ManageHd.SiteMediaProxyConfig)
+			sysConfig.POST(`/media-proxy`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteMediaProxy)
+
 			sysConfig.GET(`/danmaku`, handler.ManageHd.SiteDanmakuConfig)
 			sysConfig.POST(`/danmaku`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteDanmaku)
 

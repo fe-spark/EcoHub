@@ -106,7 +106,7 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 
 	logSlowIndexStep("FilmPlayInfo.total", totalStartedAt, "id", id)
 	dto.Success(gin.H{
-		"detail":          detail,
+		"detail":          service.WrapMovieDetailVo(detail),
 		"current":         currentPlay,
 		"currentPlayFrom": playFrom,
 		"currentEpisode":  episode,
@@ -144,5 +144,5 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 		return
 	}
 	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
-	dto.Success(relateMovie, "相关推荐获取成功", c)
+	dto.Success(service.WrapMovieBasicInfos(relateMovie), "相关推荐获取成功", c)
 }

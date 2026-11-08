@@ -15,6 +15,7 @@ import AccessConfigCard from "./access-config-card";
 import TipConfigCard from "./tip-config-card";
 import NoticeConfigCard from "./notice-config-card";
 import DanmakuConfigCard from "./danmaku-config-card";
+import MediaProxyConfigCard from "./media-proxy-config-card";
 import styles from "./index.module.less";
 
 type WebsiteTab = "basic" | "tip" | "notice";
@@ -73,6 +74,7 @@ function SiteConfigBody({ embedded = false }: SiteConfigPageViewProps) {
           <div className={styles.tabPaneScrollable}>
             <BasicConfigCard canWrite={canOperate} />
             <AccessConfigCard canWrite={canOperate} />
+            <MediaProxyConfigCard canWrite={canOperate} />
             <DanmakuConfigCard canWrite={canOperate} />
           </div>
         );

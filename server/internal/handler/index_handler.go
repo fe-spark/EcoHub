@@ -78,7 +78,7 @@ func (h *IndexHandler) Index(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.Success(data, "首页数据获取成功", c)
+	dto.Success(service.WrapHomeData(data), "首页数据获取成功", c)
 }
 
 // DailyUpdates 近 24h 更新：
@@ -100,7 +100,7 @@ func (h *IndexHandler) DailyUpdates(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.Success(result, "获取每日更新成功", c)
+	dto.Success(service.WrapDailyUpdateResult(result), "获取每日更新成功", c)
 }
 
 func pageSizeSpecified(c *gin.Context) bool {
@@ -239,7 +239,7 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	if result.Sources == nil {
 		result.Sources = []model.SearchSourceTab{}
 	}
-	dto.Success(gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}, "影片搜索成功", c)
+	dto.Success(gin.H{"list": service.WrapMovieBasicInfos(result.List), "page": page, "sort": sortField, "sources": result.Sources}, "影片搜索成功", c)
 }
 
 // HotKeywords 获取当前全站热门搜索推荐词
@@ -324,7 +324,7 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	if hasSearchOptions(searchTags) {
 		response["search"] = searchTags
 	}
-	dto.Success(response, "分类影片数据获取成功", c)
+	dto.Success(service.WrapFilmTagSearchResult(response), "分类影片数据获取成功", c)
 }
 
 // FilmClassify 影片分类首页数据展示 (GET /api/categories/overview)
@@ -364,6 +364,6 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 	}
 	dto.Success(gin.H{
 		"title":   title,
-		"content": content,
+		"content": service.WrapFilmClassifyContent(content),
 	}, "分类影片信息获取成功", c)
 }

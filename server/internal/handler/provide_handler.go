@@ -50,13 +50,13 @@ func normalizeMediaURL(raw, baseURL string) string {
 		return raw
 	}
 	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
-		return raw
+		return service.WrapMediaURL(raw)
 	}
 	if strings.HasPrefix(raw, "//") {
 		if strings.HasPrefix(baseURL, "https://") {
-			return "https:" + raw
+			return service.WrapMediaURL("https:" + raw)
 		}
-		return "http:" + raw
+		return service.WrapMediaURL("http:" + raw)
 	}
 	if strings.HasPrefix(raw, "/") {
 		return baseURL + raw
