@@ -327,10 +327,6 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		}
 
 		if filmIndex != nil {
-			if filmIndex.FirstSourceId == source.Id && !support.IsCategoryVisible(filmIndex.Cid, filmIndex.Pid) {
-				mid = 0
-				return ErrCategoryDisabled
-			}
 			if filmIndex.FirstSourceId != source.Id {
 				filmIndex = nil
 				mid = 0
@@ -443,22 +439,21 @@ func SaveCollectedPeerDetails(
 
 	var affected []int64
 	var notify []int64
-	var unmapped, disabled int
+	var unmapped int
 	err := runPeerCollectTx(ctx, func(tx *gorm.DB) error {
 		var writeErr error
-		affected, notify, unmapped, disabled, writeErr = writePeerPage(tx, source, details, sources)
+		affected, notify, unmapped, writeErr = writePeerPage(tx, source, details, sources)
 		return writeErr
 	})
 	if err == nil {
-		if unmapped > 0 || disabled > 0 {
-			log.Printf("[Spider][PeerCollect] 分类跳过 source=%s page=%d unmapped=%d disabled=%d",
-				source.Id, page, unmapped, disabled)
+		if unmapped > 0 {
+			log.Printf("[Spider][PeerCollect] 分类跳过 source=%s page=%d unmapped=%d",
+				source.Id, page, unmapped)
 		}
 		return scheduler.Mids{
 			Affected: uniqueMIDs(affected),
 			Notify:   uniqueMIDs(notify),
 			Unmapped: unmapped,
-			Disabled: disabled,
 		}, nil
 	}
 	if isDeterministicRowError(err) {

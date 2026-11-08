@@ -211,8 +211,8 @@ func TestSaveCollectedPeerDetails_SkipsOversizedFilm(t *testing.T) {
 	t.Cleanup(func() { db.Mdb = prev })
 
 	origWrite := writePeerPage
-	writePeerPage = func(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, int, int, error) {
-		return nil, nil, 0, 0, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
+	writePeerPage = func(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, int, error) {
+		return nil, nil, 0, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
 	}
 	origSave := savePeerFilm
 	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, bool, error) {
@@ -254,8 +254,8 @@ func TestSaveCollectedPeerDetails_TransientFilmErrorRetriesPage(t *testing.T) {
 	t.Cleanup(func() { db.Mdb = prev })
 
 	origWrite := writePeerPage
-	writePeerPage = func(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, int, int, error) {
-		return nil, nil, 0, 0, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
+	writePeerPage = func(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, int, error) {
+		return nil, nil, 0, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
 	}
 	origSave := savePeerFilm
 	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, bool, error) {

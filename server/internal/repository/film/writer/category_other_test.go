@@ -2,7 +2,6 @@ package writer
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
@@ -79,7 +78,7 @@ func TestConvertFilmIndex_UnmappedUsesCMS其它(t *testing.T) {
 	}
 }
 
-func TestConvertFilmIndex_HiddenOtherStillSkipped(t *testing.T) {
+func TestConvertFilmIndex_HiddenOtherStillStores(t *testing.T) {
 	gdb := openWriterCategoryDB(t)
 	tree := &model.CategoryTree{
 		Children: []*model.CategoryTree{{Id: 1, Name: "电影", Show: true}},
@@ -93,15 +92,54 @@ func TestConvertFilmIndex_HiddenOtherStillSkipped(t *testing.T) {
 		t.Fatalf("hide 其他: %v", err)
 	}
 	support.ReloadMappingRules()
-	_, err := ConvertFilmIndex("src_hide", model.MovieDetail{
+	index, err := ConvertFilmIndex("src_hide", model.MovieDetail{
 		Id:              10,
 		Cid:             99,
 		RawCid:          99,
 		Name:            "未映射片",
 		MovieDescriptor: model.MovieDescriptor{CName: "冷门类", UpdateTime: "2026-11-07 12:00:00"},
 	}, "v1", "r1")
-	if err == nil || !errors.Is(err, ErrCategoryDisabled) {
-		t.Fatalf("hidden 其他 should skip as disabled, err=%v", err)
+	if err != nil {
+		t.Fatalf("hidden 其他 should still store, err=%v", err)
+	}
+	wantKey := support.BuildSourceCategoryKey("src_hide", model.OtherSourceTypeID)
+	if index.Pid <= 0 || index.Cid <= 0 {
+		t.Fatalf("pid/cid not bound: pid=%d cid=%d", index.Pid, index.Cid)
+	}
+	if index.RootCategoryKey != wantKey || index.CategoryKey != wantKey {
+		t.Fatalf("keys=%s / %s", index.RootCategoryKey, index.CategoryKey)
+	}
+}
+
+func TestConvertFilmIndex_HiddenMappedStillStores(t *testing.T) {
+	gdb := openWriterCategoryDB(t)
+	tree := &model.CategoryTree{
+		Children: []*model.CategoryTree{{Id: 1, Name: "电影", Show: true}},
+	}
+	if err := repository.SaveCategoryTree("src_hide_mapped", tree); err != nil {
+		t.Fatalf("SaveCategoryTree: %v", err)
+	}
+	if err := gdb.Model(&model.Category{}).
+		Where("stable_key = ?", support.BuildSourceCategoryKey("src_hide_mapped", 1)).
+		Update("show", false).Error; err != nil {
+		t.Fatalf("hide 电影: %v", err)
+	}
+	support.ReloadMappingRules()
+	index, err := ConvertFilmIndex("src_hide_mapped", model.MovieDetail{
+		Id:              1,
+		Cid:             1,
+		Pid:             1,
+		RawCid:          1,
+		RawPid:          1,
+		Name:            "动作片",
+		MovieDescriptor: model.MovieDescriptor{CName: "电影", UpdateTime: "2026-11-07 12:00:00"},
+	}, "v1", "r1")
+	if err != nil {
+		t.Fatalf("hidden mapped category should still store, err=%v", err)
+	}
+	wantKey := support.BuildSourceCategoryKey("src_hide_mapped", 1)
+	if index.CName != "电影" || index.CategoryKey != wantKey {
+		t.Fatalf("c_name=%s key=%s", index.CName, index.CategoryKey)
 	}
 }
 
@@ -132,6 +170,35 @@ func TestSaveCollectedPeerDetails_UnmappedGoesToOther(t *testing.T) {
 	wantKey := support.BuildSourceCategoryKey(source.Id, model.OtherSourceTypeID)
 	if film.CName != model.TagOthersName || film.CategoryKey != wantKey {
 		t.Fatalf("c_name=%s key=%s", film.CName, film.CategoryKey)
+	}
+}
+
+func TestSaveCollectedPeerDetails_HiddenCategoryStores(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 1).Update("show", false).Error; err != nil {
+		t.Fatalf("hide category: %v", err)
+	}
+	support.RefreshCategoryCache()
+
+	source := &model.FilmSource{Id: "src-hidden", Name: "爱旦", State: true}
+	detail := testPeerDetail(42, "停用类片子", "第1集")
+	got, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{detail})
+	if err != nil {
+		t.Fatalf("SaveCollectedPeerDetails: %v", err)
+	}
+	if len(got.Affected) != 1 || got.Unmapped != 0 {
+		t.Fatalf("affected=%v unmapped=%d", got.Affected, got.Unmapped)
+	}
+	var film model.FilmIndex
+	if err := gdb.Where("name = ?", "停用类片子").First(&film).Error; err != nil {
+		t.Fatalf("film missing: %v", err)
+	}
+	if film.Pid <= 0 {
+		t.Fatalf("pid not bound: %d", film.Pid)
 	}
 }
 

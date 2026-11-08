@@ -10,16 +10,12 @@ import (
 func savePeerFilmsIsolated(source *model.FilmSource, page int, details []model.MovieDetail) (scheduler.Mids, error) {
 	affected := make([]int64, 0, len(details))
 	notify := make([]int64, 0, len(details))
-	unmapped, disabled := 0, 0
+	unmapped := 0
 	for _, detail := range details {
 		mid, isNew, playChanged, stored, err := savePeerFilm(source, detail)
 		if err != nil {
-			switch categorySkipKind(err) {
-			case skipKindUnmapped:
+			if categorySkipKind(err) == skipKindUnmapped {
 				unmapped++
-				continue
-			case skipKindDisabled:
-				disabled++
 				continue
 			}
 			if isDeterministicRowError(err) {
@@ -39,14 +35,13 @@ func savePeerFilmsIsolated(source *model.FilmSource, page int, details []model.M
 			notify = append(notify, mid)
 		}
 	}
-	if unmapped > 0 || disabled > 0 {
-		log.Printf("[Spider][PeerCollect] 分类跳过 source=%s page=%d unmapped=%d disabled=%d",
-			source.Id, page, unmapped, disabled)
+	if unmapped > 0 {
+		log.Printf("[Spider][PeerCollect] 分类跳过 source=%s page=%d unmapped=%d",
+			source.Id, page, unmapped)
 	}
 	return scheduler.Mids{
 		Affected: uniqueMIDs(affected),
 		Notify:   uniqueMIDs(notify),
 		Unmapped: unmapped,
-		Disabled: disabled,
 	}, nil
 }

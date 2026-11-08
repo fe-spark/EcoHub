@@ -211,12 +211,11 @@ func (b *collectBatchContext) AddNotifyMIDs(sourceID string, mids []int64) {
 
 type categorySkipCount struct {
 	unmapped int
-	disabled int
 }
 
-// AddCategorySkip 实现 fetcher.Batch：累计分类未入库的部数。
-func (b *collectBatchContext) AddCategorySkip(sourceID string, unmapped, disabled int) {
-	if b == nil || (unmapped <= 0 && disabled <= 0) {
+// AddCategorySkip 实现 fetcher.Batch：累计分类未映射而没有入库的部数。
+func (b *collectBatchContext) AddCategorySkip(sourceID string, unmapped int) {
+	if b == nil || unmapped <= 0 {
 		return
 	}
 	sourceID = strings.TrimSpace(sourceID)
@@ -226,19 +225,18 @@ func (b *collectBatchContext) AddCategorySkip(sourceID string, unmapped, disable
 	b.mu.Lock()
 	got := b.sourceSkips[sourceID]
 	got.unmapped += unmapped
-	got.disabled += disabled
 	b.sourceSkips[sourceID] = got
 	b.mu.Unlock()
 }
 
-func (b *collectBatchContext) CategorySkip(sourceID string) (unmapped, disabled int) {
+func (b *collectBatchContext) CategorySkip(sourceID string) int {
 	if b == nil {
-		return 0, 0
+		return 0
 	}
 	b.mu.Lock()
 	got := b.sourceSkips[sourceID]
 	b.mu.Unlock()
-	return got.unmapped, got.disabled
+	return got.unmapped
 }
 
 // RecordSourceError 实现 fetcher.Batch：记录单站采集错误信息。
