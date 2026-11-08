@@ -55,7 +55,6 @@ type Completion struct {
 	NotifyMIDs   []int64 // 更新列表
 	AffectedMIDs []int64 // 快照/缓存收尾
 	Unmapped     int
-	Disabled     int
 	Err          error
 	Stage        string
 }
@@ -74,7 +73,6 @@ type Mids struct {
 	Notify   []int64
 	Affected []int64
 	Unmapped int // 分类未映射，未入库
-	Disabled int // 分类已停用，未入库
 }
 
 // writeSnapshot 写库缓冲水位快照，供日志与后续进度 API 使用。
@@ -413,7 +411,6 @@ func (l *writeLane) run(workerID int) {
 					NotifyMIDs:   mids.Notify,
 					AffectedMIDs: mids.Affected,
 					Unmapped:     mids.Unmapped,
-					Disabled:     mids.Disabled,
 					Err:          err,
 					Stage:        "save",
 				})

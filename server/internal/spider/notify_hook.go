@@ -182,15 +182,11 @@ func emitBatchNotify(b *collectBatchContext) {
 	})
 }
 
-func formatCategorySkip(unmapped, disabled int) string {
-	parts := make([]string, 0, 2)
+func formatCategorySkip(unmapped int) string {
 	if unmapped > 0 {
-		parts = append(parts, fmt.Sprintf("分类未映射，跳过 %d 部", unmapped))
+		return fmt.Sprintf("分类未映射，跳过 %d 部", unmapped)
 	}
-	if disabled > 0 {
-		parts = append(parts, fmt.Sprintf("分类已停用，跳过 %d 部", disabled))
-	}
-	return strings.Join(parts, "；")
+	return ""
 }
 
 func settleSourceStatus(status, errMsg string, successCnt int) (string, string) {

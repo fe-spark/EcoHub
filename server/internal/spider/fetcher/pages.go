@@ -34,8 +34,8 @@ type Batch interface {
 	RecordSourceError(sourceID, reason string)
 	// TouchRecord 把已写入的影片和页数落到运行中的采集记录。
 	TouchRecord()
-	// AddCategorySkip 累计分类未映射或已停用而没有入库的部数。页请求仍算成功。
-	AddCategorySkip(sourceID string, unmapped, disabled int)
+	// AddCategorySkip 累计分类未映射而没有入库的部数。页请求仍算成功。
+	AddCategorySkip(sourceID string, unmapped int)
 }
 
 const (
@@ -314,8 +314,8 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 			recordPageFailure(completion.Page, completion.Stage, completion.Err)
 			continue
 		}
-		if batch != nil && (completion.Unmapped > 0 || completion.Disabled > 0) {
-			batch.AddCategorySkip(s.Id, completion.Unmapped, completion.Disabled)
+		if batch != nil && completion.Unmapped > 0 {
+			batch.AddCategorySkip(s.Id, completion.Unmapped)
 		}
 		recordPageSuccess(completion.Page, completion.NotifyMIDs, completion.AffectedMIDs)
 	}

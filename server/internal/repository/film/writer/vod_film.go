@@ -50,7 +50,7 @@ func detachSharedSourceVodsTx(tx *gorm.DB, sourceID string, items []peerPageItem
 
 func markUnmappedCreates(items []peerPageItem) {
 	for i := range items {
-		if items[i].disabled || items[i].film != nil {
+		if items[i].film != nil {
 			continue
 		}
 		items[i].create = true

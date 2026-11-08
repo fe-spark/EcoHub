@@ -13,24 +13,14 @@ import (
 	"server/internal/utils"
 )
 
-var (
-	ErrCategoryNotMapped = errors.New("影片未映射到分类")
-	ErrCategoryDisabled  = errors.New("影片分类已停用")
-)
+var ErrCategoryNotMapped = errors.New("影片未映射到分类")
 
 const (
 	skipKindNone     = 0
 	skipKindUnmapped = 1
-	skipKindDisabled = 2
 )
 
 func categorySkipKind(err error) int {
-	if err == nil {
-		return skipKindNone
-	}
-	if errors.Is(err, ErrCategoryDisabled) || strings.Contains(err.Error(), "影片分类已停用") {
-		return skipKindDisabled
-	}
 	if IsCategoryNotMapped(err) {
 		return skipKindUnmapped
 	}
@@ -41,8 +31,7 @@ func IsCategoryNotMapped(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, ErrCategoryNotMapped) || errors.Is(err, ErrCategoryDisabled) ||
-		strings.Contains(err.Error(), "影片未映射到分类") || strings.Contains(err.Error(), "影片分类已停用")
+	return errors.Is(err, ErrCategoryNotMapped) || strings.Contains(err.Error(), "影片未映射到分类")
 }
 
 type resolvedSearchCategory struct {
@@ -314,9 +303,6 @@ func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion
 	}
 	if category.Pid <= 0 {
 		return model.FilmIndex{}, fmt.Errorf("%w: %s", ErrCategoryNotMapped, strings.TrimSpace(detail.Name))
-	}
-	if !support.IsCategoryVisible(category.Cid, category.Pid) {
-		return model.FilmIndex{}, fmt.Errorf("%w: %s", ErrCategoryDisabled, strings.TrimSpace(detail.Name))
 	}
 	meta, err := normalizeSearchMetadata(sourceId, detail, category)
 	if err != nil {
