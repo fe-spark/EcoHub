@@ -151,6 +151,35 @@ func (h *ManageHandler) UpdateSiteAccess(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
+// SiteMediaProxyConfig 网站媒体图片边缘反代配置
+func (h *ManageHandler) SiteMediaProxyConfig(c *gin.Context) {
+	cfg, err := service.ManageSvc.GetSiteMediaProxyConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(cfg, "媒体反代配置获取成功", c)
+}
+
+// UpdateSiteMediaProxy 更新网站媒体图片边缘反代配置
+func (h *ManageHandler) UpdateSiteMediaProxy(c *gin.Context) {
+	var cfg model.MediaProxyConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
+		return
+	}
+	cfg.Template = strings.TrimSpace(cfg.Template)
+	if err := service.ValidateMediaProxyConfig(cfg); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	if err := service.ManageSvc.UpdateSiteMediaProxyConfig(cfg); err != nil {
+		dto.Failed(fmt.Sprint("媒体反代配置更新失败: ", err), c)
+		return
+	}
+	dto.Success(cfg, "媒体反代配置更新成功", c)
+}
+
 // SiteDanmakuConfig 网站弹幕系统配置
 func (h *ManageHandler) SiteDanmakuConfig(c *gin.Context) {
 	cfg, err := service.ManageSvc.GetSiteDanmakuConfig()

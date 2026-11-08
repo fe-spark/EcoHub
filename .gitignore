@@ -20,6 +20,7 @@ web/.env.local
 .codegraph/
 .claude/
 .ai/
+.grok/
 
 
 #忽略client相关依赖缓存

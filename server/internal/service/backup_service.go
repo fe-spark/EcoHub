@@ -130,6 +130,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.SaveSiteBasic(*backup.Site); err != nil {
 			return fmt.Errorf("导入网站配置失败: %w", err)
 		}
+		InvalidateMediaProxyMemoryCache()
 	}
 
 	if req.Modules.FilmSources {

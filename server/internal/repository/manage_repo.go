@@ -87,13 +87,18 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	if err != nil {
 		return err
 	}
+	mediaProxyJSON, err := model.EncodeMediaProxyJSON(c.MediaProxy)
+	if err != nil {
+		return err
+	}
 	rec := model.SiteConfigRecord{
 		SiteName: c.SiteName, SiteURL: c.SiteURL, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
 		PrivateAccess: c.PrivateAccess, ProvideKey: strings.TrimSpace(c.ProvideKey),
-		DanmakuJSON: danmakuJSON,
-		TipJSON:     tipJSON,
-		NoticeJSON:  noticeJSON,
+		DanmakuJSON:    danmakuJSON,
+		TipJSON:        tipJSON,
+		NoticeJSON:     noticeJSON,
+		MediaProxyJSON: mediaProxyJSON,
 	}
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
@@ -153,9 +158,10 @@ func GetSiteBasic() (model.BasicConfig, error) {
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
 		if recordNotFound(err) {
 			return model.BasicConfig{
-				Danmaku: model.DefaultDanmakuConfig(),
-				Tip:     model.DefaultTipConfig(),
-				Notice:  model.DefaultNoticeConfig(),
+				Danmaku:    model.DefaultDanmakuConfig(),
+				Tip:        model.DefaultTipConfig(),
+				Notice:     model.DefaultNoticeConfig(),
+				MediaProxy: model.DefaultMediaProxyConfig(),
 			}, nil
 		}
 		return model.BasicConfig{}, err
@@ -172,6 +178,10 @@ func GetSiteBasic() (model.BasicConfig, error) {
 	if err != nil {
 		return model.BasicConfig{}, err
 	}
+	mediaProxy, err := model.DecodeMediaProxyJSON(rec.MediaProxyJSON)
+	if err != nil {
+		return model.BasicConfig{}, err
+	}
 	c := model.BasicConfig{
 		SiteName: rec.SiteName, SiteURL: NormalizeSiteURL(rec.SiteURL), Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
@@ -180,6 +190,7 @@ func GetSiteBasic() (model.BasicConfig, error) {
 		Danmaku:       danmaku,
 		Tip:           tip,
 		Notice:        notice,
+		MediaProxy:    mediaProxy,
 	}
 	raw, err := json.Marshal(c)
 	if err != nil {
