@@ -73,7 +73,7 @@ func tagMetaMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta) 
 		if item == nil {
 			return false
 		}
-		if !sourceCategoryVisible(sourceID, item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
+		if !SourceCategoryVisible(sourceID, item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
 			return false
 		}
 		if sourceID != "" {

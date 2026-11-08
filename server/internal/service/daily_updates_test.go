@@ -8,8 +8,10 @@ import (
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 func TestNormalizeDailyUpdateReqDefaults(t *testing.T) {
@@ -192,5 +194,95 @@ func TestDailyUpdates_PrimarySourceCategoryIsolation(t *testing.T) {
 	}
 	if resB.Page.Total != 1 || len(resB.Categories) != 2 || resB.Categories[1].Pid != 20 {
 		t.Fatalf("src_b unexpected result: total=%d cats=%+v", resB.Page.Total, resB.Categories)
+	}
+}
+
+func TestDailyUpdates_HiddenSourceCategorySkipped(t *testing.T) {
+	gdb, _ := setupTestDBAndRedis(t)
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() {
+		support.StoreMappingSnapshotForTest(prev)
+	})
+
+	now := time.Now()
+	_ = filmsnapshot.SetActiveSnapshotVersion("live")
+
+	if err := gdb.Create(&model.FilmSource{Id: "src_daily_hide", Name: "爱旦", State: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if err := gdb.Create([]model.Category{
+		{Id: 1, Pid: 0, Name: "电影", Show: true, StableKey: "src_daily_hide:1"},
+		{Id: 17, Pid: 0, Name: "公告", Show: true, StableKey: "src_daily_hide:17"},
+	}).Error; err != nil {
+		t.Fatalf("create categories: %v", err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 17).Update("show", false).Error; err != nil {
+		t.Fatalf("hide 公告: %v", err)
+	}
+	if err := gdb.Create([]model.CategoryMapping{
+		{SourceId: "src_daily_hide", SourceTypeId: 1, CategoryId: 1},
+		{SourceId: "src_daily_hide", SourceTypeId: 17, CategoryId: 17},
+	}).Error; err != nil {
+		t.Fatalf("create mappings: %v", err)
+	}
+	if err := gdb.Create([]model.SourceCategory{
+		{SourceId: "src_daily_hide", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src_daily_hide", SourceTypeId: 17, ParentSourceTypeId: 0, RawName: "公告", Sort: 2, Depth: 0},
+	}).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+	repository.ReloadMappingRules()
+
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3001, FirstSourceId: "src_daily_hide"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_daily_hide:1", RootCategoryKey: "source:src_daily_hide:1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "可见电影", UpdateStamp: now.Unix()},
+	}).Error; err != nil {
+		t.Fatalf("create visible film: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{Mid: 3001, SourceId: "src_daily_hide", LineKind: "play", GroupIndex: 0}).Error; err != nil {
+		t.Fatalf("create visible playlist: %v", err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3002, FirstSourceId: "src_daily_hide"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_daily_hide:17", RootCategoryKey: "source:src_daily_hide:17"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "隐藏公告片", UpdateStamp: now.Unix()},
+	}).Error; err != nil {
+		t.Fatalf("create hidden film: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{Mid: 3002, SourceId: "src_daily_hide", LineKind: "play", GroupIndex: 0}).Error; err != nil {
+		t.Fatalf("create hidden playlist: %v", err)
+	}
+
+	all, err := IndexSvc.DailyUpdates(DailyUpdateListReq{Pid: 0, SourceId: "src_daily_hide"})
+	if err != nil {
+		t.Fatalf("pid=0: %v", err)
+	}
+	if all.Page.Total != 1 {
+		t.Fatalf("全部 total=%d, want 1 (hidden skipped)", all.Page.Total)
+	}
+	if len(all.Categories) != 2 || all.Categories[0].Count != 1 || all.Categories[1].Pid != 1 {
+		t.Fatalf("categories=%+v, want 全部=1 and 电影", all.Categories)
+	}
+	for _, cat := range all.Categories {
+		if cat.Pid == film.DailyPidOther {
+			t.Fatalf("hidden film leaked into 其他: %+v", all.Categories)
+		}
+	}
+
+	other, err := IndexSvc.DailyUpdates(DailyUpdateListReq{Pid: film.DailyPidOther, SourceId: "src_daily_hide"})
+	if err != nil {
+		t.Fatalf("pid=-1: %v", err)
+	}
+	if other.Page.Total != 0 {
+		t.Fatalf("其他 total=%d, want 0", other.Page.Total)
+	}
+
+	hiddenPid, err := IndexSvc.DailyUpdates(DailyUpdateListReq{Pid: 17, SourceId: "src_daily_hide"})
+	if err != nil {
+		t.Fatalf("pid=17: %v", err)
+	}
+	if hiddenPid.Page.Total != 0 {
+		t.Fatalf("停用分类 pid=17 total=%d, want 0", hiddenPid.Page.Total)
 	}
 }
