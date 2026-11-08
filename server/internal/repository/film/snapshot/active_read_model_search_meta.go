@@ -70,7 +70,8 @@ type scoredMetaHit struct {
 	updateStamp int64
 }
 
-func sourceCategoryVisible(sourceID, categoryKey, rootKey string, cid, pid int64) bool {
+// SourceCategoryVisible 当前站这部片子的分类对前台是否可见。隐藏组、隐藏子类、隐藏父级都为 false。
+func SourceCategoryVisible(sourceID, categoryKey, rootKey string, cid, pid int64) bool {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return support.IsCategoryVisible(cid, pid)
@@ -92,7 +93,7 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField, sourceID stri
 	positions, narrowed := idx.SearchPosts.lookup(q)
 	matches := make([]scoredMetaHit, 0, 64)
 	visit := func(meta *FilmSearchMeta) {
-		if !sourceCategoryVisible(sourceID, meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
+		if !SourceCategoryVisible(sourceID, meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
 			return
 		}
 		if pid > 0 && meta.Pid != pid {

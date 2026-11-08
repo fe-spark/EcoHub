@@ -200,6 +200,9 @@ func dailyMetaStop(meta *filmsnapshot.FilmSearchMeta, sourceID string, fromUnix,
 	if sourceID != "" && !meta.HasPlaySource(sourceID) {
 		return true, false
 	}
+	if !filmsnapshot.SourceCategoryVisible(sourceID, meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
+		return true, false
+	}
 	return false, false
 }
 
