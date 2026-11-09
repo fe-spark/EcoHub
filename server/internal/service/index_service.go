@@ -201,9 +201,13 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 			"hot":    pickInfos(byID, slot.hot),
 		})
 	}
+	// 轮播读失败时首页照常返回（轮播为空），但这次结果不进缓存，避免空轮播被缓存 10 分钟。
+	cacheable := true
 	banners, err := BannerSvc.HomeBanners(sourceId)
 	if err != nil {
-		return nil, err
+		log.Printf("[Index] 读取首页轮播失败: %v", err)
+		banners = make(model.Banners, 0)
+		cacheable = false
 	}
 	res := map[string]any{
 		"category":      tree,
@@ -211,7 +215,7 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		"banners":       banners,
 		"currentSource": sourceId,
 	}
-	if db.Rdb != nil {
+	if db.Rdb != nil && cacheable {
 		if data, err := json.Marshal(res); err == nil {
 			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), 10*time.Minute, listGen)
 		}

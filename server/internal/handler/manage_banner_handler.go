@@ -54,6 +54,7 @@ func (h *ManageHandler) BannerCreate(c *gin.Context) {
 }
 
 // BannerUpdate PATCH /manage/banners/:id 只改提交了的字段，立即生效。
+// 空字符串清除文字/图片覆盖；score、year 填 0 等于清除覆盖、显示片库值。换片时刮削和覆盖一并清除。
 func (h *ManageHandler) BannerUpdate(c *gin.Context) {
 	var req service.BannerFields
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -119,7 +120,7 @@ type bannerDeckReq struct {
 	Items    []service.BannerFields `json:"items"`
 }
 
-// BannerDeck PUT /manage/banners/deck 发布排片，整组替换该站轮播。revision 不一致返回 409。
+// BannerDeck PUT /manage/banners/deck 发布排片，整组替换该站轮播，最多 99 条。revision 不一致返回 409。
 func (h *ManageHandler) BannerDeck(c *gin.Context) {
 	var req bannerDeckReq
 	if err := c.ShouldBindJSON(&req); err != nil {

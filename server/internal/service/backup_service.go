@@ -240,19 +240,40 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 	return nil
 }
 
-// importBannerSlots 新版备份直接用 bannerSlots，只保留现有站点的行；旧版备份的全局 banners 按迁移规则分到站点。
+// importBannerSlots 新版备份直接用 bannerSlots，只保留现有站点、且片库里还有这部影片的行；
+// 旧版备份的全局 banners 按迁移规则分到站点。备份里的 id 重复时重新生成；非法的覆盖值只丢弃该字段。
 func importBannerSlots(backup model.ConfigBackup) ([]model.BannerSlot, error) {
 	if backup.BannerSlots == nil {
 		return migration.ConvertLegacyBanners(db.Mdb, backup.Banners)
 	}
+	mids := make([]int64, 0, len(backup.BannerSlots))
+	for _, s := range backup.BannerSlots {
+		if s.Mid > 0 {
+			mids = append(mids, s.Mid)
+		}
+	}
+	existing, err := repository.ExistingFilmMids(mids)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]model.BannerSlot, 0, len(backup.BannerSlots))
 	seen := make(map[string]bool, len(backup.BannerSlots))
+	usedIDs := make(map[string]bool, len(backup.BannerSlots))
+	sourceOK := map[string]bool{}
 	nextSort := map[string]int64{}
 	sorted := append([]model.BannerSlot(nil), backup.BannerSlots...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Sort < sorted[j].Sort })
 	for _, s := range sorted {
 		s.SourceId = strings.TrimSpace(s.SourceId)
-		if s.SourceId == "" || s.Mid <= 0 || repository.FindCollectSourceById(s.SourceId) == nil {
+		if s.SourceId == "" || s.Mid <= 0 || !existing[s.Mid] {
+			continue
+		}
+		ok, checked := sourceOK[s.SourceId]
+		if !checked {
+			ok = repository.FindCollectSourceById(s.SourceId) != nil
+			sourceOK[s.SourceId] = ok
+		}
+		if !ok {
 			continue
 		}
 		key := fmt.Sprintf("%s:%d", s.SourceId, s.Mid)
@@ -260,18 +281,16 @@ func importBannerSlots(backup model.ConfigBackup) ([]model.BannerSlot, error) {
 			continue
 		}
 		seen[key] = true
-		if strings.TrimSpace(s.Id) == "" {
+		s.Id = strings.TrimSpace(s.Id)
+		if s.Id == "" || len(s.Id) > 64 || usedIDs[s.Id] {
 			id, err := utils.GenerateSalt()
 			if err != nil {
 				return nil, err
 			}
 			s.Id = id
 		}
-		if s.ImageMode != model.BannerImageCustom {
-			s.ImageMode = model.BannerImageFollow
-			s.PosterOverride = ""
-			s.BackdropOverride = ""
-		}
+		usedIDs[s.Id] = true
+		model.SanitizeBannerSlot(&s)
 		nextSort[s.SourceId]++
 		s.Sort = nextSort[s.SourceId]
 		out = append(out, s)

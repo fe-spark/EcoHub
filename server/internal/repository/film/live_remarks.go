@@ -1,8 +1,8 @@
 package film
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"server/internal/infra/db"
@@ -89,10 +89,14 @@ func (s LiveBannerSnapshot) DisplayPictureSlide() string {
 }
 
 // LiveBannerSnapshotsByMIDs 从活跃快照读取展示用状态与最新海报/幻灯图（毫秒级索引直查）。
-func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
+// sourceID 非空时只返回在该站有播放线路的影片。查询出错时返回 error，调用方不要把空结果当成“没有影片”。
+func LiveBannerSnapshotsByMIDs(ctx context.Context, sourceID string, mids []int64) (map[int64]LiveBannerSnapshot, error) {
 	out := make(map[int64]LiveBannerSnapshot, len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
-		return out
+		return out, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	type row struct {
@@ -118,12 +122,14 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		IsCustomPicture    bool
 	}
 	var rows []row
-	if err := db.Mdb.Model(&model.FilmIndex{}).
+	query := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
 		Select("mid, first_source_id, db_id, name, pid, year, c_name, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
-		Where("mid IN ?", mids).
-		Scan(&rows).Error; err != nil {
-		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
-		return out
+		Where("mid IN ?", mids)
+	if sourceID = strings.TrimSpace(sourceID); sourceID != "" {
+		query = query.Where(model.FilmHasPlaySourceSQL(), sourceID, model.LineKindPlay)
+	}
+	if err := query.Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("读取轮播影片失败: %w", err)
 	}
 
 	for _, r := range rows {
@@ -174,12 +180,15 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		current.IsCustomPicture = snap.IsCustomPicture
 		out[snap.Mid] = current
 	}
-	return out
+	return out, nil
 }
 
 // LiveUpdateRemarksByMIDs 从活跃快照读取展示用更新状态（毫秒级索引直查）。
 func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
-	snaps := LiveBannerSnapshotsByMIDs(mids)
+	snaps, err := LiveBannerSnapshotsByMIDs(context.Background(), "", mids)
+	if err != nil {
+		return map[int64]string{}
+	}
 	out := make(map[int64]string, len(snaps))
 	for mid, s := range snaps {
 		if s.Remarks != "" {
