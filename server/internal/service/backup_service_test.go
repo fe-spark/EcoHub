@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,7 +34,6 @@ func setupBackupTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSource{},
 		&model.CrontabRecord{},
 		&model.Banner{},
-		&model.BannerConfigRecord{},
 		&model.MappingRule{},
 		&model.ProxyConfigRecord{},
 		&model.TMDBConfigRecord{},
@@ -99,18 +99,6 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 		t.Fatalf("save banners: %v", err)
 	}
 
-	bannerCfg := model.BannerConfig{
-		Strategy: repository.BannerStrategyHot,
-		AutoTMDB: true,
-		Quotas: []model.BannerQuota{
-			{CategoryID: 1, Count: 2},
-			{CategoryID: 2, Count: 1},
-		},
-	}
-	if err := repository.SaveBannerConfig(bannerCfg); err != nil {
-		t.Fatalf("save banner config: %v", err)
-	}
-
 	proxyCfg := model.ProxyConfig{
 		Enabled:  true,
 		ProxyURL: "http://user:secret123@proxy.test:8080",
@@ -173,12 +161,13 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	if len(backup.Banners) != 1 || backup.Banners[0].Name != "测试轮播影片" {
 		t.Fatalf("banners export mismatch: %+v", backup.Banners)
 	}
-	// 验证 BannerConfig 轮播排片配置导出
-	if backup.BannerConfig == nil || backup.BannerConfig.Strategy != repository.BannerStrategyHot || !backup.BannerConfig.AutoTMDB {
-		t.Fatalf("bannerConfig export mismatch: %+v", backup.BannerConfig)
+	// 排片配置不再保存，导出里不能再出现 bannerConfig。
+	raw, err := json.Marshal(backup)
+	if err != nil {
+		t.Fatalf("marshal backup: %v", err)
 	}
-	if len(backup.BannerConfig.Quotas) != 2 {
-		t.Fatalf("bannerConfig fields mismatch: %+v", backup.BannerConfig)
+	if strings.Contains(string(raw), "bannerConfig") {
+		t.Fatalf("backup export should not contain bannerConfig: %s", raw)
 	}
 	// 验证敏感凭据在灾备导出中完整保留
 	if backup.Proxy == nil || backup.Proxy.ProxyURL != "http://user:secret123@proxy.test:8080" {
@@ -198,26 +187,21 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	}
 }
 
-func TestImportConfig_WithBannerConfig(t *testing.T) {
+func TestImportConfig_IgnoresLegacyBannerConfig(t *testing.T) {
 	setupBackupTestDB(t)
 
-	// 构建备份数据并导入
-	backup := model.ConfigBackup{
-		Version:    model.ConfigBackupVersion,
-		ExportedAt: time.Now().Format(time.RFC3339),
-		Banners: model.Banners{
-			{
-				Id:   "imp_b1",
-				Mid:  2001,
-				Name: "导入的轮播",
-				Sort: 1,
-			},
-		},
-		BannerConfig: &model.BannerConfig{
-			Strategy: repository.BannerStrategyScore,
-			AutoTMDB: false,
-			Quotas:   []model.BannerQuota{{CategoryID: 3, Count: 1}},
-		},
+	// 旧版本备份带 bannerConfig 和 isPinned/source，导入时忽略这些字段，不报错。
+	legacy := `{
+		"version": 1,
+		"exportedAt": "2026-11-01T00:00:00+08:00",
+		"filmSources": [],
+		"mappingRules": [],
+		"banners": [{"id": "imp_b1", "mid": 2001, "name": "导入的轮播", "sort": 1, "isPinned": true, "source": "auto"}],
+		"bannerConfig": {"strategy": "score_random", "autoTMDB": true, "quotas": [{"categoryId": 3, "count": 1}]}
+	}`
+	var backup model.ConfigBackup
+	if err := json.Unmarshal([]byte(legacy), &backup); err != nil {
+		t.Fatalf("decode legacy backup: %v", err)
 	}
 
 	req := model.ConfigBackupImportRequest{
@@ -231,7 +215,6 @@ func TestImportConfig_WithBannerConfig(t *testing.T) {
 		t.Fatalf("import config failed: %v", err)
 	}
 
-	// 验证落库
 	banners, err := repository.GetBanners()
 	if err != nil {
 		t.Fatal(err)
@@ -239,13 +222,8 @@ func TestImportConfig_WithBannerConfig(t *testing.T) {
 	if len(banners) != 1 || banners[0].Name != "导入的轮播" {
 		t.Fatalf("imported banners mismatch: %+v", banners)
 	}
-
-	bannerCfg, err := repository.GetBannerConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bannerCfg.Strategy != repository.BannerStrategyScore || len(bannerCfg.Quotas) != 1 || bannerCfg.Quotas[0].CategoryID != 3 {
-		t.Fatalf("imported bannerConfig mismatch: %+v", bannerCfg)
+	if db.Mdb.Migrator().HasTable("banner_config") {
+		t.Fatalf("banner_config table should not be created")
 	}
 }
 

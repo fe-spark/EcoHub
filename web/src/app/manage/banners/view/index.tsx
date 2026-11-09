@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Button, Space, Spin, Empty, Tooltip } from "antd";
-import { DesktopOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Space, Spin, Empty } from "antd";
+import { DesktopOutlined } from "@ant-design/icons";
 
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -13,7 +13,6 @@ import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import BannerDrawer from "./banner-drawer";
 import BannerQuickDrawer from "./banner-quick-drawer";
 import BannerQuickModal from "./banner-quick-modal";
-import BannerConfigDrawer from "./banner-config-drawer";
 import BannerGrid from "./banner-grid";
 import { QuickStrategy } from "./banner-quick-config";
 import { useBannerDeck } from "./use-banner-deck";
@@ -34,7 +33,6 @@ export default function BannersPageView() {
   const [loading, setLoading] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
   const [quickModalOpen, setQuickModalOpen] = useState(false);
-  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false);
   const [quickDeck, setQuickDeck] = useState<BannerRecord[]>([]);
   const [quickStrategy, setQuickStrategy] = useState<QuickStrategy>("hot");
@@ -147,7 +145,7 @@ export default function BannersPageView() {
     <div className={`${styles.pageStack} ${orderDirty ? styles.pageStackDirty : ""}`}>
       <ManagePageHeader title="首页轮播" />
 
-      {/* 顶部操作工具栏：配置使用齿轮图标按钮，独立放置；其他操作保持文字按钮 */}
+      {/* 顶部操作工具栏 */}
       <div className={styles.toolbarCard}>
         <div className={styles.toolbar}>
           {/* 左侧：标题与统计徽标 */}
@@ -157,17 +155,8 @@ export default function BannersPageView() {
             <span className={styles.countBadge}>{banners.length}</span>
           </div>
 
-          {/* 右侧：只放配置 + 一键排片 */}
+          {/* 右侧：一键排片 */}
           <Space size={8} wrap className={styles.toolbarActions}>
-            <Tooltip title="排片配置">
-              <Button
-                size="middle"
-                icon={<SettingOutlined />}
-                disabled={!canWrite}
-                onClick={() => setConfigDrawerOpen(true)}
-              />
-            </Tooltip>
-
             <Button
               type="primary"
               size="middle"
@@ -212,23 +201,16 @@ export default function BannersPageView() {
         />
       )}
 
-      {/* 纯净一键排片进度执行器 */}
+      {/* 一键排片：每次先确认配置，再执行 */}
       <BannerQuickModal
         open={quickModalOpen}
         onClose={() => setQuickModalOpen(false)}
-        onOpenConfig={() => setConfigDrawerOpen(true)}
         onGenerated={(deck, strategy) => {
           setQuickDeck(deck);
           setQuickStrategy(strategy);
           setQuickModalOpen(false);
           setQuickDrawerOpen(true);
         }}
-      />
-
-      {/* 独立的排片配置抽屉 */}
-      <BannerConfigDrawer
-        open={configDrawerOpen}
-        onClose={() => setConfigDrawerOpen(false)}
       />
 
       {/* 排片结果抽屉 */}

@@ -11,7 +11,6 @@ type ConfigBackup struct {
 	Site         *BasicConfig        `json:"site,omitempty"`
 	FilmSources  []FilmSource        `json:"filmSources"`
 	Banners      Banners             `json:"banners"`
-	BannerConfig *BannerConfig       `json:"bannerConfig,omitempty"`
 	MappingRules []MappingRuleExport `json:"mappingRules"`
 	Proxy        *ProxyConfig        `json:"proxy,omitempty"`
 	TMDB         *TMDBConfig         `json:"tmdb,omitempty"`

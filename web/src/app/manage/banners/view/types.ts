@@ -22,8 +22,6 @@ export type BannerRecord = {
   mediaType?: string;
   pendingScrape?: boolean;
   scrapeState?: "pending" | "scraped" | "miss" | "none";
-  source?: string;
-  isPinned?: boolean;
 };
 
 export interface BannerSnapshot {

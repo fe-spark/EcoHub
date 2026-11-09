@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -233,12 +232,6 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 				Message:  fmt.Sprintf("已选入 (%d/%d): %s", i+1, len(pickedSnaps), snap.Name),
 			})
 		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(30 * time.Millisecond):
-		}
 	}
 
 	for i := range banners {
@@ -261,24 +254,4 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 	}
 
 	return nil
-}
-
-// OneClickGenerateDeck 一键排片同步调用方法
-func (s *ManageService) OneClickGenerateDeck(req OneClickGenerateReq) (model.Banners, error) {
-	var finalBanners model.Banners
-	err := s.OneClickGenerateDeckStream(context.Background(), req, func(evt OneClickProgressEvent) {
-		if evt.Event == "done" && evt.Banners != nil {
-			finalBanners = evt.Banners
-		}
-	})
-	if err != nil {
-		return nil, err
-	}
-	if finalBanners == nil {
-		finalBanners, err = s.GetBanners()
-		if err != nil {
-			return nil, err
-		}
-	}
-	return finalBanners, nil
 }

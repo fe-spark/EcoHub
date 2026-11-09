@@ -12,7 +12,7 @@ func (s *ManageService) SaveBannerDeck(bl model.Banners) error {
 		bl[i].Sort = int64(i + 1)
 		scraped := bl[i].TmdbID > 0 || bl[i].PendingScrape
 		bl[i].PendingScrape = false
-		if scraped || strings.TrimSpace(bl[i].PictureSlide) != "" {
+		if scraped {
 			bl[i].IsCustomPic = true
 			if strings.TrimSpace(bl[i].CustomPicture) == "" && strings.TrimSpace(bl[i].Picture) != "" {
 				bl[i].CustomPicture = strings.TrimSpace(bl[i].Picture)
