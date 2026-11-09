@@ -23,7 +23,6 @@ type SiteOption = {
   id: string;
   name: string;
   state: boolean;
-  isPrimary?: boolean;
 };
 
 export default function BannersPageView() {
@@ -209,7 +208,7 @@ export default function BannersPageView() {
               onChange={handleSiteChange}
               options={sites.map((site) => ({
                 value: site.id,
-                label: `${site.name || site.id}${site.isPrimary ? "（首选）" : ""}${site.state ? "" : "（已停用）"}`,
+                label: `${site.name || site.id}${site.state ? "" : "（已停用）"}`,
               }))}
             />
             <Button
