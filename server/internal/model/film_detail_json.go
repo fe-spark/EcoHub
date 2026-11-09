@@ -40,36 +40,51 @@ func (s *flexString) UnmarshalJSON(data []byte) error {
 
 // flexInt64 接受 JSON 数字或数字字符串，统一存成 int64；null 与空字符串记为 0。
 // 部分采集站会把 vod_score_num 等整型字段输出成 "10" 这样的字符串，
-// 标准 encoding/json 直接报错，导致整页失败。小数按截断取整，其余非数字文本仍报错。
+// 标准 encoding/json 直接报错，导致整页失败。小数按截断取整，越界或非数字文本报错。
 type flexInt64 int64
 
 func (n *flexInt64) UnmarshalJSON(data []byte) error {
+	v, err := parseFlexInt(data, false)
+	*n = flexInt64(v)
+	return err
+}
+
+// flexID 同 flexInt64，但只收整数值。ID 带小数说明数据有问题，截断会悄悄指错片或分类。
+type flexID int64
+
+func (n *flexID) UnmarshalJSON(data []byte) error {
+	v, err := parseFlexInt(data, true)
+	*n = flexID(v)
+	return err
+}
+
+func parseFlexInt(data []byte, integral bool) (int64, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
-		*n = 0
-		return nil
+		return 0, nil
 	}
 	text := string(data)
 	if data[0] == '"' {
 		if err := json.Unmarshal(data, &text); err != nil {
-			return err
+			return 0, err
 		}
 		text = strings.TrimSpace(text)
 		if text == "" {
-			*n = 0
-			return nil
+			return 0, nil
 		}
 	}
 	if v, err := strconv.ParseInt(text, 10, 64); err == nil {
-		*n = flexInt64(v)
-		return nil
+		return v, nil
 	}
 	f, err := strconv.ParseFloat(text, 64)
-	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f > math.MaxInt64 || f < math.MinInt64 {
-		return fmt.Errorf("字段需为整数或数字字符串: %s", text)
+	// float64(MaxInt64) 等于 2^63，已经越界，所以上界用 >=。
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f >= math.MaxInt64 || f < math.MinInt64 {
+		return 0, fmt.Errorf("字段需为整数或数字字符串: %s", text)
 	}
-	*n = flexInt64(f)
-	return nil
+	if integral && f != math.Trunc(f) {
+		return 0, fmt.Errorf("字段需为整数: %s", text)
+	}
+	return int64(f), nil
 }
 
 // UnmarshalJSON 兼容采集详情里站点常输出成「另一种类型」的字段：
@@ -83,10 +98,10 @@ func (f *FilmDetail) UnmarshalJSON(data []byte) error {
 		VodDuration    flexString `json:"vod_duration"`
 		VodScore       flexString `json:"vod_score"`
 		VodDouBanScore flexString `json:"vod_douban_score"`
-		VodID          flexInt64  `json:"vod_id"`
-		TypeID         flexInt64  `json:"type_id"`
-		TypeID1        flexInt64  `json:"type_id_1"`
-		GroupID        flexInt64  `json:"group_id"`
+		VodID          flexID     `json:"vod_id"`
+		TypeID         flexID     `json:"type_id"`
+		TypeID1        flexID     `json:"type_id_1"`
+		GroupID        flexID     `json:"group_id"`
 		VodStatus      flexInt64  `json:"vod_status"`
 		VodTotal       flexInt64  `json:"vod_total"`
 		VodIsEnd       flexInt64  `json:"vod_isend"`
@@ -154,8 +169,8 @@ func (f *FilmDetail) UnmarshalJSON(data []byte) error {
 func (f *FilmList) UnmarshalJSON(data []byte) error {
 	type alias FilmList
 	aux := struct {
-		VodID  flexInt64 `json:"vod_id"`
-		TypeID flexInt64 `json:"type_id"`
+		VodID  flexID `json:"vod_id"`
+		TypeID flexID `json:"type_id"`
 		*alias
 	}{alias: (*alias)(f)}
 	if err := json.Unmarshal(data, &aux); err != nil {
@@ -163,5 +178,66 @@ func (f *FilmList) UnmarshalJSON(data []byte) error {
 	}
 	f.VodID = int64(aux.VodID)
 	f.TypeID = int64(aux.TypeID)
+	return nil
+}
+
+// UnmarshalJSON 分类列表的 type_id、type_pid 同样兼容数字字符串。
+func (c *FilmClass) UnmarshalJSON(data []byte) error {
+	type alias FilmClass
+	aux := struct {
+		ID  flexID `json:"type_id"`
+		Pid flexID `json:"type_pid"`
+		*alias
+	}{alias: (*alias)(c)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	c.ID = int64(aux.ID)
+	c.Pid = int64(aux.Pid)
+	return nil
+}
+
+// UnmarshalJSON 探页用的分页外壳：pagecount、total 有的站输出成字符串。
+func (p *CommonPage) UnmarshalJSON(data []byte) error {
+	type alias CommonPage
+	aux := struct {
+		PageCount flexInt64 `json:"pagecount"`
+		Total     flexInt64 `json:"total"`
+		*alias
+	}{alias: (*alias)(p)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	p.PageCount, p.Total = int(aux.PageCount), int(aux.Total)
+	return nil
+}
+
+// UnmarshalJSON 列表分页外壳，同 CommonPage。
+func (p *FilmListPage) UnmarshalJSON(data []byte) error {
+	type alias FilmListPage
+	aux := struct {
+		PageCount flexInt64 `json:"pagecount"`
+		Total     flexInt64 `json:"total"`
+		*alias
+	}{alias: (*alias)(p)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	p.PageCount, p.Total = int(aux.PageCount), int(aux.Total)
+	return nil
+}
+
+// UnmarshalJSON 详情分页外壳，同 CommonPage。
+func (p *FilmDetailLPage) UnmarshalJSON(data []byte) error {
+	type alias FilmDetailLPage
+	aux := struct {
+		PageCount flexInt64 `json:"pagecount"`
+		Total     flexInt64 `json:"total"`
+		*alias
+	}{alias: (*alias)(p)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	p.PageCount, p.Total = int(aux.PageCount), int(aux.Total)
 	return nil
 }
