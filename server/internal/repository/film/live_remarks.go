@@ -54,6 +54,9 @@ func formatLiveRemark(last string, n int) string {
 // LiveBannerSnapshot 轮播实时关联的影片动态信息
 type LiveBannerSnapshot struct {
 	Mid                int64
+	Name               string
+	Year               int64
+	CName              string
 	Remarks            string
 	Area               string
 	ClassTag           string
@@ -98,6 +101,8 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		DbId               int64
 		Name               string
 		Pid                int64
+		Year               int64
+		CName              string
 		Remarks            string
 		Area               string
 		ClassTag           string
@@ -114,7 +119,7 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 	}
 	var rows []row
 	if err := db.Mdb.Model(&model.FilmIndex{}).
-		Select("mid, first_source_id, db_id, name, pid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
+		Select("mid, first_source_id, db_id, name, pid, year, c_name, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
 		Where("mid IN ?", mids).
 		Scan(&rows).Error; err != nil {
 		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
@@ -124,6 +129,9 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 	for _, r := range rows {
 		snap := LiveBannerSnapshot{
 			Mid:                r.Mid,
+			Name:               strings.TrimSpace(r.Name),
+			Year:               r.Year,
+			CName:              strings.TrimSpace(r.CName),
 			Remarks:            strings.TrimSpace(r.Remarks),
 			Area:               strings.TrimSpace(r.Area),
 			ClassTag:           strings.TrimSpace(r.ClassTag),

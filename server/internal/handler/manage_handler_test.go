@@ -29,7 +29,7 @@ func setupManageConfigDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.Banner{}, &model.MappingRule{}, &model.TMDBConfigRecord{}, &model.User{}, &model.FileInfo{}); err != nil {
+	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.BannerSlot{}, &model.FilmIndex{}, &model.FilmSourcePlaylist{}, &model.FilmSource{}, &model.MappingRule{}, &model.TMDBConfigRecord{}, &model.User{}, &model.FileInfo{}); err != nil {
 		t.Fatal(err)
 	}
 	prev := db.Mdb
@@ -233,58 +233,110 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 func TestBannerHandlers(t *testing.T) {
 	setupManageConfigDB(t)
 	h := &ManageHandler{}
+	db.Mdb.Create(&model.FilmSource{Id: "src1", Name: "站一", Uri: "http://src1.test", State: true, Sort: 1})
+	db.Mdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "src1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "测试影片", Area: "美国", Actor: "演员"},
+	})
+	db.Mdb.Create(&model.FilmSourcePlaylist{Mid: 101, SourceId: "src1", LineKind: model.LineKindPlay})
 
-	c, w := testContext(http.MethodGet, "/api/manage/banner/list")
-	h.BannerList(c)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200 body=%s", w.Code, w.Body.String())
+	type listData struct {
+		SourceId string `json:"sourceId"`
+		Revision string `json:"revision"`
+		Items    []struct {
+			Id    string `json:"id"`
+			Mid   int64  `json:"mid"`
+			Area  string `json:"area"`
+			Blurb string `json:"blurb"`
+		} `json:"items"`
 	}
-	resp := decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("code=%d want 0", resp.Code)
+	list := func() listData {
+		t.Helper()
+		c, w := testContext(http.MethodGet, "/api/manage/banners?sourceId=src1")
+		h.BannerList(c)
+		resp := decodeResponse(t, w)
+		if resp.Code != dto.SUCCESS {
+			t.Fatalf("list code=%d msg=%s", resp.Code, resp.Msg)
+		}
+		raw, _ := json.Marshal(resp.Data)
+		var out listData
+		_ = json.Unmarshal(raw, &out)
+		return out
 	}
 
-	// 测试一键排片参数解析异常与成功处理
-	cGen, wGen := testJSONContext(http.MethodPost, "/api/manage/banner/quick-generate", `{"count":6,"strategy":"hot"}`)
-	h.BannerQuickGenerate(cGen)
-	if wGen.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200 body=%s", wGen.Code, wGen.Body.String())
+	// 新增
+	c, w := testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src1","mid":101}`)
+	h.BannerCreate(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("create code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	before := list()
+	if len(before.Items) != 1 || before.Items[0].Area != "美国" {
+		t.Fatalf("list after create: %+v", before)
+	}
+	id := before.Items[0].Id
+
+	// 部分更新：只改简介，地区仍来自片库。
+	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/"+id, `{"blurb":"新简介"}`)
+	c.Params = gin.Params{{Key: "id", Value: id}}
+	h.BannerUpdate(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("patch code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	after := list()
+	if after.Items[0].Blurb != "新简介" || after.Items[0].Area != "美国" {
+		t.Fatalf("patch result: %+v", after.Items)
+	}
+
+	// 过期的 revision 保存顺序返回 409。
+	body, _ := json.Marshal(map[string]any{"sourceId": "src1", "revision": before.Revision, "ids": []string{id}})
+	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
+	h.BannerOrder(c)
+	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != http.StatusConflict {
+		t.Fatalf("stale order want 409, got status=%d body=%s", w.Code, w.Body.String())
+	}
+	body, _ = json.Marshal(map[string]any{"sourceId": "src1", "revision": after.Revision, "ids": []string{id}})
+	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
+	h.BannerOrder(c)
+	if w.Code != http.StatusOK || decodeResponse(t, w).Code != dto.SUCCESS {
+		t.Fatalf("order want success, got status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 发布时 revision 过期也返回 409。
+	body, _ = json.Marshal(map[string]any{"sourceId": "src1", "revision": before.Revision, "items": []map[string]any{{"mid": 101}}})
+	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/deck", string(body))
+	h.BannerDeck(c)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stale deck want 409, got status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 一键排片参数不合法时返回业务错误。
+	c, w = testJSONContext(http.MethodPost, "/api/manage/banners/generate", `{"sourceId":"src1","strategy":"hot","quotas":[]}`)
+	h.BannerGenerate(c)
+	if resp := decodeResponse(t, w); w.Code != http.StatusOK || resp.Code != dto.FAILED {
+		t.Fatalf("invalid generate want FAILED, got status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// 删除
+	c, w = testContext(http.MethodDelete, "/api/manage/banners/"+id)
+	c.Params = gin.Params{{Key: "id", Value: id}}
+	h.BannerDelete(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("delete code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	if len(list().Items) != 0 {
+		t.Fatalf("banner should be deleted")
 	}
 }
 
-func TestBannerAndMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
+func TestMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
 	setupManageConfigDB(t)
 	h := &ManageHandler{}
-
-	// 1. BannerSave (新增，不传 ID)
-	bannerAddBody := `{"title":"测试轮播","mid":101,"poster":"http://test.jpg"}`
-	c, w := testJSONContext(http.MethodPost, "/api/manage/banner/save", bannerAddBody)
-	h.BannerSave(c)
-	resp := decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("expected BannerSave success, got code=%d msg=%s", resp.Code, resp.Msg)
-	}
-
-	// 获取生成的 banner
-	banners, err := service.ManageSvc.GetBanners()
-	if err != nil || len(banners) != 1 {
-		t.Fatalf("expected 1 banner, got %v, err=%v", len(banners), err)
-	}
-	bannerID := banners[0].Id
-
-	// 2. BannerDelete 批量删除
-	delBody, _ := json.Marshal(map[string][]string{"ids": {bannerID}})
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banner/delete", string(delBody))
-	h.BannerDelete(c)
-	resp = decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("expected BannerDelete success, got code=%d msg=%s", resp.Code, resp.Msg)
-	}
-
-	bannersAfter, _ := service.ManageSvc.GetBanners()
-	if len(bannersAfter) != 0 {
-		t.Fatalf("expected 0 banners after delete, got %d", len(bannersAfter))
-	}
+	var (
+		c    *gin.Context
+		w    *httptest.ResponseRecorder
+		resp dto.Response
+	)
 
 	// 3. MappingRuleSave (新增，ID=0)
 	ruleAddBody := `{"raw":"大陆","target":"中国大陆","matchType":"exact","group":"Area"}`

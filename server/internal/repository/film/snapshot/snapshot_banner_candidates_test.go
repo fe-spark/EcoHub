@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"testing"
 
 	"server/internal/model"
@@ -40,7 +41,11 @@ func TestGetSnapshotBannerCandidates_TopNExcludeAndScoreFill(t *testing.T) {
 
 	assertMids := func(strategy string, limit int, exclude []int64, want ...int64) {
 		t.Helper()
-		got := bannerCandidateMids(GetSnapshotBannerCandidates("live", strategy, "", []int64{1}, limit, exclude))
+		snaps, err := GetSnapshotBannerCandidates(context.Background(), "live", strategy, "", []int64{1}, limit, exclude)
+		if err != nil {
+			t.Fatalf("candidates: %v", err)
+		}
+		got := bannerCandidateMids(snaps)
 		if len(got) != len(want) {
 			t.Fatalf("%s limit=%d exclude=%v got %v want %v", strategy, limit, exclude, got, want)
 		}
@@ -56,7 +61,19 @@ func TestGetSnapshotBannerCandidates_TopNExcludeAndScoreFill(t *testing.T) {
 	assertMids("score_random", 3, nil, 1, 3, 4)
 	assertMids("score_random", 4, nil, 1, 3, 4, 2)
 	assertMids("latest_random", 2, nil, 5, 4)
-	if got := GetSnapshotBannerCandidates("live", "hot_random", "", []int64{1}, 0, nil); len(got) != 0 {
+	if got, _ := GetSnapshotBannerCandidates(context.Background(), "live", "hot_random", "", []int64{1}, 0, nil); len(got) != 0 {
 		t.Fatalf("limit 0 got %v", bannerCandidateMids(got))
+	}
+}
+
+func TestGetSnapshotBannerCandidates_CanceledContext(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	if err := gdb.Create(&[]model.FilmIndex{bannerCandidateFilm(1, 1, 10, 9.0, 100, "影片")}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := GetSnapshotBannerCandidates(ctx, "live", "hot_random", "", []int64{1}, 2, nil); err == nil {
+		t.Fatalf("canceled context should return an error")
 	}
 }

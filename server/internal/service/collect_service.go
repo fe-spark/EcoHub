@@ -166,10 +166,6 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 		return false
 	}
 	epoch := primarySwitchEpoch.Add(1)
-	// 轮播还是全局一组，影片属于原首选站，切站时先清空。按站点区分后去掉。
-	if err := ManageSvc.SaveBanners(model.Banners{}); err != nil {
-		syslog.Errorf("[Banner] 切换首选站清空轮播失败: %v", err)
-	}
 	repository.MarkCategoryChanged()
 	repository.ClearIndexPageCache()
 	filmsnapshot.BumpSearchCacheVersion()
