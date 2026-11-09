@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -173,6 +174,11 @@ func probeSourcePageCount(s *model.FilmSource, h int, trigger string) error {
 	stopCheck := time.NewTicker(200 * time.Millisecond)
 	defer stopCheck.Stop()
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				syslog.Errorf("[Spider] 站点 %s 探页停止监听 panic: %v\n%s", s.Name, r, debug.Stack())
+			}
+		}()
 		for {
 			select {
 			case <-ctx.Done():
@@ -266,6 +272,18 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				}
 			}()
 			defer scheduler.FinishSource(fs.Id)
+			defer func() {
+				if r := recover(); r != nil {
+					reportSourcePanic(tag, fs, batchCtx, r)
+					progress.Update(fs.Id, func(cur *model.CollectProgress) {
+						switch cur.Status {
+						case progress.StatusStarting, progress.StatusRunning:
+							cur.Status = progress.StatusFailed
+						}
+					})
+					batchCtx.releaseSourceOccupy(fs.Id)
+				}
+			}()
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 停止采集：%s", tag, fs.Name, currentStopAllReason())
 				abandonQueuedCollectSource(fs, batchCtx)
