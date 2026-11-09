@@ -32,7 +32,12 @@ func migrateBannerSlot(gdb *gorm.DB) error {
 	if err != nil {
 		return err
 	}
+	// MySQL 的 DROP TABLE 会隐式提交事务：回填已经写进 banner_slot、旧表却没删掉时，迁移不会被记成完成，
+	// 下次启动会再跑一遍。回填前先清空 banner_slot（迁移完成前它只会有本迁移写入的数据），重跑时不会撞唯一索引。
 	return gdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerSlot{}).Error; err != nil {
+			return err
+		}
 		if len(slots) > 0 {
 			if err := tx.Create(&slots).Error; err != nil {
 				return err
@@ -162,6 +167,7 @@ func ConvertLegacyBanners(gdb *gorm.DB, legacy []model.LegacyBanner) ([]model.Ba
 		if r.Year > 0 && r.Year != film.Year {
 			slot.YearOverride = r.Year
 		}
+		model.SanitizeBannerSlot(&slot)
 		out = append(out, slot)
 	}
 	return out, nil
