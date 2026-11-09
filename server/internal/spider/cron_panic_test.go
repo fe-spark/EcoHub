@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 )
 
@@ -53,6 +54,35 @@ func TestReportSourcePanic_RecordsAndNotifies(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if len(*got) != 1 || (*got)[0] != "source:s1|panic: bad" {
+		t.Fatalf("notify = %v", *got)
+	}
+}
+
+func TestFireCronTask_ConfigReadFailureNotifies(t *testing.T) {
+	prevDB := db.Mdb
+	db.Mdb = nil
+	t.Cleanup(func() { db.Mdb = prevDB })
+	mu, got := captureNotify(t)
+	fireCronTask("sys_cron_orphan_clean")
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*got) != 1 || !strings.Contains((*got)[0], "sys_cron_orphan_clean|sys_cron_orphan_clean|读取定时任务配置失败") {
+		t.Fatalf("notify = %v", *got)
+	}
+}
+
+func TestRunTaskBody_AutoCollectSourceReadFailureNotifies(t *testing.T) {
+	prevDB := db.Mdb
+	db.Mdb = nil
+	t.Cleanup(func() { db.Mdb = prevDB })
+	if searchIndexBlocksCollect() || isMaintenanceRunning() {
+		t.Skip("collect gated in this environment")
+	}
+	mu, got := captureNotify(t)
+	runTaskBody(model.FilmCollectTask{Id: "auto", Model: model.TaskModelAutoCollect, State: true, Remark: "自动采集", Time: 24})
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*got) != 1 || !strings.Contains((*got)[0], "auto|自动采集|读取采集站失败") {
 		t.Fatalf("notify = %v", *got)
 	}
 }
