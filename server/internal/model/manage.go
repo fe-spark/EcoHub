@@ -111,44 +111,6 @@ type AccessConfig struct {
 	ProvideKey    string `json:"provideKey"`    // TVBox/订阅专属访问密钥
 }
 
-// Banner 首页横幅信息
-type Banner struct {
-	Id            string  `gorm:"primaryKey;size:64" json:"id"`           // 唯一标识
-	Mid           int64   `gorm:"index" json:"mid"`                       // 绑定所属影片Id
-	Name          string  `gorm:"size:128" json:"name"`                   // 影片名称
-	Year          int64   `json:"year"`                                   // 上映年份
-	CName         string  `gorm:"size:64" json:"cName"`                   // 分类名称
-	Poster        string  `gorm:"size:512" json:"poster"`                 // 本行竖版海报
-	Picture       string  `gorm:"size:512" json:"picture"`                // 本行竖版封面
-	PictureSlide  string  `gorm:"size:512" json:"pictureSlide"`           // 本行横版幻灯图
-	CustomPicture string  `gorm:"size:512" json:"customPicture"`          // 本行自定义封面
-	Remark        string  `gorm:"size:128" json:"remark"`                 // 更新状态描述信息
-	Sort          int64   `json:"sort"`                                   // 排序分値
-	IsCustomPic   bool    `gorm:"default:false" json:"isCustomPic"`       // 本行自有图片。为真时不跟随影片封面
-	Area          string  `gorm:"size:128" json:"area,omitempty"`         // 地区，排片时写入轮播行
-	ClassTag      string  `gorm:"type:text" json:"classTag,omitempty"`    // 类型标签，排片时写入轮播行
-	Actor         string  `gorm:"type:text" json:"actor,omitempty"`       // 主演，排片时写入轮播行
-	Director      string  `gorm:"type:text" json:"director,omitempty"`    // 导演，排片时写入轮播行
-	Blurb         string  `gorm:"type:text" json:"blurb,omitempty"`       // 简介，排片时写入轮播行
-	Score         float64 `json:"score,omitempty"`                        // 评分，排片时写入轮播行
-	Hits          int64   `gorm:"-" json:"hits,omitempty"`                // 热度，不落库
-	TmdbID        int64   `json:"tmdbId,omitempty"`                       // 本行刮削词条。海报和简介写在本行，不进刮削表
-	IsScraped     bool    `gorm:"-" json:"isScraped"`                     // 由 TmdbID 得出，不落库
-	MediaType     string  `gorm:"-" json:"mediaType,omitempty"`           // 草稿匹配类型，不落库
-	PendingScrape bool    `gorm:"-" json:"pendingScrape,omitempty"`       // 草稿已匹配，发布时写入本行
-	ScrapeState   string  `gorm:"-" json:"scrapeState,omitempty"`         // pending | scraped | miss | none
-}
-
-func (Banner) TableName() string {
-	return TableBanners
-}
-
-type Banners []Banner
-
-func (bl Banners) Len() int           { return len(bl) }
-func (bl Banners) Less(i, j int) bool { return bl[i].Sort < bl[j].Sort }
-func (bl Banners) Swap(i, j int)      { bl[i], bl[j] = bl[j], bl[i] }
-
 // ------------------------------------------------------ MySQL 持久化模型 ---
 
 // SiteConfigRecord 网站基础配置持久化 (MySQL单行表)

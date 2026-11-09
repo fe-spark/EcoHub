@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -170,13 +171,16 @@ func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string 
 
 // GetSnapshotBannerCandidates 按排片策略取该分类的前 limit 部。sourceID 为空时不限站。
 // exclude 中的影片会跳过，便于多个分类名额不重复。
-func GetSnapshotBannerCandidates(version string, strategy string, sourceID string, categoryPids []int64, limit int, exclude []int64) []model.FilmListSnapshot {
+func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy string, sourceID string, categoryPids []int64, limit int, exclude []int64) ([]model.FilmListSnapshot, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
 	if limit <= 0 || db.Mdb == nil {
-		return []model.FilmListSnapshot{}
+		return []model.FilmListSnapshot{}, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
@@ -197,7 +201,7 @@ func GetSnapshotBannerCandidates(version string, strategy string, sourceID strin
 	}
 
 	baseQuery := func(skip []int64) *gorm.DB {
-		q := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
+		q := applyBannerCategories(applySourceMembership(liveFilmQuery().WithContext(ctx), sourceID), sourceID, categoryPids)
 		if len(skip) > 0 {
 			q = q.Where("mid NOT IN ?", skip)
 		}
@@ -206,22 +210,20 @@ func GetSnapshotBannerCandidates(version string, strategy string, sourceID strin
 
 	results, err := scanListSnapshots(applyStrategy(baseQuery(exclude), true).Limit(limit))
 	if err != nil {
-		log.Println("[Snapshot] 获取轮播候选集异常:", err)
-		return []model.FilmListSnapshot{}
+		return nil, err
 	}
 	if strategy == "score_random" && len(results) < limit {
 		skip := append(append([]int64{}, exclude...), snapshotMids(results)...)
 		more, fillErr := scanListSnapshots(applyStrategy(baseQuery(skip), false).Limit(limit - len(results)))
 		if fillErr != nil {
-			log.Println("[Snapshot] 评分候选补齐异常:", fillErr)
-		} else {
-			results = append(results, more...)
+			return nil, fillErr
 		}
+		results = append(results, more...)
 	}
 	if len(results) > limit {
-		return results[:limit]
+		return results[:limit], nil
 	}
-	return results
+	return results, nil
 }
 
 func snapshotMids(snaps []model.FilmListSnapshot) []int64 {

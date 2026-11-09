@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"server/internal/config"
@@ -13,32 +12,6 @@ import (
 
 	"gorm.io/gorm"
 )
-
-func normalizeBannerImageFields(bl model.Banners) model.Banners {
-	for index := range bl {
-		picture := strings.TrimSpace(bl[index].Picture)
-		if picture == "" {
-			picture = strings.TrimSpace(bl[index].Poster)
-		}
-		if picture == "" {
-			continue
-		}
-
-		bl[index].Picture = picture
-		if strings.TrimSpace(bl[index].Poster) == "" {
-			bl[index].Poster = picture
-		}
-
-		// 严禁拿竖版封面/海报填充横屏大图 PictureSlide！
-		// 若 PictureSlide 等于 Picture 或 Poster，说明是伪横图，直接置为空字符串
-		slide := strings.TrimSpace(bl[index].PictureSlide)
-		if slide == picture || slide == strings.TrimSpace(bl[index].Poster) {
-			bl[index].PictureSlide = ""
-		}
-	}
-
-	return bl
-}
 
 // ExistSiteConfig 判断 MySQL 中是否已有网站配置。
 func ExistSiteConfig() (bool, error) {
@@ -200,72 +173,4 @@ func GetSiteBasic() (model.BasicConfig, error) {
 		return model.BasicConfig{}, err
 	}
 	return c, nil
-}
-
-// GetBanners 读取轮播。没有行时返回空切片。查询失败返回错误。
-func GetBanners() (model.Banners, error) {
-	if data, ok, err := readCache(config.BannersKey); err != nil {
-		return nil, err
-	} else if ok && data != "" && data != "null" {
-		var cached model.Banners
-		if err := json.Unmarshal([]byte(data), &cached); err != nil {
-			if delErr := dropCache(config.BannersKey); delErr != nil {
-				return nil, fmt.Errorf("轮播缓存损坏: %v; 删除失败: %w", err, delErr)
-			}
-		} else {
-			cached = normalizeBannerImageFields(cached)
-			sort.Sort(cached)
-			return cached, nil
-		}
-	}
-	if db.Mdb == nil {
-		return nil, errors.New("数据库未连接")
-	}
-	bl := make(model.Banners, 0)
-	if err := db.Mdb.Order("sort ASC").Find(&bl).Error; err != nil {
-		return nil, err
-	}
-	bl = normalizeBannerImageFields(bl)
-	sort.Sort(bl)
-	raw, err := json.Marshal(bl)
-	if err != nil {
-		return nil, err
-	}
-	if err := fillCache(config.BannersKey, string(raw)); err != nil {
-		return nil, err
-	}
-	return bl, nil
-}
-
-// SaveBanners 保存轮播配置信息 (MySQL + Redis 短期缓存)
-func SaveBanners(bl model.Banners) error {
-	bl = normalizeBannerImageFields(bl)
-	if db.Mdb == nil {
-		return errors.New("数据库未连接")
-	}
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		// 清空旧轮播数据
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Banner{}).Error; err != nil {
-			return err
-		}
-		// 批量插入新数据
-		if len(bl) > 0 {
-			if err := tx.Create(&bl).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	raw, err := json.Marshal(bl)
-	if err != nil {
-		return err
-	}
-	if err := writeCache(config.BannersKey, string(raw)); err != nil {
-		return err
-	}
-	ClearIndexPageCache()
-	return nil
 }

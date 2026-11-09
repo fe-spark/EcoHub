@@ -35,6 +35,11 @@ var migrations = []Migration{
 		Name:    "删除一键排片配置表",
 		Run:     migrateDropBannerConfig,
 	},
+	{
+		Version: "20261109_banner_slot",
+		Name:    "轮播按站点存储，删除旧轮播表",
+		Run:     migrateBannerSlot,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

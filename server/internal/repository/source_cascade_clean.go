@@ -42,6 +42,10 @@ func cascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 		return nil, err
 	}
+	// 该站的轮播整组删除；其他站轮播里的该站影片随档案一起删。
+	if err := DeleteBannerSlotsBySource(tx, id); err != nil {
+		return nil, err
+	}
 	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
 		return nil, err
 	}
@@ -61,7 +65,7 @@ func deleteOwnedFilmChunk(tx *gorm.DB, mids []int64) error {
 	if err := tx.Where("global_mid IN ?", mids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 		return err
 	}
-	if err := tx.Where("mid IN ?", mids).Delete(&model.Banner{}).Error; err != nil {
+	if err := DeleteBannerSlotsByMids(tx, mids); err != nil {
 		return err
 	}
 	if err := tx.Where("mid IN ?", mids).Delete(&model.FilmTMDBScrape{}).Error; err != nil {

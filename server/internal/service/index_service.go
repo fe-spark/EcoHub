@@ -13,7 +13,6 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
@@ -202,13 +201,9 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 			"hot":    pickInfos(byID, slot.hot),
 		})
 	}
-	rawBanners, err := repository.GetBanners()
+	banners, err := BannerSvc.HomeBanners(sourceId)
 	if err != nil {
 		return nil, err
-	}
-	banners := overlayBannerLiveRemarks(rawBanners)
-	if banners == nil {
-		banners = make(model.Banners, 0)
 	}
 	res := map[string]any{
 		"category":      tree,
@@ -222,46 +217,4 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		}
 	}
 	return res, nil
-}
-
-// OverlayBannerLiveRemarks 只把片库更新状态补到轮播。图片和简介用轮播行自己的。
-func OverlayBannerLiveRemarks(banners model.Banners) model.Banners {
-	return overlayBannerLiveRemarks(banners)
-}
-
-func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
-	if banners == nil {
-		return make(model.Banners, 0)
-	}
-	if len(banners) == 0 {
-		return banners
-	}
-	mids := make([]int64, 0, len(banners))
-	for _, b := range banners {
-		if b.Mid > 0 {
-			mids = append(mids, b.Mid)
-		}
-	}
-	if len(mids) == 0 {
-		return banners
-	}
-	liveData := filmrepo.LiveBannerSnapshotsByMIDs(mids)
-	if len(liveData) == 0 {
-		return banners
-	}
-	out := make(model.Banners, len(banners))
-	copy(out, banners)
-	for i := range out {
-		snap, ok := liveData[out[i].Mid]
-		if !ok {
-			continue
-		}
-		if snap.Remarks != "" {
-			out[i].Remark = snap.Remarks
-		}
-		if out[i].TmdbID > 0 {
-			out[i].IsScraped = true
-		}
-	}
-	return out
 }

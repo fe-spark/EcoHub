@@ -35,7 +35,7 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 			return err
 		}
 		if len(list) == 0 {
-			return nil
+			return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerSlot{}).Error
 		}
 		now := time.Now()
 		for i := range list {
@@ -46,6 +46,14 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 				list[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
 			}
 			normalizeCollectSourceDefaults(&list[i])
+		}
+		// 不在新列表里的站点，它们的轮播一并删除。
+		ids := make([]string, 0, len(list))
+		for _, s := range list {
+			ids = append(ids, s.Id)
+		}
+		if err := tx.Where("source_id NOT IN ?", ids).Delete(&model.BannerSlot{}).Error; err != nil {
+			return err
 		}
 		return tx.Create(&list).Error
 	})

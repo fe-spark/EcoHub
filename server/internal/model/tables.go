@@ -16,7 +16,7 @@ const (
 	TableSearchTag          = "search_tag_item"
 	TableCrontabRecord      = "crontab_record"
 	TableSiteConfig         = "site_config_record"
-	TableBanners            = "banners_record"
+	TableBannerSlot         = "banner_slot"
 	TableFileInfo           = "files"
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
@@ -53,7 +53,7 @@ var AllModels = []any{
 	&CrontabRecord{},
 	&SiteConfigRecord{},
 	&MovieSourceMapping{},
-	&Banner{},
+	&BannerSlot{},
 	&MappingRule{},
 	&CategoryMapping{},
 	&SourceCategory{},

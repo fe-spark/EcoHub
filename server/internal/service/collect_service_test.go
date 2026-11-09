@@ -37,7 +37,7 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 		&model.CategoryMapping{},
 		&model.ProxyConfigRecord{},
 		&model.NotifyConfigRecord{},
-		&model.Banner{},
+		&model.BannerSlot{},
 		&model.SiteConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)

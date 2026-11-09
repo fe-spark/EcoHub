@@ -181,8 +181,6 @@ const (
 	SiteConfigBasic = RedisKeyPrefix + ":Config:Site:Basic"
 	// TMDBConfigKey TMDB 刮削配置缓存
 	TMDBConfigKey = RedisKeyPrefix + ":Config:TMDB"
-	// BannersKey 轮播组件key
-	BannersKey = RedisKeyPrefix + ":Config:Banners"
 	// ProxyConfigKey 采集网络代理配置缓存
 	ProxyConfigKey = RedisKeyPrefix + ":Config:Proxy"
 	// NotifyConfigKey Telegram 通知配置缓存

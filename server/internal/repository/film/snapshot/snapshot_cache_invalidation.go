@@ -28,7 +28,6 @@ func RefreshAccessDataCaches() {
 			config.ActiveCategoryTreeKey,
 			config.CategoryTreeKey,
 			config.TVBoxConfigCacheKey,
-			config.BannersKey,
 		)
 	}
 	cache.BumpSearchTagsVersion()
