@@ -198,19 +198,25 @@ export default function BannersPageView() {
             <span className={styles.countBadge}>{banners.length}</span>
           </div>
 
-          {/* 右侧：站点与一键排片 */}
+          {/* 右侧：采集源与一键排片 */}
           <Space size={8} wrap className={styles.toolbarActions}>
-            <Select
-              style={{ minWidth: 180 }}
-              value={sourceId || undefined}
-              placeholder="选择站点"
-              disabled={orderSaving}
-              onChange={handleSiteChange}
-              options={sites.map((site) => ({
-                value: site.id,
-                label: `${site.name || site.id}${site.state ? "" : "（已停用）"}`,
-              }))}
-            />
+            <div className={styles.sourceField}>
+              <span className={styles.sourceLabel}>采集源</span>
+              <Select
+                placeholder="选择采集源"
+                className={styles.sourceSelect}
+                value={sourceId || undefined}
+                disabled={orderSaving}
+                onChange={handleSiteChange}
+                options={sites.map((site) => ({
+                  label: site.state === false ? `${site.name} (已停用)` : site.name,
+                  value: site.id,
+                }))}
+                showSearch
+                optionFilterProp="label"
+                popupMatchSelectWidth={false}
+              />
+            </div>
             <Button
               type="primary"
               size="middle"
