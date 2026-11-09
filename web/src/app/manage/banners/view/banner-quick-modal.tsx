@@ -6,23 +6,33 @@ import { CompassOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { BannerGenerateResult } from "./types";
-import BannerQuickConfig, { CategoryQuotaItem, QuickStrategy } from "./banner-quick-config";
+import BannerQuickConfig, {
+  CategoryQuotaItem,
+  QUOTA_MAX,
+  QuickConfigMemo,
+  QuickStrategy,
+} from "./banner-quick-config";
 import { positiveQuotas } from "./banner-quick-recipe";
 
 interface BannerQuickModalProps {
   open: boolean;
   sourceId: string;
+  // 该站上次排片用的配置；没有时用默认值。
+  lastConfig?: QuickConfigMemo;
+  onRemember: (config: QuickConfigMemo) => void;
   onClose: () => void;
   onGenerated: (result: BannerGenerateResult, strategy: QuickStrategy) => void;
 }
 
-// 排片配置不保存。每次打开都用默认值：最热，每类 1 部。
+// 该站没有上次配置时的默认值：最热，每类 1 部。
 const DEFAULT_STRATEGY: QuickStrategy = "hot";
 const DEFAULT_COUNT = 1;
 
 export default function BannerQuickModal({
   open,
   sourceId,
+  lastConfig,
+  onRemember,
   onClose,
   onGenerated,
 }: BannerQuickModalProps) {
@@ -36,6 +46,10 @@ export default function BannerQuickModal({
   useEffect(() => {
     messageRef.current = message;
   }, [message]);
+  const lastConfigRef = useRef(lastConfig);
+  useEffect(() => {
+    lastConfigRef.current = lastConfig;
+  }, [lastConfig]);
 
   const abortRunning = () => {
     abortRef.current?.abort();
@@ -43,7 +57,7 @@ export default function BannerQuickModal({
     setRunning(false);
   };
 
-  // 每次打开都重新读该站分类，并回到默认配置。
+  // 每次打开都重新读该站分类。已有分类沿用上次的数量，新分类用默认值，已不存在的分类丢掉。
   useEffect(() => {
     if (!open) {
       abortRunning();
@@ -51,7 +65,8 @@ export default function BannerQuickModal({
     }
 
     let cancelled = false;
-    setStrategy(DEFAULT_STRATEGY);
+    const memo = lastConfigRef.current;
+    setStrategy(memo?.strategy ?? DEFAULT_STRATEGY);
     setCategories([]);
     setLoadingCategories(true);
     ApiGet("/categories", { sourceId: sourceId || undefined })
@@ -63,7 +78,7 @@ export default function BannerQuickModal({
                 .map((item: { id?: number; name?: string }) => ({
                   id: Number(item.id),
                   name: String(item.name || ""),
-                  count: DEFAULT_COUNT,
+                  count: Math.min(memo?.counts[Number(item.id)] ?? DEFAULT_COUNT, QUOTA_MAX),
                 }))
                 .filter((item: CategoryQuotaItem) => item.id > 0)
             : [];
@@ -95,6 +110,10 @@ export default function BannerQuickModal({
       return;
     }
     const runStrategy = strategy;
+    onRemember({
+      strategy: runStrategy,
+      counts: Object.fromEntries(categories.map((item) => [item.id, item.count || 0])),
+    });
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true);

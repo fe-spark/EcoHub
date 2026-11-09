@@ -7,6 +7,15 @@ import styles from "./banner-quick.module.less";
 
 export type QuickStrategy = "latest" | "hot" | "score";
 
+// 一键排片单个分类最多排几部，和后端 bannerQuotaMax 一致。
+export const QUOTA_MAX = 5;
+
+// 上次排片用的配置，按站点记在页面内存里，重新打开弹窗时沿用。
+export interface QuickConfigMemo {
+  strategy: QuickStrategy;
+  counts: Record<number, number>;
+}
+
 export interface CategoryQuotaItem {
   id: number;
   name: string;
@@ -150,7 +159,7 @@ export default function BannerQuickConfig({
                 </span>
                 <InputNumber
                   min={0}
-                  max={5}
+                  max={QUOTA_MAX}
                   size="small"
                   value={cat.count}
                   disabled={disabled}
