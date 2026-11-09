@@ -67,8 +67,15 @@ func flushCronQueue() {
 		}
 		log.Printf("[Spider] 定时自动采集跳过：维护任务执行中（%s），Task[%s]", maintenanceRunningDetail(), id)
 	}
-	for _, id := range skippedMaintenance {
-		log.Printf("[Spider] 定时维护跳过：已有维护任务在执行（%s），Task[%s]", maintenanceRunningDetail(), id)
+	if len(skippedMaintenance) > 0 {
+		byID := make(map[string]model.FilmCollectTask, len(batch))
+		for _, ft := range batch {
+			byID[ft.Id] = ft
+		}
+		for _, id := range skippedMaintenance {
+			log.Printf("[Spider] 定时维护延后：已有维护任务在执行（%s），Task[%s]", maintenanceRunningDetail(), id)
+			deferMaintenance(byID[id])
+		}
 	}
 	if len(run) == 0 {
 		return
