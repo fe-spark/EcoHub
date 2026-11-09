@@ -69,11 +69,12 @@ func tagMetaMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta) 
 	if err != nil {
 		return nil, err
 	}
+	categoryVisible := SourceCategoryVisibility(sourceID)
 	return func(item *FilmSearchMeta) bool {
 		if item == nil {
 			return false
 		}
-		if !SourceCategoryVisible(sourceID, item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
+		if !categoryVisible(item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
 			return false
 		}
 		if sourceID != "" {
