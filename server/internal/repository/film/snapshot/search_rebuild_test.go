@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func resetSearchRebuildForTest(t *testing.T, debounce time.Duration, scan func(uint64) error) {
+func resetSearchRebuildForTest(t *testing.T, debounce time.Duration, scan func() (int64, error)) {
 	t.Helper()
 	prevDebounce := searchRebuildDebounce
 	prevScan := scanActiveFilmSearchIndex
@@ -51,9 +51,9 @@ func waitScans(t *testing.T, scans *atomic.Int32, want int32) {
 
 func TestSearchRebuildCollapsesBurstIntoOneScan(t *testing.T) {
 	var scans atomic.Int32
-	resetSearchRebuildForTest(t, 30*time.Millisecond, func(uint64) error {
+	resetSearchRebuildForTest(t, 30*time.Millisecond, func() (int64, error) {
 		scans.Add(1)
-		return nil
+		return 0, nil
 	})
 	RequestActiveFilmSearchIndexRebuild()
 	RequestActiveFilmSearchIndexRebuild()
@@ -70,13 +70,13 @@ func TestSearchRebuildRescansImmediatelyWhenGenMovesDuringScan(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	resetSearchRebuildForTest(t, 30*time.Millisecond, func(uint64) error {
+	resetSearchRebuildForTest(t, 30*time.Millisecond, func() (int64, error) {
 		n := scans.Add(1)
 		if n == 1 {
 			once.Do(func() { close(started) })
 			<-release
 		}
-		return nil
+		return 0, nil
 	})
 	RequestActiveFilmSearchIndexRebuild()
 	select {
@@ -94,7 +94,7 @@ func TestSearchRebuildRescansImmediatelyWhenGenMovesDuringScan(t *testing.T) {
 }
 
 func TestNotifySearchIndexIfCurrentSkipsStaleGen(t *testing.T) {
-	resetSearchRebuildForTest(t, time.Hour, func(uint64) error { return nil })
+	resetSearchRebuildForTest(t, time.Hour, func() (int64, error) { return 0, nil })
 	NotifySearchIndexProgress(10, 1, "indexing")
 	searchRebuild.mu.Lock()
 	searchRebuild.gen = 2
@@ -120,14 +120,13 @@ func TestNotifySearchIndexIfCurrentSkipsStaleGen(t *testing.T) {
 
 func TestSearchRebuildFailureKeepsNewerIndexing(t *testing.T) {
 	var scans atomic.Int32
-	resetSearchRebuildForTest(t, 20*time.Millisecond, func(seen uint64) error {
+	resetSearchRebuildForTest(t, 20*time.Millisecond, func() (int64, error) {
 		n := scans.Add(1)
 		if n == 1 {
 			RequestActiveFilmSearchIndexRebuild()
-			return errors.New("scan failed")
+			return 0, errors.New("scan failed")
 		}
-		notifySearchIndexIfCurrent(seen, 3, 3, "done")
-		return nil
+		return 3, nil
 	})
 	RequestActiveFilmSearchIndexRebuild()
 	waitScans(t, &scans, 2)
@@ -158,6 +157,47 @@ func TestBuildAndStoreClearsSearchIndexBuilding(t *testing.T) {
 	}
 	got := GetLatestSearchIndexProgress()
 	if got.Status != "done" || got.Total != 1 || got.Current != 1 {
+		t.Fatalf("progress=%+v", got)
+	}
+}
+
+// 监听方收到重建终态时，running 必须已经清掉。
+// 否则封口队列会按残留的 running 判断「重建还在跑」而停下，之后再也等不到终态。
+var rebuildDoneSawRunning atomic.Int32 // 0 未观察，1 已清，2 仍在跑
+var watchRebuildDone atomic.Bool
+var rebuildDoneListener sync.Once
+
+func TestSearchRebuildClearsRunningBeforeDone(t *testing.T) {
+	rebuildDoneListener.Do(func() {
+		AddSearchIndexProgressListener(func(p SearchIndexProgress) {
+			// 终态在重建锁里发，这里直接读 running。
+			if watchRebuildDone.Load() && p.Status == "done" {
+				if searchRebuild.running {
+					rebuildDoneSawRunning.Store(2)
+				} else {
+					rebuildDoneSawRunning.Store(1)
+				}
+			}
+		})
+	})
+	var scans atomic.Int32
+	resetSearchRebuildForTest(t, 10*time.Millisecond, func() (int64, error) {
+		scans.Add(1)
+		return 5, nil
+	})
+	rebuildDoneSawRunning.Store(0)
+	watchRebuildDone.Store(true)
+	t.Cleanup(func() { watchRebuildDone.Store(false) })
+
+	RequestActiveFilmSearchIndexRebuild()
+	waitScans(t, &scans, 1)
+	switch rebuildDoneSawRunning.Load() {
+	case 0:
+		t.Fatal("没有收到重建终态")
+	case 2:
+		t.Fatal("发 done 时 running 还没清")
+	}
+	if got := GetLatestSearchIndexProgress(); got.Status != "done" || got.Total != 5 {
 		t.Fatalf("progress=%+v", got)
 	}
 }

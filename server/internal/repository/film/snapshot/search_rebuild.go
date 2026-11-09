@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -124,6 +125,7 @@ func SearchRebuildScheduled() bool {
 
 // WithSearchRebuildScheduled 持有重建锁调用 fn，传入 SearchRebuildScheduled 的结果。
 // 重建收尾会持有这把锁通知监听，调用方要同时拿自己的锁时只能在 fn 里拿。
+// 锁不可重入：fn 里不能再调 SearchRebuildScheduled、IsSearchIndexRebuilding、RequestActiveFilmSearchIndexRebuild。
 func WithSearchRebuildScheduled(fn func(scheduled bool)) {
 	searchRebuild.mu.Lock()
 	defer searchRebuild.mu.Unlock()
@@ -153,15 +155,22 @@ func runSearchRebuild() {
 		seen := searchRebuild.gen
 		searchRebuild.mu.Unlock()
 
-		err := scanActiveFilmSearchIndex(seen)
-		if err != nil {
+		count, err := scanActiveFilmSearchIndex()
+		if err != nil && !errors.Is(err, errSearchRebuildSkipped) {
 			log.Printf("[ActiveReadModel] 检索索引重建失败: %v", err)
-			notifySearchIndexIfCurrent(seen, 0, 0, "idle")
 		}
 
+		// 清 running 和发终态在同一把锁里：监听方收到 done 时，重建一定已经不算在跑，
+		// 封口队列不会因为残留的 running 停下来等一个不会再来的终态。
+		// 代数变了说明有更新的请求，本轮不发终态，接着重扫。
 		searchRebuild.mu.Lock()
 		if searchRebuild.gen == seen {
 			searchRebuild.running = false
+			if err != nil {
+				NotifySearchIndexProgress(0, 0, "idle")
+			} else {
+				NotifySearchIndexProgress(count, count, "done")
+			}
 			searchRebuild.mu.Unlock()
 			return
 		}
@@ -179,11 +188,14 @@ func notifySearchIndexIfCurrent(seen uint64, total, current int64, status string
 	NotifySearchIndexProgress(total, current, status)
 }
 
-func scanAndStoreActiveFilmSearchIndex(seen uint64) error {
+// errSearchRebuildSkipped 没有版本或没有数据库，不扫库，终态记 idle。
+var errSearchRebuildSkipped = errors.New("检索索引重建跳过：无版本或数据库")
+
+// scanAndStoreActiveFilmSearchIndex 全库扫描并换上新索引，返回影片数。终态由 runSearchRebuild 发。
+func scanAndStoreActiveFilmSearchIndex() (int64, error) {
 	version := currentSearchIndexVersion()
 	if version == "" || db.Mdb == nil {
-		notifySearchIndexIfCurrent(seen, 0, 0, "idle")
-		return nil
+		return 0, errSearchRebuildSkipped
 	}
 	activeFilmSearchMetasMu.Lock()
 	defer activeFilmSearchMetasMu.Unlock()
@@ -191,7 +203,7 @@ func scanAndStoreActiveFilmSearchIndex(seen uint64) error {
 	started := time.Now()
 	items, plays, err := loadSearchIndexParts(version)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	attachPlaySources(items, plays)
 	plays = nil
@@ -199,8 +211,7 @@ func scanAndStoreActiveFilmSearchIndex(seen uint64) error {
 	activeFilmSearchMetas.Store(idx)
 	cost := time.Since(started).Round(time.Millisecond)
 	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s count=%d cost=%s", version, len(items), cost)
-	notifySearchIndexIfCurrent(seen, int64(len(items)), int64(len(items)), "done")
-	return nil
+	return int64(len(items)), nil
 }
 
 func currentSearchIndexVersion() string {
