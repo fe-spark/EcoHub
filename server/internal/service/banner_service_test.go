@@ -410,8 +410,8 @@ func TestBannerCascadeDelete(t *testing.T) {
 
 	// 定时清理空片：同样删轮播。
 	gdb.Model(&model.FilmIndex{}).Where("mid = ?", 2).Update("name", "")
-	if cleaned := filmrepo.CleanEmptyFilms(); cleaned == 0 {
-		t.Fatalf("expected empty film cleaned")
+	if cleaned, err := filmrepo.CleanEmptyFilms(); err != nil || cleaned == 0 {
+		t.Fatalf("expected empty film cleaned, got %d, %v", cleaned, err)
 	}
 	if count("mid = ?", 2) != 0 {
 		t.Fatalf("cleaning empty film should delete its banner")

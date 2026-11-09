@@ -107,3 +107,98 @@ func TestCleanOrphanRows_ReturnsError(t *testing.T) {
 		t.Fatalf("expected error when movie_source_mapping table is missing")
 	}
 }
+
+// 预检查认为是孤儿、但在 DELETE 之前 film_index 写入了该 mid：删除语句必须原子复核，保留这些行。
+func TestCleanOrphanRows_FilmAppearsBeforeDeleteSurvives(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	origScan, origDelete := orphanScanBatchSize, orphanDeleteBatchSize
+	orphanScanBatchSize, orphanDeleteBatchSize = 2, 1
+	defer func() {
+		db.Rdb = origRdb
+		orphanScanBatchSize, orphanDeleteBatchSize = origScan, origDelete
+		orphanBeforeDeleteHook = nil
+	}()
+
+	gdb := setupFilmZeroTestDB(t)
+
+	// mid 1、2、3 都没有 film_index；mid 2 会在预检查后“并发”写入。
+	for mid := int64(1); mid <= 3; mid++ {
+		gdb.Create(&model.FilmSourcePlaylist{Mid: mid, SourceId: "src1", LineKind: "play", Content: "[]"})
+		gdb.Create(&model.MovieMatchKey{Mid: mid, MatchKey: "k"})
+		gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: mid * 100, GlobalMid: mid})
+	}
+	const racedMid = int64(2)
+	hookCalls := 0
+	orphanBeforeDeleteHook = func(table string, orphans []int64) {
+		hookCalls++
+		for _, mid := range orphans {
+			if mid != racedMid {
+				continue
+			}
+			var n int64
+			gdb.Unscoped().Model(&model.FilmIndex{}).Where("mid = ?", racedMid).Count(&n)
+			if n == 0 {
+				gdb.Create(&model.FilmIndex{
+					FilmIndexIdentity: model.FilmIndexIdentity{Mid: racedMid, FirstSourceId: "src1"},
+					FilmIndexContent:  model.FilmIndexContent{Name: "new"},
+				})
+			}
+		}
+	}
+
+	n, err := CleanOrphanPlaylists()
+	if err != nil {
+		t.Fatalf("CleanOrphanPlaylists: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("playlists cleaned = %d, want 2 (mid 2 must survive)", n)
+	}
+	if hookCalls == 0 {
+		t.Fatalf("hook not called")
+	}
+
+	// 对匹配键 / 源映射：先删掉 film_index 让预检查判为孤儿，再由 hook 写回。
+	gdb.Unscoped().Where("mid = ?", racedMid).Delete(&model.FilmIndex{})
+	k, err := CleanOrphanMatchKeysAndMappings()
+	if err != nil {
+		t.Fatalf("CleanOrphanMatchKeysAndMappings: %v", err)
+	}
+	if k != 4 {
+		t.Fatalf("keys+mappings cleaned = %d, want 4 (mid 2 must survive)", k)
+	}
+
+	var cnt int64
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("mid = ?", racedMid).Count(&cnt)
+	if cnt != 1 {
+		t.Fatalf("raced playlist deleted")
+	}
+	gdb.Model(&model.MovieMatchKey{}).Where("mid = ?", racedMid).Count(&cnt)
+	if cnt != 1 {
+		t.Fatalf("raced match key deleted")
+	}
+	gdb.Model(&model.MovieSourceMapping{}).Where("global_mid = ?", racedMid).Count(&cnt)
+	if cnt != 1 {
+		t.Fatalf("raced mapping deleted")
+	}
+	gdb.Model(&model.FilmSourcePlaylist{}).Count(&cnt)
+	if cnt != 1 {
+		t.Fatalf("playlists left = %d, want 1", cnt)
+	}
+}
+
+func TestCleanFilmBatches_ReturnsError(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	defer func() { db.Rdb = origRdb }()
+	gdb := setupFilmZeroTestDB(t)
+	if err := gdb.Migrator().DropTable(&model.FilmIndex{}); err != nil {
+		t.Fatalf("drop table: %v", err)
+	}
+	if _, err := CleanEmptyFilms(); err == nil {
+		t.Fatalf("CleanEmptyFilms: expected error")
+	}
+	if _, err := CleanPlaylessFilms(time.Hour); err == nil {
+		t.Fatalf("CleanPlaylessFilms: expected error")
+	}
+}
