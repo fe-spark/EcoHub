@@ -66,14 +66,18 @@ func addFilmCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
 		return -99, fmt.Errorf("定时任务添加失败，Cron 表达式校验失败: %w", err)
 	}
-	return CronCollect.AddFunc(spec, func() {
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Printf("定时任务执行失败 id=%s err=%v", id, err)
-			return
-		}
-		enqueueCronTask(ft)
-	})
+	return CronCollect.AddFunc(spec, func() { fireCronTask(id) })
+}
+
+// fireCronTask 定时任务到点：读取最新配置后入队。读取失败时告警，避免任务静默不跑。
+func fireCronTask(id string) {
+	ft, err := repository.GetFilmTaskById(id)
+	if err != nil {
+		syslog.Errorf("[Cron] 定时任务到点但读取任务配置失败 id=%s err=%v", id, err)
+		emitCronFailedNotify(id, id, fmt.Sprintf("读取定时任务配置失败，本轮未执行: %v", err))
+		return
+	}
+	enqueueCronTask(ft)
 }
 
 // AddAutoUpdateCron 添加所有已启用站点的影片更新定时任务。
@@ -160,7 +164,14 @@ func runTaskBody(ft model.FilmCollectTask) {
 
 	switch ft.Model {
 	case model.TaskModelAutoCollect:
-		AutoCollectTriggered(model.CollectTriggerCron, ft.Time)
+		if err := autoCollect(model.CollectTriggerCron, ft.Time); err != nil {
+			remark := strings.TrimSpace(ft.Remark)
+			if remark == "" {
+				remark = "自动采集"
+			}
+			syslog.Errorf("[Cron] %s 失败: %v", remark, err)
+			emitCronFailedNotify(ft.Id, remark, err.Error())
+		}
 		log.Println("执行一次已启用站点采集")
 	case model.TaskModelOrphanClean:
 		executeOrphanCleanTask(ft)
