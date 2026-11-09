@@ -1,11 +1,11 @@
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import {
   BannerRecord,
+  BannerFields,
   BannerFormValues,
   FilmOption,
   EditorMode,
   resolvePreviewPicture,
-  resolveEditablePicture,
 } from "./types";
 
 export async function uploadBannerFile(file: File): Promise<string> {
@@ -25,71 +25,97 @@ export function initBannerFormValues(
   currentRow: BannerRecord | null,
 ): Partial<BannerFormValues> {
   if (mode === "edit" && currentRow) {
-    const isCustom = currentRow.isCustomPic === true || Boolean(currentRow.customPicture?.trim());
-    const rawSlide = (currentRow.pictureSlide || "").trim();
-    const rawPic = (currentRow.picture || "").trim();
-    const rawPoster = (currentRow.poster || "").trim();
-    const validSlide = (rawSlide && rawSlide !== rawPic && rawSlide !== rawPoster) ? rawSlide : "";
+    const isCustom = currentRow.imageMode === "custom";
     return {
       mid: currentRow.mid,
       isCustomPic: isCustom,
-      picture: isCustom ? resolveEditablePicture(currentRow) : "",
-      pictureSlide: isCustom ? validSlide : "",
+      picture: isCustom ? currentRow.overrides?.poster || "" : "",
+      pictureSlide: isCustom ? currentRow.overrides?.backdrop || "" : "",
     };
   }
   return { isCustomPic: false };
 }
 
-interface BuildPayloadParams {
+export type BannerScrapedData = {
+  score?: number;
+  blurb?: string;
+  tmdbId?: number;
+};
+
+interface BuildFieldsParams {
   values: BannerFormValues;
   currentRow: BannerRecord | null;
-  selectedFilm: FilmOption | null;
-  isReplacingFilm: boolean;
-  scrapedData?: {
-    score?: number;
-    blurb?: string;
-    tmdbId?: number;
-  };
+  scrapedData: BannerScrapedData;
 }
 
-export function buildBannerPayload({
-  values,
-  currentRow,
-  selectedFilm,
-  isReplacingFilm,
-  scrapedData,
-}: BuildPayloadParams): BannerRecord {
+/**
+ * 编辑抽屉提交的字段。新增给全量；编辑只给改过的字段。
+ * scrapedData 只放 TMDB 填入的值；恢复片库默认时清空为 {}，编辑时据此清除覆盖。
+ */
+export function buildBannerFields({ values, currentRow, scrapedData }: BuildFieldsParams): BannerFields {
   const isCustom = Boolean(values.isCustomPic);
-  const customPic = isCustom ? (values.picture || "").trim() : "";
-  const customSlide = isCustom ? (values.pictureSlide || "").trim() : "";
-  const baseFilm = isReplacingFilm ? selectedFilm : (selectedFilm || currentRow);
-  const livePic = baseFilm?.picture || "";
-  const rawLiveSlide = baseFilm?.pictureSlide?.trim() || "";
-  const liveSlide = (rawLiveSlide && rawLiveSlide !== livePic) ? rawLiveSlide : "";
-  const finalSlide = isCustom ? customSlide : liveSlide;
-
-  const rawYear = baseFilm?.year;
-  const parsedYear = typeof rawYear === "number" ? rawYear : parseInt(String(rawYear || "0"), 10) || 0;
-
-  return {
-    id: currentRow?.id || "",
-    mid: Number(values.mid || baseFilm?.id || 0),
-    name: String(baseFilm?.name || "").trim(),
-    cName: String(baseFilm?.cName || "").trim(),
-    year: parsedYear,
-    poster: isCustom && customPic ? customPic : livePic,
-    picture: isCustom && customPic ? customPic : livePic,
-    pictureSlide: finalSlide,
-    customPicture: isCustom ? customPic : "",
-    sort: currentRow?.sort ?? 0,
-    remark: selectedFilm?.remarks || (!isReplacingFilm ? (currentRow?.remark || "") : ""),
-    isCustomPic: isCustom,
-    source: currentRow?.source || "manual",
-    isPinned: false,
-    score: scrapedData?.score ?? (currentRow?.score || selectedFilm?.score || 0),
-    blurb: scrapedData?.blurb ?? (currentRow?.blurb || (selectedFilm as any)?.blurb || ""),
-    tmdbId: scrapedData?.tmdbId ?? (currentRow?.tmdbId || (selectedFilm as any)?.tmdbId || 0),
+  const poster = isCustom ? (values.picture || "").trim() : "";
+  const backdrop = isCustom ? (values.pictureSlide || "").trim() : "";
+  const target: Required<Omit<BannerFields, "year">> = {
+    mid: Number(values.mid || 0),
+    imageMode: isCustom ? "custom" : "follow",
+    poster,
+    backdrop,
+    blurb: scrapedData.blurb || "",
+    score: scrapedData.score || 0,
+    tmdbId: scrapedData.tmdbId || 0,
   };
+  if (!currentRow) {
+    const fields: BannerFields = { mid: target.mid, imageMode: target.imageMode };
+    if (isCustom) {
+      fields.poster = poster;
+      fields.backdrop = backdrop;
+    }
+    if (target.blurb) fields.blurb = target.blurb;
+    if (target.score) fields.score = target.score;
+    if (target.tmdbId) fields.tmdbId = target.tmdbId;
+    return fields;
+  }
+
+  const prev = currentRow.overrides;
+  const fields: BannerFields = {};
+  if (target.mid !== Number(currentRow.mid)) {
+    // 换片后服务端会清掉 TMDB 和文字覆盖，这里按新片重新给。
+    fields.mid = target.mid;
+    fields.imageMode = target.imageMode;
+    if (isCustom) {
+      fields.poster = poster;
+      fields.backdrop = backdrop;
+    }
+    if (target.blurb) fields.blurb = target.blurb;
+    if (target.score) fields.score = target.score;
+    if (target.tmdbId) fields.tmdbId = target.tmdbId;
+    return fields;
+  }
+  if (target.imageMode !== (currentRow.imageMode || "follow")) fields.imageMode = target.imageMode;
+  if (isCustom && poster !== (prev?.poster || "")) fields.poster = poster;
+  if (isCustom && backdrop !== (prev?.backdrop || "")) fields.backdrop = backdrop;
+  if (target.blurb !== (prev?.blurb || "")) fields.blurb = target.blurb;
+  if (target.score !== (prev?.score || 0)) fields.score = target.score;
+  if (target.tmdbId !== (currentRow.tmdbId || 0)) fields.tmdbId = target.tmdbId;
+  return fields;
+}
+
+/** 排片预览的一行转成发布字段：只给和片库不同的值。 */
+export function deckItemFields(item: BannerRecord): BannerFields {
+  const lib = item.library;
+  const custom = item.imageMode === "custom" || Boolean(item.isCustomPic);
+  const fields: BannerFields = { mid: Number(item.mid), imageMode: custom ? "custom" : "follow" };
+  if (custom) {
+    fields.poster = (item.customPicture || item.picture || item.poster || "").trim();
+    const slide = (item.pictureSlide || "").trim();
+    fields.backdrop = slide && slide !== fields.poster ? slide : "";
+  }
+  if (item.blurb && item.blurb !== (lib?.blurb || "")) fields.blurb = item.blurb;
+  if (item.score && item.score !== (lib?.score || 0)) fields.score = item.score;
+  if (item.year && item.year !== (lib?.year || 0)) fields.year = item.year;
+  if (item.tmdbId) fields.tmdbId = item.tmdbId;
+  return fields;
 }
 
 export function computeTmdbPrefillUpdates(

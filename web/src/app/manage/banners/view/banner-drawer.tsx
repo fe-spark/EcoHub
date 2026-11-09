@@ -22,7 +22,7 @@ import {
   CompassOutlined,
 } from "@ant-design/icons";
 
-import { ApiPost } from "@/lib/client-api";
+import { ApiPatch, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ImagePicker from "@/app/manage/components/image-picker";
@@ -37,7 +37,8 @@ import {
   UploadFieldName,
 } from "./types";
 import {
-  buildBannerPayload,
+  BannerScrapedData,
+  buildBannerFields,
   computeTmdbPrefillUpdates,
   fetchFilmOption,
   computeBannerPreview,
@@ -52,6 +53,7 @@ const { Title, Text } = Typography;
 interface BannerDrawerProps {
   open: boolean;
   mode: EditorMode;
+  sourceId: string;
   currentRow: BannerRecord | null;
   tmdbEnabled?: boolean;
   onClose: () => void;
@@ -61,6 +63,7 @@ interface BannerDrawerProps {
 export default function BannerDrawer({
   open,
   mode,
+  sourceId,
   currentRow,
   tmdbEnabled = false,
   onClose,
@@ -75,11 +78,8 @@ export default function BannerDrawer({
   const [filmPickerOpen, setFilmPickerOpen] = useState(false);
   const [tmdbOpen, setTmdbOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [scrapedData, setScrapedData] = useState<{
-    score?: number;
-    blurb?: string;
-    tmdbId?: number;
-  }>({});
+  // 简介、评分、TMDB 编号的覆盖值；编辑时从行的覆盖项初始化。
+  const [scrapedData, setScrapedData] = useState<BannerScrapedData>({});
 
   const watchedPicture = Form.useWatch("picture", form);
   const watchedPictureSlide = Form.useWatch("pictureSlide", form);
@@ -142,9 +142,9 @@ export default function BannerDrawer({
     if (mode === "edit" && currentRow?.mid) {
       loadFilmDetail(currentRow.mid).catch(() => {});
       setScrapedData({
-        score: currentRow.score,
-        blurb: currentRow.blurb,
-        tmdbId: currentRow.tmdbId,
+        score: currentRow.overrides?.score || undefined,
+        blurb: currentRow.overrides?.blurb || undefined,
+        tmdbId: currentRow.tmdbId || undefined,
       });
     }
   }, [open, mode, currentRow, form, loadFilmDetail]);
@@ -213,7 +213,7 @@ export default function BannerDrawer({
     const updates = computeTmdbPrefillUpdates(data, fields, currentValues, selectedFilm);
     form.setFieldsValue(updates);
 
-    const nextScraped: { score?: number; blurb?: string; tmdbId?: number } = { ...scrapedData };
+    const nextScraped: BannerScrapedData = { ...scrapedData };
     if (data.id || data.tmdbId) {
       nextScraped.tmdbId = Number(data.id || data.tmdbId);
     }
@@ -240,19 +240,21 @@ export default function BannerDrawer({
     try {
       await form.validateFields();
       const values = form.getFieldsValue(true) as BannerFormValues;
-      const payload = buildBannerPayload({
-        values,
-        currentRow,
-        selectedFilm,
-        isReplacingFilm,
-        scrapedData,
-      });
-      if (!payload.mid) {
+      const editing = mode === "edit" && currentRow ? currentRow : null;
+      const fields = buildBannerFields({ values, currentRow: editing, scrapedData });
+      if (!editing && !fields.mid) {
         message.error("请选择影片");
         return;
       }
+      if (editing && Object.keys(fields).length === 0) {
+        message.info("没有改动");
+        onClose();
+        return;
+      }
       setSubmitting(true);
-      const resp = await ApiPost("/manage/banner/save", payload);
+      const resp = editing
+        ? await ApiPatch(`/manage/banners/${encodeURIComponent(editing.id)}`, fields)
+        : await ApiPost("/manage/banners", { sourceId, ...fields });
       if (resp.code === 0) {
         message.success(resp.msg || "保存成功");
         onSuccess();
@@ -438,6 +440,7 @@ export default function BannerDrawer({
       <FilmPicker
         open={filmPickerOpen}
         selectedMid={currentMid}
+        sourceId={sourceId}
         onCancel={() => setFilmPickerOpen(false)}
         onSelect={onFilmSelect}
       />

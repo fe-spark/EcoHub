@@ -31,9 +31,6 @@ func clearCategorySyncRedisCaches() {
 func finalizeCategorySync() {
 	repository.RefreshCategoryCache()
 	clearCategorySyncRedisCaches()
-	if _, _, err := ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil {
-		syslog.Errorf("[Banner] 分类同步后初始化排片规则失败: %v", err)
-	}
 }
 
 // StartCollect 执行对指定站点的采集任务

@@ -34,25 +34,25 @@
   overflow-y: auto; // Prevent vertical overflow clipping
 }
 
-/* Fix: Use explicit :global(.selector) to avoid Ambiguous CSS Module error */
-.errorOverlay :global(.ant-result) {
+/* 错误提示：通过 Result 的 classNames 挂本地类 */
+.errorOverlay .result {
   padding: 0 !important;
   margin: 0 !important;
   width: 100%;
 }
 
-.errorOverlay :global(.ant-result-icon) {
+.errorOverlay .resultIcon {
   margin-bottom: 24px !important;
   transition: all 0.3s ease;
 }
 
-.errorOverlay :global(.ant-result-title) {
+.errorOverlay .resultTitle {
   color: var(--player-text-1) !important;
   font-size: 20px !important;
   transition: all 0.3s ease;
 }
 
-.errorOverlay :global(.ant-result-subtitle) {
+.errorOverlay .resultSubtitle {
   color: var(--player-text-2) !important;
   font-size: 14px !important;
   line-height: 1.6;
@@ -61,7 +61,7 @@
   transition: all 0.3s ease;
 }
 
-.errorOverlay :global(.ant-result-extra) {
+.errorOverlay .resultExtra {
   margin-top: 24px !important;
 }
 
@@ -72,24 +72,24 @@
     justify-content: center;
   }
 
-  .errorOverlay :global(.ant-result-icon) {
+  .errorOverlay .resultIcon {
     margin-bottom: 12px !important;
 
-    & :global(.anticon) {
+    .resultIconGlyph {
       font-size: 40px !important; // Smaller icon
     }
   }
 
-  .errorOverlay :global(.ant-result-title) {
+  .errorOverlay .resultTitle {
     font-size: 16px !important; // Smaller title
   }
 
-  .errorOverlay :global(.ant-result-subtitle) {
+  .errorOverlay .resultSubtitle {
     font-size: 12px !important; // Smaller subtitle
     padding: 0 12px;
   }
 
-  .errorOverlay :global(.ant-result-extra) {
+  .errorOverlay .resultExtra {
     margin-top: 16px !important;
     display: flex;
     flex-direction: column;

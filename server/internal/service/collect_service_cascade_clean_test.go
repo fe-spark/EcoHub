@@ -29,7 +29,7 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSourcePlaylist{},
 		&model.MovieMatchKey{},
 		&model.MovieSourceMapping{},
-		&model.Banner{},
+		&model.BannerSlot{},
 		&model.FilmTMDBScrape{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
@@ -72,7 +72,7 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 	gdb.Create(&model.MovieMatchKey{Mid: 1, MatchKey: "k1"})
 	gdb.Create(&model.MovieMatchKey{Mid: 3, MatchKey: "k3"})
 	gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: 1, GlobalMid: 1})
-	gdb.Create(&model.Banner{Id: "b1", Mid: 1, Name: "源1影片"})
+	gdb.Create(&model.BannerSlot{Id: "b1", SourceId: "src1", Mid: 1})
 	gdb.Create(&model.FilmTMDBScrape{Mid: 1, TmdbID: 11, MediaType: "movie"})
 	gdb.Create(&model.FilmTMDBScrape{Mid: 2, TmdbID: 22, MediaType: "movie"})
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "电影"})
@@ -117,7 +117,7 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 	var scrapes int64
 	gdb.Model(&model.MovieMatchKey{}).Where("mid IN ?", []int64{1, 3}).Count(&keys)
 	gdb.Model(&model.MovieSourceMapping{}).Where("source_id = ?", "src1").Count(&maps)
-	gdb.Model(&model.Banner{}).Where("mid = ?", 1).Count(&banners)
+	gdb.Model(&model.BannerSlot{}).Where("mid = ?", 1).Count(&banners)
 	gdb.Model(&model.FilmTMDBScrape{}).Where("mid = ?", 1).Count(&scrapes)
 	if keys != 0 || maps != 0 || banners != 0 || scrapes != 0 {
 		t.Fatalf("residue keys=%d maps=%d banners=%d scrapes=%d", keys, maps, banners, scrapes)

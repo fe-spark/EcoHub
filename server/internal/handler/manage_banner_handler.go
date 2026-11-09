@@ -1,171 +1,136 @@
 package handler
 
 import (
-	"strings"
+	"net/http"
 
-	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
-	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
-// BannerList 获取当前首页轮播列表
+// bannerConflictCode 版本号冲突时响应体里的 code，HTTP 状态为 409。
+const bannerConflictCode = http.StatusConflict
+
+func bannerFail(err error, c *gin.Context) {
+	switch {
+	case service.IsBannerConflict(err):
+		dto.CustomResult(http.StatusConflict, bannerConflictCode, nil, err.Error(), c)
+	case service.IsBannerUserError(err):
+		dto.Failed(err.Error(), c)
+	default:
+		dto.Failed("操作失败: "+err.Error(), c)
+	}
+}
+
+// BannerList GET /manage/banners?sourceId= 一个站点的轮播，不传时用首选站。
 func (h *ManageHandler) BannerList(c *gin.Context) {
-	bl, err := service.ManageSvc.GetBanners()
+	view, err := service.BannerSvc.List(c.Query("sourceId"))
 	if err != nil {
-		dto.Failed(err.Error(), c)
+		bannerFail(err, c)
 		return
 	}
-	dto.Success(bl, "获取轮播列表成功", c)
+	dto.Success(view, "获取轮播列表成功", c)
 }
 
-// BannerSave 保存轮播数据（新增或更新）
-func (h *ManageHandler) BannerSave(c *gin.Context) {
-	var b model.Banner
-	if err := c.ShouldBindJSON(&b); err != nil {
-		dto.Failed("Banner 参数提交异常", c)
-		return
-	}
-	bl, err := service.ManageSvc.GetBanners()
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	b.Id = strings.TrimSpace(b.Id)
-	if b.Id == "" {
-		id, err := utils.GenerateSalt()
-		if err != nil {
-			dto.Failed(err.Error(), c)
-			return
-		}
-		b.Id = id
-		b.Sort = int64(len(bl) + 1)
-		bl = append(bl, b)
-		if err := service.ManageSvc.SaveBanners(bl); err != nil {
-			dto.Failed("添加轮播失败: "+err.Error(), c)
-			return
-		}
-		dto.SuccessOnlyMsg("添加轮播成功", c)
-		return
-	}
-	found := false
-	for i, item := range bl {
-		if item.Id == b.Id {
-			bl[i] = b
-			found = true
-			break
-		}
-	}
-	if !found {
-		dto.Failed("未匹配到对应轮播项", c)
-		return
-	}
-	if err := service.ManageSvc.SaveBanners(bl); err != nil {
-		dto.Failed("更新轮播失败: "+err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("更新轮播成功", c)
+type bannerCreateReq struct {
+	SourceId string `json:"sourceId"`
+	service.BannerFields
 }
 
-// BannerDelete 删除轮播数据（批量/单条，数组入参）
-func (h *ManageHandler) BannerDelete(c *gin.Context) {
-	var req struct {
-		Ids []string `json:"ids"`
-	}
+// BannerCreate POST /manage/banners 新增一行，立即生效。
+func (h *ManageHandler) BannerCreate(c *gin.Context) {
+	var req bannerCreateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	idMap := make(map[string]struct{}, len(req.Ids))
-	for _, id := range req.Ids {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			idMap[id] = struct{}{}
-		}
-	}
-	if len(idMap) == 0 {
-		dto.Failed("缺少 ID 参数", c)
-		return
-	}
-	bl, err := service.ManageSvc.GetBanners()
+	item, err := service.BannerSvc.Create(req.SourceId, req.BannerFields)
 	if err != nil {
-		dto.Failed(err.Error(), c)
+		bannerFail(err, c)
 		return
 	}
-	newBl := make([]model.Banner, 0, len(bl))
-	for _, b := range bl {
-		if _, ok := idMap[b.Id]; !ok {
-			newBl = append(newBl, b)
-		}
+	dto.Success(item, "添加轮播成功", c)
+}
+
+// BannerUpdate PATCH /manage/banners/:id 只改提交了的字段，立即生效。
+// 空字符串清除文字/图片覆盖；score、year 填 0 等于清除覆盖、显示片库值。换片时刮削和覆盖一并清除。
+func (h *ManageHandler) BannerUpdate(c *gin.Context) {
+	var req service.BannerFields
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
 	}
-	if err := service.ManageSvc.SaveBanners(newBl); err != nil {
-		dto.Failed("删除失败: "+err.Error(), c)
+	item, err := service.BannerSvc.Update(c.Param("id"), req)
+	if err != nil {
+		bannerFail(err, c)
+		return
+	}
+	dto.Success(item, "更新轮播成功", c)
+}
+
+// BannerDelete DELETE /manage/banners/:id 删除一行，立即生效。
+func (h *ManageHandler) BannerDelete(c *gin.Context) {
+	if err := service.BannerSvc.Delete(c.Param("id")); err != nil {
+		bannerFail(err, c)
 		return
 	}
 	dto.SuccessOnlyMsg("删除轮播成功", c)
 }
 
-// BannerSaveDeck 批量保存排片卡组与排序
-func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
-	var req model.Banners
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("排片卡组数据格式异常", c)
-		return
-	}
-	if err := service.ManageSvc.SaveBannerDeck(req); err != nil {
-		dto.Failed("保存排片卡组失败: "+err.Error(), c)
-		return
-	}
-	banners, err := service.ManageSvc.GetBanners()
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.Success(banners, "排片卡组已保存并生效", c)
+type bannerOrderReq struct {
+	SourceId string   `json:"sourceId"`
+	Revision string   `json:"revision"`
+	Ids      []string `json:"ids"`
 }
 
-// BannerQuickConfigGet 读取已保存的一键排片配置。
-func (h *ManageHandler) BannerQuickConfigGet(c *gin.Context) {
-	view, err := service.ManageSvc.GetBannerQuickConfig()
-	if err != nil {
-		dto.Failed(err.Error(), c)
+// BannerOrder PUT /manage/banners/order 只提交顺序。revision 不一致返回 409。
+func (h *ManageHandler) BannerOrder(c *gin.Context) {
+	var req bannerOrderReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
 		return
 	}
-	dto.Success(view, "获取排片配置成功", c)
+	view, err := service.BannerSvc.Reorder(req.SourceId, req.Revision, req.Ids)
+	if err != nil {
+		bannerFail(err, c)
+		return
+	}
+	dto.Success(view, "排序已保存", c)
 }
 
-// BannerQuickConfigSave 保存一键排片配置。不生成卡组，不替换线上轮播。
-func (h *ManageHandler) BannerQuickConfigSave(c *gin.Context) {
-	var req service.BannerQuickConfigInput
+// BannerGenerate POST /manage/banners/generate 按提交的策略和数量生成预览，不落库。
+func (h *ManageHandler) BannerGenerate(c *gin.Context) {
+	var req service.BannerGenerateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("排片配置参数异常", c)
+		dto.Failed("请求参数异常", c)
 		return
 	}
-	view, err := service.ManageSvc.SaveBannerQuickConfig(req)
+	result, err := service.BannerSvc.Generate(c.Request.Context(), req)
 	if err != nil {
-		dto.Failed(err.Error(), c)
+		bannerFail(err, c)
 		return
 	}
-	dto.Success(view, "配置已保存", c)
+	dto.Success(result, "排片完成", c)
 }
 
-// BannerQuickGenerate 一键排片：按选择分类与策略（最热/高分/最新）一键生成排片列表（支持 SSE 实时事件流）
-func (h *ManageHandler) BannerQuickGenerate(c *gin.Context) {
-	var req service.OneClickGenerateReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("排片参数解析异常: "+err.Error(), c)
-		return
-	}
+type bannerDeckReq struct {
+	SourceId string                 `json:"sourceId"`
+	Revision string                 `json:"revision"`
+	Items    []service.BannerFields `json:"items"`
+}
 
-	stream, ok := openSSE(c)
-	if !ok {
+// BannerDeck PUT /manage/banners/deck 发布排片，整组替换该站轮播。revision 不一致返回 409。
+func (h *ManageHandler) BannerDeck(c *gin.Context) {
+	var req bannerDeckReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
 		return
 	}
-	if err := service.ManageSvc.OneClickGenerateDeckStream(c.Request.Context(), req, func(evt service.OneClickProgressEvent) {
-		_ = stream.SendData(evt)
-	}); err != nil {
-		_ = stream.SendData(gin.H{"error": err.Error()})
+	view, err := service.BannerSvc.PublishDeck(req.SourceId, req.Revision, req.Items)
+	if err != nil {
+		bannerFail(err, c)
+		return
 	}
+	dto.Success(view, "排片已发布", c)
 }

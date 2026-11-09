@@ -51,6 +51,23 @@
   flex-wrap: wrap;
 }
 
+.sourceField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sourceLabel {
+  flex: none;
+  font-size: 13px;
+  line-height: 22px;
+  color: var(--ant-color-text-secondary);
+}
+
+.sourceSelect {
+  width: 220px;
+}
+
 .countBadge {
   font-size: 12px;
   font-weight: 600;
@@ -316,4 +333,15 @@
   border: 1px dashed var(--ant-color-border);
   border-radius: 12px;
   text-align: center;
+}
+
+/* 影片已失效的行：灰显，仍可排序、删除 */
+.bannerCardUnavailable {
+  border-style: dashed;
+
+  .cardBody {
+    cursor: default;
+    opacity: 0.55;
+    filter: grayscale(1);
+  }
 }

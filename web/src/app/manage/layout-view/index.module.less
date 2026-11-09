@@ -70,7 +70,7 @@ html[data-theme="dark"] .sider {
   background: transparent !important;
   padding: 8px 0;
 
-  :global(.ant-menu-item-selected) {
+  .menuItemSelected {
     font-weight: 600 !important;
   }
 }
@@ -147,17 +147,17 @@ html[data-theme="dark"] .sider {
   flex: 1;
   height: 100%;
 
-  :global(.ant-card) {
+  .contentCard {
     border-radius: 12px !important;
     border: 1px solid var(--ant-color-border-secondary) !important;
   }
 }
 
-html[data-theme="light"] .content :global(.ant-card) {
+html[data-theme="light"] .content .contentCard {
   border: 1px solid #e2e8f0 !important;
 }
 
-html[data-theme="dark"] .content :global(.ant-card) {
+html[data-theme="dark"] .content .contentCard {
   border: 1px solid rgba(255, 255, 255, 0.18) !important;
 }
 

@@ -18,6 +18,14 @@ instance.interceptors.response.use(
     return response.data;
   },
   async (error) => {
+    // 主动取消的请求不提示。
+    if (axios.isCancel(error)) {
+      return Promise.reject(error);
+    }
+    // 版本号冲突交给调用方处理，按普通响应返回（code 为 409）。
+    if (error.response?.status === 409 && error.response.data) {
+      return error.response.data;
+    }
     if (error.response?.status === 401) {
       message.error(error.response.data?.msg || "请先登录");
       window.location.href = "/login";
@@ -31,20 +39,56 @@ instance.interceptors.response.use(
   },
 );
 
+export interface ApiRequestOptions {
+  signal?: AbortSignal;
+}
+
 export const ApiGet = <T = any>(
   url: string,
   params?: Record<string, any>,
   timeout?: number,
+  options?: ApiRequestOptions,
 ): Promise<ApiResponse<T>> => {
-  return instance.get(url, timeout ? { params, timeout } : { params }) as any;
+  return instance.get(url, {
+    params,
+    ...(timeout ? { timeout } : {}),
+    ...(options?.signal ? { signal: options.signal } : {}),
+  }) as any;
 };
 
 export const ApiPost = <T = any>(
   url: string,
   data?: any,
+  options?: ApiRequestOptions,
 ): Promise<ApiResponse<T>> => {
-  return instance.post(url, data) as any;
+  return instance.post(url, data, options) as any;
 };
+
+export const ApiPut = <T = any>(
+  url: string,
+  data?: any,
+  options?: ApiRequestOptions,
+): Promise<ApiResponse<T>> => {
+  return instance.put(url, data, options) as any;
+};
+
+export const ApiPatch = <T = any>(
+  url: string,
+  data?: any,
+  options?: ApiRequestOptions,
+): Promise<ApiResponse<T>> => {
+  return instance.patch(url, data, options) as any;
+};
+
+export const ApiDelete = <T = any>(
+  url: string,
+  options?: ApiRequestOptions,
+): Promise<ApiResponse<T>> => {
+  return instance.delete(url, options) as any;
+};
+
+/** 版本号冲突时服务端返回的 code。 */
+export const API_CONFLICT = 409;
 
 /** 长耗时请求（如批量站点连通性检测），可单独指定超时时间（ms）。 */
 export const ApiPostLong = <T = any>(

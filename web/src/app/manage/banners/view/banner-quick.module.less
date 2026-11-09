@@ -1,5 +1,5 @@
 /* ============================================================
-   一键排片配置抽屉与弹窗 (BannerConfigDrawer & BannerQuickModal)
+   一键排片弹窗：排片配置与进度 (BannerQuickModal)
    ============================================================ */
 .stack {
   display: flex;
@@ -11,7 +11,7 @@
 .configGroup {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .configGroupHeader {
@@ -25,39 +25,123 @@
 .configGroupTitle {
   font-size: 13px;
   font-weight: 600;
+  line-height: 24px;
   color: var(--ant-color-text-secondary);
-  letter-spacing: 0.2px;
 }
 
 .quickActions {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 
-.quickActionBtn {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary);
-  cursor: pointer;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: var(--ant-color-fill-quaternary);
-  border: 1px solid var(--ant-color-border-secondary);
-  transition: all 0.15s ease;
-  user-select: none;
+/* 排序策略：三张单选卡片 */
+.strategyGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 
-  &:hover {
-    color: var(--ant-color-text);
-    border-color: var(--ant-color-border);
-    background: var(--ant-color-fill-tertiary);
+  @media (max-width: 560px) {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
-/* 分类配额网格：通透、规整、自然展开随抽屉滚动 */
+.strategyCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--ant-color-border);
+  border-radius: var(--ant-border-radius-lg, 8px);
+  background: var(--ant-color-bg-container);
+  color: var(--ant-color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+
+  &:hover:not(:disabled) {
+    border-color: var(--ant-color-primary-hover);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--ant-color-primary-bg-hover);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+
+.strategyCardActive {
+  border-color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+
+  .strategyIcon {
+    color: var(--ant-color-white, #fff);
+    background: var(--ant-color-primary);
+  }
+
+  .strategyTitle {
+    color: var(--ant-color-primary);
+  }
+
+  &:hover:not(:disabled) {
+    border-color: var(--ant-color-primary);
+  }
+}
+
+.strategyIcon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--ant-border-radius, 6px);
+  font-size: 16px;
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-tertiary);
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.strategyText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.strategyTitle {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  transition: color 0.2s ease;
+}
+
+.strategyDesc {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分类配额网格 */
 .quotaGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
 }
 
 .quotaItem {
@@ -65,31 +149,27 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
-  border: 1px solid var(--ant-color-border-secondary);
-  transition: border-color 0.15s ease, background 0.15s ease;
-
-  &:hover {
-    border-color: var(--ant-color-border);
-    background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.04));
-  }
+  padding: 6px 8px 6px 12px;
+  border-radius: var(--ant-border-radius-lg, 8px);
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid transparent;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
 }
 
 .quotaItemActive {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.04));
+  border-color: var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-container);
 }
 
 .quotaName {
   min-width: 0;
   font-size: 13px;
-  color: var(--ant-color-text-secondary);
+  color: var(--ant-color-text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 400;
 }
 
 .quotaNameActive {
@@ -97,68 +177,9 @@
   color: var(--ant-color-text);
 }
 
-.quotaHint {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary);
-}
-
-/* 进度面板 */
-.progressPanel {
-  padding: 20px;
-  border-radius: 10px;
-  background: var(--ant-color-fill-quaternary);
-  border: 1px solid var(--ant-color-border-secondary);
-}
-
-.progressHead {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.progressTitle {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ant-color-text);
-}
-
-.progressCount {
-  font-size: 12px;
-  color: var(--ant-color-text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.progressMessage {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--ant-color-text-description);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.progressTags {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--ant-color-border-secondary);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-.progressTagName {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.progressTagCategory {
-  opacity: 0.75;
-  font-size: 10px;
+.quotaInput {
+  flex: none;
+  width: 64px;
 }
 
 /* ============================================================

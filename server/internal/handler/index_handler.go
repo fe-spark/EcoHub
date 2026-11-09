@@ -189,7 +189,8 @@ func parseDailyUpdateExclude(raw string) []int64 {
 
 // CategoriesInfo 分类信息获取
 func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
-	data, err := service.IndexSvc.GetNavCategory()
+	// sourceId 可选：后台一键排片按站点列一级分类；不传时用首选站，行为不变。
+	data, err := service.IndexSvc.GetNavCategory(c.Query("sourceId"))
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return

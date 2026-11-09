@@ -10,8 +10,8 @@ type ConfigBackup struct {
 	AppVersion   string              `json:"appVersion,omitempty"`
 	Site         *BasicConfig        `json:"site,omitempty"`
 	FilmSources  []FilmSource        `json:"filmSources"`
-	Banners      Banners             `json:"banners"`
-	BannerConfig *BannerConfig       `json:"bannerConfig,omitempty"`
+	BannerSlots  []BannerSlot        `json:"bannerSlots"`
+	Banners      []LegacyBanner      `json:"banners,omitempty"` // 旧版备份的全局轮播，只用于导入
 	MappingRules []MappingRuleExport `json:"mappingRules"`
 	Proxy        *ProxyConfig        `json:"proxy,omitempty"`
 	TMDB         *TMDBConfig         `json:"tmdb,omitempty"`

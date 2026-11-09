@@ -58,7 +58,7 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 10})
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "动作"})
 	gdb.Create(&fileDummy{Id: 1})
-	gdb.Create(&model.Banner{Id: "b1", Mid: 200, Name: "测试轮播"})
+	gdb.Create(&model.BannerSlot{Id: "b1", SourceId: "src1", Mid: 200})
 
 	if err := FilmZero(); err != nil {
 		t.Fatalf("FilmZero failed: %v", err)
@@ -71,7 +71,7 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	gdb.Unscoped().Model(&model.MovieSourceMapping{}).Count(&mappingCount)
 	gdb.Unscoped().Model(&model.CategoryMapping{}).Count(&catMapCount)
 	gdb.Unscoped().Model(&model.SourceCategory{}).Count(&srcCatCount)
-	gdb.Model(&model.Banner{}).Count(&bannerCount)
+	gdb.Model(&model.BannerSlot{}).Count(&bannerCount)
 
 	if playlistCount != 0 || fileCount != 0 || mappingCount != 0 || bannerCount != 0 {
 		t.Fatalf("expected inventory tables physically cleared, got playlists=%d files=%d mapping=%d banners=%d",

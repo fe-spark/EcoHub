@@ -30,6 +30,16 @@ var migrations = []Migration{
 		Name:    "分类规则绑定采集站",
 		Run:     migrateMappingRuleSource,
 	},
+	{
+		Version: "20261109_drop_banner_config",
+		Name:    "删除一键排片配置表",
+		Run:     migrateDropBannerConfig,
+	},
+	{
+		Version: "20261109_banner_slot",
+		Name:    "轮播按站点存储，删除旧轮播表",
+		Run:     migrateBannerSlot,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {
