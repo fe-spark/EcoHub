@@ -1,6 +1,7 @@
 package film
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -200,5 +201,39 @@ func TestCleanFilmBatches_ReturnsError(t *testing.T) {
 	}
 	if _, err := CleanPlaylessFilms(time.Hour); err == nil {
 		t.Fatalf("CleanPlaylessFilms: expected error")
+	}
+}
+
+func TestCleanEmptyFilms_MidCursorMultiBatch(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	origBatch := filmCleanBatchSize
+	filmCleanBatchSize = 2
+	defer func() {
+		db.Rdb = origRdb
+		filmCleanBatchSize = origBatch
+	}()
+	gdb := setupFilmZeroTestDB(t)
+
+	// mid 1..9：3 的倍数是空片名（应删），其余保留。
+	for mid := int64(1); mid <= 9; mid++ {
+		name := "keep"
+		if mid%3 == 0 {
+			name = ""
+		}
+		gdb.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid, FirstSourceId: "src1"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: name},
+		})
+	}
+	n, err := CleanEmptyFilms()
+	if err != nil || n != 3 {
+		t.Fatalf("cleaned=%d err=%v, want 3", n, err)
+	}
+	var left []int64
+	gdb.Unscoped().Model(&model.FilmIndex{}).Order("mid").Pluck("mid", &left)
+	if fmt.Sprint(left) != "[1 2 4 5 7 8]" {
+		t.Fatalf("left = %v", left)
 	}
 }
