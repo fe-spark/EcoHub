@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Button, Space, Spin, Empty } from "antd";
+import { Button, Space, Spin, Empty, Select } from "antd";
 import { DesktopOutlined } from "@ant-design/icons";
 
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { API_CONFLICT, ApiDelete, ApiGet, ApiPut } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
@@ -16,8 +16,15 @@ import BannerQuickModal from "./banner-quick-modal";
 import BannerGrid from "./banner-grid";
 import { QuickStrategy } from "./banner-quick-config";
 import { useBannerDeck } from "./use-banner-deck";
-import { BannerRecord, EditorMode } from "./types";
+import { BannerListView, BannerRecord, EditorMode } from "./types";
 import styles from "./index.module.less";
+
+type SiteOption = {
+  id: string;
+  name: string;
+  state: boolean;
+  isPrimary?: boolean;
+};
 
 export default function BannersPageView() {
   const tmdbEnabled = useTmdbEnabled();
@@ -35,6 +42,11 @@ export default function BannersPageView() {
   const [quickModalOpen, setQuickModalOpen] = useState(false);
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false);
   const [quickDeck, setQuickDeck] = useState<BannerRecord[]>([]);
+  const [quickRevision, setQuickRevision] = useState("");
+  // 轮播按站点分开存；为空时服务端取首选站。
+  const [sourceId, setSourceId] = useState("");
+  const [sites, setSites] = useState<SiteOption[]>([]);
+  const revisionRef = useRef("");
   const [quickStrategy, setQuickStrategy] = useState<QuickStrategy>("hot");
 
   // 手动添加/编辑弹窗状态
@@ -50,9 +62,13 @@ export default function BannersPageView() {
   const fetchBanners = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await ApiGet("/manage/banner/list");
-      if (resp.code === 0) {
-        absorbServerList((resp.data || []) as BannerRecord[]);
+      const resp = await ApiGet<BannerListView>("/manage/banners", {
+        sourceId: sourceId || undefined,
+      });
+      if (resp.code === 0 && resp.data) {
+        revisionRef.current = resp.data.revision;
+        absorbServerList(resp.data.items || []);
+        if (!sourceId && resp.data.sourceId) setSourceId(resp.data.sourceId);
       } else {
         messageRef.current.error(resp.msg || "获取轮播列表失败");
       }
@@ -61,11 +77,29 @@ export default function BannersPageView() {
     } finally {
       setLoading(false);
     }
-  }, [absorbServerList]);
+  }, [absorbServerList, sourceId]);
 
   useEffect(() => {
     void fetchBanners();
   }, [fetchBanners]);
+
+  useEffect(() => {
+    ApiGet("/manage/collect/list")
+      .then((resp) => {
+        if (resp.code === 0 && Array.isArray(resp.data)) {
+          setSites(resp.data as SiteOption[]);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSiteChange = (next: string) => {
+    if (next === sourceId) return;
+    // 换站直接丢弃未保存的顺序。
+    replaceList([]);
+    revisionRef.current = "";
+    setSourceId(next);
+  };
 
   // 拖拽只改本地顺序，保存走底部条
   const handleSortList = useCallback(
@@ -94,11 +128,21 @@ export default function BannersPageView() {
     const draft = bannersRef.current;
     setOrderSaving(true);
     try {
-      const resp = await ApiPost("/manage/banner/deck", draft);
-      if (resp.code === 0) {
-        const next = Array.isArray(resp.data) ? (resp.data as BannerRecord[]) : draft;
-        replaceList(next);
+      const resp = await ApiPut<BannerListView>("/manage/banners/order", {
+        sourceId,
+        revision: revisionRef.current,
+        ids: draft.map((item) => item.id),
+      });
+      if (resp.code === 0 && resp.data) {
+        revisionRef.current = resp.data.revision;
+        replaceList(resp.data.items || []);
         message.success(resp.msg || "排片顺序已保存");
+        return;
+      }
+      if (resp.code === API_CONFLICT) {
+        // 列表已被别处改过：拉最新数据，本地顺序尽量保留，再确认一次。
+        message.warning("轮播已被修改，已刷新为最新数据，请确认顺序后再保存");
+        void fetchBanners();
         return;
       }
       message.error(resp.msg || "排序保存失败");
@@ -107,13 +151,13 @@ export default function BannersPageView() {
     } finally {
       setOrderSaving(false);
     }
-  }, [bannersRef, canWrite, message, replaceList]);
+  }, [bannersRef, canWrite, message, replaceList, sourceId, fetchBanners]);
 
   // 删除某一项轮播
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        const resp = await ApiPost("/manage/banner/delete", { ids: [String(id)] });
+        const resp = await ApiDelete(`/manage/banners/${encodeURIComponent(String(id))}`);
         if (resp.code === 0) {
           message.success("删除成功");
           void fetchBanners();
@@ -155,12 +199,23 @@ export default function BannersPageView() {
             <span className={styles.countBadge}>{banners.length}</span>
           </div>
 
-          {/* 右侧：一键排片 */}
+          {/* 右侧：站点与一键排片 */}
           <Space size={8} wrap className={styles.toolbarActions}>
+            <Select
+              style={{ minWidth: 180 }}
+              value={sourceId || undefined}
+              placeholder="选择站点"
+              disabled={orderSaving}
+              onChange={handleSiteChange}
+              options={sites.map((site) => ({
+                value: site.id,
+                label: `${site.name || site.id}${site.isPrimary ? "（首选）" : ""}${site.state ? "" : "（已停用）"}`,
+              }))}
+            />
             <Button
               type="primary"
               size="middle"
-              disabled={!canWrite}
+              disabled={!canWrite || !sourceId}
               onClick={openQuickModal}
             >
               一键排片
@@ -182,7 +237,7 @@ export default function BannersPageView() {
           >
             <Button
               type="primary"
-              disabled={!canWrite}
+              disabled={!canWrite || !sourceId}
               onClick={openCreateEditor}
             >
               添加影片
@@ -204,9 +259,11 @@ export default function BannersPageView() {
       {/* 一键排片：每次先确认配置，再执行 */}
       <BannerQuickModal
         open={quickModalOpen}
+        sourceId={sourceId}
         onClose={() => setQuickModalOpen(false)}
-        onGenerated={(deck, strategy) => {
-          setQuickDeck(deck);
+        onGenerated={(result, strategy) => {
+          setQuickDeck(result.items);
+          setQuickRevision(result.revision);
           setQuickStrategy(strategy);
           setQuickModalOpen(false);
           setQuickDrawerOpen(true);
@@ -216,6 +273,8 @@ export default function BannersPageView() {
       {/* 排片结果抽屉 */}
       <BannerQuickDrawer
         open={quickDrawerOpen}
+        sourceId={sourceId}
+        revision={quickRevision}
         deck={quickDeck}
         strategy={quickStrategy}
         tmdbEnabled={tmdbEnabled}
@@ -229,10 +288,11 @@ export default function BannersPageView() {
           setQuickModalOpen(true);
         }}
         onChange={setQuickDeck}
-        onSuccess={(next) => {
-          replaceList(next);
+        onSuccess={(view) => {
+          revisionRef.current = view.revision;
+          replaceList(view.items || []);
           setQuickDrawerOpen(false);
-          void fetchBanners();
+          setQuickDeck([]);
         }}
       />
 
@@ -240,6 +300,7 @@ export default function BannersPageView() {
       <BannerDrawer
         open={editorVisible}
         mode={editorMode}
+        sourceId={sourceId}
         currentRow={currentRow}
         tmdbEnabled={tmdbEnabled}
         onClose={() => setEditorVisible(false)}

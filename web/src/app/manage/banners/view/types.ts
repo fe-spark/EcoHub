@@ -1,5 +1,20 @@
+export type BannerImageMode = "follow" | "custom";
+
+/** 图片、简介、评分、年份：覆盖值或片库值。 */
+export type BannerValues = {
+  poster: string;
+  backdrop: string;
+  blurb: string;
+  score: number;
+  year: number;
+};
+
 export type BannerRecord = {
   id: string;
+  sourceId?: string;
+  imageMode?: BannerImageMode;
+  overrides?: BannerValues;
+  library?: BannerValues;
   mid: number;
   name: string;
   cName: string;
@@ -13,7 +28,6 @@ export type BannerRecord = {
   isCustomPic?: boolean;
   area?: string;
   score?: number;
-  hits?: number;
   blurb?: string;
   actor?: string;
   director?: string;
@@ -22,6 +36,37 @@ export type BannerRecord = {
   mediaType?: string;
   pendingScrape?: boolean;
   scrapeState?: "pending" | "scraped" | "miss" | "none";
+};
+
+/** 写接口的字段；没给的字段不改，空值清除覆盖。 */
+export type BannerFields = {
+  mid?: number;
+  imageMode?: BannerImageMode;
+  poster?: string;
+  backdrop?: string;
+  blurb?: string;
+  score?: number;
+  year?: number;
+  tmdbId?: number;
+};
+
+export type BannerListView = {
+  sourceId: string;
+  revision: string;
+  items: BannerRecord[];
+};
+
+export type BannerSkipped = {
+  categoryId: number;
+  reason: "not_site_category" | "not_enough";
+  requested: number;
+  got: number;
+};
+
+export type BannerGenerateResult = {
+  revision: string;
+  items: BannerRecord[];
+  skipped: BannerSkipped[];
 };
 
 export interface BannerSnapshot {
