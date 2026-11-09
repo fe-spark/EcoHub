@@ -7,6 +7,7 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 # package-lock.json 已入库，npm ci 严格按 lockfile 安装，杜绝依赖版本漂移
 COPY package.json package-lock.json ./
+COPY patches ./patches
 RUN --mount=type=cache,target=/root/.npm \
     npm ci
 
