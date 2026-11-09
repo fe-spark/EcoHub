@@ -152,12 +152,19 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
     }
   };
 
+  const summaryCardClassNames = {
+    header: styles.summaryCardHead,
+    title: styles.summaryCardTitle,
+    body: styles.summaryCardBody,
+  };
+
   return (
     <div className={styles.overviewGrid}>
       <Card
         title="运行概览"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
+        classNames={summaryCardClassNames}
         extra={
           <Link href="/manage/collect" style={{ fontSize: 13, color: "#fa8c16" }}>
             采集中心
@@ -187,6 +194,7 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
         title="当前主站"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
+        classNames={summaryCardClassNames}
         extra={
           topSite ? <Tag color="gold">主站</Tag> : <Tag color="warning">未配置</Tag>
         }

@@ -94,7 +94,11 @@ export default function ManagePageView() {
 
       {Boolean(primarySource) && <InventoryStats primaryId={primarySource?.id} />}
 
-      <Card className={styles.panelCard} title="快捷入口">
+      <Card
+        className={styles.panelCard}
+        classNames={{ header: styles.panelCardHead, title: styles.panelCardTitle, body: styles.panelCardBody }}
+        title="快捷入口"
+      >
         <div className={styles.entryGrid}>
           {quickEntries.map((entry) => {
             const Icon = entry.icon;

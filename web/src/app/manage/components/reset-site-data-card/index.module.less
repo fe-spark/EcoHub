@@ -4,24 +4,20 @@
   border-color: var(--ant-color-error-border);
   background: var(--ant-color-error-bg);
 
-  :global(.ant-card-head) {
+  /* 小号卡片的头部高度由 antd 的 small 规则决定；头部高度由组件上的 styles.header 保证 */
+  .dangerCardHead {
     min-height: 52px;
     padding: 0 18px;
     font-weight: 600;
   }
 
-  :global(.ant-card-head-wrapper) {
-    min-height: 52px;
-    align-items: center;
-  }
-
-  :global(.ant-card-extra) {
+  .dangerCardExtra {
     padding: 10px 0;
     display: flex;
     align-items: center;
   }
 
-  :global(.ant-card-body) {
+  .dangerCardBody {
     padding: 16px;
   }
 }

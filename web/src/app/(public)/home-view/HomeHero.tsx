@@ -335,6 +335,8 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
                     />
                     <span className={styles.cardFeaturedBadge}>✨ 精选</span>
                   </button>
+                  {/* 卡片效果的阴影层：Swiper 找到已有的 .swiper-slide-shadow 就不再自己创建 */}
+                  <span aria-hidden className={`swiper-slide-shadow ${styles.deckShadow}`} />
                 </SwiperSlide>
               ))}
             </Swiper>

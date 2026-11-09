@@ -5,7 +5,7 @@ import Artplayer from "artplayer";
 import artplayerPluginDanmuku from "artplayer-plugin-danmuku";
 import Hls from "hls.js";
 import { Button, Result } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { CloseCircleFilled, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import styles from "./index.module.less";
@@ -509,6 +509,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         <div className={styles.errorOverlay}>
           <Result
             status="error"
+            icon={<CloseCircleFilled className={styles.resultIconGlyph} />}
+            classNames={{
+              root: styles.result,
+              icon: styles.resultIcon,
+              title: styles.resultTitle,
+              subTitle: styles.resultSubtitle,
+              extra: styles.resultExtra,
+            }}
             title="视频加载失败"
             subTitle="该视频源可能已失效或受到环境策略限制，请尝试切换播放源或重新加载。"
             extra={[
