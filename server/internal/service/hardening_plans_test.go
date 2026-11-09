@@ -393,7 +393,7 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	}
 }
 
-// 方案 5 测试：filmClassifySearch 深分页截断与 SingleFlight 并发安全返回
+// 方案 5 测试：filmClassifySearch 分页参数归一化与 SingleFlight 并发安全返回
 func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 	setupTestDBAndRedis(t)
 	const version = "v_plan5"
@@ -401,8 +401,9 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 	// 1. 验证 normalizeIndexPage 边界截断
 	p1 := &dto.Page{Current: 100, PageSize: 100}
 	p1 = normalizeIndexPage(p1)
-	if p1.Current != 50 {
-		t.Fatalf("expected Current capped at 50, got %d", p1.Current)
+	// 分页已在内存索引上完成，回表只按主键取当前页，不再截断深分页页码
+	if p1.Current != 100 {
+		t.Fatalf("expected Current kept at 100, got %d", p1.Current)
 	}
 	if p1.PageSize != 48 {
 		t.Fatalf("expected PageSize capped at 48, got %d", p1.PageSize)
