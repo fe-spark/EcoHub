@@ -75,21 +75,14 @@ func flushCronQueue() {
 		return
 	}
 	for _, ft := range run {
-		go executeTask(ft)
+		go runCronTaskSafely(ft)
 	}
 }
 
 // runMaintenanceBatch 同一秒的维护按入队顺序执行。前一条结束后再开始下一条。
 func runMaintenanceBatch(tasks []model.FilmCollectTask) {
 	for _, ft := range tasks {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[Spider] 定时维护 panic: task=%s err=%v", ft.Id, r)
-				}
-			}()
-			executeTask(ft)
-		}()
+		runCronTaskSafely(ft)
 	}
 }
 

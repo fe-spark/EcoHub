@@ -59,7 +59,7 @@ func RemoveCronByTaskId(taskId string) {
 
 // CreateCron 创建定时任务
 func CreateCron() *cron.Cron {
-	return cron.New(cron.WithSeconds())
+	return cron.New(cron.WithSeconds(), cron.WithChain(cron.Recover(cron.PrintfLogger(log.Default()))))
 }
 
 func addFilmCron(id, spec string) (cron.EntryID, error) {
@@ -352,12 +352,7 @@ func RunTaskOnce(id string) error {
 	}
 	go func() {
 		defer runningCronTasks.Delete(ft.Id)
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[Spider] Cron task panic recovered: task=%s err=%v", ft.Id, r)
-			}
-		}()
-		runTaskBody(ft)
+		withCronRecover(ft, func() { runTaskBody(ft) })
 	}()
 	return nil
 }
