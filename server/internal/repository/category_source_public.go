@@ -216,6 +216,18 @@ func PublicSourceTypeVisible(sourceID string, typeID int64) bool {
 	return view.publiclyVisible(typeID)
 }
 
+// PublicSourceTypeVisibility 一次读出当前站的前台分类可见性，返回的函数可在循环里反复调用。
+// 逐条调用 PublicSourceTypeVisible 每次都会读两次 Redis 版本号，批量筛选时会被放大成上万次往返。
+func PublicSourceTypeVisibility(sourceID string) func(typeID int64) bool {
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil {
+		return func(int64) bool { return false }
+	}
+	return func(typeID int64) bool {
+		return typeID > 0 && view.publiclyVisible(typeID)
+	}
+}
+
 // PublicSourceTypeName 当前站这个 type_id 的前台名。合并后的成员共用合成名。隐藏分类为空。
 func PublicSourceTypeName(sourceID string, typeID int64) string {
 	if typeID <= 0 {

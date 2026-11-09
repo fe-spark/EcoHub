@@ -35,9 +35,6 @@ func normalizeIndexPage(page *dto.Page) *dto.Page {
 	if page.Current <= 0 {
 		page.Current = 1
 	}
-	if page.Current > 50 {
-		page.Current = 50
-	}
 	if page.PageSize <= 0 {
 		page.PageSize = 20
 	}
