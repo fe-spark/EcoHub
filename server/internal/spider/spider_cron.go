@@ -281,13 +281,14 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 }
 
 func cleanOrphanData() (int64, int64, error) {
-	var n int64
-	if res := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = film_source_playlists.mid)").Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
-		return 0, 0, res.Error
-	} else {
-		n = res.RowsAffected
+	n, err := filmrepo.CleanOrphanPlaylists()
+	if err != nil {
+		return n, 0, fmt.Errorf("清理孤儿播放列表失败: %w", err)
 	}
-	k := filmrepo.CleanOrphanMatchKeysAndMappings()
+	k, err := filmrepo.CleanOrphanMatchKeysAndMappings()
+	if err != nil {
+		return n, k, err
+	}
 	return n, k, nil
 }
 

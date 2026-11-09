@@ -288,18 +288,102 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
 	}
 }
 
-// CleanOrphanMatchKeysAndMappings 清理关联影片已被删除的悬空匹配键与源映射
-func CleanOrphanMatchKeysAndMappings() int64 {
+// orphanScanBatchSize 每轮按 mid 游标顺序扫描的候选 mid 数；orphanDeleteBatchSize 每条 DELETE 的 mid 上限。
+// 两者都是包级变量，方便测试调小以覆盖多批次。
+var (
+	orphanScanBatchSize   = 5000
+	orphanDeleteBatchSize = 1000
+)
+
+// CleanOrphanPlaylists 分批清理关联影片已不存在的播放列表（film_source_playlists.mid 不在 film_index 中）。
+func CleanOrphanPlaylists() (int64, error) {
+	return cleanOrphanRowsByMid(model.TableFilmSourcePlaylist, "mid")
+}
+
+// CleanOrphanMatchKeysAndMappings 分批清理关联影片已被删除的悬空匹配键与源映射。
+// 任一步出错都会返回已清理条数与错误，交给定时任务告警。
+func CleanOrphanMatchKeysAndMappings() (int64, error) {
+	keys, err := cleanOrphanRowsByMid(model.TableMovieMatchKey, "mid")
+	if err != nil {
+		return keys, fmt.Errorf("清理悬空匹配键失败: %w", err)
+	}
+	mappings, err := cleanOrphanRowsByMid(model.TableMovieSourceMapping, "global_mid")
+	if err != nil {
+		return keys + mappings, fmt.Errorf("清理悬空源映射失败: %w", err)
+	}
+	return keys + mappings, nil
+}
+
+// cleanOrphanRowsByMid 按 mid 升序游标分批找出 table.column 中不在 film_index 的 mid 并删除。
+// 每轮只走索引取一小段 DISTINCT mid，再到 film_index 主键查存在性，最后按 IN 列表删除，
+// 避免整表 NOT EXISTS 的长语句撞上 MySQL readTimeout。
+// film_index 存在性检查与原 SQL 一致，不过滤软删除记录。
+func cleanOrphanRowsByMid(table, column string) (int64, error) {
+	if db.Mdb == nil {
+		return 0, nil
+	}
+	scanSize := orphanScanBatchSize
+	if scanSize <= 0 {
+		scanSize = 5000
+	}
+	deleteSize := orphanDeleteBatchSize
+	if deleteSize <= 0 {
+		deleteSize = 1000
+	}
+	session := db.Mdb.Session(&gorm.Session{SkipDefaultTransaction: true})
 	var cleaned int64
-	res1 := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = movie_match_keys.mid)").Delete(&model.MovieMatchKey{})
-	if res1.Error == nil {
-		cleaned += res1.RowsAffected
+	var cursor int64 = -1 << 63
+	for {
+		var candidates []int64
+		if err := session.Table(table).
+			Distinct(column).
+			Where(column+" > ?", cursor).
+			Order(column).
+			Limit(scanSize).
+			Pluck(column, &candidates).Error; err != nil {
+			return cleaned, fmt.Errorf("扫描 %s 失败: %w", table, err)
+		}
+		if len(candidates) == 0 {
+			return cleaned, nil
+		}
+		next := candidates[len(candidates)-1]
+		if next <= cursor {
+			// 防御：游标不前进时直接结束，避免死循环
+			return cleaned, nil
+		}
+		cursor = next
+
+		var existing []int64
+		if err := session.Unscoped().Model(&model.FilmIndex{}).
+			Where("mid IN ?", candidates).
+			Pluck("mid", &existing).Error; err != nil {
+			return cleaned, fmt.Errorf("查询 film_index 失败: %w", err)
+		}
+		exists := make(map[int64]struct{}, len(existing))
+		for _, mid := range existing {
+			exists[mid] = struct{}{}
+		}
+		orphans := make([]int64, 0, len(candidates)-len(existing))
+		for _, mid := range candidates {
+			if _, ok := exists[mid]; !ok {
+				orphans = append(orphans, mid)
+			}
+		}
+		for i := 0; i < len(orphans); i += deleteSize {
+			end := i + deleteSize
+			if end > len(orphans) {
+				end = len(orphans)
+			}
+			res := session.Exec("DELETE FROM "+table+" WHERE "+column+" IN ?", orphans[i:end])
+			if res.Error != nil {
+				return cleaned, fmt.Errorf("删除 %s 失败: %w", table, res.Error)
+			}
+			cleaned += res.RowsAffected
+		}
+		if len(candidates) < scanSize {
+			return cleaned, nil
+		}
 	}
-	res2 := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = movie_source_mappings.global_mid)").Delete(&model.MovieSourceMapping{})
-	if res2.Error == nil {
-		cleaned += res2.RowsAffected
-	}
-	return cleaned
 }
 
 func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
