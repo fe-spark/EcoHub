@@ -26,6 +26,8 @@ interface FilmPickerProps {
   open: boolean;
   title?: string;
   selectedMid?: number;
+  /** 只列这个采集站有播放线路的影片。 */
+  sourceId?: string;
   onCancel: () => void;
   onSelect: (film: FilmOption) => void;
 }
@@ -34,6 +36,7 @@ export default function FilmPicker({
   open,
   title = "选择影片",
   selectedMid,
+  sourceId,
   onCancel,
   onSelect,
 }: FilmPickerProps) {
@@ -55,9 +58,11 @@ export default function FilmPicker({
         let curPage = current;
         const pSize = 10;
 
-        if (!trimmed) {
-          // 无关键词时，加载片库最近影片
+        if (!trimmed || sourceId) {
+          // 无关键词或限定站点时，走片库管理检索
           const resp = await ApiGet("/manage/film/search/list", {
+            name: trimmed || undefined,
+            sourceId: sourceId || undefined,
             current,
             pageSize: pSize,
           });
@@ -126,7 +131,7 @@ export default function FilmPicker({
         setLoading(false);
       }
     },
-    [],
+    [sourceId],
   );
 
   useEffect(() => {

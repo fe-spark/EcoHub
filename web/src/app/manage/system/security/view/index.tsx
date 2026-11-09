@@ -45,6 +45,8 @@ interface ConfigBackup {
   appVersion?: string;
   site?: unknown;
   filmSources?: unknown[];
+  bannerSlots?: unknown[];
+  /** 旧版备份的轮播，导入时按站点归属转换。 */
   banners?: unknown[];
   notify?: unknown;
   mappingRules?: unknown[];
@@ -105,8 +107,9 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   if (Array.isArray(backup.filmSources)) {
     parts.push(`采集站 ${backup.filmSources.length}`);
   }
-  if (Array.isArray(backup.banners)) {
-    parts.push(`封面 ${backup.banners.length}`);
+  const bannerRows = Array.isArray(backup.bannerSlots) ? backup.bannerSlots : backup.banners;
+  if (Array.isArray(bannerRows)) {
+    parts.push(`轮播 ${bannerRows.length}`);
   }
   if (Array.isArray(backup.mappingRules)) {
     parts.push(`映射规则 ${backup.mappingRules.length}`);

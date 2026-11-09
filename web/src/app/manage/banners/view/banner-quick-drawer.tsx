@@ -12,9 +12,10 @@ import {
   CheckCircleOutlined,
   CompassOutlined,
 } from "@ant-design/icons";
-import { ApiPost } from "@/lib/client-api";
+import { API_CONFLICT, ApiPut } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { BannerRecord } from "./types";
+import { BannerListView, BannerRecord } from "./types";
+import { deckItemFields } from "./banner-modal-utils";
 import { QuickStrategy } from "./banner-quick-config";
 import BannerQuickCard from "./banner-quick-card";
 import TmdbModal from "@/app/manage/film/components/tmdb-modal";
@@ -28,30 +29,26 @@ const STRATEGY_LABEL: Record<QuickStrategy, string> = {
 
 interface BannerQuickDrawerProps {
   open: boolean;
+  sourceId: string;
+  /** 排片时该站的版本号；发布时带上，期间有人改过就返回 409。 */
+  revision: string;
   deck: BannerRecord[];
   strategy: QuickStrategy;
   tmdbEnabled?: boolean;
   onClose: () => void;
   onRedo: () => void;
   onChange: (deck: BannerRecord[]) => void;
-  onSuccess: (banners: BannerRecord[]) => void;
+  onSuccess: (view: BannerListView) => void;
 }
 
 function withSort(list: BannerRecord[]) {
   return list.map((item, idx) => ({ ...item, sort: idx + 1 }));
 }
 
-function hasRealSlide(item: BannerRecord) {
-  return Boolean(
-    item.pictureSlide &&
-      item.pictureSlide.trim() !== "" &&
-      item.pictureSlide !== item.picture &&
-      item.pictureSlide !== item.poster,
-  );
-}
-
 export default function BannerQuickDrawer({
   open,
+  sourceId,
+  revision,
   deck,
   strategy,
   tmdbEnabled = false,
@@ -109,12 +106,17 @@ export default function BannerQuickDrawer({
     if (data.mediaType) {
       patch.mediaType = data.mediaType;
     }
-    if (shouldFill("poster", "picture") && data.picture) {
-      patch.picture = data.picture;
-      patch.poster = data.picture;
-    }
-    if (shouldFill("backdrop", "pictureSlide") && data.pictureSlide) {
-      patch.pictureSlide = data.pictureSlide;
+    const fillPoster = shouldFill("poster", "picture") && Boolean(data.picture);
+    const fillSlide = shouldFill("backdrop", "pictureSlide") && Boolean(data.pictureSlide);
+    if (fillPoster || fillSlide) {
+      // 用了 TMDB 图片就改为自定义图片，没填的那张沿用当前图。
+      patch.imageMode = "custom";
+      patch.isCustomPic = true;
+      const poster = fillPoster ? data.picture : tmdbTargetItem.picture || tmdbTargetItem.poster;
+      patch.picture = poster;
+      patch.poster = poster;
+      patch.customPicture = poster;
+      patch.pictureSlide = fillSlide ? data.pictureSlide : tmdbTargetItem.pictureSlide;
     }
     if (shouldFill("score") && (data.dbScore || data.score)) {
       const s = parseFloat(String(data.dbScore || data.score));
@@ -159,11 +161,18 @@ export default function BannerQuickDrawer({
     }
     setPublishing(true);
     try {
-      const resp = await ApiPost("/manage/banner/deck", deck);
-      if (resp.code === 0) {
+      const resp = await ApiPut<BannerListView>("/manage/banners/deck", {
+        sourceId,
+        revision,
+        items: deck.map(deckItemFields),
+      });
+      if (resp.code === 0 && resp.data) {
         message.success("发布成功");
-        const next = Array.isArray(resp.data) ? (resp.data as BannerRecord[]) : deck;
-        onSuccess(next);
+        onSuccess(resp.data);
+        return;
+      }
+      if (resp.code === API_CONFLICT) {
+        message.error("排片期间该站轮播已被修改，请重新排片后再发布");
         return;
       }
       message.error(resp.msg || "发布失败");
