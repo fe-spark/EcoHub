@@ -15,7 +15,7 @@ import BannerDrawer from "./banner-drawer";
 import BannerQuickDrawer from "./banner-quick-drawer";
 import BannerQuickModal from "./banner-quick-modal";
 import BannerGrid from "./banner-grid";
-import { QuickStrategy } from "./banner-quick-config";
+import { QuickConfigMemo, QuickStrategy } from "./banner-quick-config";
 import { useBannerDeck } from "./use-banner-deck";
 import { BannerListView, BannerRecord, EditorMode } from "./types";
 import styles from "./index.module.less";
@@ -41,6 +41,8 @@ export default function BannersPageView() {
   const [orderSaving, setOrderSaving] = useState(false);
   const [quickModalOpen, setQuickModalOpen] = useState(false);
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false);
+  // 一键排片上次的配置，按站点记住，刷新页面后丢失。
+  const [quickConfigs, setQuickConfigs] = useState<Record<string, QuickConfigMemo>>({});
   const [quickDeck, setQuickDeck] = useState<BannerRecord[]>([]);
   const [quickRevision, setQuickRevision] = useState("");
   // 轮播按站点分开存；为空时服务端取首选站。
@@ -289,6 +291,8 @@ export default function BannersPageView() {
       <BannerQuickModal
         open={quickModalOpen}
         sourceId={sourceId}
+        lastConfig={quickConfigs[sourceId]}
+        onRemember={(config) => setQuickConfigs((prev) => ({ ...prev, [sourceId]: config }))}
         onClose={() => setQuickModalOpen(false)}
         onGenerated={(result, strategy) => {
           setQuickDeck(result.items);
