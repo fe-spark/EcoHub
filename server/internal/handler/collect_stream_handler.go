@@ -53,7 +53,6 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 		Current: latest.Current,
 		Percent: latest.Percent,
 		Status:  latest.Status,
-		Sites:   progress.CurrentSearchSealSites(),
 	}); err != nil {
 		if errors.Is(err, errSSEWrite) {
 			return

@@ -122,6 +122,14 @@ func SearchRebuildScheduled() bool {
 	return searchRebuild.running || searchRebuild.timer != nil
 }
 
+// WithSearchRebuildScheduled 持有重建锁调用 fn，传入 SearchRebuildScheduled 的结果。
+// 重建收尾会持有这把锁通知监听，调用方要同时拿自己的锁时只能在 fn 里拿。
+func WithSearchRebuildScheduled(fn func(scheduled bool)) {
+	searchRebuild.mu.Lock()
+	defer searchRebuild.mu.Unlock()
+	fn(searchRebuild.running || searchRebuild.timer != nil)
+}
+
 func startSearchRebuild() {
 	searchRebuild.mu.Lock()
 	searchRebuild.timer = nil

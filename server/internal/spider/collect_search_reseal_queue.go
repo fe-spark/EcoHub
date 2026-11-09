@@ -110,16 +110,21 @@ func (q *searchResealQueue) run() {
 		// 增量封口失败会转全量重建。已交出的站点等重建结束再收口。
 		// 重建期间新进来的编号还在 pending，继续封。
 		if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
-			q.mu.Lock()
-			pendingLeft := len(q.pending) > 0
-			stillRebuilding := filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled()
-			if pendingLeft || !stillRebuilding {
-				q.mu.Unlock()
-				continue
+			parked := false
+			// 先拿重建锁再拿 q.mu，和重建收尾通知监听的顺序一致。
+			filmsnapshot.WithSearchRebuildScheduled(func(scheduled bool) {
+				q.mu.Lock()
+				defer q.mu.Unlock()
+				if len(q.pending) > 0 || !(scheduled || filmsnapshot.IsSearchIndexBuilding()) {
+					return
+				}
+				q.running = false
+				parked = true
+			})
+			if parked {
+				return
 			}
-			q.running = false
-			q.mu.Unlock()
-			return
+			continue
 		}
 		q.complete()
 		if len(mids) == 0 {
