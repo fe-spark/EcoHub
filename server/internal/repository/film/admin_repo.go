@@ -220,7 +220,8 @@ func InvalidateMasterSwitchCaches() {
 	}
 }
 
-const filmCleanBatchSize = 500
+// filmCleanBatchSize 每轮清理的影片数。包级变量，测试可调小。
+var filmCleanBatchSize = 500
 
 type filmCleanRow struct {
 	Mid int64
@@ -253,9 +254,14 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) (int64, err
 		return 0, nil
 	}
 	var cleaned int64
+	// 按 mid 升序游标前进：已删除或不命中的行不再重复扫描。
+	var cursor int64
 	for {
 		var rows []filmCleanRow
-		q := scope(db.Mdb.Model(&model.FilmIndex{}).Select("film_index.mid, film_index.pid")).Limit(filmCleanBatchSize)
+		q := scope(db.Mdb.Model(&model.FilmIndex{}).Select("film_index.mid, film_index.pid")).
+			Where("film_index.mid > ?", cursor).
+			Order("film_index.mid").
+			Limit(filmCleanBatchSize)
 		if err := q.Scan(&rows).Error; err != nil {
 			log.Printf("%s Error: %v", logName, err)
 			return cleaned, fmt.Errorf("查询待清理影片失败: %w", err)
@@ -266,6 +272,9 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) (int64, err
 		mids := make([]int64, 0, len(rows))
 		pidSet := make(map[int64]struct{}, len(rows))
 		for _, row := range rows {
+			if row.Mid > cursor {
+				cursor = row.Mid
+			}
 			if row.Mid <= 0 {
 				continue
 			}
