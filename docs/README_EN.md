@@ -20,7 +20,7 @@
 </div>
 
 > [!WARNING]
-> v3.0 does not read v2.x databases and there is no migration. Do not pull on an old `./data/mysql`, and do not use in-app upgrade. Deploy in a new directory or after wiping data, then run a full collect. Steps: [v2 to v3](./v2-to-v3.md). This preview is `3.0.0-preview`. File problems as [Issues](https://github.com/fe-spark/EcoHub/issues).
+> v3.0 does not read v2.x databases and there is no migration. Do not pull on an old `./data/mysql`, and do not use in-app upgrade. Deploy in a new directory or after wiping data, then run a full collect. Steps: [v2 to v3](./v2-to-v3.md). The current release is `3.0.0`. File problems as [Issues](https://github.com/fe-spark/EcoHub/issues).
 
 Updates are slow. Pull requests are welcome.
 
@@ -37,7 +37,7 @@ Multi-source collect, a web player, and an admin panel. Clients are separate rep
 | --- | --- |
 | Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
-| v3 preview | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
+| v3 | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
 
 Visitor login is `guest` / `guest` (read-only). The demo does not work on China Mobile. Use China Unicom or China Telecom.
 
@@ -56,7 +56,7 @@ Docker 20+ and Compose 2+. Aim for 2 CPU cores and 2 GB RAM.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0 sh
 ```
 
 Data goes to `~/ecohub`. The command is `ecohub`. Install prints the web port, site, admin, and three subscription URLs. The default web port is `3000`. Passwords, reverse proxy, and 1Panel: [Deploy guide](./README-Deploy_EN.md).
