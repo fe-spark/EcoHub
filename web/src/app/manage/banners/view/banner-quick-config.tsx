@@ -126,7 +126,7 @@ export default function BannerQuickConfig({
                 <Button
                   key={preset.count}
                   size="small"
-                  type="text"
+                  danger={preset.count === 0}
                   disabled={disabled}
                   onClick={() => handleFillAll(preset.count)}
                 >
