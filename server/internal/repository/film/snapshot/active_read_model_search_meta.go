@@ -71,18 +71,29 @@ type scoredMetaHit struct {
 }
 
 // SourceCategoryVisible 当前站这部片子的分类对前台是否可见。隐藏组、隐藏子类、隐藏父级都为 false。
+// 循环里批量判断请用 SourceCategoryVisibility，避免每条都读 Redis。
 func SourceCategoryVisible(sourceID, categoryKey, rootKey string, cid, pid int64) bool {
+	return SourceCategoryVisibility(sourceID)(categoryKey, rootKey, cid, pid)
+}
+
+// SourceCategoryVisibility 预先加载一次当前站的分类可见性，返回可在循环里反复调用的判断函数。
+func SourceCategoryVisibility(sourceID string) func(categoryKey, rootKey string, cid, pid int64) bool {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
+		return func(_, _ string, cid, pid int64) bool {
+			return support.IsCategoryVisible(cid, pid)
+		}
+	}
+	typeVisible := repository.PublicSourceTypeVisibility(sourceID)
+	return func(categoryKey, rootKey string, cid, pid int64) bool {
+		if sid, typeID, ok := support.ParseSourceCategoryKey(categoryKey); ok && sid == sourceID {
+			return typeVisible(typeID)
+		}
+		if sid, typeID, ok := support.ParseSourceCategoryKey(rootKey); ok && sid == sourceID {
+			return typeVisible(typeID)
+		}
 		return support.IsCategoryVisible(cid, pid)
 	}
-	if sid, typeID, ok := support.ParseSourceCategoryKey(categoryKey); ok && sid == sourceID {
-		return repository.PublicSourceTypeVisible(sourceID, typeID)
-	}
-	if sid, typeID, ok := support.ParseSourceCategoryKey(rootKey); ok && sid == sourceID {
-		return repository.PublicSourceTypeVisible(sourceID, typeID)
-	}
-	return support.IsCategoryVisible(cid, pid)
 }
 
 func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField, sourceID string, pid, cid int64) []scoredMetaHit {
@@ -92,8 +103,9 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField, sourceID stri
 	q := utils.BuildQueryContext(keyword)
 	positions, narrowed := idx.SearchPosts.lookup(q)
 	matches := make([]scoredMetaHit, 0, 64)
+	categoryVisible := SourceCategoryVisibility(sourceID)
 	visit := func(meta *FilmSearchMeta) {
-		if !SourceCategoryVisible(sourceID, meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
+		if !categoryVisible(meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
 			return
 		}
 		if pid > 0 && meta.Pid != pid {
