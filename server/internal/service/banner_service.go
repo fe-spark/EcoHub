@@ -29,9 +29,9 @@ func bannerInputErr(format string, args ...any) error {
 }
 
 // 一键排片单个分类最多排几部，和后台输入框上限一致。
-const bannerQuotaMax = 99
+const bannerQuotaMax = 5
 
-// 一个站点一次发布的轮播最多几条；一键排片各分类合计也不能超过它。
+// 一个站点一次发布的轮播最多几条。
 const bannerDeckMax = 99
 
 // 一键排片查询的超时上限。
@@ -480,7 +480,6 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 	}
 	quotas := make([]BannerQuota, 0, len(req.Quotas))
 	seen := make(map[int64]bool, len(req.Quotas))
-	total := 0
 	for _, q := range req.Quotas {
 		if q.CategoryID <= 0 {
 			return BannerGenerateResult{}, bannerInputErr("分类编号不合法")
@@ -492,14 +491,10 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 			continue
 		}
 		seen[q.CategoryID] = true
-		total += q.Count
 		quotas = append(quotas, q)
 	}
 	if len(quotas) == 0 {
 		return BannerGenerateResult{}, bannerInputErr("请至少为一个分类设置排片数量")
-	}
-	if total > bannerDeckMax {
-		return BannerGenerateResult{}, bannerInputErr("各分类合计最多 %d 部", bannerDeckMax)
 	}
 
 	if ctx == nil {

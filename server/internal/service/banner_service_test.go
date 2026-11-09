@@ -517,9 +517,9 @@ func TestBannerDeck_Limit(t *testing.T) {
 	if _, err := BannerSvc.PublishDeck("src1", view.Revision, items); !IsBannerUserError(err) {
 		t.Fatalf("deck over limit should be rejected, got %v", err)
 	}
-	quotas := []BannerQuota{{CategoryID: 1, Count: 60}, {CategoryID: 2, Count: 60}}
+	quotas := []BannerQuota{{CategoryID: 1, Count: bannerQuotaMax + 1}}
 	if _, err := BannerSvc.Generate(context.Background(), BannerGenerateReq{SourceId: "src1", Strategy: "hot", Quotas: quotas}); !IsBannerUserError(err) {
-		t.Fatalf("generate total over limit should be rejected, got %v", err)
+		t.Fatalf("generate per-category over limit should be rejected, got %v", err)
 	}
 }
 
