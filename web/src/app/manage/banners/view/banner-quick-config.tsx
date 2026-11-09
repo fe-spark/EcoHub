@@ -150,7 +150,7 @@ export default function BannerQuickConfig({
                 </span>
                 <InputNumber
                   min={0}
-                  max={99}
+                  max={5}
                   size="small"
                   value={cat.count}
                   disabled={disabled}
