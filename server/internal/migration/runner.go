@@ -40,6 +40,11 @@ var migrations = []Migration{
 		Name:    "轮播按站点存储，删除旧轮播表",
 		Run:     migrateBannerSlot,
 	},
+	{
+		Version: "20261110_cron_default_specs",
+		Name:    "系统维护任务默认时刻错开整点",
+		Run:     migrateCronDefaultSpecs,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {
