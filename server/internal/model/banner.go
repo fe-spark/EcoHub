@@ -71,6 +71,8 @@ type BannerAdminItem struct {
 	ImageMode string       `json:"imageMode"`
 	Overrides BannerValues `json:"overrides"`
 	Library   BannerValues `json:"library"`
+	// Unavailable 影片已不在片库，或在该站已没有播放线路。首页不展示这一行；后台照常列出，可删除、参与排序。
+	Unavailable bool `json:"unavailable,omitempty"`
 }
 
 // LegacyBanner 旧表 banners_record 和旧版备份里的一行，只用于迁移和导入旧备份。
@@ -87,4 +89,31 @@ type LegacyBanner struct {
 	Sort          int64   `json:"sort"`
 	IsCustomPic   bool    `json:"isCustomPic"`
 	TmdbID        int64   `json:"tmdbId"`
+}
+
+// BannerOverrideURLMax 覆盖图地址的最大长度，和 PosterOverride/BackdropOverride 的列定义一致。
+const BannerOverrideURLMax = 512
+
+// SanitizeBannerSlot 清理导入或迁移进来的轮播行：非法的覆盖值丢弃（回到跟随片库），不让整批写入失败。
+func SanitizeBannerSlot(s *BannerSlot) {
+	if s.ImageMode != BannerImageCustom {
+		s.ImageMode = BannerImageFollow
+		s.PosterOverride = ""
+		s.BackdropOverride = ""
+	}
+	if len(s.PosterOverride) > BannerOverrideURLMax {
+		s.PosterOverride = ""
+	}
+	if len(s.BackdropOverride) > BannerOverrideURLMax {
+		s.BackdropOverride = ""
+	}
+	if s.ScoreOverride < 0 || s.ScoreOverride > 10 || s.ScoreOverride != s.ScoreOverride {
+		s.ScoreOverride = 0
+	}
+	if s.YearOverride < 0 || s.YearOverride > 9999 {
+		s.YearOverride = 0
+	}
+	if s.TmdbID < 0 {
+		s.TmdbID = 0
+	}
 }

@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +91,43 @@ func TestMigrateBannerSlot_Backfill(t *testing.T) {
 	// 再跑一次不报错（旧表已删）。
 	if err := migrateBannerSlot(gdb); err != nil {
 		t.Fatalf("second run: %v", err)
+	}
+}
+
+// MySQL 的 DROP TABLE 会隐式提交：上次回填已写入 banner_slot、旧表没删掉、迁移没记完成。重跑必须成功且不重复。
+func TestMigrateBannerSlot_RerunAfterPartialFailure(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmIndex{}, &model.FilmSourcePlaylist{}, &model.FilmSource{}, &model.BannerSlot{}, &legacyBannerRow{}); err != nil {
+		t.Fatal(err)
+	}
+	gdb.Create(&model.FilmSource{Id: "s1", Uri: "http://s1.test", State: true, Sort: 1, CreatedAt: time.Now()})
+	gdb.Create(&model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "s1"}})
+	gdb.Create(&model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "s1"}})
+	gdb.Create(&[]legacyBannerRow{
+		{Id: "a", Mid: 1, Sort: 1},
+		{Id: "b", Mid: 2, Sort: 2, IsCustomPic: true, CustomPicture: "http://" + strings.Repeat("x", 600)},
+	})
+	// 上次失败留下的回填结果。
+	gdb.Create(&[]model.BannerSlot{
+		{Id: "a", SourceId: "s1", Mid: 1, Sort: 1, ImageMode: model.BannerImageFollow},
+		{Id: "b", SourceId: "s1", Mid: 2, Sort: 2, ImageMode: model.BannerImageFollow},
+	})
+
+	if err := migrateBannerSlot(gdb); err != nil {
+		t.Fatalf("rerun should succeed: %v", err)
+	}
+	if gdb.Migrator().HasTable(legacyBannerTable) {
+		t.Fatalf("legacy table should be dropped")
+	}
+	var slots []model.BannerSlot
+	gdb.Order("sort").Find(&slots)
+	if len(slots) != 2 || slots[0].Mid != 1 || slots[1].Mid != 2 {
+		t.Fatalf("want 2 slots without duplicates, got %+v", slots)
+	}
+	if slots[1].PosterOverride != "" {
+		t.Fatalf("over-long poster override should be dropped, got %q", slots[1].PosterOverride)
 	}
 }
