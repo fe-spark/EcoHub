@@ -79,3 +79,49 @@ func TestFilmDetailVo_UnmarshalPlayFrom(t *testing.T) {
 		t.Fatalf("playForm alias parse failed: %+v", fd3.PlayFrom)
 	}
 }
+
+func TestFilmDetailAcceptsStringIntFields(t *testing.T) {
+	raw := []byte(`{"vod_id":"645395466392961375","type_id":"701","group_id":"0","vod_score_num":"167","vod_hits":"12","vod_up":"","vod_down":null,"vod_score_all":"8.5","vod_time_add":1731115697,"vod_douban_id":""}`)
+	var detail FilmDetail
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		t.Fatalf("字符串整型字段应可解析: %v", err)
+	}
+	if detail.VodID != 645395466392961375 || detail.TypeID != 701 || detail.GroupID != 0 {
+		t.Fatalf("ID 解析不符: %+v", detail)
+	}
+	if detail.VodScoreNum != 167 || detail.VodHits != 12 || detail.VodUp != 0 || detail.VodDown != 0 || detail.VodScoreAll != 8 {
+		t.Fatalf("统计字段解析不符: %+v", detail)
+	}
+	if detail.VodTimeAdd != 1731115697 || detail.VodDouBanID != 0 {
+		t.Fatalf("数字或空字符串解析不符: %+v", detail)
+	}
+}
+
+func TestFilmDetailRejectsNonNumericIntField(t *testing.T) {
+	var detail FilmDetail
+	if err := json.Unmarshal([]byte(`{"vod_score_num":"暂无"}`), &detail); err == nil {
+		t.Fatal("非数字文本应报错")
+	}
+}
+
+func TestFilmDetailPageAcceptsStringScoreNum(t *testing.T) {
+	raw := []byte(`{"code":1,"list":[{"vod_id":1,"vod_name":"甲","vod_score_num":10},{"vod_id":2,"vod_name":"乙","vod_score_num":"10"}]}`)
+	var page FilmDetailLPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatalf("分页详情应可解析: %v", err)
+	}
+	if len(page.List) != 2 || page.List[0].VodScoreNum != 10 || page.List[1].VodScoreNum != 10 || page.List[1].VodName != "乙" {
+		t.Fatalf("分页解析结果不符: %+v", page.List)
+	}
+}
+
+func TestFilmListAcceptsStringIDs(t *testing.T) {
+	raw := []byte(`{"code":1,"list":[{"vod_id":"9","type_id":"2","vod_name":"测试"}]}`)
+	var page FilmListPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatalf("列表应可解析: %v", err)
+	}
+	if len(page.List) != 1 || page.List[0].VodID != 9 || page.List[0].TypeID != 2 || page.List[0].VodName != "测试" {
+		t.Fatalf("列表解析结果不符: %+v", page.List)
+	}
+}
