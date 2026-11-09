@@ -2,7 +2,7 @@
 
 中文 | [English](./README-Deploy_EN.md)
 
-`ghcr.io/fe-spark/ecohub:latest` 指向最新正式版 v3。要固定版本就写 `ghcr.io/fe-spark/ecohub:v3.0.0`。不写 `ECOHUB_IMAGE` 时，compose 用的就是 `:latest`。
+`ghcr.io/fe-spark/ecohub:latest` 指向最新正式版 v3。要固定版本就写 `ghcr.io/fe-spark/ecohub:v3.0.1`。不写 `ECOHUB_IMAGE` 时，compose 用的就是 `:latest`。
 
 发布镜像是 All-in-One：同一容器里跑 Go API `:8080` 和 Next.js `:3000`。旧的 `ecohub-web` / `ecohub-server` 双镜像已废弃。
 
@@ -28,7 +28,7 @@ openssl rand -hex 32
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1 sh
 ```
 
 数据目录默认 `~/ecohub`。换目录把 `ECOHUB_INSTALL_DIR=~/ecohub-v3` 写在 `sh` 前面。变量写在 `curl` 前面不会进脚本。脚本写入编排和 `.env`，安装 `ecohub`，启动，并打印前台、后台、三条订阅和初始账号。之后直接执行 `ecohub`。
@@ -78,7 +78,7 @@ ecohub uninstall --purge
 3. 环境变量：
 
 ```env
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1
 WEB_PORT=3000
 SERVER_PORT=18080
 JWT_SECRET=请替换为长随机串
@@ -113,7 +113,7 @@ JWT_SECRET="$(openssl rand -hex 32)"
 
 docker pull mysql:8.4
 docker pull redis:7.4-alpine
-docker pull ghcr.io/fe-spark/ecohub:v3.0.0
+docker pull ghcr.io/fe-spark/ecohub:v3.0.1
 
 docker run -d --name Eco-mysql --restart always --network Eco-network \
   -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -150,7 +150,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -e REDIS_DB=0 \
   -v ~/ecohub/data/uploads:/app/static/upload \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/fe-spark/ecohub:v3.0.0
+  ghcr.io/fe-spark/ecohub:v3.0.1
 ```
 
 容器内数据库主机名是 `Eco-mysql`、`Eco-redis`。自备库时不要启动上面两个数据库容器。MySQL 第一次初始化可能要几十秒，失败看 `docker logs Eco-mysql`。

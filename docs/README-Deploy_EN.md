@@ -2,7 +2,7 @@
 
 [中文](./README-Deploy.md) | English
 
-`ghcr.io/fe-spark/ecohub:latest` points to the latest formal release, v3. Pin a version with `ghcr.io/fe-spark/ecohub:v3.0.0`. Leaving `ECOHUB_IMAGE` unset makes compose use `:latest`.
+`ghcr.io/fe-spark/ecohub:latest` points to the latest formal release, v3. Pin a version with `ghcr.io/fe-spark/ecohub:v3.0.1`. Leaving `ECOHUB_IMAGE` unset makes compose use `:latest`.
 
 The release image is all-in-one: Go API `:8080` and Next.js `:3000` in one container. The old `ecohub-web` / `ecohub-server` pair is retired.
 
@@ -28,7 +28,7 @@ Upgrading from v2: [v2 to v3](./v2-to-v3.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1 sh
 ```
 
 Data defaults to `~/ecohub`. Put `ECOHUB_INSTALL_DIR=~/ecohub-v3` before `sh` to use another directory. A variable before `curl` does not reach the script. The script writes compose and `.env`, installs `ecohub`, starts the stack, and prints the site, admin, three subscription URLs, and the initial account. Later commands are just `ecohub`.
@@ -78,7 +78,7 @@ These containers show up in 1Panel. Keep managing them with `ecohub`. Do not cre
 3. Environment:
 
 ```env
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1
 WEB_PORT=3000
 SERVER_PORT=18080
 JWT_SECRET=replace-with-a-long-random-string
@@ -113,7 +113,7 @@ JWT_SECRET="$(openssl rand -hex 32)"
 
 docker pull mysql:8.4
 docker pull redis:7.4-alpine
-docker pull ghcr.io/fe-spark/ecohub:v3.0.0
+docker pull ghcr.io/fe-spark/ecohub:v3.0.1
 
 docker run -d --name Eco-mysql --restart always --network Eco-network \
   -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -150,7 +150,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -e REDIS_DB=0 \
   -v ~/ecohub/data/uploads:/app/static/upload \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/fe-spark/ecohub:v3.0.0
+  ghcr.io/fe-spark/ecohub:v3.0.1
 ```
 
 Inside the app container the database hosts are `Eco-mysql` and `Eco-redis`. If you bring your own database, do not start the MySQL and Redis containers above. First-time MySQL init can take tens of seconds. If the ready check fails, read `docker logs Eco-mysql`.
