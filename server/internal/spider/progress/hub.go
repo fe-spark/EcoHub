@@ -314,18 +314,15 @@ func SubscribeSourceDelete(ctx context.Context) <-chan SourceDeleteEvent {
 }
 
 // SearchIndexProgressEvent 检索索引重建数字进度事件。
-// Sites 是全局唯一的封口队列，与采集队列条数无关。
 type SearchIndexProgressEvent struct {
-	Total   int64            `json:"total"`
-	Current int64            `json:"current"`
-	Percent int              `json:"percent"`
-	Status  string           `json:"status"` // "indexing" | "done" | "idle"
-	Sites   []SearchSealSite `json:"sites,omitempty"`
+	Total   int64  `json:"total"`
+	Current int64  `json:"current"`
+	Percent int    `json:"percent"`
+	Status  string `json:"status"` // "indexing" | "done" | "idle"
 }
 
 // BroadcastSearchIndexProgress 广播检索索引重建数字进度
 func BroadcastSearchIndexProgress(evt SearchIndexProgressEvent) {
-	evt.Sites = CurrentSearchSealSites()
 	GlobalHub.mu.RLock()
 	defer GlobalHub.mu.RUnlock()
 	for ch := range GlobalHub.searchIndexSubscribers {
