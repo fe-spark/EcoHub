@@ -25,7 +25,7 @@ docker compose down
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
+  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0 sh
 ```
 
 要在第一次初始化前改密码，把 `JWT_SECRET`、`ECOHUB_ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD` 写在 `sh` 前面。内置库保持 `MYSQL_HOST=mysql`、`REDIS_HOST=redis`。密码何时生效见部署指南。
@@ -42,11 +42,11 @@ docker compose down
 rm -rf data/mysql data/redis data/uploads
 ```
 
-已有 `.env` 会保留。把预览镜像写在 `sh` 前面再装：
+已有 `.env` 会保留。把 v3 镜像写在 `sh` 前面再装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=~/ecohub ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-preview sh
+  | ECOHUB_INSTALL_DIR=~/ecohub ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0 sh
 ```
 
 ## 自备数据库
