@@ -49,9 +49,9 @@ func TestResealSearchIndexMidsDoesNotFullScan(t *testing.T) {
 	var scanned atomic.Bool
 	prevScan := scanActiveFilmSearchIndex
 	prevDebounce := searchRebuildDebounce
-	scanActiveFilmSearchIndex = func(uint64) error {
+	scanActiveFilmSearchIndex = func() (int64, error) {
 		scanned.Store(true)
-		return nil
+		return 0, nil
 	}
 	searchRebuildDebounce = 10 * time.Millisecond
 	t.Cleanup(func() {
@@ -101,9 +101,9 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	var scanned atomic.Bool
 	prevScan := scanActiveFilmSearchIndex
 	prevDebounce := searchRebuildDebounce
-	scanActiveFilmSearchIndex = func(uint64) error {
+	scanActiveFilmSearchIndex = func() (int64, error) {
 		scanned.Store(true)
-		return nil
+		return 0, nil
 	}
 	searchRebuildDebounce = 10 * time.Millisecond
 	t.Cleanup(func() {
@@ -226,9 +226,9 @@ func stubSearchRebuildScan(t *testing.T, scanned *atomic.Bool) func() {
 	t.Helper()
 	prevScan := scanActiveFilmSearchIndex
 	prevDebounce := searchRebuildDebounce
-	scanActiveFilmSearchIndex = func(uint64) error {
+	scanActiveFilmSearchIndex = func() (int64, error) {
 		scanned.Store(true)
-		return nil
+		return 0, nil
 	}
 	searchRebuildDebounce = 10 * time.Millisecond
 	return func() {
