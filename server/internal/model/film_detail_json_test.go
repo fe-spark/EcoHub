@@ -79,3 +79,94 @@ func TestFilmDetailVo_UnmarshalPlayFrom(t *testing.T) {
 		t.Fatalf("playForm alias parse failed: %+v", fd3.PlayFrom)
 	}
 }
+
+func TestFilmDetailAcceptsStringIntFields(t *testing.T) {
+	raw := []byte(`{"vod_id":"645395466392961375","type_id":"701","group_id":"0","vod_score_num":"167","vod_hits":"12","vod_up":"","vod_down":null,"vod_score_all":"8.5","vod_time_add":1731115697,"vod_douban_id":""}`)
+	var detail FilmDetail
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		t.Fatalf("字符串整型字段应可解析: %v", err)
+	}
+	if detail.VodID != 645395466392961375 || detail.TypeID != 701 || detail.GroupID != 0 {
+		t.Fatalf("ID 解析不符: %+v", detail)
+	}
+	if detail.VodScoreNum != 167 || detail.VodHits != 12 || detail.VodUp != 0 || detail.VodDown != 0 || detail.VodScoreAll != 8 {
+		t.Fatalf("统计字段解析不符: %+v", detail)
+	}
+	if detail.VodTimeAdd != 1731115697 || detail.VodDouBanID != 0 {
+		t.Fatalf("数字或空字符串解析不符: %+v", detail)
+	}
+}
+
+func TestFilmDetailRejectsNonNumericIntField(t *testing.T) {
+	var detail FilmDetail
+	if err := json.Unmarshal([]byte(`{"vod_score_num":"暂无"}`), &detail); err == nil {
+		t.Fatal("非数字文本应报错")
+	}
+}
+
+func TestFilmDetailPageAcceptsStringScoreNum(t *testing.T) {
+	raw := []byte(`{"code":1,"list":[{"vod_id":1,"vod_name":"甲","vod_score_num":10},{"vod_id":2,"vod_name":"乙","vod_score_num":"10"}]}`)
+	var page FilmDetailLPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatalf("分页详情应可解析: %v", err)
+	}
+	if len(page.List) != 2 || page.List[0].VodScoreNum != 10 || page.List[1].VodScoreNum != 10 || page.List[1].VodName != "乙" {
+		t.Fatalf("分页解析结果不符: %+v", page.List)
+	}
+}
+
+func TestFilmListAcceptsStringIDs(t *testing.T) {
+	raw := []byte(`{"code":1,"list":[{"vod_id":"9","type_id":"2","vod_name":"测试"}]}`)
+	var page FilmListPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatalf("列表应可解析: %v", err)
+	}
+	if len(page.List) != 1 || page.List[0].VodID != 9 || page.List[0].TypeID != 2 || page.List[0].VodName != "测试" {
+		t.Fatalf("列表解析结果不符: %+v", page.List)
+	}
+}
+
+func TestFlexIntOverflowAndFractionalID(t *testing.T) {
+	var d FilmDetail
+	if err := json.Unmarshal([]byte(`{"vod_hits":"9223372036854775808"}`), &d); err == nil {
+		t.Fatalf("越界应报错，得到 %d", d.VodHits)
+	}
+	if err := json.Unmarshal([]byte(`{"vod_hits":"9223372036854775807"}`), &d); err != nil || d.VodHits != 9223372036854775807 {
+		t.Fatalf("MaxInt64 应可解析: %d %v", d.VodHits, err)
+	}
+	for _, field := range []string{"vod_id", "type_id", "type_id_1", "group_id"} {
+		var fd FilmDetail
+		if err := json.Unmarshal([]byte(`{"`+field+`":"12.7"}`), &fd); err == nil {
+			t.Fatalf("%s 带小数应报错", field)
+		}
+		if err := json.Unmarshal([]byte(`{"`+field+`":"12.0"}`), &fd); err != nil {
+			t.Fatalf("%s 整数值的小数写法应可解析: %v", field, err)
+		}
+	}
+	var l FilmList
+	if err := json.Unmarshal([]byte(`{"vod_id":1.5}`), &l); err == nil {
+		t.Fatal("列表 vod_id 带小数应报错")
+	}
+}
+
+func TestPagesAcceptStringCounts(t *testing.T) {
+	var cp CommonPage
+	if err := json.Unmarshal([]byte(`{"code":1,"pagecount":"16218","total":"324350"}`), &cp); err != nil || cp.PageCount != 16218 || cp.Total != 324350 || cp.Code != 1 {
+		t.Fatalf("探页外壳解析不符: %+v %v", cp, err)
+	}
+	raw := []byte(`{"code":1,"pagecount":"2","total":"30","list":[{"vod_id":"9","vod_name":"甲"}],"class":[{"type_id":"6","type_pid":"1","type_name":"动作片"}]}`)
+	var lp FilmListPage
+	if err := json.Unmarshal(raw, &lp); err != nil {
+		t.Fatalf("列表外壳应可解析: %v", err)
+	}
+	if lp.PageCount != 2 || lp.Total != 30 || len(lp.List) != 1 || lp.List[0].VodID != 9 {
+		t.Fatalf("列表外壳解析不符: %+v", lp)
+	}
+	if len(lp.Class) != 1 || lp.Class[0].ID != 6 || lp.Class[0].Pid != 1 || lp.Class[0].Name != "动作片" {
+		t.Fatalf("分类解析不符: %+v", lp.Class)
+	}
+	var dp FilmDetailLPage
+	if err := json.Unmarshal([]byte(`{"pagecount":"3","total":60,"list":[{"vod_id":1,"vod_name":"乙"}]}`), &dp); err != nil || dp.PageCount != 3 || dp.Total != 60 || len(dp.List) != 1 || dp.List[0].VodName != "乙" {
+		t.Fatalf("详情外壳解析不符: %+v %v", dp, err)
+	}
+}
