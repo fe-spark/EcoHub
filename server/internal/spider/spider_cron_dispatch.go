@@ -50,7 +50,10 @@ func flushCronQueue() {
 	if len(batch) == 0 {
 		return
 	}
-	run, skippedCollect, skippedMaintenance := planCronBatch(batch, isMaintenanceRunning())
+	run, light, skippedCollect, skippedMaintenance := planCronBatch(batch, isMaintenanceRunning())
+	for _, ft := range light {
+		go runCronTaskSafely(ft)
+	}
 	due := make([]string, 0, len(run))
 	for _, ft := range run {
 		if isMaintenanceModel(ft.Model) {
@@ -87,9 +90,10 @@ func runMaintenanceBatch(tasks []model.FilmCollectTask) {
 }
 
 // planCronBatch 裁决同一秒内的计划任务。
+// 轻量任务（日志清理、采集记录清理）不受维护影响，总是放行，也不让采集跳过。
 // 已有维护在跑时，本批采集和维护全部跳过。
 // 本批含维护且当前没有维护在跑时，只保留维护，采集跳过。
-func planCronBatch(batch []model.FilmCollectTask, maintenanceBusy bool) (run []model.FilmCollectTask, skippedCollect, skippedMaintenance []string) {
+func planCronBatch(batch []model.FilmCollectTask, maintenanceBusy bool) (run, light []model.FilmCollectTask, skippedCollect, skippedMaintenance []string) {
 	seen := make(map[string]struct{}, len(batch))
 	var maintenance, collects []model.FilmCollectTask
 	for _, ft := range batch {
@@ -99,11 +103,14 @@ func planCronBatch(batch []model.FilmCollectTask, maintenanceBusy bool) (run []m
 			}
 			seen[ft.Id] = struct{}{}
 		}
-		if ft.Model == model.TaskModelAutoCollect {
+		switch {
+		case ft.Model == model.TaskModelAutoCollect:
 			collects = append(collects, ft)
-			continue
+		case isLightCronModel(ft.Model):
+			light = append(light, ft)
+		default:
+			maintenance = append(maintenance, ft)
 		}
-		maintenance = append(maintenance, ft)
 	}
 	collectIDs := func(tasks []model.FilmCollectTask) []string {
 		ids := make([]string, len(tasks))
@@ -113,10 +120,10 @@ func planCronBatch(batch []model.FilmCollectTask, maintenanceBusy bool) (run []m
 		return ids
 	}
 	if maintenanceBusy {
-		return nil, collectIDs(collects), collectIDs(maintenance)
+		return nil, light, collectIDs(collects), collectIDs(maintenance)
 	}
 	if len(maintenance) > 0 {
-		return maintenance, collectIDs(collects), nil
+		return maintenance, light, collectIDs(collects), nil
 	}
-	return collects, nil, nil
+	return collects, light, nil, nil
 }

@@ -182,9 +182,16 @@ func runTaskBody(ft model.FilmCollectTask) {
 
 var runningMaintenanceTasks sync.Map
 
+// isMaintenanceModel 需要占用维护闸门（停止采集、独占执行）的任务。目前只有片库清理。
 func isMaintenanceModel(taskModel int) bool {
+	return taskModel == model.TaskModelOrphanClean
+}
+
+// isLightCronModel 不碰片库、无需停采集的轻量清理任务：日志清理、采集记录清理。
+// 它们只受 runningCronTasks 防重入保护，不占维护闸门，也不让采集让行。
+func isLightCronModel(taskModel int) bool {
 	switch taskModel {
-	case model.TaskModelOrphanClean, model.TaskModelLogClean, model.TaskModelCollectClean:
+	case model.TaskModelLogClean, model.TaskModelCollectClean:
 		return true
 	default:
 		return false
@@ -317,8 +324,23 @@ const (
 	failureRecordRetention = 7 * 24 * time.Hour
 )
 
+// executeLightTask 轻量任务的执行流程：不停采集、不占闸门，失败时告警。
+func executeLightTask(ft model.FilmCollectTask, fallback string, action func(remark string, startedAt time.Time) error) {
+	startedAt := time.Now()
+	remark := strings.TrimSpace(ft.Remark)
+	if remark == "" {
+		remark = fallback
+	}
+	noteTaskRan(ft.Id, startedAt)
+	if err := action(remark, startedAt); err != nil {
+		syslog.Errorf("[Cron] %s 失败: %v", remark, err)
+		emitCronFailedNotify(ft.Id, remark, err.Error())
+	}
+}
+
+// executeLogCleanTask 只删除磁盘上的历史轮转日志，与采集互不影响，不走维护闸门。
 func executeLogCleanTask(ft model.FilmCollectTask) {
-	executeMaintenance(ft, "清理过期运行日志", func(remark string, startedAt time.Time) error {
+	executeLightTask(ft, "清理过期运行日志", func(remark string, startedAt time.Time) error {
 		n, err := syslog.PruneExpiredLogs(logRetention)
 		if err != nil {
 			return err
@@ -328,8 +350,11 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 	})
 }
 
+// executeCollectRecordCleanTask 不走维护闸门：清理只碰 started_at 超过 30 天且非 running 的记录，
+// 以及早于 30 天、批次记录已不存在的清单行。采集只写进行中批次（记录与清单都是新时间），两者不会交叉；
+// 也不涉及快照发布，因此无需 publishMu。
 func executeCollectRecordCleanTask(ft model.FilmCollectTask) {
-	executeMaintenance(ft, "定期清理超过 30 天的采集运行记录与快照", func(remark string, startedAt time.Time) error {
+	executeLightTask(ft, "定期清理超过 30 天的采集运行记录与快照", func(remark string, startedAt time.Time) error {
 		if err := repository.CleanOldCollectRecords(30); err != nil {
 			return err
 		}
