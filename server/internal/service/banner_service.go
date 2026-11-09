@@ -31,9 +31,6 @@ func bannerInputErr(format string, args ...any) error {
 // 一键排片单个分类最多排几部，和后台输入框上限一致。
 const bannerQuotaMax = 5
 
-// 一个站点一次发布的轮播最多几条。
-const bannerDeckMax = 99
-
 // 一键排片查询的超时上限。
 const bannerGenerateTimeout = 10 * time.Second
 
@@ -420,9 +417,6 @@ func (s *BannerService) PublishDeck(sourceID, revision string, items []BannerFie
 	src, err := resolveBannerSource(sourceID)
 	if err != nil {
 		return BannerListView{}, err
-	}
-	if len(items) > bannerDeckMax {
-		return BannerListView{}, bannerInputErr("一次最多发布 %d 条轮播", bannerDeckMax)
 	}
 	mids := make([]int64, 0, len(items))
 	seen := make(map[int64]bool, len(items))
