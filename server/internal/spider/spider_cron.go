@@ -272,7 +272,8 @@ func finishMaintenance(ft model.FilmCollectTask, remark string, err error) {
 		return
 	}
 	if errors.Is(err, errMaintenanceBusy) {
-		log.Printf("定时任务跳过: %s（%s），已有维护任务在执行（%s）", remark, ft.Id, maintenanceRunningDetail())
+		log.Printf("定时任务延后: %s（%s），已有维护任务在执行（%s）", remark, ft.Id, maintenanceRunningDetail())
+		deferMaintenance(ft)
 		return
 	}
 	syslog.Errorf("[Maintenance] %s 失败: %v", remark, err)

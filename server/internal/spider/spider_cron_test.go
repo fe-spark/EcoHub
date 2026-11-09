@@ -116,9 +116,18 @@ func TestFinishMaintenance_BusyDoesNotNotify(t *testing.T) {
 	RegisterNotifyDispatcher(NotifyDispatcher{
 		OnCronFailed: func(string, string, string) { called = true },
 	})
-	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", errMaintenanceBusy)
+	var deferred []string
+	startDeferredMaintenanceHook = func(ft model.FilmCollectTask, _ *deferredMaintenanceState) {
+		deferred = append(deferred, ft.Id)
+		deferredMaintenance.Delete(ft.Id)
+	}
+	defer func() { startDeferredMaintenanceHook = nil }()
+	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean", Model: model.TaskModelOrphanClean}, "片库清理", errMaintenanceBusy)
 	if called {
 		t.Fatal("busy skip must not notify")
+	}
+	if len(deferred) != 1 || deferred[0] != "sys_cron_orphan_clean" {
+		t.Fatalf("busy skip should be deferred, got %v", deferred)
 	}
 }
 
