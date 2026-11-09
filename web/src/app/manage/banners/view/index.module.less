@@ -334,3 +334,14 @@
   border-radius: 12px;
   text-align: center;
 }
+
+/* 影片已失效的行：灰显，仍可排序、删除 */
+.bannerCardUnavailable {
+  border-style: dashed;
+
+  .cardBody {
+    cursor: default;
+    opacity: 0.55;
+    filter: grayscale(1);
+  }
+}
