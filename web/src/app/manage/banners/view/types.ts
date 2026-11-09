@@ -34,6 +34,8 @@ export type BannerRecord = {
   isScraped?: boolean;
   tmdbId?: number;
   mediaType?: string;
+  /** 影片已不在片库，或在该站已没有播放线路：首页不展示，后台灰显，可删除、参与排序。 */
+  unavailable?: boolean;
   pendingScrape?: boolean;
   scrapeState?: "pending" | "scraped" | "miss" | "none";
 };

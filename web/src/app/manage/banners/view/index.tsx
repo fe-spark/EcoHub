@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import axios from "axios";
 import { Button, Space, Spin, Empty, Select } from "antd";
 import { DesktopOutlined } from "@ant-design/icons";
 
@@ -58,29 +59,50 @@ export default function BannersPageView() {
   messageRef.current = message;
   const { canWrite } = useManagePermission();
 
+  // 当前列表请求；换站或再次刷新时中止上一个，避免旧站点的响应覆盖新站点。
+  const listAbortRef = useRef<AbortController | null>(null);
+  // 已经拿到列表的站点。初始不传站点时服务端回填首选站，回填后不必再请求一次。
+  const loadedSourceRef = useRef<string | null>(null);
+
   const fetchBanners = useCallback(async () => {
+    listAbortRef.current?.abort();
+    const controller = new AbortController();
+    listAbortRef.current = controller;
     setLoading(true);
     try {
-      const resp = await ApiGet<BannerListView>("/manage/banners", {
-        sourceId: sourceId || undefined,
-      });
+      const resp = await ApiGet<BannerListView>(
+        "/manage/banners",
+        { sourceId: sourceId || undefined },
+        undefined,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       if (resp.code === 0 && resp.data) {
         revisionRef.current = resp.data.revision;
         absorbServerList(resp.data.items || []);
+        loadedSourceRef.current = resp.data.sourceId || sourceId;
         if (!sourceId && resp.data.sourceId) setSourceId(resp.data.sourceId);
       } else {
         messageRef.current.error(resp.msg || "获取轮播列表失败");
       }
-    } catch {
+    } catch (err) {
+      if (controller.signal.aborted || axios.isCancel(err)) return;
       messageRef.current.error("网络异常，获取轮播列表失败");
     } finally {
-      setLoading(false);
+      if (listAbortRef.current === controller) {
+        listAbortRef.current = null;
+        setLoading(false);
+      }
     }
   }, [absorbServerList, sourceId]);
 
   useEffect(() => {
+    // 初始请求回填了首选站后，sourceId 变化不需要再拉一次同一个站。
+    if (sourceId && loadedSourceRef.current === sourceId) return;
     void fetchBanners();
-  }, [fetchBanners]);
+  }, [fetchBanners, sourceId]);
+
+  useEffect(() => () => listAbortRef.current?.abort(), []);
 
   useEffect(() => {
     ApiGet("/manage/collect/list")
@@ -95,6 +117,8 @@ export default function BannersPageView() {
   const handleSiteChange = (next: string) => {
     if (next === sourceId) return;
     // 换站直接丢弃未保存的顺序。
+    listAbortRef.current?.abort();
+    loadedSourceRef.current = null;
     replaceList([]);
     revisionRef.current = "";
     setSourceId(next);
