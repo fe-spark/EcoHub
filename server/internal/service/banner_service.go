@@ -82,9 +82,9 @@ type BannerGenerateResult struct {
 }
 
 var bannerStrategies = map[string]string{
+	"latest": "latest_random",
 	"hot":    "hot_random",
 	"score":  "score_random",
-	"latest": "latest_random",
 }
 
 // resolveBannerSource 不传站点时用当前首选站。
@@ -430,7 +430,7 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 	}
 	strategy, ok := bannerStrategies[strings.TrimSpace(req.Strategy)]
 	if !ok {
-		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 hot、score 或 latest")
+		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 latest、hot 或 score")
 	}
 	quotas := make([]BannerQuota, 0, len(req.Quotas))
 	seen := make(map[int64]bool, len(req.Quotas))

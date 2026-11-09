@@ -4,7 +4,7 @@ import React, { useMemo } from "react";
 import { InputNumber, Segmented } from "antd";
 import styles from "./banner-quick.module.less";
 
-export type QuickStrategy = "hot" | "score" | "latest";
+export type QuickStrategy = "latest" | "hot" | "score";
 
 export interface CategoryQuotaItem {
   id: number;
@@ -21,9 +21,9 @@ interface BannerQuickConfigProps {
 }
 
 const STRATEGY_OPTIONS = [
+  { label: "最近更新", value: "latest" },
   { label: "最热排片", value: "hot" },
   { label: "评分优先", value: "score" },
-  { label: "最近更新", value: "latest" },
 ];
 
 export default function BannerQuickConfig({

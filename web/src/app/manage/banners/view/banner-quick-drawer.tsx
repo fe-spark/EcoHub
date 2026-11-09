@@ -22,9 +22,9 @@ import TmdbModal from "@/app/manage/film/components/tmdb-modal";
 import styles from "./banner-quick.module.less";
 
 const STRATEGY_LABEL: Record<QuickStrategy, string> = {
+  latest: "最近更新",
   hot: "最热排片",
   score: "评分优先",
-  latest: "最近更新",
 };
 
 interface BannerQuickDrawerProps {
