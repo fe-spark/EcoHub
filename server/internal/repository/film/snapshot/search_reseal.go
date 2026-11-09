@@ -114,7 +114,10 @@ func resealLoadProgress(total int64, startedAt time.Time) func(n int) {
 		pct := float64(done) * 100 / float64(total)
 		log.Printf("[ActiveReadModel] 检索索引读库进度: %d/%d (%.1f%%) 耗时=%s",
 			done, total, pct, time.Since(startedAt).Round(time.Millisecond))
-		NotifySearchIndexProgress(total, done, "indexing")
+		// 读完不等于封完。满格只由构建结束后的 done 发。
+		if done < total {
+			NotifySearchIndexProgress(total, done, "indexing")
+		}
 		if loaded >= total {
 			next = total + 1
 			return
