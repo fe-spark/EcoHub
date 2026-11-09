@@ -120,7 +120,7 @@ type bannerDeckReq struct {
 	Items    []service.BannerFields `json:"items"`
 }
 
-// BannerDeck PUT /manage/banners/deck 发布排片，整组替换该站轮播，最多 99 条。revision 不一致返回 409。
+// BannerDeck PUT /manage/banners/deck 发布排片，整组替换该站轮播。revision 不一致返回 409。
 func (h *ManageHandler) BannerDeck(c *gin.Context) {
 	var req bannerDeckReq
 	if err := c.ShouldBindJSON(&req); err != nil {

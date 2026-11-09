@@ -507,16 +507,8 @@ func TestBannerUpdate_ChangeFilmResetsImages(t *testing.T) {
 	}
 }
 
-func TestBannerDeck_Limit(t *testing.T) {
+func TestBannerGenerate_PerCategoryLimit(t *testing.T) {
 	setupBannerSvcDB(t)
-	items := make([]BannerFields, bannerDeckMax+1)
-	for i := range items {
-		items[i] = BannerFields{Mid: i64Ptr(int64(i + 1))}
-	}
-	view, _ := BannerSvc.List("src1")
-	if _, err := BannerSvc.PublishDeck("src1", view.Revision, items); !IsBannerUserError(err) {
-		t.Fatalf("deck over limit should be rejected, got %v", err)
-	}
 	quotas := []BannerQuota{{CategoryID: 1, Count: bannerQuotaMax + 1}}
 	if _, err := BannerSvc.Generate(context.Background(), BannerGenerateReq{SourceId: "src1", Strategy: "hot", Quotas: quotas}); !IsBannerUserError(err) {
 		t.Fatalf("generate per-category over limit should be rejected, got %v", err)
