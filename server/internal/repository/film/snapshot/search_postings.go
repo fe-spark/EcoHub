@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"cmp"
 	"slices"
 	"sort"
 	"strings"
@@ -103,6 +104,8 @@ func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []*FilmSearchMe
 	if len(modified) == 0 {
 		return cur.SearchPosts
 	}
+	// 按下标从小到大追加。新片下标都在末尾，倒排表只需尾部追加，不会每条都重排。
+	slices.SortFunc(modified, func(a, b changed) int { return cmp.Compare(a.pos, b.pos) })
 	posts := &searchPostings{
 		runes: make(map[rune][]int32, len(cur.SearchPosts.runes)+len(modified)),
 		ascii: make(map[string][]int32, len(cur.SearchPosts.ascii)+len(modified)),
@@ -143,14 +146,11 @@ func cowAppendPos[K comparable](list []int32, owned map[K]struct{}, key K, pos i
 	if len(list) == 0 || pos > list[len(list)-1] {
 		return append(list, pos)
 	}
-	for _, v := range list {
-		if v == pos {
-			return list
-		}
+	i, found := slices.BinarySearch(list, pos)
+	if found {
+		return list
 	}
-	list = append(list, pos)
-	slices.Sort(list)
-	return list
+	return slices.Insert(list, i, pos)
 }
 func addAsciiPostings(dst map[string][]int32, pos int32, raw string, owned map[string]struct{}) {
 	raw = strings.ToLower(strings.TrimSpace(raw))

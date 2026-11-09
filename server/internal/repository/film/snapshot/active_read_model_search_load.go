@@ -210,7 +210,10 @@ func (p *searchLoadProgress) add(n int) {
 	if loaded > p.total {
 		loaded = p.total
 	}
-	NotifySearchIndexProgress(p.total, loaded, "indexing")
+	// 读完不等于封完。满格只由构建结束后的 done 发。
+	if loaded < p.total {
+		NotifySearchIndexProgress(p.total, loaded, "indexing")
+	}
 	log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 影片 %d/%d %d%%",
 		p.version, loaded, p.total, loaded*100/p.total)
 	if p.loaded >= p.total {
