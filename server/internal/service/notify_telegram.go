@@ -448,3 +448,23 @@ func truncateRunes(s string, max int) string {
 	r := []rune(s)
 	return string(r[:max]) + "…"
 }
+
+// 定时任务失败原因的截断上限：多步错误按行拼接，逐行截断，避免第一行过长把后面的步骤挤掉。
+const (
+	cronReasonLineMax  = 200
+	cronReasonTotalMax = 600
+)
+
+// truncateReasonLines 按行截断（按 rune 计数，不会截坏中文），再整体截断。空行丢弃。
+func truncateReasonLines(s string, lineMax, totalMax int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		kept = append(kept, truncateRunes(line, lineMax))
+	}
+	return truncateRunes(strings.Join(kept, "\n"), totalMax)
+}
