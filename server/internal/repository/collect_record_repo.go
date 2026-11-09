@@ -241,7 +241,16 @@ func ClearCollectRecords() error {
 	})
 }
 
-// CleanOldCollectRecords 清理超过指定天数的历史采集记录（防数据库膨胀）
+// 过期采集记录清理的批大小。包级变量，测试可调小覆盖多批次。
+var (
+	collectCleanRecordChunk = 200  // 每轮处理的过期记录条数
+	collectCleanFilmChunk   = 5000 // 每条 DELETE 删除的影片清单行数上限
+)
+
+// CleanOldCollectRecords 清理超过指定天数的历史采集记录（防数据库膨胀）。
+// 不再包一个大事务：按记录 id 游标分批，每批先删这些批次的影片清单（每次最多 collectCleanFilmChunk 行），
+// 再删记录本身；最后按清单 id 游标清掉已无记录的旧清单行。每条语句都有上限，避免撞上 MySQL readTimeout。
+// 进行中的批次（status=running）一律跳过，它的记录和清单都不动。
 func CleanOldCollectRecords(days int) error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
@@ -250,21 +259,135 @@ func CleanOldCollectRecords(days int) error {
 		days = 30
 	}
 	threshold := time.Now().AddDate(0, 0, -days)
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+	session := db.Mdb.Session(&gorm.Session{SkipDefaultTransaction: true})
+	recordChunk := collectCleanRecordChunk
+	if recordChunk <= 0 {
+		recordChunk = 200
+	}
+
+	var cursor uint
+	for {
 		var rows []model.CollectRecord
-		if err := tx.Select("id", "batch_id").
-			Where("started_at < ?", threshold).
+		if err := session.Select("id", "batch_id").
+			Where("started_at < ? AND status != ? AND id > ?", threshold, model.CollectRecordStatusRunning, cursor).
+			Order("id").
+			Limit(recordChunk).
 			Find(&rows).Error; err != nil {
+			return fmt.Errorf("查询过期采集记录失败: %w", err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		cursor = rows[len(rows)-1].ID
+		ids := make([]uint, 0, len(rows))
+		batchIDs := make([]string, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+			if batchID := strings.TrimSpace(row.BatchID); batchID != "" {
+				batchIDs = append(batchIDs, batchID)
+			}
+		}
+		if err := deleteCollectFilmsByBatches(session, batchIDs); err != nil {
 			return err
 		}
-		if err := removeRecordsAndFilms(tx, rows); err != nil {
-			return err
+		// 复核状态：查询之后才变成 running 的记录（理论上不会发生）不删。
+		if err := session.Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).
+			Delete(&model.CollectRecord{}).Error; err != nil {
+			return fmt.Errorf("删除过期采集记录失败: %w", err)
 		}
-		// 只清没有记录的旧影片行。仍在库里的批次，包括进行中的，清单保留。
-		alive := tx.Model(&model.CollectRecord{}).Where("batch_id != ''").Select("batch_id")
-		return tx.Where("created_at < ? AND batch_id NOT IN (?)", threshold, alive).
-			Delete(&model.CollectRecordFilmItem{}).Error
-	})
+		if len(rows) < recordChunk {
+			break
+		}
+	}
+	return sweepOrphanCollectFilms(session, threshold)
+}
+
+// deleteCollectFilmsByBatches 分批删除指定批次的影片清单。先按主键取一批，再按主键删，sqlite 与 MySQL 通用。
+func deleteCollectFilmsByBatches(session *gorm.DB, batchIDs []string) error {
+	if len(batchIDs) == 0 {
+		return nil
+	}
+	chunk := collectCleanFilmChunk
+	if chunk <= 0 {
+		chunk = 5000
+	}
+	for {
+		var ids []uint
+		if err := session.Model(&model.CollectRecordFilmItem{}).
+			Where("batch_id IN ?", batchIDs).
+			Limit(chunk).
+			Pluck("id", &ids).Error; err != nil {
+			return fmt.Errorf("查询过期影片清单失败: %w", err)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if err := session.Where("id IN ?", ids).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
+			return fmt.Errorf("删除过期影片清单失败: %w", err)
+		}
+		if len(ids) < chunk {
+			return nil
+		}
+	}
+}
+
+// sweepOrphanCollectFilms 按清单 id 游标清理早于 threshold 且所属批次已没有记录的清单行。
+// 仍有记录的批次（包括进行中的）保留；删除语句再原子复核一次批次记录是否存在。
+func sweepOrphanCollectFilms(session *gorm.DB, threshold time.Time) error {
+	chunk := collectCleanFilmChunk
+	if chunk <= 0 {
+		chunk = 5000
+	}
+	var cursor uint
+	for {
+		var rows []model.CollectRecordFilmItem
+		if err := session.Select("id", "batch_id").
+			Where("created_at < ? AND id > ?", threshold, cursor).
+			Order("id").
+			Limit(chunk).
+			Find(&rows).Error; err != nil {
+			return fmt.Errorf("查询孤儿影片清单失败: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		cursor = rows[len(rows)-1].ID
+		batchSet := make(map[string]struct{}, len(rows))
+		batchIDs := make([]string, 0)
+		for _, row := range rows {
+			if _, ok := batchSet[row.BatchID]; ok {
+				continue
+			}
+			batchSet[row.BatchID] = struct{}{}
+			batchIDs = append(batchIDs, row.BatchID)
+		}
+		var alive []string
+		if err := session.Model(&model.CollectRecord{}).
+			Where("batch_id IN ?", batchIDs).
+			Pluck("batch_id", &alive).Error; err != nil {
+			return fmt.Errorf("查询采集批次失败: %w", err)
+		}
+		aliveSet := make(map[string]struct{}, len(alive))
+		for _, id := range alive {
+			aliveSet[id] = struct{}{}
+		}
+		ids := make([]uint, 0, len(rows))
+		for _, row := range rows {
+			if _, ok := aliveSet[row.BatchID]; !ok {
+				ids = append(ids, row.ID)
+			}
+		}
+		if len(ids) > 0 {
+			aliveSub := session.Model(&model.CollectRecord{}).Select("batch_id").Where("batch_id IN ?", batchIDs)
+			if err := session.Where("id IN ? AND batch_id NOT IN (?)", ids, aliveSub).
+				Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
+				return fmt.Errorf("删除孤儿影片清单失败: %w", err)
+			}
+		}
+		if len(rows) < chunk {
+			return nil
+		}
+	}
 }
 
 // UpdateRunningCollectRecord 刷新仍在运行的批次页数、影片数和明细。不改终态。
