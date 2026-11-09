@@ -31,10 +31,15 @@ func bannerInputErr(format string, args ...any) error {
 // 一键排片单个分类最多排几部，和后台输入框上限一致。
 const bannerQuotaMax = 99
 
+// 一个站点一次发布的轮播最多几条；一键排片各分类合计也不能超过它。
+const bannerDeckMax = 99
+
 // 一键排片查询的超时上限。
 const bannerGenerateTimeout = 10 * time.Second
 
 // BannerFields 新增、编辑、发布时可提交的字段。指针为空表示不改；空字符串或 0 表示清除覆盖、跟随片库。
+//   - score 填 0 等于清除评分覆盖，显示片库评分；year 填 0 同理。
+//   - 换片（mid 变化）时会清掉刮削和文字覆盖；本次没提交 poster/backdrop 时图片也回到跟随片库。
 type BannerFields struct {
 	Mid       *int64   `json:"mid"`
 	ImageMode *string  `json:"imageMode"`
@@ -104,20 +109,35 @@ func resolveBannerSource(sourceID string) (*model.FilmSource, error) {
 	return src, nil
 }
 
-// AssembleBanners 用片库数据组装轮播行。片库里查不到的行跳过，不在读路径上删数据。
-func AssembleBanners(slots []model.BannerSlot) []model.BannerAdminItem {
+// AssembleBanners 用片库数据组装轮播行。影片不在片库、或在该行站点已没有播放线路时视为不可用：
+// keepUnavailable 为 false（首页）时跳过；为 true（后台）时保留并标记 Unavailable，便于删除和排序。
+// 读路径不删数据。片库查询出错时返回 error，不当成“没有影片”。
+func AssembleBanners(ctx context.Context, slots []model.BannerSlot, keepUnavailable bool) ([]model.BannerAdminItem, error) {
 	out := make([]model.BannerAdminItem, 0, len(slots))
 	if len(slots) == 0 {
-		return out
+		return out, nil
 	}
-	mids := make([]int64, 0, len(slots))
+	midsBySource := make(map[string][]int64)
 	for _, s := range slots {
-		mids = append(mids, s.Mid)
+		midsBySource[s.SourceId] = append(midsBySource[s.SourceId], s.Mid)
 	}
-	live := filmrepo.LiveBannerSnapshotsByMIDs(mids)
+	live := make(map[string]map[int64]filmrepo.LiveBannerSnapshot, len(midsBySource))
+	for sourceID, mids := range midsBySource {
+		snaps, err := filmrepo.LiveBannerSnapshotsByMIDs(ctx, sourceID, mids)
+		if err != nil {
+			return nil, err
+		}
+		live[sourceID] = snaps
+	}
 	for _, s := range slots {
-		snap, ok := live[s.Mid]
+		snap, ok := live[s.SourceId][s.Mid]
 		if !ok {
+			if !keepUnavailable {
+				continue
+			}
+			item := assembleBanner(s, filmrepo.LiveBannerSnapshot{Mid: s.Mid})
+			item.Unavailable = true
+			out = append(out, item)
 			continue
 		}
 		out = append(out, assembleBanner(s, snap))
@@ -125,7 +145,7 @@ func AssembleBanners(slots []model.BannerSlot) []model.BannerAdminItem {
 	for i := range out {
 		out[i].Sort = int64(i + 1)
 	}
-	return out
+	return out, nil
 }
 
 func assembleBanner(s model.BannerSlot, snap filmrepo.LiveBannerSnapshot) model.BannerAdminItem {
@@ -212,13 +232,18 @@ func (s *BannerService) HomeBanners(sourceID string) (model.Banners, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range AssembleBanners(slots) {
+	items, err := AssembleBanners(context.Background(), slots, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
 		out = append(out, item.Banner)
 	}
 	return out, nil
 }
 
-// List 一个站点的轮播和版本号。
+// List 一个站点的全部轮播和版本号。不可用的行也列出（带 unavailable 标记），
+// 这样前端提交排序时的 ids 和服务端算 revision 用的是同一组行。
 func (s *BannerService) List(sourceID string) (BannerListView, error) {
 	src, err := resolveBannerSource(sourceID)
 	if err != nil {
@@ -228,15 +253,22 @@ func (s *BannerService) List(sourceID string) (BannerListView, error) {
 	if err != nil {
 		return BannerListView{}, err
 	}
+	items, err := AssembleBanners(context.Background(), slots, true)
+	if err != nil {
+		return BannerListView{}, err
+	}
 	return BannerListView{
 		SourceId: src.Id,
 		Revision: repository.BannerRevision(slots),
-		Items:    AssembleBanners(slots),
+		Items:    items,
 	}, nil
 }
 
 func (s *BannerService) findItem(slot model.BannerSlot) (model.BannerAdminItem, error) {
-	items := AssembleBanners([]model.BannerSlot{slot})
+	items, err := AssembleBanners(context.Background(), []model.BannerSlot{slot}, true)
+	if err != nil {
+		return model.BannerAdminItem{}, err
+	}
 	if len(items) == 0 {
 		return model.BannerAdminItem{}, bannerInputErr("影片不存在")
 	}
@@ -249,11 +281,11 @@ func checkFilmOnSource(mid int64, sourceID string) error {
 	if mid <= 0 {
 		return bannerInputErr("请选择影片")
 	}
-	ok, err := repository.FilmOnSource(mid, sourceID)
+	ok, err := repository.FilmsOnSource(context.Background(), sourceID, []int64{mid})
 	if err != nil {
 		return err
 	}
-	if !ok {
+	if !ok[mid] {
 		return bannerInputErr("影片不存在或不属于该采集站")
 	}
 	return nil
@@ -268,6 +300,12 @@ func applyBannerFields(slot *model.BannerSlot, f BannerFields) error {
 		slot.BlurbOverride = ""
 		slot.ScoreOverride = 0
 		slot.YearOverride = 0
+		// 本次没提交图片时，旧影片的自定义海报和横图也不再适用，回到跟随片库。
+		if f.Poster == nil && f.Backdrop == nil {
+			slot.ImageMode = model.BannerImageFollow
+			slot.PosterOverride = ""
+			slot.BackdropOverride = ""
+		}
 	}
 	if f.ImageMode != nil {
 		switch strings.TrimSpace(*f.ImageMode) {
@@ -342,22 +380,19 @@ func (s *BannerService) Create(sourceID string, f BannerFields) (model.BannerAdm
 	return s.findItem(slot)
 }
 
-// Update 只改提交了的字段，立即生效。
+// Update 只改提交了的字段，立即生效。读出、合并、保存在同一个事务里完成。
 func (s *BannerService) Update(id string, f BannerFields) (model.BannerAdminItem, error) {
-	slot, err := repository.GetBannerSlot(id)
-	if err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	oldMid := slot.Mid
-	if err := applyBannerFields(&slot, f); err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	if slot.Mid != oldMid {
-		if err := checkFilmOnSource(slot.Mid, slot.SourceId); err != nil {
-			return model.BannerAdminItem{}, err
+	slot, err := repository.UpdateBannerSlot(id, func(slot *model.BannerSlot) error {
+		oldMid := slot.Mid
+		if err := applyBannerFields(slot, f); err != nil {
+			return err
 		}
-	}
-	if err := repository.UpdateBannerSlot(&slot); err != nil {
+		if slot.Mid != oldMid {
+			return checkFilmOnSource(slot.Mid, slot.SourceId)
+		}
+		return nil
+	})
+	if err != nil {
 		return model.BannerAdminItem{}, err
 	}
 	return s.findItem(slot)
@@ -386,7 +421,10 @@ func (s *BannerService) PublishDeck(sourceID, revision string, items []BannerFie
 	if err != nil {
 		return BannerListView{}, err
 	}
-	slots := make([]model.BannerSlot, 0, len(items))
+	if len(items) > bannerDeckMax {
+		return BannerListView{}, bannerInputErr("一次最多发布 %d 条轮播", bannerDeckMax)
+	}
+	mids := make([]int64, 0, len(items))
 	seen := make(map[int64]bool, len(items))
 	for _, f := range items {
 		if f.Mid == nil || *f.Mid <= 0 {
@@ -396,8 +434,16 @@ func (s *BannerService) PublishDeck(sourceID, revision string, items []BannerFie
 			return BannerListView{}, bannerInputErr("排片里有重复的影片")
 		}
 		seen[*f.Mid] = true
-		if err := checkFilmOnSource(*f.Mid, src.Id); err != nil {
-			return BannerListView{}, err
+		mids = append(mids, *f.Mid)
+	}
+	onSource, err := repository.FilmsOnSource(context.Background(), src.Id, mids)
+	if err != nil {
+		return BannerListView{}, err
+	}
+	slots := make([]model.BannerSlot, 0, len(items))
+	for _, f := range items {
+		if !onSource[*f.Mid] {
+			return BannerListView{}, bannerInputErr("影片不存在或不属于该采集站")
 		}
 		id, err := utils.GenerateSalt()
 		if err != nil {
@@ -434,6 +480,7 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 	}
 	quotas := make([]BannerQuota, 0, len(req.Quotas))
 	seen := make(map[int64]bool, len(req.Quotas))
+	total := 0
 	for _, q := range req.Quotas {
 		if q.CategoryID <= 0 {
 			return BannerGenerateResult{}, bannerInputErr("分类编号不合法")
@@ -445,10 +492,14 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 			continue
 		}
 		seen[q.CategoryID] = true
+		total += q.Count
 		quotas = append(quotas, q)
 	}
 	if len(quotas) == 0 {
 		return BannerGenerateResult{}, bannerInputErr("请至少为一个分类设置排片数量")
+	}
+	if total > bannerDeckMax {
+		return BannerGenerateResult{}, bannerInputErr("各分类合计最多 %d 部", bannerDeckMax)
 	}
 
 	if ctx == nil {
@@ -457,8 +508,11 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 	ctx, cancel := context.WithTimeout(ctx, bannerGenerateTimeout)
 	defer cancel()
 
-	current, err := repository.ListBannerSlots(src.Id)
+	current, err := repository.ListBannerSlotsCtx(ctx, src.Id)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return BannerGenerateResult{}, ctxErr
+		}
 		return BannerGenerateResult{}, err
 	}
 	version := filmsnapshot.GetActiveSnapshotVersion()
@@ -471,6 +525,9 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 			return BannerGenerateResult{}, err
 		}
 		cats, fellBack := repository.ResolveBannerSourceCategories(src.Id, []int64{q.CategoryID})
+		if err := ctx.Err(); err != nil {
+			return BannerGenerateResult{}, err
+		}
 		if fellBack || len(cats) == 0 {
 			skipped = append(skipped, BannerSkipped{CategoryID: q.CategoryID, Reason: "not_site_category", Requested: q.Count})
 			continue
@@ -507,9 +564,16 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 			break
 		}
 	}
+	items, err := AssembleBanners(ctx, slots, false)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return BannerGenerateResult{}, ctxErr
+		}
+		return BannerGenerateResult{}, err
+	}
 	return BannerGenerateResult{
 		Revision: repository.BannerRevision(current),
-		Items:    AssembleBanners(slots),
+		Items:    items,
 		Skipped:  skipped,
 	}, nil
 }
@@ -524,5 +588,6 @@ func IsBannerUserError(err error) bool {
 	var input *BannerInputError
 	return errors.As(err, &input) ||
 		errors.Is(err, repository.ErrBannerSlotNotFound) ||
+		errors.Is(err, repository.ErrBannerSourceNotFound) ||
 		errors.Is(err, repository.ErrBannerDuplicateFilm)
 }

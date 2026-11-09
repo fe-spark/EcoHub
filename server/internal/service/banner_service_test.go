@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -426,5 +427,126 @@ func TestBannerCascadeDelete(t *testing.T) {
 	}
 	if count("source_id = ?", "src1") != 0 || count("source_id = ?", "src2") != 1 {
 		t.Fatalf("cleaning src1 should only remove src1 banners")
+	}
+}
+
+// 影片在该站没有播放线路（或已不在片库）时：首页跳过；后台照常列出并标记 unavailable，
+// 排序提交全部行不会一直 409，不可用的行也能删除。
+func TestBanner_UnavailableRows(t *testing.T) {
+	gdb := setupBannerSvcDB(t)
+	seedBannerFilm(t, gdb, 1, "src1", 1, "A", 10)
+	seedBannerFilm(t, gdb, 2, "src1", 1, "B", 9)
+	seedBannerFilm(t, gdb, 3, "src1", 1, "C", 8)
+	a, _ := BannerSvc.Create("src1", BannerFields{Mid: i64Ptr(1)})
+	b, _ := BannerSvc.Create("src1", BannerFields{Mid: i64Ptr(2)})
+	c, _ := BannerSvc.Create("src1", BannerFields{Mid: i64Ptr(3)})
+
+	// 2 在本站没线路了（档案还在），3 档案没了但轮播行还在（例如导入的旧数据）。
+	gdb.Where("mid = ? AND source_id = ?", 2, "src1").Delete(&model.FilmSourcePlaylist{})
+	gdb.Where("mid = ?", 3).Delete(&model.FilmIndex{})
+
+	home, err := BannerSvc.HomeBanners("src1")
+	if err != nil || len(home) != 1 || home[0].Mid != 1 || home[0].Sort != 1 {
+		t.Fatalf("home should only show films playable on this site: %v %+v", err, home)
+	}
+
+	view, err := BannerSvc.List("src1")
+	if err != nil || len(view.Items) != 3 {
+		t.Fatalf("admin list should keep all rows: %v %+v", err, view.Items)
+	}
+	if view.Items[0].Unavailable || !view.Items[1].Unavailable || !view.Items[2].Unavailable {
+		t.Fatalf("unavailable flags mismatch: %+v", view.Items)
+	}
+
+	next, err := BannerSvc.Reorder("src1", view.Revision, []string{c.Id, a.Id, b.Id})
+	if err != nil {
+		t.Fatalf("reorder with unavailable rows should succeed: %v", err)
+	}
+	if fmt.Sprint(bannerMidList(next.Items)) != "[3 1 2]" {
+		t.Fatalf("reorder result = %v", bannerMidList(next.Items))
+	}
+	if err := BannerSvc.Delete(c.Id); err != nil {
+		t.Fatalf("delete unavailable row: %v", err)
+	}
+	if err := BannerSvc.Delete(c.Id); !IsBannerUserError(err) {
+		t.Fatalf("deleting twice should be not found, got %v", err)
+	}
+	after, _ := BannerSvc.List("src1")
+	if fmt.Sprint(bannerMidList(after.Items)) != "[1 2]" {
+		t.Fatalf("after delete = %v", bannerMidList(after.Items))
+	}
+}
+
+// 换片且没有提交图片时，旧影片的自定义海报和横图要一起清掉。
+func TestBannerUpdate_ChangeFilmResetsImages(t *testing.T) {
+	gdb := setupBannerSvcDB(t)
+	seedBannerFilm(t, gdb, 1, "src1", 1, "A", 10)
+	seedBannerFilm(t, gdb, 2, "src1", 1, "B", 9)
+	seedBannerFilm(t, gdb, 3, "src1", 1, "C", 8)
+	item, err := BannerSvc.Create("src1", BannerFields{
+		Mid: i64Ptr(1), ImageMode: strPtr("custom"), Poster: strPtr("http://old.jpg"), Backdrop: strPtr("http://old-slide.jpg"),
+	})
+	if err != nil || !item.IsCustomPic {
+		t.Fatalf("create custom: %v %+v", err, item)
+	}
+	item, err = BannerSvc.Update(item.Id, BannerFields{Mid: i64Ptr(2)})
+	if err != nil {
+		t.Fatalf("change film: %v", err)
+	}
+	if item.Mid != 2 || item.ImageMode != model.BannerImageFollow || item.IsCustomPic ||
+		item.Overrides.Poster != "" || item.Overrides.Backdrop != "" || item.Picture != "http://img/2.jpg" {
+		t.Fatalf("changing film should reset images: %+v", item)
+	}
+	// 换片时一起提交了新图片，则保留新图片。
+	item, err = BannerSvc.Update(item.Id, BannerFields{Mid: i64Ptr(3), ImageMode: strPtr("custom"), Poster: strPtr("http://new.jpg")})
+	if err != nil {
+		t.Fatalf("change film with image: %v", err)
+	}
+	if item.Mid != 3 || !item.IsCustomPic || item.Picture != "http://new.jpg" {
+		t.Fatalf("submitted image should be kept: %+v", item)
+	}
+}
+
+func TestBannerDeck_Limit(t *testing.T) {
+	setupBannerSvcDB(t)
+	items := make([]BannerFields, bannerDeckMax+1)
+	for i := range items {
+		items[i] = BannerFields{Mid: i64Ptr(int64(i + 1))}
+	}
+	view, _ := BannerSvc.List("src1")
+	if _, err := BannerSvc.PublishDeck("src1", view.Revision, items); !IsBannerUserError(err) {
+		t.Fatalf("deck over limit should be rejected, got %v", err)
+	}
+	quotas := []BannerQuota{{CategoryID: 1, Count: 60}, {CategoryID: 2, Count: 60}}
+	if _, err := BannerSvc.Generate(context.Background(), BannerGenerateReq{SourceId: "src1", Strategy: "hot", Quotas: quotas}); !IsBannerUserError(err) {
+		t.Fatalf("generate total over limit should be rejected, got %v", err)
+	}
+}
+
+func TestGetNavCategory_RejectsUnknownOrDisabledSource(t *testing.T) {
+	setupBannerSvcDB(t)
+	if _, err := IndexSvc.GetNavCategory("nope"); !errors.Is(err, ErrNavCategorySourceUnavailable) {
+		t.Fatalf("unknown source should be rejected, got %v", err)
+	}
+	if _, err := IndexSvc.GetNavCategory("src3"); !errors.Is(err, ErrNavCategorySourceUnavailable) {
+		t.Fatalf("disabled source should be rejected, got %v", err)
+	}
+	if _, err := IndexSvc.GetNavCategory("src1"); err != nil {
+		t.Fatalf("enabled source should pass, got %v", err)
+	}
+}
+
+// 片库查询出错时 HomeBanners 返回 error，不当成空轮播。
+func TestHomeBanners_ReturnsErrorOnLibraryFailure(t *testing.T) {
+	gdb := setupBannerSvcDB(t)
+	seedBannerFilm(t, gdb, 1, "src1", 1, "A", 10)
+	if _, err := BannerSvc.Create("src1", BannerFields{Mid: i64Ptr(1)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Migrator().DropTable(&model.FilmIndex{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BannerSvc.HomeBanners("src1"); err == nil {
+		t.Fatalf("library failure should surface as error")
 	}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -37,16 +38,23 @@ func (i *IndexService) GetCategoryInfo() map[string]any {
 	return nav
 }
 
+// ErrNavCategorySourceUnavailable 指定的采集站不存在或已停用。
+var ErrNavCategorySourceUnavailable = errors.New("采集站不存在或已停用")
+
 // GetNavCategory 获取导航分类信息 (按当前生效站点隔离)
 func (i *IndexService) GetNavCategory(sourceIdOpt ...string) ([]*model.Category, error) {
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
-	if sourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
-			sourceId = active.Id
+	if sourceId != "" {
+		// 显式传站点时（公开接口 /categories?sourceId=）先校验站点存在且启用，
+		// 不存在的值不进分类树缓存，避免任意参数刷出大量缓存键，也不暴露停用站点的分类。
+		if src := repository.FindCollectSourceById(sourceId); src == nil || !src.State {
+			return nil, ErrNavCategorySourceUnavailable
 		}
+	} else if active := repository.GetActiveCollectSource(); active != nil {
+		sourceId = active.Id
 	}
 	tree, err := repository.GetActiveCategoryTree(sourceId)
 	if err != nil {

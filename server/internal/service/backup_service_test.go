@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"server/internal/access"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-	"server/internal/access"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -76,13 +76,13 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 
 	srcList := []model.FilmSource{
 		{
-			Id:       "src_1",
-			Name:     "资源站A",
-			Uri:      "https://api.source1.com/api.php/provide/vod",
-			State:    true,
-			Sort:     1,
-			Cd:       24,
-			Format:   "json",
+			Id:     "src_1",
+			Name:   "资源站A",
+			Uri:    "https://api.source1.com/api.php/provide/vod",
+			State:  true,
+			Sort:   1,
+			Cd:     24,
+			Format: "json",
 		},
 	}
 	if err := repository.ReplaceCollectSources(srcList); err != nil {
@@ -246,12 +246,22 @@ func TestImportConfig_BannerSlotsRoundTrip(t *testing.T) {
 	if err := repository.ReplaceCollectSources([]model.FilmSource{{Id: "srcA", Name: "A", Uri: "http://a.test", State: true, Sort: 1}}); err != nil {
 		t.Fatal(err)
 	}
+	for _, mid := range []int64{1, 2, 3, 4} {
+		if err := db.Mdb.Create(&model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid, FirstSourceId: "srcA"}}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	backup := model.ConfigBackup{
 		Version: model.ConfigBackupVersion,
 		BannerSlots: []model.BannerSlot{
 			{Id: "s2", SourceId: "srcA", Mid: 2, Sort: 5, ImageMode: model.BannerImageCustom, PosterOverride: "http://p.jpg"},
 			{Id: "s1", SourceId: "srcA", Mid: 1, Sort: 1, ImageMode: "pinned", PosterOverride: "http://x.jpg"},
 			{Id: "gone", SourceId: "removed", Mid: 3, Sort: 1},
+			{Id: "nofilm", SourceId: "srcA", Mid: 404, Sort: 2},
+			// id 和 s1 重复、覆盖值非法：重新生成 id，只丢弃非法字段，不让整个导入失败。
+			{Id: "s1", SourceId: "srcA", Mid: 4, Sort: 9, ImageMode: model.BannerImageCustom,
+				PosterOverride: "http://" + strings.Repeat("x", 600), BackdropOverride: "http://b.jpg",
+				ScoreOverride: 42, YearOverride: -1, BlurbOverride: "简介"},
 		},
 	}
 	req := model.ConfigBackupImportRequest{Modules: model.ConfigBackupModules{Banners: true}, Backup: backup}
@@ -259,14 +269,21 @@ func TestImportConfig_BannerSlotsRoundTrip(t *testing.T) {
 		t.Fatalf("import: %v", err)
 	}
 	slots, _ := repository.ListBannerSlots("srcA")
-	if len(slots) != 2 || slots[0].Id != "s1" || slots[0].Sort != 1 || slots[1].Sort != 2 {
+	if len(slots) != 3 || slots[0].Id != "s1" || slots[0].Sort != 1 || slots[1].Sort != 2 || slots[2].Sort != 3 {
 		t.Fatalf("slots mismatch: %+v", slots)
 	}
 	if slots[0].ImageMode != model.BannerImageFollow || slots[0].PosterOverride != "" {
 		t.Fatalf("unknown image mode should fall back to follow: %+v", slots[0])
 	}
-	if all, _ := repository.ListAllBannerSlots(); len(all) != 2 {
-		t.Fatalf("slots of unknown sites should be dropped: %+v", all)
+	bad := slots[2]
+	if bad.Mid != 4 || bad.Id == "s1" || bad.Id == "" {
+		t.Fatalf("duplicate id should be regenerated: %+v", bad)
+	}
+	if bad.PosterOverride != "" || bad.BackdropOverride != "http://b.jpg" || bad.ScoreOverride != 0 || bad.YearOverride != 0 || bad.BlurbOverride != "简介" {
+		t.Fatalf("invalid overrides should be dropped field by field: %+v", bad)
+	}
+	if all, _ := repository.ListAllBannerSlots(); len(all) != 3 {
+		t.Fatalf("slots of unknown sites or missing films should be dropped: %+v", all)
 	}
 }
 
