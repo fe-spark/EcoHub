@@ -44,10 +44,6 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 	if banners == nil {
 		banners = model.Banners{}
 	}
-	bannerConfig, err := repository.GetBannerConfig()
-	if err != nil {
-		return model.ConfigBackup{}, err
-	}
 
 	site, err := repository.GetSiteBasic()
 	if err != nil {
@@ -93,7 +89,6 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 		Site:         &site,
 		FilmSources:  sources,
 		Banners:      banners,
-		BannerConfig: &bannerConfig,
 		MappingRules: exports,
 		Proxy:        &proxyCfg,
 		TMDB:         &tmdbCfg,
@@ -158,11 +153,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		banners := backup.Banners
 		if err := repository.SaveBanners(banners); err != nil {
 			return fmt.Errorf("导入首页轮播失败: %w", err)
-		}
-		if backup.BannerConfig != nil {
-			if err := repository.SaveBannerConfig(*backup.BannerConfig); err != nil {
-				return fmt.Errorf("导入首页轮播排片配置失败: %w", err)
-			}
 		}
 	}
 

@@ -84,8 +84,6 @@ export function buildBannerPayload({
     sort: currentRow?.sort ?? 0,
     remark: selectedFilm?.remarks || (!isReplacingFilm ? (currentRow?.remark || "") : ""),
     isCustomPic: isCustom,
-    source: currentRow?.source || "manual",
-    isPinned: false,
     score: scrapedData?.score ?? (currentRow?.score || selectedFilm?.score || 0),
     blurb: scrapedData?.blurb ?? (currentRow?.blurb || (selectedFilm as any)?.blurb || ""),
     tmdbId: scrapedData?.tmdbId ?? (currentRow?.tmdbId || (selectedFilm as any)?.tmdbId || 0),

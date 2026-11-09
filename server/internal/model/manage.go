@@ -125,8 +125,6 @@ type Banner struct {
 	Remark        string  `gorm:"size:128" json:"remark"`                 // 更新状态描述信息
 	Sort          int64   `json:"sort"`                                   // 排序分値
 	IsCustomPic   bool    `gorm:"default:false" json:"isCustomPic"`       // 本行自有图片。为真时不跟随影片封面
-	IsPinned      bool    `gorm:"default:false" json:"isPinned"`          // 是否人工置顶锁定
-	Source        string  `gorm:"size:32;default:'manual'" json:"source"` // 来源: manual(手动) | auto(系统自动推荐)
 	Area          string  `gorm:"size:128" json:"area,omitempty"`         // 地区，排片时写入轮播行
 	ClassTag      string  `gorm:"type:text" json:"classTag,omitempty"`    // 类型标签，排片时写入轮播行
 	Actor         string  `gorm:"type:text" json:"actor,omitempty"`       // 主演，排片时写入轮播行
@@ -193,25 +191,3 @@ func (MappingRule) TableName() string {
 	return TableMappingRule
 }
 
-// BannerQuota 一键排片里单个分类的数量。
-type BannerQuota struct {
-	CategoryID int64 `json:"categoryId"`
-	Count      int   `json:"count"`
-}
-
-// BannerConfig 一键排片配置。
-type BannerConfig struct {
-	Strategy string        `json:"strategy"` // hot_random | score_random | latest_random
-	AutoTMDB bool          `json:"autoTMDB"` // 替换线上时是否写入刮削
-	Quotas   []BannerQuota `json:"quotas"`
-}
-
-// BannerConfigRecord 轮播配置持久化模型 (MySQL单行表)
-type BannerConfigRecord struct {
-	gorm.Model
-	Payload string `gorm:"type:text"`
-}
-
-func (BannerConfigRecord) TableName() string {
-	return TableBannerConfig
-}

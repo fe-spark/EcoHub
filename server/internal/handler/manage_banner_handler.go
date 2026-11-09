@@ -53,7 +53,7 @@ func (h *ManageHandler) BannerSave(c *gin.Context) {
 	found := false
 	for i, item := range bl {
 		if item.Id == b.Id {
-			bl[i] = b
+			bl[i] = service.MergeBannerUpdate(item, b)
 			found = true
 			break
 		}
@@ -124,31 +124,6 @@ func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
 		return
 	}
 	dto.Success(banners, "排片卡组已保存并生效", c)
-}
-
-// BannerQuickConfigGet 读取已保存的一键排片配置。
-func (h *ManageHandler) BannerQuickConfigGet(c *gin.Context) {
-	view, err := service.ManageSvc.GetBannerQuickConfig()
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.Success(view, "获取排片配置成功", c)
-}
-
-// BannerQuickConfigSave 保存一键排片配置。不生成卡组，不替换线上轮播。
-func (h *ManageHandler) BannerQuickConfigSave(c *gin.Context) {
-	var req service.BannerQuickConfigInput
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("排片配置参数异常", c)
-		return
-	}
-	view, err := service.ManageSvc.SaveBannerQuickConfig(req)
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.Success(view, "配置已保存", c)
 }
 
 // BannerQuickGenerate 一键排片：按选择分类与策略（最热/高分/最新）一键生成排片列表（支持 SSE 实时事件流）

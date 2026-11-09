@@ -36,7 +36,6 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.ProxyConfigRecord{},
-		&model.BannerConfigRecord{},
 		&model.NotifyConfigRecord{},
 		&model.Banner{},
 		&model.SiteConfigRecord{},

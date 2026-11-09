@@ -46,7 +46,6 @@ interface ConfigBackup {
   site?: unknown;
   filmSources?: unknown[];
   banners?: unknown[];
-  bannerConfig?: unknown;
   notify?: unknown;
   mappingRules?: unknown[];
   proxy?: unknown;
@@ -108,9 +107,6 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   }
   if (Array.isArray(backup.banners)) {
     parts.push(`封面 ${backup.banners.length}`);
-  }
-  if (backup.bannerConfig) {
-    parts.push("轮播排片");
   }
   if (Array.isArray(backup.mappingRules)) {
     parts.push(`映射规则 ${backup.mappingRules.length}`);

@@ -166,8 +166,8 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 		return false
 	}
 	epoch := primarySwitchEpoch.Add(1)
-	// 分类编号属于原首选站。轮播和排片规则一起清空。
-	if err := ResetBannerDeckForSourceChange(); err != nil {
+	// 轮播还是全局一组，影片属于原首选站，切站时先清空。按站点区分后去掉。
+	if err := ManageSvc.SaveBanners(model.Banners{}); err != nil {
 		syslog.Errorf("[Banner] 切换首选站清空轮播失败: %v", err)
 	}
 	repository.MarkCategoryChanged()
@@ -228,9 +228,6 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 				syslog.Errorf("[Collect] 切换主站后预热首页数据失败: %v", err)
 			} else {
 				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
-				if _, _, err := ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil {
-					syslog.Errorf("[Banner] 切换主站后初始化默认排片规则失败: %v", err)
-				}
 			}
 		}
 	}(newID, epoch)

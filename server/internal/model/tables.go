@@ -22,7 +22,6 @@ const (
 	TableAccessDailyTop     = "access_daily_top"
 	TableSchemaMigration    = "schema_migrations"
 	TableTMDBConfig         = "tmdb_config"
-	TableBannerConfig       = "banner_config"
 	TableProxyConfig        = "proxy_config"
 	TableNotifyConfig       = "notify_config"
 	TableFilmSource         = "film_sources"
@@ -62,7 +61,6 @@ var AllModels = []any{
 	&AccessDailyTop{},
 	&SchemaMigration{},
 	&TMDBConfigRecord{},
-	&BannerConfigRecord{},
 	&ProxyConfigRecord{},
 	&NotifyConfigRecord{},
 	&FilmTMDBScrape{},

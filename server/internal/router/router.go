@@ -120,8 +120,6 @@ func SetupRouter() *gin.Engine {
 			banner.POST(`/save`, handler.ManageHd.BannerSave)
 			banner.POST(`/delete`, handler.ManageHd.BannerDelete)
 			banner.POST(`/deck`, handler.ManageHd.BannerSaveDeck)
-			banner.GET(`/quick-config`, handler.ManageHd.BannerQuickConfigGet)
-			banner.POST(`/quick-config`, handler.ManageHd.BannerQuickConfigSave)
 			banner.POST(`/quick-generate`, handler.ManageHd.BannerQuickGenerate)
 		}
 
