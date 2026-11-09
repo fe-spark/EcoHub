@@ -42,7 +42,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
   return (
     <Card size="small" className={styles.toolbarCard} styles={{ body: { padding: 12 } }}>
       <div className={styles.toolbar}>
-        <Space size={[8, 8]} wrap>
+        <Space size={[8, 8]} wrap className={styles.toolbarSpace}>
           <span className={styles.toolbarHint}>共 {totalCount} 个</span>
           <Button size="small" data-tour="collect-select-all" onClick={onSelectAll}>
             全选
@@ -54,7 +54,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             清空选择
           </Button>
         </Space>
-        <Space size={8} wrap className={styles.toolbarActions}>
+        <Space size={8} wrap className={`${styles.toolbarSpace} ${styles.toolbarActions}`}>
           <Tooltip title={isIndexing ? "检索索引更新中，采集已暂停" : undefined}>
             <span>
               <Button

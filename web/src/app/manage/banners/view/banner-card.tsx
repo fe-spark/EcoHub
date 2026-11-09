@@ -46,6 +46,8 @@ export function BannerCard({
   onMoveOrder,
 }: BannerCardProps) {
   const isFirst = index === 0;
+  // 影片已不在片库或本站已无线路：首页不展示，这里灰显，只能删除或调整顺序。
+  const unavailable = Boolean(record.unavailable);
   const isLast = index === totalCount - 1;
 
   const posterUrl =
@@ -59,9 +61,9 @@ export function BannerCard({
   ].filter(Boolean);
 
   return (
-    <div className={styles.bannerCard}>
+    <div className={`${styles.bannerCard} ${unavailable ? styles.bannerCardUnavailable : ""}`}>
       {/* 卡片正文：左侧海报 + 右侧详情 */}
-      <div className={styles.cardBody} onClick={() => onEdit(record)}>
+      <div className={styles.cardBody} onClick={() => !unavailable && onEdit(record)}>
         <div className={styles.posterBox}>
           <img
             src={posterUrl}
@@ -86,12 +88,17 @@ export function BannerCard({
                 {String(index + 1).padStart(2, "0")}
               </span>
               <Paragraph className={styles.cardTitle} ellipsis={{ rows: 1, tooltip: record.name }}>
-                {record.name}
+                {record.name || `影片 #${record.mid}`}
               </Paragraph>
+              {unavailable ? <Tag color="default">已失效</Tag> : null}
             </div>
 
             <div className={styles.metaLine}>
-              {metaParts.length > 0 ? metaParts.join(" · ") : "暂无分类信息"}
+              {unavailable
+                ? "影片已从片库移除或本站已无播放线路，首页不展示，可删除"
+                : metaParts.length > 0
+                  ? metaParts.join(" · ")
+                  : "暂无分类信息"}
             </div>
 
             <div className={styles.cardBlurb} title={record.blurb}>
@@ -112,7 +119,7 @@ export function BannerCard({
           <Button
             size="small"
             type="text"
-            disabled={!canWrite}
+            disabled={!canWrite || unavailable}
             onClick={() => onEdit(record)}
           >
             编辑

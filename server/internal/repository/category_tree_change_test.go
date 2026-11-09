@@ -26,7 +26,7 @@ func setupCategoryChangeTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSourcePlaylist{},
 		&model.MovieMatchKey{},
 		&model.MovieSourceMapping{},
-		&model.Banner{},
+		&model.BannerSlot{},
 		&model.FilmTMDBScrape{},
 	)
 	if err != nil {

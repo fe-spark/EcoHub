@@ -140,34 +140,47 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		}), "POST notify")
 	})
 
-	// 2. 轮播图模块（/save 新增/编辑 + /delete 批量删除）
+	// 2. 轮播图模块（按站点：新增、部分更新、保存顺序、删除）
 	t.Run("BannerEndpoints", func(t *testing.T) {
-		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/banner/save", token, map[string]any{
-			"title":  "集成测试轮播",
-			"mid":    9001,
-			"poster": "http://img.com/p.jpg",
+		db.Mdb.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 9001, FirstSourceId: "src_default_main"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "集成测试影片", Picture: "http://img.com/p.jpg"},
+		})
+		db.Mdb.Create(&model.FilmSourcePlaylist{Mid: 9001, SourceId: "src_default_main", LineKind: model.LineKindPlay})
+
+		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/banners", token, map[string]any{
+			"sourceId": "src_default_main",
+			"mid":      9001,
 		}), "POST banner add")
 
-		w := doJSONRequest(r, http.MethodGet, "/api/manage/banner/list", token, nil)
+		w := doJSONRequest(r, http.MethodGet, "/api/manage/banners?sourceId=src_default_main", token, nil)
 		resp := assertSuccess(t, w, "GET banner list")
 		rawList, _ := json.Marshal(resp.Data)
-		var list []model.Banner
-		_ = json.Unmarshal(rawList, &list)
-		if len(list) == 0 {
-			t.Fatalf("未能检索到刚创建的轮播图")
+		var view struct {
+			Revision string                  `json:"revision"`
+			Items    []model.BannerAdminItem `json:"items"`
 		}
-		bannerID := list[0].Id
+		_ = json.Unmarshal(rawList, &view)
+		if len(view.Items) == 0 || view.Items[0].Name != "集成测试影片" {
+			t.Fatalf("未能检索到刚创建的轮播图: %s", rawList)
+		}
+		bannerID := view.Items[0].Id
 
-		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/banner/save", token, map[string]any{
-			"id":     bannerID,
-			"title":  "集成测试轮播(改)",
-			"mid":    9001,
-			"poster": "http://img.com/p2.jpg",
-		}), "POST banner update")
+		assertSuccess(t, doJSONRequest(r, http.MethodPatch, "/api/manage/banners/"+bannerID, token, map[string]any{
+			"imageMode": "custom",
+			"poster":    "http://img.com/p2.jpg",
+		}), "PATCH banner update")
 
-		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/banner/delete", token, map[string]any{
-			"ids": []string{bannerID},
-		}), "POST banner delete batch")
+		w = doJSONRequest(r, http.MethodPut, "/api/manage/banners/order", token, map[string]any{
+			"sourceId": "src_default_main",
+			"revision": view.Revision,
+			"ids":      []string{bannerID},
+		})
+		if w.Code != http.StatusConflict {
+			t.Fatalf("PATCH 之后用旧 revision 保存顺序应返回 409, got %d body=%s", w.Code, w.Body.String())
+		}
+
+		assertSuccess(t, doJSONRequest(r, http.MethodDelete, "/api/manage/banners/"+bannerID, token, nil), "DELETE banner")
 	})
 
 	// 3. 映射规则模块（/rule/save + /rule/delete 批量删除）

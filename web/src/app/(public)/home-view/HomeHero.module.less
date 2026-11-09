@@ -105,8 +105,8 @@
   overflow: visible !important;
 }
 
-.deckSwiper :global(.swiper-wrapper),
-.deckSwiper :global(.swiper-slide) {
+/* 卡片效果默认给 slide 加 overflow: hidden，这里放开；wrapper 本身就是 visible */
+.deckSwiper .deckSlide {
   overflow: visible !important;
 }
 
@@ -115,7 +115,8 @@
   height: 100%;
 }
 
-.deckSwiper :global(.swiper-slide-shadow) {
+/* 自己渲染的阴影层：Swiper 会复用 slide 里已有的 .swiper-slide-shadow，只改它的透明度 */
+.deckSwiper .deckShadow {
   border-radius: 20px;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.16) 0%, rgba(0, 0, 0, 0.4) 100%);
 }

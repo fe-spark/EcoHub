@@ -55,7 +55,7 @@ func DelFilmSearchBatch(ids []int64) error {
 		if err := tx.Where("global_mid IN ?", cleanIds).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.Banner{}).Error; err != nil {
+		if err := repository.DeleteBannerSlotsByMids(tx, cleanIds); err != nil {
 			return err
 		}
 		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
@@ -138,7 +138,7 @@ func masterDataResetTables() []string {
 		model.TableCategory,
 		model.TableCategoryMapping,
 		model.TableSourceCategory,
-		model.TableBanners,
+		model.TableBannerSlot,
 		model.TableFilmTMDBScrape,
 	}
 }
@@ -168,7 +168,7 @@ func FilmZero() error {
 		model.TableCollectSourceStats,
 		model.TableSearchTag,
 		model.TableCollectRecord,
-		model.TableBanners,
+		model.TableBannerSlot,
 	} {
 		if err := truncateTable(db.Mdb, t); err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
@@ -197,9 +197,6 @@ func FilmZero() error {
 
 func RefreshMasterDataCaches() {
 	markCategoryChanged()
-	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.BannersKey)
-	}
 	cache.ClearTVBoxListCache()
 	cache.ClearTVBoxConfigCache()
 }
@@ -219,7 +216,6 @@ func InvalidateMasterSwitchCaches() {
 			config.ActiveCategoryTreeKey,
 			config.CategoryTreeKey,
 			config.TVBoxConfigCacheKey,
-			config.BannersKey,
 		)
 	}
 }
@@ -323,7 +319,7 @@ func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
 		if err := tx.Where("global_mid IN ?", mids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid IN ?", mids).Delete(&model.Banner{}).Error; err != nil {
+		if err := repository.DeleteBannerSlotsByMids(tx, mids); err != nil {
 			return err
 		}
 		return nil

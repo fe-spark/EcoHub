@@ -4,14 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"server/internal/access"
+	"sort"
+	"strings"
 	"time"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/infra/syslog"
+	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
+	"server/internal/utils"
 )
 
 // BackupService 站点配置备份/恢复（不含影视库存与账号）
@@ -37,14 +42,7 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 	if sources == nil {
 		sources = []model.FilmSource{}
 	}
-	banners, err := repository.GetBanners()
-	if err != nil {
-		return model.ConfigBackup{}, err
-	}
-	if banners == nil {
-		banners = model.Banners{}
-	}
-	bannerConfig, err := repository.GetBannerConfig()
+	bannerSlots, err := repository.ListAllBannerSlots()
 	if err != nil {
 		return model.ConfigBackup{}, err
 	}
@@ -92,8 +90,7 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 		AppVersion:   config.Version,
 		Site:         &site,
 		FilmSources:  sources,
-		Banners:      banners,
-		BannerConfig: &bannerConfig,
+		BannerSlots:  bannerSlots,
 		MappingRules: exports,
 		Proxy:        &proxyCfg,
 		TMDB:         &tmdbCfg,
@@ -155,14 +152,12 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.Banners {
-		banners := backup.Banners
-		if err := repository.SaveBanners(banners); err != nil {
+		slots, err := importBannerSlots(backup)
+		if err != nil {
 			return fmt.Errorf("导入首页轮播失败: %w", err)
 		}
-		if backup.BannerConfig != nil {
-			if err := repository.SaveBannerConfig(*backup.BannerConfig); err != nil {
-				return fmt.Errorf("导入首页轮播排片配置失败: %w", err)
-			}
+		if err := repository.ReplaceAllBannerSlots(slots); err != nil {
+			return fmt.Errorf("导入首页轮播失败: %w", err)
 		}
 	}
 
@@ -224,7 +219,7 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 	if req.Modules.FilmSources && b.FilmSources == nil {
 		return errors.New("备份中缺少采集站")
 	}
-	if req.Modules.Banners && b.Banners == nil {
+	if req.Modules.Banners && b.BannerSlots == nil && b.Banners == nil {
 		return errors.New("备份中缺少首页轮播")
 	}
 	if req.Modules.MappingRules && b.MappingRules == nil {
@@ -243,4 +238,62 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 		return errors.New("备份中缺少数据分析配置数据")
 	}
 	return nil
+}
+
+// importBannerSlots 新版备份直接用 bannerSlots，只保留现有站点、且片库里还有这部影片的行；
+// 旧版备份的全局 banners 按迁移规则分到站点。备份里的 id 重复时重新生成；非法的覆盖值只丢弃该字段。
+func importBannerSlots(backup model.ConfigBackup) ([]model.BannerSlot, error) {
+	if backup.BannerSlots == nil {
+		return migration.ConvertLegacyBanners(db.Mdb, backup.Banners)
+	}
+	mids := make([]int64, 0, len(backup.BannerSlots))
+	for _, s := range backup.BannerSlots {
+		if s.Mid > 0 {
+			mids = append(mids, s.Mid)
+		}
+	}
+	existing, err := repository.ExistingFilmMids(mids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.BannerSlot, 0, len(backup.BannerSlots))
+	seen := make(map[string]bool, len(backup.BannerSlots))
+	usedIDs := make(map[string]bool, len(backup.BannerSlots))
+	sourceOK := map[string]bool{}
+	nextSort := map[string]int64{}
+	sorted := append([]model.BannerSlot(nil), backup.BannerSlots...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Sort < sorted[j].Sort })
+	for _, s := range sorted {
+		s.SourceId = strings.TrimSpace(s.SourceId)
+		if s.SourceId == "" || s.Mid <= 0 || !existing[s.Mid] {
+			continue
+		}
+		ok, checked := sourceOK[s.SourceId]
+		if !checked {
+			ok = repository.FindCollectSourceById(s.SourceId) != nil
+			sourceOK[s.SourceId] = ok
+		}
+		if !ok {
+			continue
+		}
+		key := fmt.Sprintf("%s:%d", s.SourceId, s.Mid)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		s.Id = strings.TrimSpace(s.Id)
+		if s.Id == "" || len(s.Id) > 64 || usedIDs[s.Id] {
+			id, err := utils.GenerateSalt()
+			if err != nil {
+				return nil, err
+			}
+			s.Id = id
+		}
+		usedIDs[s.Id] = true
+		model.SanitizeBannerSlot(&s)
+		nextSort[s.SourceId]++
+		s.Sort = nextSort[s.SourceId]
+		out = append(out, s)
+	}
+	return out, nil
 }

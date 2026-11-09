@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"server/internal/access"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-	"server/internal/access"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -32,8 +33,9 @@ func setupBackupTestDB(t *testing.T) *gorm.DB {
 		&model.SiteConfigRecord{},
 		&model.FilmSource{},
 		&model.CrontabRecord{},
-		&model.Banner{},
-		&model.BannerConfigRecord{},
+		&model.BannerSlot{},
+		&model.FilmIndex{},
+		&model.FilmSourcePlaylist{},
 		&model.MappingRule{},
 		&model.ProxyConfigRecord{},
 		&model.TMDBConfigRecord{},
@@ -74,41 +76,23 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 
 	srcList := []model.FilmSource{
 		{
-			Id:       "src_1",
-			Name:     "资源站A",
-			Uri:      "https://api.source1.com/api.php/provide/vod",
-			State:    true,
-			Sort:     1,
-			Cd:       24,
-			Format:   "json",
+			Id:     "src_1",
+			Name:   "资源站A",
+			Uri:    "https://api.source1.com/api.php/provide/vod",
+			State:  true,
+			Sort:   1,
+			Cd:     24,
+			Format: "json",
 		},
 	}
 	if err := repository.ReplaceCollectSources(srcList); err != nil {
 		t.Fatalf("replace collect sources: %v", err)
 	}
 
-	bannerItems := model.Banners{
-		{
-			Id:   "b1",
-			Mid:  1001,
-			Name: "测试轮播影片",
-			Sort: 1,
-		},
-	}
-	if err := repository.SaveBanners(bannerItems); err != nil {
-		t.Fatalf("save banners: %v", err)
-	}
-
-	bannerCfg := model.BannerConfig{
-		Strategy: repository.BannerStrategyHot,
-		AutoTMDB: true,
-		Quotas: []model.BannerQuota{
-			{CategoryID: 1, Count: 2},
-			{CategoryID: 2, Count: 1},
-		},
-	}
-	if err := repository.SaveBannerConfig(bannerCfg); err != nil {
-		t.Fatalf("save banner config: %v", err)
+	if err := repository.ReplaceAllBannerSlots([]model.BannerSlot{
+		{Id: "b1", SourceId: srcList[0].Id, Mid: 1001, Sort: 1, ImageMode: model.BannerImageFollow},
+	}); err != nil {
+		t.Fatalf("save banner slots: %v", err)
 	}
 
 	proxyCfg := model.ProxyConfig{
@@ -170,15 +154,19 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	if len(backup.FilmSources) != 1 || backup.FilmSources[0].Id != "src_1" {
 		t.Fatalf("film sources export mismatch: %+v", backup.FilmSources)
 	}
-	if len(backup.Banners) != 1 || backup.Banners[0].Name != "测试轮播影片" {
-		t.Fatalf("banners export mismatch: %+v", backup.Banners)
+	if len(backup.BannerSlots) != 1 || backup.BannerSlots[0].Mid != 1001 || backup.BannerSlots[0].SourceId != srcList[0].Id {
+		t.Fatalf("banner slots export mismatch: %+v", backup.BannerSlots)
 	}
-	// 验证 BannerConfig 轮播排片配置导出
-	if backup.BannerConfig == nil || backup.BannerConfig.Strategy != repository.BannerStrategyHot || !backup.BannerConfig.AutoTMDB {
-		t.Fatalf("bannerConfig export mismatch: %+v", backup.BannerConfig)
+	if backup.Banners != nil {
+		t.Fatalf("legacy banners should not be exported: %+v", backup.Banners)
 	}
-	if len(backup.BannerConfig.Quotas) != 2 {
-		t.Fatalf("bannerConfig fields mismatch: %+v", backup.BannerConfig)
+	// 排片配置不再保存，导出里不能再出现 bannerConfig。
+	raw, err := json.Marshal(backup)
+	if err != nil {
+		t.Fatalf("marshal backup: %v", err)
+	}
+	if strings.Contains(string(raw), "bannerConfig") {
+		t.Fatalf("backup export should not contain bannerConfig: %s", raw)
 	}
 	// 验证敏感凭据在灾备导出中完整保留
 	if backup.Proxy == nil || backup.Proxy.ProxyURL != "http://user:secret123@proxy.test:8080" {
@@ -198,54 +186,104 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	}
 }
 
-func TestImportConfig_WithBannerConfig(t *testing.T) {
-	setupBackupTestDB(t)
-
-	// 构建备份数据并导入
-	backup := model.ConfigBackup{
-		Version:    model.ConfigBackupVersion,
-		ExportedAt: time.Now().Format(time.RFC3339),
-		Banners: model.Banners{
-			{
-				Id:   "imp_b1",
-				Mid:  2001,
-				Name: "导入的轮播",
-				Sort: 1,
-			},
-		},
-		BannerConfig: &model.BannerConfig{
-			Strategy: repository.BannerStrategyScore,
-			AutoTMDB: false,
-			Quotas:   []model.BannerQuota{{CategoryID: 3, Count: 1}},
-		},
+func TestImportConfig_LegacyBannersGoToSites(t *testing.T) {
+	gdb := setupBackupTestDB(t)
+	if err := repository.ReplaceCollectSources([]model.FilmSource{
+		{Id: "srcA", Name: "A", Uri: "http://a.test", State: true, Sort: 1},
+		{Id: "srcB", Name: "B", Uri: "http://b.test", State: true, Sort: 2},
+	}); err != nil {
+		t.Fatal(err)
 	}
+	gdb.Create(&model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2001, FirstSourceId: "srcB"}})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 2001, SourceId: "srcA", LineKind: model.LineKindPlay})
+	gdb.Create(&model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2002, FirstSourceId: "srcB"}})
 
-	req := model.ConfigBackupImportRequest{
-		Modules: model.ConfigBackupModules{
-			Banners: true,
-		},
-		Backup: backup,
+	// 旧版本备份：全局 banners，带 bannerConfig 和 isPinned/source。新字段之外的内容忽略。
+	legacy := `{
+		"version": 1,
+		"exportedAt": "2026-11-01T00:00:00+08:00",
+		"filmSources": [],
+		"mappingRules": [],
+		"banners": [
+			{"id": "imp_b1", "mid": 2001, "name": "首选站有线路", "sort": 1, "isPinned": true, "source": "auto"},
+			{"id": "imp_b2", "mid": 2002, "name": "只属于 B", "sort": 2, "isCustomPic": true, "picture": "http://c.jpg"},
+			{"id": "imp_b3", "mid": 9999, "name": "影片已删", "sort": 3}
+		],
+		"bannerConfig": {"strategy": "score_random", "autoTMDB": true, "quotas": [{"categoryId": 3, "count": 1}]}
+	}`
+	var backup model.ConfigBackup
+	if err := json.Unmarshal([]byte(legacy), &backup); err != nil {
+		t.Fatalf("decode legacy backup: %v", err)
 	}
-
+	req := model.ConfigBackupImportRequest{Modules: model.ConfigBackupModules{Banners: true}, Backup: backup}
 	if err := BackupSvc.ImportConfig(req); err != nil {
 		t.Fatalf("import config failed: %v", err)
 	}
-
-	// 验证落库
-	banners, err := repository.GetBanners()
+	slots, err := repository.ListAllBannerSlots()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(banners) != 1 || banners[0].Name != "导入的轮播" {
-		t.Fatalf("imported banners mismatch: %+v", banners)
+	if len(slots) != 2 {
+		t.Fatalf("want 2 slots (missing film dropped), got %+v", slots)
 	}
+	bySource := map[string]model.BannerSlot{}
+	for _, s := range slots {
+		bySource[s.SourceId] = s
+	}
+	if bySource["srcA"].Mid != 2001 || bySource["srcB"].Mid != 2002 {
+		t.Fatalf("legacy rows assigned to wrong sites: %+v", slots)
+	}
+	if bySource["srcB"].ImageMode != model.BannerImageCustom || bySource["srcB"].PosterOverride != "http://c.jpg" {
+		t.Fatalf("custom picture not kept: %+v", bySource["srcB"])
+	}
+	if db.Mdb.Migrator().HasTable("banner_config") {
+		t.Fatalf("banner_config table should not be created")
+	}
+}
 
-	bannerCfg, err := repository.GetBannerConfig()
-	if err != nil {
+func TestImportConfig_BannerSlotsRoundTrip(t *testing.T) {
+	setupBackupTestDB(t)
+	if err := repository.ReplaceCollectSources([]model.FilmSource{{Id: "srcA", Name: "A", Uri: "http://a.test", State: true, Sort: 1}}); err != nil {
 		t.Fatal(err)
 	}
-	if bannerCfg.Strategy != repository.BannerStrategyScore || len(bannerCfg.Quotas) != 1 || bannerCfg.Quotas[0].CategoryID != 3 {
-		t.Fatalf("imported bannerConfig mismatch: %+v", bannerCfg)
+	for _, mid := range []int64{1, 2, 3, 4} {
+		if err := db.Mdb.Create(&model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid, FirstSourceId: "srcA"}}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	backup := model.ConfigBackup{
+		Version: model.ConfigBackupVersion,
+		BannerSlots: []model.BannerSlot{
+			{Id: "s2", SourceId: "srcA", Mid: 2, Sort: 5, ImageMode: model.BannerImageCustom, PosterOverride: "http://p.jpg"},
+			{Id: "s1", SourceId: "srcA", Mid: 1, Sort: 1, ImageMode: "pinned", PosterOverride: "http://x.jpg"},
+			{Id: "gone", SourceId: "removed", Mid: 3, Sort: 1},
+			{Id: "nofilm", SourceId: "srcA", Mid: 404, Sort: 2},
+			// id 和 s1 重复、覆盖值非法：重新生成 id，只丢弃非法字段，不让整个导入失败。
+			{Id: "s1", SourceId: "srcA", Mid: 4, Sort: 9, ImageMode: model.BannerImageCustom,
+				PosterOverride: "http://" + strings.Repeat("x", 600), BackdropOverride: "http://b.jpg",
+				ScoreOverride: 42, YearOverride: -1, BlurbOverride: "简介"},
+		},
+	}
+	req := model.ConfigBackupImportRequest{Modules: model.ConfigBackupModules{Banners: true}, Backup: backup}
+	if err := BackupSvc.ImportConfig(req); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	slots, _ := repository.ListBannerSlots("srcA")
+	if len(slots) != 3 || slots[0].Id != "s1" || slots[0].Sort != 1 || slots[1].Sort != 2 || slots[2].Sort != 3 {
+		t.Fatalf("slots mismatch: %+v", slots)
+	}
+	if slots[0].ImageMode != model.BannerImageFollow || slots[0].PosterOverride != "" {
+		t.Fatalf("unknown image mode should fall back to follow: %+v", slots[0])
+	}
+	bad := slots[2]
+	if bad.Mid != 4 || bad.Id == "s1" || bad.Id == "" {
+		t.Fatalf("duplicate id should be regenerated: %+v", bad)
+	}
+	if bad.PosterOverride != "" || bad.BackdropOverride != "http://b.jpg" || bad.ScoreOverride != 0 || bad.YearOverride != 0 || bad.BlurbOverride != "简介" {
+		t.Fatalf("invalid overrides should be dropped field by field: %+v", bad)
+	}
+	if all, _ := repository.ListAllBannerSlots(); len(all) != 3 {
+		t.Fatalf("slots of unknown sites or missing films should be dropped: %+v", all)
 	}
 }
 
