@@ -242,7 +242,7 @@ fetch_bundle() {
   apply_env_overrides
   # 模板里镜像是注释掉的，不写时 compose 会落到 :latest。新安装默认钉当前正式版。
   if [ "$fresh" -eq 1 ] && [ -z "$(env_get ECOHUB_IMAGE "")" ]; then
-    set_env_key ECOHUB_IMAGE "ghcr.io/fe-spark/ecohub:v3.0.0"
+    set_env_key ECOHUB_IMAGE "ghcr.io/fe-spark/ecohub:v3.0.1"
   fi
   install_cli
 }
@@ -343,7 +343,7 @@ cmd_help() {
 
 首次安装（变量要写在 sh 前面，写在 curl 前面不会进脚本）：
 
-  curl -fsSL ${raw_base}/scripts/install-release.sh | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0 sh
+  curl -fsSL ${raw_base}/scripts/install-release.sh | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1 sh
 
 命令安装到 /usr/local/bin/ecohub；该目录不可写时安装到 ~/.local/bin/ecohub。
 数据目录默认 \$HOME/ecohub。换目录把 ECOHUB_INSTALL_DIR 写在 sh 前面。命令会记住上次的数据目录。
