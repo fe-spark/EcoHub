@@ -1,0 +1,21 @@
+diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs b/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
+index fac426c..10c71ad 100644
+--- a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
++++ b/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
+@@ -428,7 +428,7 @@ class Danmuku {
+       $lastStartTime: 0
+       // 弹幕上次开始时间
+     };
+-    this.setState(item, "wait");
++    this.states.wait.push(item);
+     this.queue.push(item);
+     return this;
+   }
+@@ -488,6 +488,7 @@ class Danmuku {
+   }
+   // 设置弹幕状态
+   setState(danmu, state) {
++    if (danmu.$state === state) return;
+     this.states[danmu.$state] = this.states[danmu.$state].filter((item) => item !== danmu);
+     danmu.$state = state;
+     if (danmu.$ref) {
