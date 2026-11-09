@@ -228,14 +228,14 @@ type filmCleanRow struct {
 }
 
 // CleanEmptyFilms 分批硬删片名为空或无法识别大类（pid=0）的档案。
-func CleanEmptyFilms() int64 {
+func CleanEmptyFilms() (int64, error) {
 	return cleanFilmBatches("CleanEmptyFilms", func(q *gorm.DB) *gorm.DB {
 		return q.Where("name = ? OR name IS NULL OR pid = 0", "")
 	})
 }
 
 // CleanPlaylessFilms 清理无任何播放线路且超过宽限期的幽灵影片（例如源站全部删除后残留的影片）
-func CleanPlaylessFilms(gracePeriod time.Duration) int64 {
+func CleanPlaylessFilms(gracePeriod time.Duration) (int64, error) {
 	if gracePeriod <= 0 {
 		gracePeriod = 7 * 24 * time.Hour
 	}
@@ -247,9 +247,10 @@ func CleanPlaylessFilms(gracePeriod time.Duration) int64 {
 	})
 }
 
-func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
+// cleanFilmBatches 分批硬删命中 scope 的影片；出错时返回已清理条数与错误。
+func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) (int64, error) {
 	if db.Mdb == nil {
-		return 0
+		return 0, nil
 	}
 	var cleaned int64
 	for {
@@ -257,10 +258,10 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
 		q := scope(db.Mdb.Model(&model.FilmIndex{}).Select("film_index.mid, film_index.pid")).Limit(filmCleanBatchSize)
 		if err := q.Scan(&rows).Error; err != nil {
 			log.Printf("%s Error: %v", logName, err)
-			return cleaned
+			return cleaned, fmt.Errorf("查询待清理影片失败: %w", err)
 		}
 		if len(rows) == 0 {
-			return cleaned
+			return cleaned, nil
 		}
 		mids := make([]int64, 0, len(rows))
 		pidSet := make(map[int64]struct{}, len(rows))
@@ -275,15 +276,15 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
 		}
 		if len(mids) == 0 {
 			log.Printf("%s 跳过无效 mid，停止本轮", logName)
-			return cleaned
+			return cleaned, nil
 		}
 		if err := deleteFilmCascadeBatch(mids, pidSet); err != nil {
 			log.Printf("%s Delete Error: %v", logName, err)
-			return cleaned
+			return cleaned, fmt.Errorf("删除影片失败: %w", err)
 		}
 		cleaned += int64(len(mids))
 		if len(rows) < filmCleanBatchSize {
-			return cleaned
+			return cleaned, nil
 		}
 	}
 }
@@ -293,6 +294,8 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
 var (
 	orphanScanBatchSize   = 5000
 	orphanDeleteBatchSize = 1000
+	// orphanBeforeDeleteHook 仅供测试：在 film_index 预检查之后、DELETE 之前调用，用于模拟并发写入。
+	orphanBeforeDeleteHook func(table string, orphans []int64)
 )
 
 // CleanOrphanPlaylists 分批清理关联影片已不存在的播放列表（film_source_playlists.mid 不在 film_index 中）。
@@ -369,12 +372,17 @@ func cleanOrphanRowsByMid(table, column string) (int64, error) {
 				orphans = append(orphans, mid)
 			}
 		}
+		if orphanBeforeDeleteHook != nil {
+			orphanBeforeDeleteHook(table, orphans)
+		}
 		for i := 0; i < len(orphans); i += deleteSize {
 			end := i + deleteSize
 			if end > len(orphans) {
 				end = len(orphans)
 			}
-			res := session.Exec("DELETE FROM "+table+" WHERE "+column+" IN ?", orphans[i:end])
+			// 删除时再原子复核一次 film_index，避免预检查与删除之间新写入的影片被误删。
+			res := session.Exec("DELETE FROM "+table+" WHERE "+column+" IN ? AND NOT EXISTS (SELECT 1 FROM "+
+				model.TableFilmIndex+" WHERE "+model.TableFilmIndex+".mid = "+table+"."+column+")", orphans[i:end])
 			if res.Error != nil {
 				return cleaned, fmt.Errorf("删除 %s 失败: %w", table, res.Error)
 			}
