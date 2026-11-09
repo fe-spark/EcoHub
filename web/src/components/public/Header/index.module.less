@@ -24,7 +24,7 @@
   }
 }
 
-:global(html[data-theme="light"]) .headerWrap {
+html[data-theme="light"] .headerWrap {
   background: rgba(244, 246, 252, 0.65);
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 
@@ -603,10 +603,10 @@
   }
 }
 
+/* antd v6 的 className 落在 .ant-drawer-section 上；头部和内容区用 classNames 挂本地类 */
 .mobileDrawer {
-  :global(.ant-drawer-content) { background: var(--public-page-bg); }
-  :global(.ant-drawer-header) { border-bottom: 1px solid var(--public-border-3); padding: 16px 20px; }
-  :global(.ant-drawer-body) {
+  .mobileDrawerHeader { border-bottom: 1px solid var(--public-border-3); padding: 16px 20px; }
+  .mobileDrawerPanelBody {
     padding: 0 !important;
     overflow: hidden;
     height: 100%;

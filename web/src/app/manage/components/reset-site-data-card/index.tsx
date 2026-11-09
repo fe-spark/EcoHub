@@ -201,6 +201,13 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
           ) : null
         }
         className={styles.dangerCard}
+        classNames={{
+          header: styles.dangerCardHead,
+          extra: styles.dangerCardExtra,
+          body: styles.dangerCardBody,
+        }}
+        // 头部内容区 52px，加 1px 底边框（border-box）
+        styles={{ header: { minHeight: 53 } }}
       >
 
         <Flex vertical gap={12}>

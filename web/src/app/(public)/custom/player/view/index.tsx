@@ -75,9 +75,11 @@ export default function CustomPlayPageView() {
             onChange={(e) => setUrl(e.target.value)}
             onPressEnter={handlePlay}
             size="large"
+            className={styles.searchInput}
             suffix={
               <Button
                 type="text"
+                className={styles.searchBtn}
                 icon={<SearchOutlined />}
                 onClick={handlePlay}
               />

@@ -50,6 +50,7 @@ export default function MobileNavDrawer({
       size={280}
       zIndex={1300}
       className={styles.mobileDrawer}
+      classNames={{ header: styles.mobileDrawerHeader, body: styles.mobileDrawerPanelBody }}
     >
       <div className={styles.mobileDrawerBody}>
         <div className={styles.mobileNav}>

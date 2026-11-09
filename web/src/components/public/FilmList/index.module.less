@@ -1,9 +1,11 @@
-/* Theme tokens for FilmList */
-:global(html) {
+/* 海报占位底色：按主题切换，只定义在用到它的元素上 */
+.posterWrapper,
+.placeholderFallback {
   --film-placeholder-bg: var(--public-surface-3);
 }
 
-:global(html[data-theme="light"]) {
+html[data-theme="light"] .posterWrapper,
+html[data-theme="light"] .placeholderFallback {
   --film-placeholder-bg: linear-gradient(135deg, #e3e8f1 0%, #d7deea 100%);
 }
 
@@ -140,7 +142,7 @@
   }
 }
 
-:global(html[data-theme="light"]) .loadingBg::before {
+html[data-theme="light"] .loadingBg::before {
   background: linear-gradient(100deg,
       transparent 10%,
       rgba(100, 116, 139, 0.3) 45%,

@@ -14,6 +14,7 @@ import {
   Drawer,
   Grid,
   Alert,
+  ConfigProvider,
 } from "antd";
 import {
   MenuFoldOutlined,
@@ -200,6 +201,20 @@ export default function ManageLayoutView({
         return { ...item, children: filteredChildren };
       });
   }, [userInfo?.isAdmin, accessVisible]);
+  // 选中项加粗：给当前选中的菜单项挂本地类
+  const menuItemsWithSelected = useMemo(() => {
+    const mark = (items: typeof visibleMenuItems): typeof visibleMenuItems =>
+      items.map((item) => {
+        if (!item) return item;
+        if ("children" in item && item.children) {
+          return { ...item, children: mark(item.children as typeof visibleMenuItems) };
+        }
+        return "key" in item && item.key === selectedKey
+          ? { ...item, className: styles.menuItemSelected }
+          : item;
+      }) as typeof visibleMenuItems;
+    return mark(visibleMenuItems);
+  }, [visibleMenuItems, selectedKey]);
   const themeMenuItems: MenuProps["items"] = [
     {
       key: "light",
@@ -250,7 +265,7 @@ export default function ManageLayoutView({
               setOpenKeys(keys);
             }
           }}
-          items={visibleMenuItems}
+          items={menuItemsWithSelected}
           onClick={onMenuClick}
         />
       </div>
@@ -406,12 +421,15 @@ export default function ManageLayoutView({
               ))}
             </div>
           )}
-          <ManagePermissionProvider
-            canWrite={userInfo?.canWrite !== false}
-            isAdmin={Boolean(userInfo?.isAdmin)}
-          >
-            {children}
-          </ManagePermissionProvider>
+          {/* 内容区的卡片统一圆角和边框：通过 ConfigProvider 给 Card 挂本地类 */}
+          <ConfigProvider card={{ className: styles.contentCard }}>
+            <ManagePermissionProvider
+              canWrite={userInfo?.canWrite !== false}
+              isAdmin={Boolean(userInfo?.isAdmin)}
+            >
+              {children}
+            </ManagePermissionProvider>
+          </ConfigProvider>
         </Content>
       </Layout>
       <ManageTour
