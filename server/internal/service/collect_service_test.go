@@ -58,12 +58,8 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 func waitSearchWorkIdle(t *testing.T) {
 	t.Helper()
 	// 先等切主站的预热协程（它会先睡 150ms 才置 isPrimaryWarming，光看标志会漏掉）。
-	done := make(chan struct{})
-	go func() { primaryWarmups.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(15 * time.Second):
-		t.Fatal("primary warmup did not finish")
+	if !WaitAsyncWork(15 * time.Second) {
+		t.Fatal("primary warmup / category sync did not finish")
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for IsPrimarySiteSwitching() || filmsnapshot.SearchRebuildScheduled() {

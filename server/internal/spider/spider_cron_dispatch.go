@@ -4,12 +4,18 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"server/internal/model"
 )
 
-var cronCoalesceWait = time.Second
+// cronCoalesceWaitNs 同一秒到点的任务合并等待时长。用原子量存，测试可以改短而不和派发协程竞争。
+var cronCoalesceWaitNs atomic.Int64
+
+func init() { cronCoalesceWaitNs.Store(int64(time.Second)) }
+
+func cronCoalesceWait() time.Duration { return time.Duration(cronCoalesceWaitNs.Load()) }
 
 var (
 	cronDispatchOnce sync.Once
@@ -37,7 +43,7 @@ func enqueueCronTask(ft model.FilmCollectTask) {
 
 func cronDispatchLoop() {
 	for range cronFlushCh {
-		time.Sleep(cronCoalesceWait)
+		time.Sleep(cronCoalesceWait())
 		flushCronQueue()
 	}
 }

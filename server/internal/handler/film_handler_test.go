@@ -9,6 +9,8 @@ import (
 )
 
 func TestFilmSearchOptions_Success(t *testing.T) {
+	// 需要可用的库；原先靠别的用例泄漏的 db.Mdb 才能通过。
+	setupCollectHandlerTestDB(t)
 	c, w := testContext(http.MethodGet, "/api/manage/film/search/options?sourceId=")
 	FilmHd.FilmSearchOptions(c)
 	if w.Code != http.StatusOK {

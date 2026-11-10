@@ -222,7 +222,9 @@ func (s *SpiderService) SyncSourceCategoriesAsync(id string) {
 		return
 	}
 	progress.BroadcastCategoryStatus(id, "syncing")
+	categorySyncs.Add(1)
 	go func() {
+		defer categorySyncs.Done()
 		if _, err := s.SyncSourceCategories(id, ""); err != nil {
 			syslog.Errorf("[SpiderService] 异步同步分类失败 id=%s: %v", id, err)
 		}
