@@ -1,17 +1,10 @@
 package model
 
-import (
-	"regexp"
-	"strings"
-)
+import "strings"
 
-var (
-	playEpisodeRangeRe = regexp.MustCompile(`\d+\s*[-~～到至]\s*\d+`)
-	playEpisodeNumRe   = regexp.MustCompile(`(?i)(?:第\s*0*(\d+)\s*[集话回期]|^(?:ep|e)?\s*0*(\d+)$)`)
-)
-
-// DedupPlayURLs 同一集只保留第一次出现的地址。第01集和第1集视为同一集。
-// 区间标题（第1-12集）和无法识别的标题按原文区分，避免误并。
+// DedupPlayURLs 同一条线路里，播放地址完全相同（去首尾空白后）的条目只保留第一次出现的那条，保持原有顺序。
+// 不按集名合并：综艺常见「第1期上/第1期下/第1期上纯享」，集号相同但内容不同；
+// 源站也会出现同名不同地址的条目（如两条「花絮特辑」），都要保留。
 func DedupPlayURLs(links []MovieUrlInfo) []MovieUrlInfo {
 	if len(links) < 2 {
 		return links
@@ -19,7 +12,7 @@ func DedupPlayURLs(links []MovieUrlInfo) []MovieUrlInfo {
 	seen := make(map[string]struct{}, len(links))
 	out := make([]MovieUrlInfo, 0, len(links))
 	for _, item := range links {
-		key := playEpisodeKey(item.Episode)
+		key := strings.TrimSpace(item.Link)
 		if key == "" {
 			out = append(out, item)
 			continue
@@ -31,26 +24,4 @@ func DedupPlayURLs(links []MovieUrlInfo) []MovieUrlInfo {
 		out = append(out, item)
 	}
 	return out
-}
-
-func playEpisodeKey(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	if playEpisodeRangeRe.MatchString(name) {
-		return "raw:" + strings.ToLower(strings.Join(strings.Fields(name), ""))
-	}
-	if m := playEpisodeNumRe.FindStringSubmatch(name); m != nil {
-		n := m[1]
-		if n == "" {
-			n = m[2]
-		}
-		n = strings.TrimLeft(n, "0")
-		if n == "" {
-			n = "0"
-		}
-		return "n:" + n
-	}
-	return "raw:" + strings.ToLower(strings.Join(strings.Fields(name), ""))
 }
