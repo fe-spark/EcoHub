@@ -262,9 +262,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         listReady = true;
         const dm = (art.plugins as any)?.artplayerPluginDanmuku;
         if (dm && typeof dm.load === "function") {
-          await dm.load();
-          if (cancelled) return;
-          if (comments.length > 0) await dm.load(comments);
+          await dm.load(comments);
         }
       })();
     }
