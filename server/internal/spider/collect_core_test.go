@@ -1,7 +1,6 @@
 package spider
 
 import (
-	"fmt"
 	"reflect"
 	"sync"
 	"testing"
@@ -10,6 +9,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -345,7 +345,7 @@ func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
 
 func TestHandlePreparedCollect_ProbeFailureReleasesOccupy(t *testing.T) {
 	prev := db.Mdb
-	gdb, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {

@@ -7,18 +7,17 @@
 package integration
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/testutil"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -28,7 +27,7 @@ import (
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	dsn := fmt.Sprintf("file:it_%s?mode=memory&cache=shared&_busy_timeout=5000", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	dsn := testutil.MemDSN(t, "_busy_timeout=5000")
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

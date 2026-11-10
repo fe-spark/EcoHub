@@ -3,7 +3,6 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
+	"server/internal/testutil"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +24,7 @@ import (
 
 func setupManageConfigDB(t *testing.T) {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatal(err)

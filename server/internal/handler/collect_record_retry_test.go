@@ -3,7 +3,6 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider"
+	"server/internal/testutil"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -23,7 +23,7 @@ import (
 
 func TestCollectRecordHandler_HistoryRetry(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -132,7 +132,7 @@ func TestCollectRecordHandler_HistoryRetry(t *testing.T) {
 
 func TestCollectRecordHandler_HistoryRetryBadDetail(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -178,7 +178,7 @@ func TestCollectRecordHandler_HistoryRetryBadDetail(t *testing.T) {
 
 func TestCollectRecordHandler_HistoryRetryWithinHalfHour(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -255,7 +255,7 @@ func TestCollectRecordHandler_HistoryRetryWithinHalfHour(t *testing.T) {
 
 func TestCollectRecordHandler_HistoryRetryAfterHalfHour(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
