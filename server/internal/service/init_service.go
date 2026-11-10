@@ -274,12 +274,12 @@ func defaultFilmTasks() []model.FilmCollectTask {
 	}
 
 	logCleanTask := model.FilmCollectTask{
-		Id: "sys_cron_log_clean", Time: 0, Spec: config.LogCleanSpec,
+		Id: "sys_cron_log_clean", Time: 0, Spec: "0 0 3 * * *",
 		Model: model.TaskModelLogClean, State: true, Remark: "清理过期运行日志",
 	}
 
 	collectCleanTask := model.FilmCollectTask{
-		Id: model.TaskIDCollectClean, Time: 0, Spec: config.CollectRecordCleanSpec,
+		Id: model.TaskIDCollectClean, Time: 0, Spec: "0 30 3 * * *",
 		Model: model.TaskModelCollectClean, State: true, Remark: "定期清理超过 30 天的采集运行记录与快照",
 	}
 
