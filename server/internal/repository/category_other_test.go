@@ -1,12 +1,12 @@
 package repository
 
 import (
-	"fmt"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -189,7 +189,7 @@ func TestSaveCategoryTree_DoesNotDuplicate其它(t *testing.T) {
 
 func openCategoryOtherTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)

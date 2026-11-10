@@ -6,9 +6,10 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/testutil"
 
-	"gorm.io/driver/mysql"
 	"github.com/glebarez/sqlite"
+	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -373,7 +374,7 @@ func TestCategoryList_LeafRootStoredOnCategoryKey(t *testing.T) {
 }
 
 func TestSourceTypePidMatch_IncludesCategoryKey(t *testing.T) {
-	gdb, err := gorm.Open(sqlite.Open("file:source_type_pid?mode=memory&cache=shared"), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		DryRun: true,
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

@@ -1,13 +1,13 @@
 package film
 
 import (
-	"fmt"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/film/cache"
 	"server/internal/repository/film/snapshot"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -24,7 +24,7 @@ func (fileDummy) TableName() string {
 
 func setupFilmZeroTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

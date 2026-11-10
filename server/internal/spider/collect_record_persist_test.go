@@ -2,7 +2,6 @@ package spider
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -18,7 +18,7 @@ import (
 )
 
 func TestPersistCollectRecord(t *testing.T) {
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -100,7 +100,7 @@ func TestPersistCollectRecord(t *testing.T) {
 }
 
 func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -194,7 +194,7 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 }
 
 func TestReplayFilmIDsAreNotCopiedToIdleSources(t *testing.T) {
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -265,7 +265,7 @@ func assertSourceDetail(t *testing.T, raw, status string, pageTotal, pageCurrent
 }
 
 func TestPersistCollectRecord_StopAfterDoneStaysStopped(t *testing.T) {
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -331,7 +331,7 @@ func TestStartBatchCollectRetry_RollbackOccupyOnRecordStartError(t *testing.T) {
 }
 
 func TestSingleFilmBatch_RecordStartCreatesRunning(t *testing.T) {
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -413,7 +413,7 @@ func TestSingleFilmBatch_RecordStartErrorReleasesOccupy(t *testing.T) {
 }
 
 func TestCheckpointKeepsWrittenFilmsAfterInterrupt(t *testing.T) {
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

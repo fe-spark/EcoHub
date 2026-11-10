@@ -10,6 +10,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/testutil"
 )
 
 // setupMockCategoryTree 设置内存模拟分类树，模拟非硬编码 ID 环境（例如：短剧=105, 动漫=99, 电影=50, 电视剧=10, 纪录片=70）
@@ -168,7 +169,7 @@ func TestResolveRootCategoryIDByCName_ConcurrencyDeadlockFree(t *testing.T) {
 }
 
 func TestPickPrimarySourceForCategory_DisabledReturnsNil(t *testing.T) {
-	gdb, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
