@@ -526,3 +526,24 @@ func TestSubscribeCategory_Broadcast(t *testing.T) {
 		t.Fatal("expected test-src-1 to not be syncing after ready")
 	}
 }
+
+func TestMarkStoppedIfEpoch_SkipsNewerRun(t *testing.T) {
+	id := "mark-stopped-if-epoch"
+	t.Cleanup(func() { store.Delete(id) })
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-old")
+	oldEpoch := Epoch(id)
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-new")
+
+	if MarkStoppedIfEpoch(id, oldEpoch) {
+		t.Fatal("old epoch must not own the newer run")
+	}
+	if snap, _ := Snapshot(id); snap.Status != StatusStarting || snap.QueueId != "q-new" {
+		t.Fatalf("newer run changed: %+v", snap)
+	}
+	if !MarkStoppedIfEpoch(id, Epoch(id)) {
+		t.Fatal("current epoch should own the run")
+	}
+	if snap, _ := Snapshot(id); snap.Status != StatusStopped {
+		t.Fatalf("current run should be stopped: %+v", snap)
+	}
+}

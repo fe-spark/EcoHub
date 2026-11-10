@@ -460,6 +460,32 @@ func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
 	NotifyChange()
 }
 
+// MarkStoppedIfEpoch 仅当进度仍是 epoch 这一代且在排队/运行中时标成已停止，返回是否属于这一代。
+// 判断和修改在同一把锁里完成，不会和新开采集的 MarkSourcesCollectStarting 交错。
+func MarkStoppedIfEpoch(sourceID string, epoch uint64) bool {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return true
+	}
+	state := val.(*progressState)
+	state.mu.Lock()
+	if state.epoch != epoch {
+		state.mu.Unlock()
+		return false
+	}
+	changed := false
+	if state.data.Status == StatusStarting || state.data.Status == StatusRunning {
+		state.data.Status = StatusStopped
+		state.updated = time.Now()
+		changed = true
+	}
+	state.mu.Unlock()
+	if changed {
+		NotifyChange()
+	}
+	return true
+}
+
 func MarkStopped(sourceID string) {
 	Update(sourceID, func(progress *model.CollectProgress) {
 		if progress.Status == StatusStarting || progress.Status == StatusRunning {
