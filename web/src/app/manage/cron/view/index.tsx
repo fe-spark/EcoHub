@@ -51,7 +51,7 @@ export default function CronManagePageView() {
     getTaskList();
   }, [getTaskList]);
 
-  const hasRunningTask = useMemo(() => taskList.some((t) => t.running), [taskList]);
+  const hasRunningTask = useMemo(() => taskList.some((t) => t.running || t.queued), [taskList]);
 
   useEffect(() => {
     if (!hasRunningTask) return;
@@ -165,6 +165,13 @@ export default function CronManagePageView() {
             </Tag>
           );
         }
+        if (record.queued) {
+          return (
+            <Tooltip title="已有维护任务在执行，前一条结束后自动执行">
+              <Tag color="default">排队中</Tag>
+            </Tooltip>
+          );
+        }
         const isDisabled = !canWrite || !!record.disabledReason;
         const switchNode = (
           <Switch
@@ -225,8 +232,8 @@ export default function CronManagePageView() {
           );
         }
         const isRunning = runningId === record.id;
-        const runDisabled = isRunning || !!record.disabledReason;
-        const runTooltip = record.disabledReason || "立即执行一次";
+        const runDisabled = isRunning || !!record.queued || !!record.disabledReason;
+        const runTooltip = record.disabledReason || (record.queued ? "已在维护队列中" : "立即执行一次");
         return (
           <Space size={8}>
             <Tooltip title={runTooltip}>
