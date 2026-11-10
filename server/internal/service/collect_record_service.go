@@ -229,18 +229,18 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 	var firstID string
 	started := 0
 	for _, hour := range hours {
-		sources, part := spider.PrepareBatchCollectStart(groups[hour])
+		claim, part := spider.PrepareBatchCollectStart(groups[hour])
 		result.Skipped = append(result.Skipped, part.Skipped...)
-		if len(sources) == 0 {
+		if len(claim.Sources) == 0 {
 			continue
 		}
 		hourTargetPages := make(map[string][]int)
-		for _, s := range sources {
+		for _, s := range claim.Sources {
 			if pages, ok := targetPagesMap[s.Id]; ok && len(pages) > 0 {
 				hourTargetPages[s.Id] = pages
 			}
 		}
-		retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, hour, sources, hourTargetPages)
+		retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, hour, claim, hourTargetPages)
 		if err != nil {
 			if firstID != "" {
 				result.BatchID = firstID

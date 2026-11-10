@@ -65,12 +65,26 @@ func ensure(sourceID string, name string) *progressState {
 
 // SetPageTotal 写入探测结果。只接受仍在排队的站，并在同一次锁里标成已探测。0 页直接标完成。
 func SetPageTotal(sourceID string, pageCount int) {
+	setPageTotal(sourceID, pageCount, nil)
+}
+
+// SetPageTotalIfEpoch 同 SetPageTotal，但只写 epoch 这一代的进度，返回是否属于这一代。
+// 旧批次探页返回较晚时，同站可能已被新的采集接手，不能把新一轮的总页改掉。
+func SetPageTotalIfEpoch(sourceID string, epoch uint64, pageCount int) bool {
+	return setPageTotal(sourceID, pageCount, &epoch)
+}
+
+func setPageTotal(sourceID string, pageCount int, epoch *uint64) bool {
 	val, ok := store.Load(sourceID)
 	if !ok {
-		return
+		return true
 	}
 	state := val.(*progressState)
 	state.mu.Lock()
+	if epoch != nil && state.epoch != *epoch {
+		state.mu.Unlock()
+		return false
+	}
 	accepted := state.data.Status == StatusStarting
 	if accepted {
 		state.data.Total = pageCount
@@ -88,6 +102,7 @@ func SetPageTotal(sourceID string, pageCount int) {
 	if accepted {
 		NotifyChange()
 	}
+	return true
 }
 
 // PageTotal 返回已探到的总页。尚未探测返回 -1。
@@ -438,8 +453,10 @@ func FlushHotpathSideEffects(sourceIDs ...string) {
 	repository.FlushCollectSourceStats(sourceIDs...)
 }
 
-func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
+// 返回各站标记后的进度代次，供调用方在同一时刻记下"这一轮属于我"。
+func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) map[string]uint64 {
 	queueID = strings.TrimSpace(queueID)
+	epochs := make(map[string]uint64, len(sources))
 	for _, source := range sources {
 		state := ensure(source.Id, source.Name)
 		state.mu.Lock()
@@ -454,15 +471,27 @@ func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
 		state.data.Status = StatusStarting
 		state.data.QueueId = queueID
 		state.epoch++
+		epochs[source.Id] = state.epoch
 		state.updated = time.Now()
 		state.mu.Unlock()
 	}
 	NotifyChange()
+	return epochs
 }
 
 // MarkStoppedIfEpoch 仅当进度仍是 epoch 这一代且在排队/运行中时标成已停止，返回是否属于这一代。
 // 判断和修改在同一把锁里完成，不会和新开采集的 MarkSourcesCollectStarting 交错。
 func MarkStoppedIfEpoch(sourceID string, epoch uint64) bool {
+	return markActiveIfEpoch(sourceID, epoch, StatusStopped)
+}
+
+// MarkFailedIfEpoch 仅当进度仍是 epoch 这一代且在排队/运行中时标成失败，返回是否属于这一代。
+// 旧批次探页失败晚于一键终止 + 重试时，不能把重试的进度改成失败。
+func MarkFailedIfEpoch(sourceID string, epoch uint64) bool {
+	return markActiveIfEpoch(sourceID, epoch, StatusFailed)
+}
+
+func markActiveIfEpoch(sourceID string, epoch uint64, status string) bool {
 	val, ok := store.Load(sourceID)
 	if !ok {
 		return true
@@ -475,7 +504,7 @@ func MarkStoppedIfEpoch(sourceID string, epoch uint64) bool {
 	}
 	changed := false
 	if state.data.Status == StatusStarting || state.data.Status == StatusRunning {
-		state.data.Status = StatusStopped
+		state.data.Status = status
 		state.updated = time.Now()
 		changed = true
 	}
