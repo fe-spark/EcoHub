@@ -67,8 +67,13 @@ func shouldLogFailure(failed int) bool {
 	return failed == 1 || failed%failureLogStep == 0
 }
 
-const (
-	maxRecordedFailedPages = 500
+// 连续失败暂停：站点已有成功页后，连续 sourcePauseFailStreak 页取页失败（多半是被源站按 IP 限流），
+// 整站暂停 sourcePauseDuration 再从断点继续；失败的页照常记为失败，留给「重试失败页」。
+// 连续暂停 sourcePauseMaxTimes 次仍未恢复，再撞上一轮连续失败就结束本站这一轮。包级变量，测试可调小。
+var (
+	sourcePauseFailStreak = 20
+	sourcePauseDuration   = 5 * time.Minute
+	sourcePauseMaxTimes   = 3
 )
 
 func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s *model.FilmSource, h int, batch Batch) (bool, int, int, []int, error) {
@@ -147,9 +152,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 			stats.success++
 		} else {
 			stats.failed++
-			if len(stats.failedPages) < maxRecordedFailedPages {
-				stats.failedPages = append(stats.failedPages, page)
-			}
+			stats.failedPages = append(stats.failedPages, page)
 			if err != nil {
 				stats.lastErr = err.Error()
 			}
@@ -158,10 +161,79 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		statsMu.Unlock()
 		return snapshot
 	}
+	// 连续失败暂停的状态，与 fetchOK/fetchFails 同受 fetchMu 保护。
+	failStreak := 0
+	pausesInRow := 0
+	var pausedUntil time.Time
 	noteFetchOK := func() {
 		fetchMu.Lock()
 		fetchOK++
+		failStreak = 0
+		pausesInRow = 0
 		fetchMu.Unlock()
+	}
+	giveUp := func(reason string) {
+		stopOnce.Do(func() {
+			stopErr = errors.New(reason)
+			syslog.Errorf("[Spider] %s", reason)
+			if batch != nil {
+				batch.RecordSourceError(s.Id, reason)
+			}
+			cancel()
+		})
+	}
+	// waitPause 暂停中则等到暂停结束；停止或终止时立刻返回 false。
+	waitPause := func() bool {
+		for {
+			fetchMu.Lock()
+			wait := time.Until(pausedUntil)
+			fetchMu.Unlock()
+			if wait <= 0 {
+				return ctx.Err() == nil
+			}
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return false
+			case <-timer.C:
+			}
+		}
+	}
+	// notePauseStreak 已有成功页的站连续失败到阈值时整站暂停；暂停次数用完则结束本轮。
+	// 暂停期间才返回的失败（暂停前已发出的请求）不计入下一轮连续失败。
+	notePauseStreak := func() {
+		fetchMu.Lock()
+		if fetchOK == 0 || time.Now().Before(pausedUntil) {
+			fetchMu.Unlock()
+			return
+		}
+		failStreak++
+		if failStreak < sourcePauseFailStreak {
+			fetchMu.Unlock()
+			return
+		}
+		failStreak = 0
+		if pausesInRow >= sourcePauseMaxTimes {
+			fetchMu.Unlock()
+			log.Printf("[Spider] 站点 %s 连续暂停 %d 次后仍连续失败 %d 页，结束本轮采集", s.Name, sourcePauseMaxTimes, sourcePauseFailStreak)
+			giveUp(fmt.Sprintf("站点 %s 连续暂停 %d 次后仍连续失败 %d 页，已结束本轮采集，失败页可稍后重试", s.Name, sourcePauseMaxTimes, sourcePauseFailStreak))
+			return
+		}
+		pausesInRow++
+		pausedUntil = time.Now().Add(sourcePauseDuration)
+		nth, until := pausesInRow, pausedUntil
+		fetchMu.Unlock()
+		log.Printf("[Spider] 站点 %s 连续失败 %d 页，暂停 %s（第 %d/%d 次）", s.Name, sourcePauseFailStreak, sourcePauseDuration, nth, sourcePauseMaxTimes)
+		go func() {
+			timer := time.NewTimer(time.Until(until))
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+			case <-timer.C:
+				log.Printf("[Spider] 站点 %s 暂停结束，从断点继续采集（第 %d/%d 次暂停）", s.Name, nth, sourcePauseMaxTimes)
+			}
+		}()
 	}
 	noteFetchFail := func(page int, err error) {
 		fetchMu.Lock()
@@ -169,6 +241,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		ok, fails := fetchOK, fetchFails
 		fetchMu.Unlock()
 		if !shouldStopUnprovenSource(ok, fails) {
+			notePauseStreak()
 			return
 		}
 		stopOnce.Do(func() {
@@ -195,9 +268,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Failed = snapshot.failed
 			cur.Current = snapshot.success + snapshot.failed
-			if len(cur.FailedPages) < maxRecordedFailedPages {
-				cur.FailedPages = append(cur.FailedPages, page)
-			}
+			cur.FailedPages = append(cur.FailedPages, page)
 		})
 		if shouldLogFailure(snapshot.failed) {
 			syslog.Warnf("[Spider] 站点 %s 采集失败累计=%d，最近失败 page=%d stage=%s err=%v", s.Name, snapshot.failed, page, stage, err)
@@ -236,6 +307,10 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					return
 				case pg, ok := <-pages:
 					if !ok {
+						return
+					}
+					if !waitPause() {
+						markStopped()
 						return
 					}
 					progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
