@@ -20,7 +20,7 @@
 </div>
 
 > [!WARNING]
-> v3.0 与 v2.x 不兼容，没有数据迁移。不要在旧的 `./data/mysql` 上 pull，也不要使用后台「立即升级」。用新目录或清空数据后重装，再全量采集。步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。当前正式版为 `3.0.1`，问题请提 [Issues](https://github.com/fe-spark/EcoHub/issues)。
+> v3.0 与 v2.x 不兼容，没有数据迁移。不要在旧的 `./data/mysql` 上 pull，也不要使用后台「立即升级」。用新目录或清空数据后重装，再全量采集。步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。当前正式版为 `3.0.2`，问题请提 [Issues](https://github.com/fe-spark/EcoHub/issues)。
 
 作者时间有限，更新较慢。欢迎提 [PR](https://github.com/fe-spark/EcoHub/pulls)。
 
@@ -56,7 +56,7 @@
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
 ```
 
 数据在 `~/ecohub`，命令是 `ecohub`。装完终端会打印 Web 端口、前台、后台和三条订阅。默认 Web 端口 `3000`。密码、反代、1Panel 见 [部署指南](./docs/README-Deploy.md)。
