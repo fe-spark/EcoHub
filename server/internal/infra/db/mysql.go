@@ -64,7 +64,7 @@ func InitMysql() (err error) {
 	sqlDB.SetMaxOpenConns(48)
 	sqlDB.SetConnMaxLifetime(time.Minute * 30)
 	sqlDB.SetConnMaxIdleTime(time.Minute * 5)
-	if err := sqlDB.Ping(); err != nil {
+	if err := pingSQL(sqlDB); err != nil {
 		_ = sqlDB.Close()
 		return err
 	}
@@ -125,14 +125,21 @@ func StartMysqlHealthCheck() {
 	}()
 }
 
+// mysqlPingTimeout 单次 Ping 的上限。库挂死时不让启动或健康检查一直卡住。
+const mysqlPingTimeout = 10 * time.Second
+
+func pingSQL(conn *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), mysqlPingTimeout)
+	defer cancel()
+	return conn.PingContext(ctx)
+}
+
 func pingGormDB(g *gorm.DB) error {
 	sqlDB, err := g.DB()
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return sqlDB.PingContext(ctx)
+	return pingSQL(sqlDB)
 }
 
 func openSQLConn(dsn string) (*sql.DB, error) {
@@ -140,7 +147,7 @@ func openSQLConn(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = conn.Ping(); err != nil {
+	if err = pingSQL(conn); err != nil {
 		conn.Close()
 		return nil, err
 	}
