@@ -13,6 +13,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/spider"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -32,7 +33,13 @@ func TestCollectRecordHandler_HistoryRetry(t *testing.T) {
 	_ = gdb.AutoMigrate(&model.CollectRecord{}, &model.FilmSource{}, &model.CategoryMapping{}, &model.SourceCategory{})
 	prev := db.Mdb
 	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
+	t.Cleanup(func() {
+		// 重试批次在后台运行，先等它结束再换回全局 DB，避免测试之间互相踩。
+		if !spider.WaitBackgroundCollects(10 * time.Second) {
+			t.Error("background retry batch did not finish")
+		}
+		db.Mdb = prev
+	})
 
 	src1 := model.FilmSource{Id: "retry-s1", Name: "失败源1", State: true}
 	_ = gdb.Create(&src1).Error
@@ -135,7 +142,13 @@ func TestCollectRecordHandler_HistoryRetryBadDetail(t *testing.T) {
 	_ = gdb.AutoMigrate(&model.CollectRecord{})
 	prev := db.Mdb
 	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
+	t.Cleanup(func() {
+		// 重试批次在后台运行，先等它结束再换回全局 DB，避免测试之间互相踩。
+		if !spider.WaitBackgroundCollects(10 * time.Second) {
+			t.Error("background retry batch did not finish")
+		}
+		db.Mdb = prev
+	})
 
 	_ = repository.CreateCollectRecord(&model.CollectRecord{
 		BatchID:    "b-bad-json",
@@ -175,7 +188,13 @@ func TestCollectRecordHandler_HistoryRetryWithinHalfHour(t *testing.T) {
 	_ = gdb.AutoMigrate(&model.CollectRecord{}, &model.FilmSource{}, &model.CategoryMapping{}, &model.SourceCategory{})
 	prev := db.Mdb
 	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
+	t.Cleanup(func() {
+		// 重试批次在后台运行，先等它结束再换回全局 DB，避免测试之间互相踩。
+		if !spider.WaitBackgroundCollects(10 * time.Second) {
+			t.Error("background retry batch did not finish")
+		}
+		db.Mdb = prev
+	})
 
 	src := model.FilmSource{Id: "src-oscar", Name: "奥斯卡", State: true}
 	_ = gdb.Create(&src).Error
@@ -246,7 +265,13 @@ func TestCollectRecordHandler_HistoryRetryAfterHalfHour(t *testing.T) {
 	_ = gdb.AutoMigrate(&model.CollectRecord{}, &model.FilmSource{}, &model.CategoryMapping{}, &model.SourceCategory{})
 	prev := db.Mdb
 	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
+	t.Cleanup(func() {
+		// 重试批次在后台运行，先等它结束再换回全局 DB，避免测试之间互相踩。
+		if !spider.WaitBackgroundCollects(10 * time.Second) {
+			t.Error("background retry batch did not finish")
+		}
+		db.Mdb = prev
+	})
 
 	src := model.FilmSource{Id: "src-oscar2", Name: "奥斯卡2", State: true}
 	_ = gdb.Create(&src).Error
