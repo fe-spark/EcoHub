@@ -26,8 +26,8 @@ func TestDefaultFilmTasks_ContainsLogClean(t *testing.T) {
 			if task.Id != "sys_cron_log_clean" {
 				t.Errorf("expected Id 'sys_cron_log_clean', got %s", task.Id)
 			}
-			if task.Spec != "0 10 3 * * *" {
-				t.Errorf("expected Spec '0 10 3 * * *', got %s", task.Spec)
+			if task.Spec != "0 0 3 * * *" {
+				t.Errorf("expected Spec '0 0 3 * * *', got %s", task.Spec)
 			}
 			if !task.State {
 				t.Errorf("expected State to be true, got false")
@@ -67,14 +67,14 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect record clean cron: %v", err)
 	}
-	if collectClean.Model != model.TaskModelCollectClean || collectClean.Spec != "0 40 3 * * *" || !collectClean.State {
+	if collectClean.Model != model.TaskModelCollectClean || collectClean.Spec != "0 30 3 * * *" || !collectClean.State {
 		t.Fatalf("unexpected collect clean task: %+v", collectClean)
 	}
 	task, err := repository.GetFilmTaskById("sys_cron_log_clean")
 	if err != nil {
 		t.Fatalf("failed to get sys_cron_log_clean: %v", err)
 	}
-	if task.Model != model.TaskModelLogClean || task.Spec != "0 10 3 * * *" || !task.State {
+	if task.Model != model.TaskModelLogClean || task.Spec != "0 0 3 * * *" || !task.State {
 		t.Fatalf("unexpected task fields: %+v", task)
 	}
 }
