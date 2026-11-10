@@ -75,3 +75,45 @@ func TestCleanOldCollectRecords_MultiChunkKeepsRunningAndRecent(t *testing.T) {
 		t.Fatalf("films left = %d, want 10", total)
 	}
 }
+
+func TestCleanOldCollectRecords_RecordTurnedRunningKeepsRecordAndFilms(t *testing.T) {
+	gdb := setupTestDB(t)
+	oldTime := time.Now().AddDate(0, 0, -40)
+	for _, batchID := range []string{"done", "revived"} {
+		if err := gdb.Create(&model.CollectRecord{
+			BatchID: batchID, Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusSuccess, StartedAt: oldTime,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 3; i++ {
+			if err := gdb.Create(&model.CollectRecordFilmItem{
+				BatchID: batchID, SourceID: "s1", Mid: int64(i + 1), CreatedAt: oldTime,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// 查出过期记录之后、删除之前，"revived" 变成 running。
+	collectCleanBeforeDeleteHook = func([]uint) {
+		gdb.Model(&model.CollectRecord{}).Where("batch_id = ?", "revived").Update("status", model.CollectRecordStatusRunning)
+	}
+	t.Cleanup(func() { collectCleanBeforeDeleteHook = nil })
+
+	if err := CleanOldCollectRecords(30); err != nil {
+		t.Fatalf("clean: %v", err)
+	}
+	var batches []string
+	db.Mdb.Model(&model.CollectRecord{}).Order("batch_id").Pluck("batch_id", &batches)
+	if fmt.Sprint(batches) != "[revived]" {
+		t.Fatalf("records left = %v", batches)
+	}
+	var n int64
+	db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", "revived").Count(&n)
+	if n != 3 {
+		t.Fatalf("revived batch films = %d, want 3", n)
+	}
+	db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", "done").Count(&n)
+	if n != 0 {
+		t.Fatalf("done batch films = %d, want 0", n)
+	}
+}
