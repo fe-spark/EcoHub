@@ -10,6 +10,7 @@ import (
 	"server/internal/model"
 	filmcache "server/internal/repository/film/cache"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/spider/progress"
 )
 
 // publishMu 全局快照发布互斥锁，确保向 MySQL 发布快照时单次只有一个线程在执行
@@ -78,8 +79,10 @@ type collectBatchContext struct {
 	finishedSources   map[string]model.FilmSource
 	sourceSnapshots   map[string]model.CollectRecordSourceDetail
 	occupyTokens      map[string]uint64
-	runNoted          atomic.Bool
-	recordStarted     bool
+	// progressEpochs 建批次时各站的进度代次。停止时只改本代的进度，避免把同站新开的重试标成已停止。
+	progressEpochs map[string]uint64
+	runNoted       atomic.Bool
+	recordStarted  bool
 }
 
 func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
@@ -109,6 +112,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		finishedSources:  make(map[string]model.FilmSource),
 		sourceSnapshots:  make(map[string]model.CollectRecordSourceDetail),
 		occupyTokens:     snapshotOccupyTokens(sources),
+		progressEpochs:   snapshotProgressEpochs(sources),
 	}
 
 	registerActiveBatch(b)
@@ -277,6 +281,30 @@ func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	} else {
 		releaseCollectSourceIDs(id)
 	}
+}
+
+// progressEpoch 建批次时该站的进度代次。
+func (b *collectBatchContext) progressEpoch(id string) (uint64, bool) {
+	if b == nil {
+		return 0, false
+	}
+	id = collectSourceID(id)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	epoch, ok := b.progressEpochs[id]
+	return epoch, ok
+}
+
+func snapshotProgressEpochs(sources []model.FilmSource) map[string]uint64 {
+	epochs := make(map[string]uint64, len(sources))
+	for _, source := range sources {
+		id := collectSourceID(source.Id)
+		if id == "" {
+			continue
+		}
+		epochs[id] = progress.Epoch(id)
+	}
+	return epochs
 }
 
 // ownsOccupy 当前占用令牌仍是本批次抢到的那一个。停止后被新采集重新占用时为 false。

@@ -186,7 +186,16 @@ func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
 }
 
 // abandonQueuedCollectSource 站点不再采集（排队中停止 / 一键终止未派发）：立刻放占用，允许单独重试。
+// 有批次时只停本批次那一代进度：一键终止后用户可能已对同站发起新的重试（进度代次已加一、占用已换成新令牌），
+// 旧批次的派发循环随后才走到这里，不能把重试的进度改成已停止，否则重试会因"已请求停止"不再开跑。
 func abandonQueuedCollectSource(source model.FilmSource, batchCtx *collectBatchContext) {
-	progress.MarkStopped(source.Id)
+	if epoch, ok := batchCtx.progressEpoch(source.Id); ok {
+		if !progress.MarkStoppedIfEpoch(source.Id, epoch) {
+			log.Printf("[Spider] 站点 %s 已被新的采集接手，旧队列不改它的进度", source.Name)
+		}
+	} else {
+		progress.MarkStopped(source.Id)
+	}
+	// 占用按令牌释放：已被新采集重新占用时不会误放。
 	batchCtx.releaseSourceOccupy(source.Id)
 }
