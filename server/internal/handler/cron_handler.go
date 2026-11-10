@@ -140,11 +140,16 @@ func (h *CronHandler) RunFilmCronTask(c *gin.Context) {
 		dto.Failed("任务ID不能为空", c)
 		return
 	}
+	msg := spider.RunOnceStarted
 	for _, id := range cleanIds {
-		if err := service.CronSvc.RunFilmCronTaskOnce(id); err != nil {
+		got, err := service.CronSvc.RunFilmCronTaskOnce(id)
+		if err != nil {
 			dto.Failed(fmt.Sprint("手动执行失败: ", err.Error()), c)
 			return
 		}
+		if got == spider.RunOnceQueued {
+			msg = got
+		}
 	}
-	dto.SuccessOnlyMsg("定时任务已触发，执行结果请查看运行日志", c)
+	dto.SuccessOnlyMsg(msg, c)
 }

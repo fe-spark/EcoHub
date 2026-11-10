@@ -50,59 +50,33 @@ func flushCronQueue() {
 	if len(batch) == 0 {
 		return
 	}
-	run, light, skippedCollect, skippedMaintenance := planCronBatch(batch, isMaintenanceRunning())
-	for _, ft := range light {
-		go runCronTaskSafely(ft)
+	busy := isMaintenanceRunning()
+	collects, maintenance, skippedCollect := planCronBatch(batch, busy)
+	due := make([]string, 0, len(maintenance))
+	for _, ft := range maintenance {
+		due = append(due, ft.Id)
 	}
-	due := make([]string, 0, len(run))
-	for _, ft := range run {
-		if isMaintenanceModel(ft.Model) {
-			due = append(due, ft.Id)
-		}
+	// 先把维护按到点顺序入队，再裁决采集，保证采集跳过时维护已经占住“维护中”状态。
+	for _, ft := range maintenance {
+		enqueueMaintenance(ft)
 	}
 	for _, id := range skippedCollect {
 		if len(due) > 0 {
-			log.Printf("[Spider] 定时自动采集跳过：同一秒有维护任务（%s），Task[%s]", strings.Join(due, "，"), id)
+			log.Printf("[Spider] 定时自动采集跳过：同一时段有维护任务（%s），Task[%s]", strings.Join(due, "，"), id)
 			continue
 		}
 		log.Printf("[Spider] 定时自动采集跳过：维护任务执行中（%s），Task[%s]", maintenanceRunningDetail(), id)
 	}
-	if len(skippedMaintenance) > 0 {
-		byID := make(map[string]model.FilmCollectTask, len(batch))
-		for _, ft := range batch {
-			byID[ft.Id] = ft
-		}
-		for _, id := range skippedMaintenance {
-			log.Printf("[Spider] 定时维护延后：已有维护任务在执行（%s），Task[%s]", maintenanceRunningDetail(), id)
-			deferMaintenance(byID[id])
-		}
-	}
-	if len(run) == 0 {
-		return
-	}
-	if isMaintenanceModel(run[0].Model) {
-		go runMaintenanceBatch(run)
-		return
-	}
-	for _, ft := range run {
+	for _, ft := range collects {
 		go runCronTaskSafely(ft)
 	}
 }
 
-// runMaintenanceBatch 同一秒的维护按入队顺序执行。前一条结束后再开始下一条。
-func runMaintenanceBatch(tasks []model.FilmCollectTask) {
-	for _, ft := range tasks {
-		runCronTaskSafely(ft)
-	}
-}
-
-// planCronBatch 裁决同一秒内的计划任务。
-// 轻量任务（日志清理、采集记录清理）不受维护影响，总是放行，也不让采集跳过。
-// 已有维护在跑时，本批采集和维护全部跳过。
-// 本批含维护且当前没有维护在跑时，只保留维护，采集跳过。
-func planCronBatch(batch []model.FilmCollectTask, maintenanceBusy bool) (run, light []model.FilmCollectTask, skippedCollect, skippedMaintenance []string) {
+// planCronBatch 裁决同一时段（1 秒合并窗口）内到点的计划任务。
+// 维护优先：本批有维护，或已有维护在执行/排队时，本批采集全部跳过（不排队、不补跑）。
+// 本批所有维护按到点顺序返回，由调用方依次加入维护串行队列，一条都不丢。
+func planCronBatch(batch []model.FilmCollectTask, maintenanceBusy bool) (collects, maintenance []model.FilmCollectTask, skippedCollect []string) {
 	seen := make(map[string]struct{}, len(batch))
-	var maintenance, collects []model.FilmCollectTask
 	for _, ft := range batch {
 		if ft.Id != "" {
 			if _, ok := seen[ft.Id]; ok {
@@ -110,27 +84,17 @@ func planCronBatch(batch []model.FilmCollectTask, maintenanceBusy bool) (run, li
 			}
 			seen[ft.Id] = struct{}{}
 		}
-		switch {
-		case ft.Model == model.TaskModelAutoCollect:
-			collects = append(collects, ft)
-		case isLightCronModel(ft.Model):
-			light = append(light, ft)
-		default:
+		if isMaintenanceModel(ft.Model) {
 			maintenance = append(maintenance, ft)
+			continue
 		}
+		collects = append(collects, ft)
 	}
-	collectIDs := func(tasks []model.FilmCollectTask) []string {
-		ids := make([]string, len(tasks))
-		for i, ft := range tasks {
-			ids[i] = ft.Id
+	if maintenanceBusy || len(maintenance) > 0 {
+		for _, ft := range collects {
+			skippedCollect = append(skippedCollect, ft.Id)
 		}
-		return ids
+		return nil, maintenance, skippedCollect
 	}
-	if maintenanceBusy {
-		return nil, light, collectIDs(collects), collectIDs(maintenance)
-	}
-	if len(maintenance) > 0 {
-		return maintenance, light, collectIDs(collects), nil
-	}
-	return collects, light, nil, nil
+	return collects, maintenance, nil
 }
