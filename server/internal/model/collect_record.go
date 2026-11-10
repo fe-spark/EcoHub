@@ -50,25 +50,25 @@ type CollectRecord struct {
 	ID             uint                `gorm:"primaryKey;autoIncrement" json:"id"`
 	BatchID        string              `gorm:"uniqueIndex;size:64;not null" json:"batchId"`
 	ParentBatchID  string              `gorm:"index;size:64" json:"parentBatchId,omitempty"`
-	Trigger        string              `gorm:"index;size:32;not null" json:"trigger"`    // manual / cron / retry
-	Tag            string              `gorm:"size:64" json:"tag"`                       // 单站采集 / 批量采集 / 失败重试 / 定时采集等
-	Hour           int                 `gorm:"not null;default:0" json:"hour"`           // 采集跨度：-1全量，>0小时
-	Status         string              `gorm:"index;size:32;not null" json:"status"`     // running / success / partial / failed / stopped / interrupted
-	SourceCount    int                 `gorm:"not null;default:0" json:"sourceCount"`    // 覆盖站点数
-	SuccessSources int                 `gorm:"not null;default:0" json:"successSources"` // 成功站点数
-	FailedSources  int                 `gorm:"not null;default:0" json:"failedSources"`  // 失败站点数
-	FilmCount      int                 `gorm:"not null;default:0" json:"filmCount"`      // 清单行数，同一影片在多站各算一行
-	FilmIDs        string              `gorm:"size:1024" json:"filmIds,omitempty"`       // 单片更新要重放的全局影片编号
-	FilmName       string              `gorm:"-" json:"filmName,omitempty"`              // 单片更新的片名，按 filmIds 从影片库回填
-	Films          []CollectRecordFilm `gorm:"-" json:"films,omitempty"`                 // 单片更新可跳转的影片
-	PageTotal      int                 `gorm:"not null;default:0" json:"pageTotal"`      // 总页数
-	PageSuccess    int                 `gorm:"not null;default:0" json:"pageSuccess"`    // 成功页数
-	PageFailed     int                 `gorm:"not null;default:0" json:"pageFailed"`     // 失败页数
-	DurationMs     int64               `gorm:"not null;default:0" json:"durationMs"`     // 耗时毫秒
-	StartedAt      time.Time           `gorm:"index;not null" json:"startedAt"`          // 开始时间
-	FinishedAt     *time.Time          `json:"finishedAt,omitempty"`                     // 完成时间
-	ErrorMsg       string              `gorm:"type:text" json:"errorMsg,omitempty"`      // 错误摘要
-	DetailJson     string              `gorm:"type:text" json:"detailJson,omitempty"`    // 站点明细 JSON
+	Trigger        string              `gorm:"index;size:32;not null" json:"trigger"`       // manual / cron / retry
+	Tag            string              `gorm:"size:64" json:"tag"`                          // 单站采集 / 批量采集 / 失败重试 / 定时采集等
+	Hour           int                 `gorm:"not null;default:0" json:"hour"`              // 采集跨度：-1全量，>0小时
+	Status         string              `gorm:"index;size:32;not null" json:"status"`        // running / success / partial / failed / stopped / interrupted
+	SourceCount    int                 `gorm:"not null;default:0" json:"sourceCount"`       // 覆盖站点数
+	SuccessSources int                 `gorm:"not null;default:0" json:"successSources"`    // 成功站点数
+	FailedSources  int                 `gorm:"not null;default:0" json:"failedSources"`     // 失败站点数
+	FilmCount      int                 `gorm:"not null;default:0" json:"filmCount"`         // 清单行数，同一影片在多站各算一行
+	FilmIDs        string              `gorm:"size:1024" json:"filmIds,omitempty"`          // 单片更新要重放的全局影片编号
+	FilmName       string              `gorm:"-" json:"filmName,omitempty"`                 // 单片更新的片名，按 filmIds 从影片库回填
+	Films          []CollectRecordFilm `gorm:"-" json:"films,omitempty"`                    // 单片更新可跳转的影片
+	PageTotal      int                 `gorm:"not null;default:0" json:"pageTotal"`         // 总页数
+	PageSuccess    int                 `gorm:"not null;default:0" json:"pageSuccess"`       // 成功页数
+	PageFailed     int                 `gorm:"not null;default:0" json:"pageFailed"`        // 失败页数
+	DurationMs     int64               `gorm:"not null;default:0" json:"durationMs"`        // 耗时毫秒
+	StartedAt      time.Time           `gorm:"index;not null" json:"startedAt"`             // 开始时间
+	FinishedAt     *time.Time          `json:"finishedAt,omitempty"`                        // 完成时间
+	ErrorMsg       string              `gorm:"type:text" json:"errorMsg,omitempty"`         // 错误摘要
+	DetailJson     string              `gorm:"type:mediumtext" json:"detailJson,omitempty"` // 站点明细 JSON，含全部失败页，TEXT 64KB 装不下大站的失败页
 }
 
 // CollectRecordFilm 采集批次清单里的一行影片。全部站点按清单行返回，并带上 SourceID。
