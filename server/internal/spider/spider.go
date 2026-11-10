@@ -93,7 +93,7 @@ func HandlePreparedCollect(id string, h int) error {
 		abortUnstartedCollect(id, nil)
 		return errors.New("采集任务开启失败，采集站信息不存在")
 	}
-	if err := probeSourcePageCount(s, h, model.CollectTriggerManual); err != nil {
+	if err := probeSourcePageCount(s, h, model.CollectTriggerManual, nil); err != nil {
 		abortUnstartedCollect(id, nil)
 		return err
 	}
@@ -368,9 +368,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	targetPages := batchCtx.getTargetPages(id)
 	if len(targetPages) > 0 {
 		pageCount = len(targetPages)
-		progress.SetPageTotal(id, pageCount)
+		batchCtx.setSourcePageTotal(id, pageCount)
 	} else if pageCount < 0 {
-		if err := probeSourcePageCount(s, h, trigger); err != nil {
+		if err := probeSourcePageCount(s, h, trigger, batchCtx); err != nil {
 			return err
 		}
 		pageCount = progress.PageTotal(id)
@@ -424,15 +424,14 @@ func filterSourcesReadyForCollect(sources []model.FilmSource) []model.FilmSource
 	return out
 }
 
-func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
-	if len(sources) == 0 {
+// BatchCollectPrepared 执行 PrepareBatchCollectStart 占好的站。批次沿用占用那一刻的令牌和进度代次。
+func BatchCollectPrepared(trigger string, h int, claim CollectClaim) {
+	if len(claim.Sources) == 0 {
 		return
 	}
 	if searchIndexBlocksCollect() {
 		log.Printf("[Spider] 批量采集跳过：%s", errSearchIndexUpdating.Error())
-		for _, source := range sources {
-			abandonQueuedCollectSource(source, nil)
-		}
+		claim.abandon()
 		return
 	}
 	if trigger == "" {
@@ -442,21 +441,22 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 	if trigger == model.CollectTriggerCron {
 		tag = model.CollectTagCronCollect
 	}
-	runSourcesWithLimitCore(sources, h, tag, trigger)
+	runSourcesWithLimitCore(claim, h, tag, trigger)
 }
 
 // StartBatchCollectRetry 先写入 running 批次，再异步执行失败站点重试。
-func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.FilmSource, sourceTargetPages ...map[string][]int) (string, error) {
-	if len(sources) == 0 {
+// claim 来自 PrepareBatchCollectStart，批次沿用占用那一刻的令牌和进度代次。
+func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, sourceTargetPages ...map[string][]int) (string, error) {
+	if len(claim.Sources) == 0 {
 		return "", errors.New("没有可重试的站点")
 	}
 	if searchIndexBlocksCollect() {
 		return "", errSearchIndexUpdating
 	}
-	sources = prioritizeCollectSources(sources)
+	sources := prioritizeCollectSources(claim.Sources)
 	startedAt := time.Now()
 	batchCtx := newCollectBatchContext(model.CollectTriggerRetry, model.CollectTagRetryCollect, sources, startedAt).
-		withHour(hour).withParentBatchID(parentBatchID)
+		withClaim(claim).withHour(hour).withParentBatchID(parentBatchID)
 	if len(sourceTargetPages) > 0 && len(sourceTargetPages[0]) > 0 {
 		batchCtx = batchCtx.withTargetPages(sourceTargetPages[0])
 	}

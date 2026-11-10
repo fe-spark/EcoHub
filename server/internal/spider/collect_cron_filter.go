@@ -71,11 +71,11 @@ func autoCollect(trigger string, h int) error {
 	for _, skip := range result.Skipped {
 		log.Printf("[Spider] 自动采集跳过站点: id=%s name=%s reason=%s", skip.Id, skip.Name, skip.Reason)
 	}
-	if len(ready) == 0 {
+	if len(ready.Sources) == 0 {
 		log.Println("[Spider] 自动采集：没有可采集的就绪站点")
 		return nil
 	}
-	log.Printf("[Spider] 自动采集开启: 共 %d 个站点进入批量采集队列 (trigger=%s, h=%d)", len(ready), trigger, h)
+	log.Printf("[Spider] 自动采集开启: 共 %d 个站点进入批量采集队列 (trigger=%s, h=%d)", len(ready.Sources), trigger, h)
 	BatchCollectPrepared(trigger, h, ready)
 	return nil
 }

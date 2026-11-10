@@ -283,6 +283,46 @@ func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	}
 }
 
+// withClaim 用占用那一刻记下的令牌和进度代次，替换建批次时现读的值。
+func (b *collectBatchContext) withClaim(claim CollectClaim) *collectBatchContext {
+	if b == nil {
+		return b
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for id, tok := range claim.tokens {
+		b.occupyTokens[id] = tok
+	}
+	for id, epoch := range claim.epochs {
+		b.progressEpochs[id] = epoch
+	}
+	return b
+}
+
+// markSourceFailed 把本批次这一代的进度标成失败，返回进度是否仍属于本批次。
+// 无批次或没记代次时按站点直接改。
+func (b *collectBatchContext) markSourceFailed(id string) bool {
+	if epoch, ok := b.progressEpoch(id); ok {
+		return progress.MarkFailedIfEpoch(id, epoch)
+	}
+	progress.Update(id, func(cur *model.CollectProgress) {
+		switch cur.Status {
+		case progress.StatusStarting, progress.StatusRunning:
+			cur.Status = progress.StatusFailed
+		}
+	})
+	return true
+}
+
+// setSourcePageTotal 只写本批次这一代的总页，返回进度是否仍属于本批次。
+func (b *collectBatchContext) setSourcePageTotal(id string, pageCount int) bool {
+	if epoch, ok := b.progressEpoch(id); ok {
+		return progress.SetPageTotalIfEpoch(id, epoch, pageCount)
+	}
+	progress.SetPageTotal(id, pageCount)
+	return true
+}
+
 // progressEpoch 建批次时该站的进度代次。
 func (b *collectBatchContext) progressEpoch(id string) (uint64, bool) {
 	if b == nil {

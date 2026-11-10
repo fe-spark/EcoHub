@@ -307,15 +307,15 @@ func TestStartBatchCollectRetry_RollbackOccupyOnRecordStartError(t *testing.T) {
 	t.Cleanup(func() { db.Mdb = prev })
 
 	src := model.FilmSource{Id: "retry-rollback-s1", Name: "重试回滚源"}
-	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "q-test-retry")
-	if err != nil || len(occupied) != 1 {
+	claim, err := claimCollectSources([]model.FilmSource{src}, "q-test-retry")
+	if err != nil || len(claim.Sources) != 1 {
 		t.Fatalf("occupy failed: %v", err)
 	}
 	if !isOccupiedCollectSource(src.Id) {
 		t.Fatal("source should be occupied initially")
 	}
 
-	_, err = StartBatchCollectRetry("parent-b-1", 24, []model.FilmSource{src})
+	_, err = StartBatchCollectRetry("parent-b-1", 24, claim)
 	if err == nil {
 		t.Fatal("expected error when db is nil")
 	}

@@ -138,7 +138,7 @@ func CollectSingleFilm(ids string) {
 		targets = append(targets, source)
 		sourceMids[source.Id] = requestID
 	}
-	targets = filterCollectableSources(targets, "单片更新")
+	targets = occupyCollectSources(targets, "单片更新")
 	if len(targets) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 匹配站点均已在正采集队列中，跳过")
 		return

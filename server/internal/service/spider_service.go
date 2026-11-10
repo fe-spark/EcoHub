@@ -47,9 +47,9 @@ func (s *SpiderService) StartCollect(id string, h int) error {
 
 // BatchCollect 批量采集：能开的站同步标成 starting 后异步执行，跳过的站带原因返回。
 func (s *SpiderService) BatchCollect(time int, ids []string) model.CollectBatchResult {
-	sources, result := spider.PrepareBatchCollectStart(ids)
-	if len(sources) > 0 {
-		go spider.BatchCollectPrepared(model.CollectTriggerManual, time, sources)
+	claim, result := spider.PrepareBatchCollectStart(ids)
+	if len(claim.Sources) > 0 {
+		go spider.BatchCollectPrepared(model.CollectTriggerManual, time, claim)
 	}
 	return result
 }

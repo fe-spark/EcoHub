@@ -63,7 +63,7 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	started, result := PrepareBatchCollectStart([]string{
 		"ready", "off", "bare", "both", "busy", "sync", "halt", "missing", "ready", "  ",
 	})
-	if len(started) != 1 || started[0].Id != "ready" {
+	if len(started.Sources) != 1 || started.Sources[0].Id != "ready" {
 		t.Fatalf("started = %+v", started)
 	}
 	if !isOccupiedCollectSource("ready") {
@@ -141,7 +141,7 @@ func TestBatchCollect_ReleasesOccupyAfterFinished(t *testing.T) {
 	defer releaseCollectSourceIDs(src.Id)
 
 	claimed, res := PrepareBatchCollectStart([]string{src.Id})
-	if len(claimed) != 1 {
+	if len(claimed.Sources) != 1 {
 		t.Fatalf("claimed = %+v, skipped = %+v", claimed, res.Skipped)
 	}
 	if !isOccupiedCollectSource(src.Id) {
