@@ -245,11 +245,13 @@ func ClearCollectRecords() error {
 var (
 	collectCleanRecordChunk = 200  // 每轮处理的过期记录条数
 	collectCleanFilmChunk   = 5000 // 每条 DELETE 删除的影片清单行数上限
+	// collectCleanBeforeDeleteHook 仅供测试：查出过期记录之后、删除之前调用，用于模拟记录状态变化。
+	collectCleanBeforeDeleteHook func(ids []uint)
 )
 
 // CleanOldCollectRecords 清理超过指定天数的历史采集记录（防数据库膨胀）。
-// 不再包一个大事务：按记录 id 游标分批，每批先删这些批次的影片清单（每次最多 collectCleanFilmChunk 行），
-// 再删记录本身；最后按清单 id 游标清掉已无记录的旧清单行。每条语句都有上限，避免撞上 MySQL readTimeout。
+// 不再包一个大事务：按记录 id 游标分批，每批先删记录本身（复核不是 running），
+// 再删已没有记录的批次的影片清单（每次最多 collectCleanFilmChunk 行）；最后按清单 id 游标清掉已无记录的旧清单行。每条语句都有上限，避免撞上 MySQL readTimeout。
 // 进行中的批次（status=running）一律跳过，它的记录和清单都不动。
 func CleanOldCollectRecords(days int) error {
 	if db.Mdb == nil {
@@ -287,19 +289,50 @@ func CleanOldCollectRecords(days int) error {
 				batchIDs = append(batchIDs, batchID)
 			}
 		}
-		if err := deleteCollectFilmsByBatches(session, batchIDs); err != nil {
-			return err
+		if collectCleanBeforeDeleteHook != nil {
+			collectCleanBeforeDeleteHook(ids)
 		}
-		// 复核状态：查询之后才变成 running 的记录（理论上不会发生）不删。
+		// 先删记录（删除时复核不是 running），再只删已没有记录的批次的清单。
 		if err := session.Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).
 			Delete(&model.CollectRecord{}).Error; err != nil {
 			return fmt.Errorf("删除过期采集记录失败: %w", err)
+		}
+		gone, err := batchesWithoutRecord(session, batchIDs)
+		if err != nil {
+			return err
+		}
+		if err := deleteCollectFilmsByBatches(session, gone); err != nil {
+			return err
 		}
 		if len(rows) < recordChunk {
 			break
 		}
 	}
 	return sweepOrphanCollectFilms(session, threshold)
+}
+
+// batchesWithoutRecord 返回 batchIDs 中已没有采集记录的批次。
+func batchesWithoutRecord(session *gorm.DB, batchIDs []string) ([]string, error) {
+	if len(batchIDs) == 0 {
+		return nil, nil
+	}
+	var alive []string
+	if err := session.Model(&model.CollectRecord{}).
+		Where("batch_id IN ?", batchIDs).
+		Pluck("batch_id", &alive).Error; err != nil {
+		return nil, fmt.Errorf("查询采集批次失败: %w", err)
+	}
+	aliveSet := make(map[string]struct{}, len(alive))
+	for _, id := range alive {
+		aliveSet[id] = struct{}{}
+	}
+	gone := make([]string, 0, len(batchIDs))
+	for _, id := range batchIDs {
+		if _, ok := aliveSet[id]; !ok {
+			gone = append(gone, id)
+		}
+	}
+	return gone, nil
 }
 
 // deleteCollectFilmsByBatches 分批删除指定批次的影片清单。先按主键取一批，再按主键删，sqlite 与 MySQL 通用。
