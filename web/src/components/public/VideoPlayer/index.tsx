@@ -63,7 +63,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     let cancelled = false;
     let player: Artplayer | null = null;
     let modeTimer: any = null;
-    let seekEndTimer: any = null;
     let miniRafId = 0;
     let onScrollOrResize: (() => void) | null = null;
     let miniObserver: IntersectionObserver | null = null;
@@ -77,7 +76,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth <= 768;
     Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
     const isM3U8 = src.includes(".m3u8") || src.includes("m3u8");
-    const pendingLive: { text: string; color?: string; mode?: 0 | 1 | 2 }[] = [];
+    const pendingLive: { text: string; color?: string; time?: number; mode?: 0 | 1 | 2 }[] = [];
     let listReady = !danmakuEnabled;
     const art = new Artplayer({
       container: artRef.current,
@@ -136,13 +135,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     pendingLive.push({
                       text: danmu.text,
                       color: danmu.color,
-                      mode: danmu.mode === 1 ? 1 : danmu.mode === 2 ? 2 : 0,
-                    });
-                  } else {
-                    sourceComments.push({
-                      text: danmu.text,
                       time: danmu.time || art.currentTime,
-                      color: danmu.color || "#ffffff",
                       mode: danmu.mode === 1 ? 1 : danmu.mode === 2 ? 2 : 0,
                     });
                   }
@@ -234,56 +227,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
     player = art;
     type DanmakuItem = { text: string; time: number; color: string; mode: 0 | 1 | 2 };
-    let sourceComments: DanmakuItem[] = [];
-    let placeGen = 0;
-    let placeChain: Promise<void> = Promise.resolve();
-    const travelSeconds = () => {
-      const base = art.fullscreen || art.fullscreenWeb ? 10 : 5;
-      const rate = Number(art.playbackRate) || 1;
-      return base / rate;
-    };
-    const placeDanmaku = (now: number) => {
-      const gen = ++placeGen;
-      placeChain = placeChain
-        .then(async () => {
-          if (cancelled || gen !== placeGen) return;
-          const dm = (art.plugins as any)?.artplayerPluginDanmuku;
-          if (!dm || typeof dm.load !== "function") return;
-          const duration = travelSeconds();
-          const view = sourceComments.flatMap((item) => {
-            const start = item.time || 0;
-            const elapsed = now - start;
-            if (elapsed < 0) return [item];
-            if (elapsed < duration) return [{ ...item, time: now, id: `seek:${start}` }];
-            return [];
-          });
-          await dm.load();
-          if (cancelled || gen !== placeGen) return;
-          if (view.length > 0) await dm.load(view);
-        })
-        .catch(() => {});
-      return placeChain;
-    };
-    art.on("artplayerPluginDanmuku:visible", (danmu: any) => {
-      const id = String(danmu?.id || "");
-      if (!id.startsWith("seek:") || !danmu.$ref) return;
-      const start = Number(id.slice(5));
-      const duration = travelSeconds();
-      const elapsed = art.currentTime - start;
-      if (!(elapsed > 0 && elapsed < duration)) return;
-      danmu.$restTime = duration - elapsed;
-      danmu.$lastStartTime = Date.now();
-      if (danmu.mode !== 0) return;
-      const width = (art.template?.$player?.clientWidth || 0) + danmu.$ref.clientWidth;
-      const remain = duration - elapsed;
-      danmu.$ref.style.transition = "none";
-      danmu.$ref.style.transform = `translateX(${-width * (elapsed / duration)}px)`;
-      requestAnimationFrame(() => {
-        if (!danmu.$ref) return;
-        danmu.$ref.style.transition = `transform ${remain}s linear 0s`;
-        danmu.$ref.style.transform = `translateX(${-width}px)`;
-      });
-    });
     if (danmakuEnabled) {
       void (async () => {
         const meta = danmakuMetaRef.current;
@@ -307,17 +250,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           }
         }
         if (cancelled) return;
-        sourceComments = comments.concat(
+        comments = comments.concat(
           pendingLive.map((item) => ({
             text: item.text,
-            time: art.currentTime,
+            time: item.time || art.currentTime,
             color: item.color || "#ffffff",
             mode: item.mode || 0,
           })),
         );
         pendingLive.length = 0;
         listReady = true;
-        await placeDanmaku(art.currentTime);
+        const dm = (art.plugins as any)?.artplayerPluginDanmuku;
+        if (dm && typeof dm.load === "function") {
+          await dm.load();
+          if (cancelled) return;
+          if (comments.length > 0) await dm.load(comments);
+        }
       })();
     }
     if (art.template?.$video) {
@@ -375,7 +323,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const dm = (art.plugins as any)?.artplayerPluginDanmuku;
       if (!dm || typeof dm.config !== "function") return;
       dm.config({ speed: art.fullscreen || art.fullscreenWeb ? 10 : 5 });
-      void placeDanmaku(art.currentTime);
     };
     const scheduleDanmukuMode = () => {
       clearTimeout(modeTimer);
@@ -403,76 +350,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       callbacks.current.onError?.(err);
     });
 
-    let isSeeking = false;
-    let wasPlayingBeforeSeek = false;
-    let seekGen = 0;
-    let seekedGen = 0;
-     let placeFrame = 0;
-     const syncDanmukuSeek = () => {
-       if (!danmakuEnabled) return;
-       cancelAnimationFrame(placeFrame);
-       placeFrame = requestAnimationFrame(() => {
-         void placeDanmaku(art.currentTime);
-       });
-     };
-     art.on("seek", syncDanmukuSeek);
- 
-     art.on("video:seeking", () => {
-       isSeeking = true;
-       seekGen += 1;
-       clearTimeout(seekEndTimer);
-       syncDanmukuSeek();
-       const v = art.template?.$video;
-       if (v && !v.paused) {
-         wasPlayingBeforeSeek = true;
-         v.pause();
-       }
-       if (art.loading) art.loading.show = true;
-     });
- 
-     const resumePlaybackAfterSeek = () => {
-       if (!isSeeking) return;
-       isSeeking = false;
-       if (art.loading) art.loading.show = false;
-       if (wasPlayingBeforeSeek) {
-         wasPlayingBeforeSeek = false;
-         art.play().catch(() => {});
-       }
-     };
- 
-     art.on("video:seeked", () => {
-       seekedGen = seekGen;
-       if (!isSeeking) return;
-       cancelAnimationFrame(placeFrame);
-       void placeDanmaku(art.currentTime).then(() => {
-         requestAnimationFrame(() => {
-           const v = art.template?.$video;
-           if (v && v.readyState >= 3) {
-             resumePlaybackAfterSeek();
-             return;
-           }
-           clearTimeout(seekEndTimer);
-           seekEndTimer = setTimeout(resumePlaybackAfterSeek, 2500);
-         });
-       });
-     });
- 
-     art.on("video:canplay", () => {
-       if (!isSeeking || seekedGen !== seekGen) return;
-       clearTimeout(seekEndTimer);
-       resumePlaybackAfterSeek();
-     });
- 
-     art.on("video:playing", () => {
-       setHasError(false);
-       callbacks.current.onPlayStart?.();
-     });
- 
-     return () => {
-       cancelled = true;
-       clearTimeout(modeTimer);
-       clearTimeout(seekEndTimer);
-       if (placeFrame) cancelAnimationFrame(placeFrame);
+    art.on("video:playing", () => {
+      setHasError(false);
+      callbacks.current.onPlayStart?.();
+    });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(modeTimer);
       if (miniRafId) cancelAnimationFrame(miniRafId);
       if (onScrollOrResize) {
         window.removeEventListener("scroll", onScrollOrResize);

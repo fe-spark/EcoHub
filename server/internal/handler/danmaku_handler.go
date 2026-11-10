@@ -344,7 +344,7 @@ func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID i
 		}
 		t, _ := strconv.ParseFloat(parts[0], 64)
 		modeVal, _ := strconv.Atoi(parts[1])
-		colorInt, _ := strconv.ParseInt(parts[2], 10, 64)
+		colorInt, colorErr := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
 
 		mode := 0 // scroll
 		if modeVal == 5 {
@@ -354,7 +354,7 @@ func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID i
 		}
 
 		color := "#ffffff"
-		if colorInt > 0 {
+		if colorErr == nil && colorInt >= 0 && colorInt <= 0xffffff {
 			color = fmt.Sprintf("#%06x", colorInt)
 		}
 

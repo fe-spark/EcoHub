@@ -1,8 +1,180 @@
 diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs b/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
-index fac426c..10c71ad 100644
 --- a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
 +++ b/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
-@@ -428,7 +428,7 @@ class Danmuku {
+@@ -105,6 +105,115 @@
+     );
+   }
+ }
++
++function getDanmuTop({ target, visibles, clientWidth, clientHeight, marginBottom, marginTop, antiOverlap }) {
++  const maxTop = clientHeight - marginBottom;
++  const danmus = visibles.filter((item) => item.mode === target.mode && item.top <= maxTop).sort((prev, next) => prev.top - next.top);
++  if (danmus.length === 0) {
++    if (target.mode === 2) {
++      return maxTop - target.height;
++    } else {
++      return marginTop;
++    }
++  }
++  danmus.unshift({
++    type: "top",
++    top: 0,
++    left: 0,
++    right: 0,
++    height: marginTop,
++    width: clientWidth,
++    speed: 0,
++    distance: clientWidth
++  });
++  danmus.push({
++    type: "bottom",
++    top: maxTop,
++    left: 0,
++    right: 0,
++    height: marginBottom,
++    width: clientWidth,
++    speed: 0,
++    distance: clientWidth
++  });
++  if (target.mode === 2) {
++    for (let index = danmus.length - 2; index >= 0; index -= 1) {
++      const item = danmus[index];
++      const prev = danmus[index + 1];
++      const itemBottom = item.top + item.height;
++      const diff = prev.top - itemBottom;
++      if (diff >= target.height) {
++        return prev.top - target.height;
++      }
++    }
++  } else {
++    for (let index = 1; index < danmus.length; index += 1) {
++      const item = danmus[index];
++      const prev = danmus[index - 1];
++      const prevBottom = prev.top + prev.height;
++      const diff = item.top - prevBottom;
++      if (diff >= target.height) {
++        return prevBottom;
++      }
++    }
++  }
++  const topMap = [];
++  for (let index = 1; index < danmus.length - 1; index += 1) {
++    const item = danmus[index];
++    if (topMap.length) {
++      const last = topMap[topMap.length - 1];
++      if (last[0].top === item.top) {
++        last.push(item);
++      } else {
++        topMap.push([item]);
++      }
++    } else {
++      topMap.push([item]);
++    }
++  }
++  if (antiOverlap) {
++    switch (target.mode) {
++      case 0: {
++        const result = topMap.find((list) => {
++          return list.every((danmu) => {
++            if (clientWidth < danmu.distance)
++              return false;
++            if (target.speed < danmu.speed)
++              return true;
++            const overlapTime = danmu.right / (target.speed - danmu.speed);
++            if (overlapTime > danmu.time)
++              return true;
++            return false;
++          });
++        });
++        return result && result[0] ? result[0].top : void 0;
++      }
++      case 1:
++      case 2:
++        return void 0;
++    }
++  } else {
++    switch (target.mode) {
++      case 0:
++        topMap.sort((prev, next) => {
++          const nextMinRight = Math.min(...next.map((item) => item.right));
++          const prevMinRight = Math.min(...prev.map((item) => item.right));
++          return nextMinRight * next.length - prevMinRight * prev.length;
++        });
++        break;
++      case 1:
++      case 2:
++        topMap.sort((prev, next) => {
++          const nextMaxWidth = Math.max(...next.map((item) => item.width));
++          const prevMaxWidth = Math.max(...prev.map((item) => item.width));
++          return prevMaxWidth * prev.length - nextMaxWidth * next.length;
++        });
++        break;
++    }
++    return topMap[0][0].top;
++  }
++}
++
+ class Danmuku {
+   constructor(art, option) {
+     const { constructor, template } = art;
+@@ -119,6 +228,9 @@
+     this.isHide = false;
+     this.timer = null;
+     this.index = 0;
++    this.lastTime = -1;
++    this.resyncGen = 0;
++    this._seeking = false;
+     this.option = Danmuku.option;
+     this.states = { wait: [], ready: [], emit: [], stop: [] };
+     this.config(option, true);
+@@ -128,12 +240,17 @@
+     this.reset = this.reset.bind(this);
+     this.resize = this.resize.bind(this);
+     this.destroy = this.destroy.bind(this);
++    this.resync = this.resync.bind(this);
++    this.onSeeking = this.onSeeking.bind(this);
++    this.onSeeked = this.onSeeked.bind(this);
+     art.on("video:play", this.start);
+     art.on("video:playing", this.start);
+     art.on("video:pause", this.stop);
+     art.on("video:waiting", this.stop);
+     art.on("destroy", this.destroy);
+     art.on("resize", this.resize);
++    art.on("video:seeking", this.onSeeking);
++    art.on("video:seeked", this.onSeeked);
+     this.load();
+   }
+   // 默认配置
+@@ -305,7 +422,7 @@
+     const result = [];
+     this.filter("ready", (danmu) => result.push(danmu));
+     this.filter("wait", (danmu) => {
+-      if (currentTime + 0.1 >= danmu.time && danmu.time >= currentTime - 0.1) {
++      if (danmu.time > this.lastTime && danmu.time <= currentTime) {
+         result.push(danmu);
+       }
+     });
+@@ -370,6 +487,8 @@
+         await this.emit(danmu);
+       }
+       this.art.emit("artplayerPluginDanmuku:loaded", this.queue);
++      this.lastTime = -1;
++      void this.resync();
+     } catch (error) {
+       this.art.emit("artplayerPluginDanmuku:error", error);
+       throw error;
+@@ -397,8 +516,8 @@
+     });
+     if (!danmu.text.trim())
+       return this;
+-    if (danmu.time) {
+-      danmu.time = clamp(danmu.time, 0, Infinity);
++    if (danmu.time != null && danmu.time !== "") {
++      danmu.time = clamp(Number(danmu.time), 0, Infinity);
+     } else {
+       danmu.time = this.art.currentTime + 0.5;
+     }
+@@ -428,7 +547,7 @@
        $lastStartTime: 0
        // 弹幕上次开始时间
      };
@@ -11,7 +183,18 @@ index fac426c..10c71ad 100644
      this.queue.push(item);
      return this;
    }
-@@ -488,6 +488,7 @@ class Danmuku {
+@@ -449,8 +568,8 @@
+     this.option.lockTime = clamp(this.option.lockTime, 1, 60);
+     this.option.maxLength = clamp(this.option.maxLength, 1, 1e3);
+     this.option.mount = this.option.mount || $controlsCenter;
+-    if (option.fontSize) {
+-      this.reset();
++    if (!isInit && (option.fontSize || option.speed != null)) {
++      void this.resync();
+     }
+     if (this.option.visible) {
+       this.show();
+@@ -488,6 +607,7 @@
    }
    // 设置弹幕状态
    setState(danmu, state) {
@@ -19,3 +202,214 @@ index fac426c..10c71ad 100644
      this.states[danmu.$state] = this.states[danmu.$state].filter((item) => item !== danmu);
      danmu.$state = state;
      if (danmu.$ref) {
+@@ -508,11 +628,118 @@
+       danmu.$ref = null;
+     }
+   }
++  onSeeking() {
++    if (!this._seeking) {
++      this._seeking = true;
++      this.resyncGen += 1;
++      this.reset();
++    }
++  }
++  onSeeked() {
++    this._seeking = false;
++    void this.resync();
++  }
++  async reveal(danmu, elapsed = 0) {
++    const { setStyles } = this.utils;
++    const state = await this.option.beforeVisible(danmu);
++    if (!state) return;
++    const { clientWidth, clientHeight } = this.$player;
++    danmu.$ref = this.$ref;
++    danmu.$ref.textContent = danmu.text;
++    this.$danmuku.appendChild(danmu.$ref);
++    danmu.$ref.style.opacity = this.option.opacity;
++    danmu.$ref.style.fontSize = `${this.fontSize}px`;
++    danmu.$ref.style.color = danmu.color;
++    danmu.$ref.style.border = danmu.border ? `1px solid ${danmu.color}` : null;
++    danmu.$ref.style.backgroundColor = danmu.border ? "rgb(0 0 0 / 50%)" : null;
++    setStyles(danmu.$ref, danmu.style);
++    const duration = this.speed;
++    const travel = Math.max(elapsed, 0);
++    danmu.$lastStartTime = Date.now();
++    danmu.$restTime = Math.max(duration - travel, 0);
++    if (danmu.$restTime <= 0) {
++      this.makeWait(danmu);
++      return;
++    }
++    const distance = clientWidth + danmu.$ref.clientWidth;
++    const top = getDanmuTop({
++      target: {
++        mode: danmu.mode,
++        height: danmu.$ref.clientHeight,
++        speed: distance / duration
++      },
++      visibles: this.visibles,
++      antiOverlap: this.option.antiOverlap,
++      clientWidth,
++      clientHeight,
++      marginBottom: this.marginBottom,
++      marginTop: this.marginTop
++    });
++    if (!danmu.$ref) return;
++    if (top !== void 0) {
++      this.setState(danmu, "emit");
++      danmu.$ref.style.top = `${top}px`;
++      danmu.$ref.style.visibility = "visible";
++      danmu.$ref.dataset.mode = danmu.mode;
++      danmu.$ref.dataset.id = danmu.id || "";
++      switch (danmu.mode) {
++        case 0: {
++          danmu.$ref.style.left = `${clientWidth}px`;
++          danmu.$ref.style.marginLeft = "0px";
++          danmu.$ref.style.transition = "none";
++          danmu.$ref.style.transform = `translateX(${-distance * (travel / duration)}px)`;
++          if (travel > 0) {
++            void danmu.$ref.offsetWidth;
++          }
++          if (!this.isStop) {
++            danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
++            danmu.$ref.style.transform = `translateX(${-distance}px)`;
++          }
++          break;
++        }
++        case 1:
++        case 2:
++          danmu.$ref.style.left = "50%";
++          danmu.$ref.style.marginLeft = `-${danmu.$ref.clientWidth / 2}px`;
++          break;
++      }
++      this.art.emit("artplayerPluginDanmuku:visible", danmu);
++    } else {
++      this.setState(danmu, "ready");
++      this.$refs.push(danmu.$ref);
++      danmu.$ref = null;
++    }
++  }
++  async resync() {
++    const gen = ++this.resyncGen;
++    const currentTime = this.art.currentTime;
++    const duration = this.speed;
++    this.reset();
++    this.lastTime = currentTime;
++    if (this.isHide) return this;
++    const midflight = [];
++    this.filter("wait", (danmu) => {
++      const elapsed = currentTime - (danmu.time || 0);
++      if (elapsed > 0 && elapsed < duration) {
++        midflight.push(danmu);
++      }
++    });
++    midflight.sort((a, b) => (a.time || 0) - (b.time || 0));
++    for (let index = 0; index < midflight.length; index++) {
++      if (gen !== this.resyncGen) return this;
++      await this.reveal(midflight[index], currentTime - (midflight[index].time || 0));
++    }
++    if (gen === this.resyncGen && this.isStop) {
++      this.suspend();
++    }
++    return this;
++  }
+   // 实时更新弹幕
+   update() {
+-    const { setStyles } = this.utils;
+     this.timer = window.requestAnimationFrame(async () => {
+-      if (this.art.playing && !this.isHide) {
++      if (this.art.playing && !this.isHide && !this._seeking) {
++        const currentTime = this.art.currentTime;
++        const gen = this.resyncGen;
+         this.filter("emit", (danmu) => {
+           const emitTime = (Date.now() - danmu.$lastStartTime) / 1e3;
+           danmu.$restTime -= emitTime;
+@@ -521,70 +748,16 @@
+             this.makeWait(danmu);
+           }
+         });
+-        const readys = this.readys;
+-        for (let index = 0; index < readys.length; index++) {
+-          const danmu = readys[index];
+-          const state = await this.option.beforeVisible(danmu);
+-          if (state) {
+-            const { clientWidth, clientHeight } = this.$player;
+-            danmu.$ref = this.$ref;
+-            danmu.$ref.textContent = danmu.text;
+-            this.$danmuku.appendChild(danmu.$ref);
+-            danmu.$ref.style.opacity = this.option.opacity;
+-            danmu.$ref.style.fontSize = `${this.fontSize}px`;
+-            danmu.$ref.style.color = danmu.color;
+-            danmu.$ref.style.border = danmu.border ? `1px solid ${danmu.color}` : null;
+-            danmu.$ref.style.backgroundColor = danmu.border ? "rgb(0 0 0 / 50%)" : null;
+-            setStyles(danmu.$ref, danmu.style);
+-            danmu.$lastStartTime = Date.now();
+-            danmu.$restTime = this.speed;
+-            const distance = clientWidth + danmu.$ref.clientWidth;
+-            const { result: top } = await this.postMessage({
+-              type: "getDanmuTop",
+-              target: {
+-                mode: danmu.mode,
+-                height: danmu.$ref.clientHeight,
+-                speed: distance / danmu.$restTime
+-              },
+-              // 当前弹幕信息
+-              visibles: this.visibles,
+-              // 可见的弹幕的数据
+-              antiOverlap: this.option.antiOverlap,
+-              clientWidth,
+-              clientHeight,
+-              marginBottom: this.marginBottom,
+-              marginTop: this.marginTop
+-            });
+-            if (danmu.$ref) {
+-              if (!this.isStop && top !== void 0) {
+-                this.setState(danmu, "emit");
+-                danmu.$ref.style.top = `${top}px`;
+-                danmu.$ref.style.visibility = "visible";
+-                danmu.$ref.dataset.mode = danmu.mode;
+-                danmu.$ref.dataset.id = danmu.id || "";
+-                switch (danmu.mode) {
+-                  // 滚动的弹幕
+-                  case 0: {
+-                    danmu.$ref.style.left = `${clientWidth}px`;
+-                    danmu.$ref.style.marginLeft = "0px";
+-                    danmu.$ref.style.transform = `translateX(${-distance}px)`;
+-                    danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
+-                    break;
+-                  }
+-                  case 1:
+-                  // falls through
+-                  case 2:
+-                    danmu.$ref.style.left = "50%";
+-                    danmu.$ref.style.marginLeft = `-${danmu.$ref.clientWidth / 2}px`;
+-                    break;
+-                }
+-                this.art.emit("artplayerPluginDanmuku:visible", danmu);
+-              } else {
+-                this.setState(danmu, "ready");
+-                this.$refs.push(danmu.$ref);
+-                danmu.$ref = null;
+-              }
+-            }
++        if (this.lastTime < 0 || currentTime < this.lastTime || currentTime - this.lastTime > 0.5) {
++          await this.resync();
++        } else {
++          const readys = this.readys;
++          for (let index = 0; index < readys.length; index++) {
++            if (gen !== this.resyncGen || this.isStop || this._seeking) break;
++            await this.reveal(readys[index], 0);
++          }
++          if (gen === this.resyncGen) {
++            this.lastTime = currentTime;
+           }
+         }
+       }
+@@ -695,6 +868,8 @@
+     this.art.off("video:pause", this.stop);
+     this.art.off("video:waiting", this.stop);
+     this.art.off("resize", this.reset);
++    this.art.off("video:seeking", this.onSeeking);
++    this.art.off("video:seeked", this.onSeeked);
+     this.art.off("destroy", this.destroy);
+     this.art.emit("artplayerPluginDanmuku:destroy");
+   }
