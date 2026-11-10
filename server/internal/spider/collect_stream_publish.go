@@ -1,11 +1,14 @@
 package spider
 
 import (
+	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
 
+	"server/internal/infra/syslog"
 	"server/internal/repository"
 	filmcache "server/internal/repository/film/cache"
 	filmsnapshot "server/internal/repository/film/snapshot"
@@ -195,9 +198,16 @@ func ensureStreamFlushLoop() {
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
-				if err := drainStreamPublish(false); err != nil {
-					log.Printf("[Spider][StreamPublish] 定时刷窗失败: %v", err)
-				}
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							syslog.Errorf("[Spider][StreamPublish] 定时刷窗 panic: %v\n%s", r, debug.Stack())
+						}
+					}()
+					if err := drainStreamPublish(false); err != nil {
+						log.Printf("[Spider][StreamPublish] 定时刷窗失败: %v", err)
+					}
+				}()
 			}
 		}()
 	})
@@ -220,15 +230,7 @@ func drainStreamPublishLocked(force, acquire bool) (int, error) {
 				return totalDrained, nil
 			}
 		}
-		if acquire {
-			collectLifecycle.beginPublish()
-			publishMu.Lock()
-		}
-		err := publishStreamWindowFn(mids)
-		if acquire {
-			publishMu.Unlock()
-			collectLifecycle.endPublish()
-		}
+		err := publishStreamWindowGuarded(mids, acquire)
 		if err != nil {
 			streamBuf.putBack(flags)
 			return totalDrained, err
@@ -241,6 +243,25 @@ func drainStreamPublishLocked(force, acquire bool) (int, error) {
 			return totalDrained, nil
 		}
 	}
+}
+
+// publishStreamWindowGuarded 发布一窗：锁用 defer 释放，panic 转成错误，避免锁和发布计数泄漏。
+func publishStreamWindowGuarded(mids []int64, acquire bool) (err error) {
+	if acquire {
+		collectLifecycle.beginPublish()
+		publishMu.Lock()
+		defer func() {
+			publishMu.Unlock()
+			collectLifecycle.endPublish()
+		}()
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			syslog.Errorf("[Spider][StreamPublish] 发布窗口 panic: %v\n%s", r, debug.Stack())
+			err = fmt.Errorf("发布窗口 panic: %v", r)
+		}
+	}()
+	return publishStreamWindowFn(mids)
 }
 
 func enqueueStreamPublish(sourceID string, mids []int64) error {

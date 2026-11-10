@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
 
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider/progress"
@@ -334,6 +336,11 @@ func (b *collectBatchContext) maybeFlushRecord() {
 			b.mu.Lock()
 			b.flushing = false
 			b.mu.Unlock()
+		}()
+		defer func() {
+			if r := recover(); r != nil {
+				syslog.Errorf("[Spider] 采集批次 %s 写检查点 panic: %v\n%s", b.batchID, r, debug.Stack())
+			}
 		}()
 		b.writeCheckpoint(films)
 	}()

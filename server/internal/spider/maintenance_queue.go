@@ -1,12 +1,15 @@
 package spider
 
 import (
+	"errors"
 	"log"
 	"strings"
 	"sync"
 
 	"server/internal/model"
 	"server/internal/repository"
+
+	"gorm.io/gorm"
 )
 
 // 维护串行队列：所有维护任务（片库清理、日志清理、采集记录清理）都进同一个 FIFO 队列，
@@ -90,7 +93,8 @@ func (q *maintenanceQueueState) run() {
 		q.current = item.ft.Id
 		q.mu.Unlock()
 
-		runQueuedMaintenance(item)
+		// 读配置等前置步骤也可能 panic：兜住后告警，工作协程继续处理下一条。
+		withCronRecover(item.ft, func() { runQueuedMaintenance(item) })
 
 		q.mu.Lock()
 		q.current = ""
@@ -98,12 +102,19 @@ func (q *maintenanceQueueState) run() {
 	}
 }
 
-// runQueuedMaintenance 开跑前读取最新配置；定时触发的任务已停用或类型变更则跳过。
-// panic 由 runCronTaskSafely 兜底，队列继续。
+// loadQueuedTask 开跑前读取任务最新配置。包级变量，测试可替换。
+var loadQueuedTask = repository.GetFilmTaskById
+
+// runQueuedMaintenance 开跑前读取最新配置；任务已删除、定时触发的任务已停用或类型变更则跳过。
 func runQueuedMaintenance(item queuedMaintenance) {
 	ft := item.ft
-	if latest, err := repository.GetFilmTaskById(ft.Id); err == nil {
+	latest, err := loadQueuedTask(ft.Id)
+	switch {
+	case err == nil:
 		ft = latest
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		log.Printf("[Maintenance] 维护任务 %s 已删除，跳过本次排队", ft.Id)
+		return
 	}
 	if item.manual {
 		ft.State = true
@@ -116,7 +127,7 @@ func runQueuedMaintenance(item queuedMaintenance) {
 		withCronRecover(ft, func() { maintenanceRunHook(ft) })
 		return
 	}
-	runCronTaskSafely(ft)
+	runCronTaskSafely(ft, item.manual)
 }
 
 // maintenanceRunHook 仅供测试：替换队列里每条维护的实际执行。

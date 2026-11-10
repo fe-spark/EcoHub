@@ -314,3 +314,69 @@ func TestRunMaintenance_WaitsForBriefGateHolder(t *testing.T) {
 		t.Fatalf("runMaintenance = %v ran=%v", err, ran)
 	}
 }
+
+func TestMaintenanceQueue_SkipsTaskDeletedBeforeRun(t *testing.T) {
+	gdb := setupCronTaskDB(t)
+	r := installQueueRecorder(t, "first")
+	enqueueMaintenance(mt("first", model.TaskModelOrphanClean))
+	r.waitStarted(t, "first")
+	enqueueMaintenance(mt("disabled_later", model.TaskModelLogClean))
+	gdb.Where("task_id = ?", "disabled_later").Delete(&model.CrontabRecord{})
+	close(r.block["first"])
+	waitMaintenanceQueueIdle()
+	if order := r.Order(); order != "first" {
+		t.Fatalf("deleted task should be skipped, order = %s", order)
+	}
+}
+
+func TestMaintenanceQueue_PanicBeforeRunKeepsWorker(t *testing.T) {
+	noDB(t)
+	mu, got := captureNotify(t)
+	r := installQueueRecorder(t)
+	prev := loadQueuedTask
+	loadQueuedTask = func(id string) (model.FilmCollectTask, error) {
+		if id == "boom_read" {
+			panic("read boom")
+		}
+		return prev(id)
+	}
+	t.Cleanup(func() { loadQueuedTask = prev })
+	enqueueMaintenance(mt("boom_read", model.TaskModelOrphanClean))
+	enqueueMaintenance(mt("after", model.TaskModelLogClean))
+	waitMaintenanceQueueIdle()
+	if order := r.Order(); order != "after" {
+		t.Fatalf("order = %s", order)
+	}
+	if maintenanceQueueActive() || isMaintenanceRunning() {
+		t.Fatal("queue must reset to idle after panic")
+	}
+	// 工作协程退出后，新入队还能正常执行。
+	enqueueMaintenance(mt("again", model.TaskModelLogClean))
+	waitMaintenanceQueueIdle()
+	if order := r.Order(); order != "after,again" {
+		t.Fatalf("order after panic = %s", order)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*got) != 1 || !strings.Contains((*got)[0], "boom_read|boom_read|panic: read boom") {
+		t.Fatalf("notify = %v", *got)
+	}
+}
+
+func TestRunTaskOnce_GateHeldByProbeNotReportedQueued(t *testing.T) {
+	setupCronTaskDB(t)
+	r := installQueueRecorder(t)
+	// 模拟采集站接口探测短暂占用闸门：没有维护任务在执行或排队。
+	if err := collectLifecycle.beginMaintenance(); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := RunTaskOnceWithStatus("first")
+	collectLifecycle.endDrain()
+	if err != nil || msg != RunOnceStarted {
+		t.Fatalf("manual run with gate held = %q, %v", msg, err)
+	}
+	waitMaintenanceQueueIdle()
+	if order := r.Order(); order != "first" {
+		t.Fatalf("order = %s", order)
+	}
+}

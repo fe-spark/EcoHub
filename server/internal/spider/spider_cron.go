@@ -146,7 +146,8 @@ func ReloadCronTask(id string) error {
 
 // executeTask 执行已入队或手动触发的任务。
 // runningCronTasks 保证同一任务同一时刻只跑一份，重叠触发直接跳过。
-func executeTask(ft model.FilmCollectTask) {
+// manual 表示手动“立即执行”，此时失败不发定时任务告警。
+func executeTask(ft model.FilmCollectTask, manual bool) {
 	if !ft.State {
 		return
 	}
@@ -155,10 +156,10 @@ func executeTask(ft model.FilmCollectTask) {
 		return
 	}
 	defer runningCronTasks.Delete(ft.Id)
-	runTaskBody(ft)
+	runTaskBody(ft, manual)
 }
 
-func runTaskBody(ft model.FilmCollectTask) {
+func runTaskBody(ft model.FilmCollectTask, manual bool) {
 
 	log.Printf("开始执行定时任务: Task[%s] Model[%d]\n", ft.Id, ft.Model)
 
@@ -170,7 +171,9 @@ func runTaskBody(ft model.FilmCollectTask) {
 				remark = "自动采集"
 			}
 			syslog.Errorf("[Cron] %s 失败: %v", remark, err)
-			emitCronFailedNotify(ft.Id, remark, err.Error())
+			if !manual {
+				emitCronFailedNotify(ft.Id, remark, err.Error())
+			}
 		}
 		log.Println("执行一次已启用站点采集")
 	case model.TaskModelOrphanClean:
@@ -234,14 +237,19 @@ func maintenanceRunningDetail() string {
 	return strings.Join(parts, "；")
 }
 
-// isMaintenanceRunning 维护中：有维护在执行、在排队，或维护闸门被占用。此时采集一律跳过。
-func isMaintenanceRunning() bool {
+// maintenanceTaskActive 有维护任务在执行或排队（不含闸门被采集站接口探测等短暂独占的情况）。
+func maintenanceTaskActive() bool {
 	count := 0
 	runningMaintenanceTasks.Range(func(_, _ any) bool {
 		count++
 		return false
 	})
-	return count > 0 || maintenanceQueueActive() || collectLifecycle.isMaintenanceBusy()
+	return count > 0 || maintenanceQueueActive()
+}
+
+// isMaintenanceRunning 维护中：有维护在执行、在排队，或维护闸门被占用。此时采集一律跳过。
+func isMaintenanceRunning() bool {
+	return maintenanceTaskActive() || collectLifecycle.isMaintenanceBusy()
 }
 
 // rejectManualRun 维护中手动执行采集直接拒绝；维护任务不拒绝，改为排队。
@@ -383,7 +391,8 @@ func RunTaskOnceWithStatus(id string) (string, error) {
 		if IsCronTaskRunning(ft.Id) {
 			return "", fmt.Errorf("定时任务正在执行中，请等待当前执行完成")
 		}
-		busy := isMaintenanceRunning()
+		// 只有真有维护在执行或排队才提示“已排队”；闸门被接口探测短暂占用时直接开始，开工时等闸门空闲。
+		busy := maintenanceTaskActive()
 		ft.State = true // 手动执行不受启用开关限制
 		if !enqueueManualMaintenance(ft) {
 			return "", fmt.Errorf("该维护任务已在排队或执行中")
@@ -398,7 +407,7 @@ func RunTaskOnceWithStatus(id string) (string, error) {
 	}
 	go func() {
 		defer runningCronTasks.Delete(ft.Id)
-		withCronRecover(ft, func() { runTaskBody(ft) })
+		withCronRecover(ft, func() { runTaskBody(ft, true) })
 	}()
 	return RunOnceStarted, nil
 }

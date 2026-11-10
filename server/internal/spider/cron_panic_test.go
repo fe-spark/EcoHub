@@ -79,10 +79,39 @@ func TestRunTaskBody_AutoCollectSourceReadFailureNotifies(t *testing.T) {
 		t.Skip("collect gated in this environment")
 	}
 	mu, got := captureNotify(t)
-	runTaskBody(model.FilmCollectTask{Id: "auto", Model: model.TaskModelAutoCollect, State: true, Remark: "自动采集", Time: 24})
+	runTaskBody(model.FilmCollectTask{Id: "auto", Model: model.TaskModelAutoCollect, State: true, Remark: "自动采集", Time: 24}, false)
 	mu.Lock()
 	defer mu.Unlock()
 	if len(*got) != 1 || !strings.Contains((*got)[0], "auto|自动采集|读取采集站失败") {
 		t.Fatalf("notify = %v", *got)
 	}
+}
+
+func TestRunTaskBody_ManualAutoCollectFailureNoNotify(t *testing.T) {
+	prevDB := db.Mdb
+	db.Mdb = nil
+	t.Cleanup(func() { db.Mdb = prevDB })
+	if searchIndexBlocksCollect() || isMaintenanceRunning() {
+		t.Skip("collect gated in this environment")
+	}
+	mu, got := captureNotify(t)
+	runTaskBody(model.FilmCollectTask{Id: "auto", Model: model.TaskModelAutoCollect, State: true, Remark: "自动采集", Time: 24}, true)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*got) != 0 {
+		t.Fatalf("manual run must not alert, notify = %v", *got)
+	}
+}
+
+func TestPublishStreamWindowGuarded_PanicReleasesLock(t *testing.T) {
+	orig := publishStreamWindowFn
+	publishStreamWindowFn = func([]int64) error { panic("publish boom") }
+	t.Cleanup(func() { publishStreamWindowFn = orig })
+	if err := publishStreamWindowGuarded([]int64{1}, true); err == nil || !strings.Contains(err.Error(), "publish boom") {
+		t.Fatalf("err = %v", err)
+	}
+	if !publishMu.TryLock() {
+		t.Fatal("publishMu must be released after panic")
+	}
+	publishMu.Unlock()
 }

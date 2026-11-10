@@ -165,6 +165,13 @@ func CollectSingleFilm(ids string) {
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
 			defer batchCtx.releaseSourceOccupy(src.Id)
+			defer func() {
+				if r := recover(); r != nil {
+					reason := fmt.Sprintf("panic: %v", r)
+					batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, 0, reason))
+					reportSourcePanic("CollectSingleFilm", src, batchCtx, r)
+				}
+			}()
 			stored, err := collectFilmById(sourceMid, &src, batchCtx)
 			if errors.Is(err, errCollectDuringMaintenance) {
 				log.Printf("[Spider] 站点 %s 停止采集：维护任务执行中（%s）", src.Name, maintenanceRunningDetail())

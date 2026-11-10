@@ -74,7 +74,7 @@ func flushCronQueue() {
 		log.Printf("[Spider] 定时自动采集跳过：维护任务执行中（%s），Task[%s]", maintenanceRunningDetail(), id)
 	}
 	for _, ft := range collects {
-		go runCronTaskSafely(ft)
+		go runCronTaskSafely(ft, false)
 	}
 }
 
