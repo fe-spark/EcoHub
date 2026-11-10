@@ -122,9 +122,8 @@ func TestTaskPrevIncludesManualRun(t *testing.T) {
 }
 
 func TestEnqueueCronTaskCoalesce(t *testing.T) {
-	prevWait := cronCoalesceWait
-	cronCoalesceWait = 30 * time.Millisecond
-	defer func() { cronCoalesceWait = prevWait }()
+	prevWait := cronCoalesceWaitNs.Swap(int64(30 * time.Millisecond))
+	defer cronCoalesceWaitNs.Store(prevWait)
 
 	task := model.FilmCollectTask{Id: "coalesce_collect", Model: model.TaskModelAutoCollect, State: true}
 	enqueueCronTask(task)

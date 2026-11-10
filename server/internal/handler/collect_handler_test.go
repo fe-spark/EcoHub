@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/service"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -41,7 +43,15 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 
+	prev := db.Mdb
 	db.Mdb = gdb
+	t.Cleanup(func() {
+		// 启停/改站会触发切主站预热、异步同步分类，它们读全局 db；等它们结束再还原，避免 -race 报竞争。
+		if !service.WaitAsyncWork(15 * time.Second) {
+			t.Error("service background work did not finish")
+		}
+		db.Mdb = prev
+	})
 	return gdb
 }
 

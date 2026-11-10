@@ -49,6 +49,8 @@ func newTestDB(t *testing.T) *gorm.DB {
 	// 先注册 → 最后执行：等后台协程收尾后再还原全局句柄
 	t.Cleanup(func() {
 		filmsnapshot.WaitActiveFilmSearchIndexBuilt()
+		// 缓存失效有防抖定时器，到点会读 db.Rdb；先同步刷掉，避免和下一个用例换句柄竞争。
+		filmsnapshot.FlushSnapshotCacheInvalidation()
 		db.Mdb = origMdb
 		db.Rdb = origRdb
 	})

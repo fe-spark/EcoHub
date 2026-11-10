@@ -12,8 +12,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -106,6 +106,8 @@ func TestNormalizeMediaURL(t *testing.T) {
 
 func TestHandleProvideConfig_RedisNilSafety(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	// 需要可用的库；原先靠别的用例泄漏的 db.Mdb 才能通过。
+	setupCollectHandlerTestDB(t)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/config", nil)
@@ -569,7 +571,6 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected 0 list items when category disabled, got %d", len(resList.List))
 		}
 	})
-
 
 	// F. 验证 GET /api/provide/vod?wd=星际 (关键字搜索)
 	t.Run("ProvideVodKeywordSearch", func(t *testing.T) {
