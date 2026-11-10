@@ -374,6 +374,7 @@ func TestCategoryList_LeafRootStoredOnCategoryKey(t *testing.T) {
 }
 
 func TestSourceTypePidMatch_IncludesCategoryKey(t *testing.T) {
+	detachGlobalDB(t)
 	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		DryRun: true,
 		Logger: logger.Default.LogMode(logger.Silent),

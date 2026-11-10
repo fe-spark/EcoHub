@@ -229,7 +229,9 @@ func TestStopTaskDropsQueuedOccupySoRetryCanStart(t *testing.T) {
 		t.Fatalf("retry progress = ok:%v status:%q queue:%q", ok, before.Status, before.QueueId)
 	}
 
-	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, 0, batch)
+	// 和生产一样用当前的停止版本号；写死 0 时，只要本进程里别的用例调用过 StopAllCollect（-count>1 的第二轮必然如此），
+	// 派发就会被当成"已全部停止"，走另一条分支。
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, stopAllVersion.Load(), batch)
 	after, ok := progress.Snapshot(src.Id)
 	if !ok || after.Status != progress.StatusStarting || after.QueueId != before.QueueId {
 		t.Fatalf("old queue must not overwrite retry, ok=%v status=%q queue=%q want %q", ok, after.Status, after.QueueId, before.QueueId)
@@ -337,7 +339,7 @@ func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
 	progress.Ensure(source.Id, source.Name)
 	progress.MarkStopped(source.Id)
 
-	runSourcesGroupWithLimit([]model.FilmSource{source}, 24, "Batch-Collect", 0, 0, nil)
+	runSourcesGroupWithLimit([]model.FilmSource{source}, 24, "Batch-Collect", 0, stopAllVersion.Load(), nil)
 	if isOccupiedCollectSource(source.Id) {
 		t.Fatal("stopped queued source must release occupy so retry can start")
 	}
