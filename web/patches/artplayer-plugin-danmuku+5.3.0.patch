@@ -252,7 +252,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
      this.states[danmu.$state] = this.states[danmu.$state].filter((item) => item !== danmu);
      danmu.$state = state;
      if (danmu.$ref) {
-@@ -508,11 +654,184 @@
+@@ -508,11 +654,194 @@
        danmu.$ref = null;
      }
    }
@@ -333,17 +333,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +      danmu.$ref.dataset.id = danmu.id || "";
 +      switch (danmu.mode) {
 +        case 0: {
-+          danmu.$ref.style.left = `${clientWidth}px`;
-+          danmu.$ref.style.marginLeft = "0px";
-+          danmu.$ref.style.transition = "none";
-+          danmu.$ref.style.transform = `translateX(${-distance * travelRatio}px)`;
-+          if (travel > 0) {
-+            void danmu.$ref.offsetWidth;
-+          }
-+          if (!opts.freeze && !this.isStop) {
-+            danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
-+            danmu.$ref.style.transform = `translateX(${-distance}px)`;
-+          }
++          this.applyScroll(danmu, !opts.freeze && !this.isStop);
 +          break;
 +        }
 +        case 1:
@@ -390,15 +380,35 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +    this.filter("stop", collect);
 +    return result;
 +  }
++  scrollMetrics(danmu) {
++    const clientWidth = this.$player.clientWidth;
++    const width = danmu.$ref ? danmu.$ref.clientWidth : 0;
++    const distance = clientWidth + width;
++    const videoDuration = this.option.speed;
++    const elapsed = Math.max(0, this.art.currentTime - (danmu.time || 0));
++    const travelRatio = Math.min(elapsed / videoDuration, 1);
++    const rate = this.option.synchronousPlayback ? Number(this.art.playbackRate) || 1 : 1;
++    const restTime = Math.max(videoDuration - elapsed, 0) / rate;
++    return { clientWidth, distance, travelRatio, restTime };
++  }
++  applyScroll(danmu, animate) {
++    if (danmu.mode !== 0 || !danmu.$ref) return;
++    const { clientWidth, distance, travelRatio, restTime } = this.scrollMetrics(danmu);
++    danmu.$restTime = restTime;
++    danmu.$lastStartTime = Date.now();
++    const $ref = danmu.$ref;
++    $ref.style.left = `${clientWidth}px`;
++    $ref.style.marginLeft = "0px";
++    $ref.style.transition = "none";
++    $ref.style.transform = `translateX(${-distance * travelRatio}px)`;
++    void $ref.offsetWidth;
++    if (animate && restTime > 0) {
++      $ref.style.transition = `transform ${restTime}s linear 0s`;
++      $ref.style.transform = `translateX(${-distance}px)`;
++    }
++  }
 +  startEmittingScroll() {
-+    const { clientWidth } = this.$player;
-+    this.filter("emit", (danmu) => {
-+      if (danmu.mode !== 0 || !danmu.$ref) return;
-+      const distance = clientWidth + danmu.$ref.clientWidth;
-+      danmu.$lastStartTime = Date.now();
-+      danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
-+      danmu.$ref.style.transform = `translateX(${-distance}px)`;
-+    });
++    this.filter("emit", (danmu) => this.applyScroll(danmu, true));
 +  }
 +  async resync() {
 +    const gen = ++this.resyncGen;
@@ -440,7 +450,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
          this.filter("emit", (danmu) => {
            const emitTime = (Date.now() - danmu.$lastStartTime) / 1e3;
            danmu.$restTime -= emitTime;
-@@ -521,70 +840,17 @@
+@@ -521,70 +850,17 @@
              this.makeWait(danmu);
            }
          });
@@ -522,7 +532,81 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
            }
          }
        }
-@@ -695,6 +961,8 @@
+@@ -596,61 +872,22 @@
+   }
+   // 重置正在显示的弹幕: stop/emit 状态的弹幕
+   resize() {
+-    const { clientWidth } = this.$player;
+-    this.filter("stop", (danmu) => {
+-      switch (danmu.mode) {
+-        // 滚动的弹幕
+-        case 0:
+-          danmu.$ref.style.left = `${clientWidth}px`;
+-          break;
+-      }
+-    });
+-    this.filter("emit", (danmu) => {
+-      danmu.$lastStartTime = Date.now();
+-      switch (danmu.mode) {
+-        // 滚动的弹幕
+-        case 0: {
+-          const distance = clientWidth + danmu.$ref.clientWidth;
+-          danmu.$ref.style.left = `${clientWidth}px`;
+-          danmu.$ref.style.transform = `translateX(${-distance}px)`;
+-          danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
+-          break;
+-        }
+-      }
+-    });
++    this.filter("stop", (danmu) => this.applyScroll(danmu, false));
++    this.filter("emit", (danmu) => this.applyScroll(danmu, !this.isStop));
+   }
+   // 继续弹幕
+   continue() {
+-    const { clientWidth } = this.$player;
+     this.filter("stop", (danmu) => {
+       this.setState(danmu, "emit");
+-      danmu.$lastStartTime = Date.now();
+-      switch (danmu.mode) {
+-        // 继续滚动的弹幕
+-        case 0: {
+-          const distance = clientWidth + danmu.$ref.clientWidth;
+-          danmu.$ref.style.transform = `translateX(${-distance}px)`;
+-          danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
+-          break;
+-        }
+-      }
++      this.applyScroll(danmu, true);
+     });
+     return this;
+   }
+   // 暂停弹幕
+   suspend() {
+-    const { clientWidth } = this.$player;
+     this.filter("emit", (danmu) => {
+       this.setState(danmu, "stop");
+-      switch (danmu.mode) {
+-        // 停止滚动的弹幕
+-        case 0: {
+-          const translateX = clientWidth - (this.getLeft(danmu.$ref) - this.getLeft(this.$player));
+-          danmu.$ref.style.transform = `translateX(${-translateX}px)`;
+-          danmu.$ref.style.transition = "transform 0s linear 0s";
+-          break;
+-        }
+-      }
++      this.applyScroll(danmu, false);
+     });
+     return this;
+   }
+@@ -662,6 +899,7 @@
+     return this;
+   }
+   start() {
++    window.cancelAnimationFrame(this.timer);
+     this.isStop = false;
+     this.continue();
+     this.update();
+@@ -695,6 +933,8 @@
      this.art.off("video:pause", this.stop);
      this.art.off("video:waiting", this.stop);
      this.art.off("resize", this.reset);
