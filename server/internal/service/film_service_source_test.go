@@ -31,6 +31,7 @@ func setupFilmServiceTestDB(t *testing.T) *gorm.DB {
 		&model.Category{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
+		&model.MovieSourceMapping{}, // 按站筛选会联表 movie_source_mapping
 		&model.SiteConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
