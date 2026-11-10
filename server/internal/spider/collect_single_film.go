@@ -138,7 +138,8 @@ func CollectSingleFilm(ids string) {
 		targets = append(targets, source)
 		sourceMids[source.Id] = requestID
 	}
-	targets = occupyCollectSources(targets, "单片更新")
+	// 令牌在占用那一刻拿到并交给批次，不在建批次时再现读。
+	targets, tokens := occupyCollectSourcesWithTokens(targets, "单片更新")
 	if len(targets) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 匹配站点均已在正采集队列中，跳过")
 		return
@@ -146,6 +147,7 @@ func CollectSingleFilm(ids string) {
 
 	startedAt := time.Now()
 	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, model.CollectTagSingleUpdate, targets, startedAt).
+		withClaim(CollectClaim{Sources: targets, tokens: tokens}).
 		withReplayFilmIDs([]int64{globalMid})
 	defer batchCtx.close()
 
