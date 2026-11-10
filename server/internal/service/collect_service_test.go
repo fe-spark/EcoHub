@@ -178,7 +178,15 @@ func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 		t.Fatalf("create src_2: %v", err)
 	}
 	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "src_1", Name: "站1"}}, "q-test")
-	t.Cleanup(func() { progress.MarkStopped("src_1") })
+	// 真实的采集在跑时会登记任务；只有进度、没有任务也没有占用的排队会被当成残留当场清掉，
+	// 所以这里要登记一个任务，才算"正在采集"。
+	if _, err := progress.TryRegisterTask("src_1", "req-test", nil); err != nil {
+		t.Fatalf("register running task: %v", err)
+	}
+	t.Cleanup(func() {
+		progress.UnregisterTask("src_1", "req-test")
+		progress.MarkStopped("src_1")
+	})
 
 	srv := &CollectService{}
 	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
