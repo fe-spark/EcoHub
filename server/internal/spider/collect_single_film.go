@@ -167,9 +167,12 @@ func CollectSingleFilm(ids string) {
 			defer batchCtx.releaseSourceOccupy(src.Id)
 			defer func() {
 				if r := recover(); r != nil {
-					reason := fmt.Sprintf("panic: %v", r)
+					reason := reportSourcePanic("CollectSingleFilm", src, batchCtx, r)
 					batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, 0, reason))
-					reportSourcePanic("CollectSingleFilm", src, batchCtx, r)
+					// 站点已被新的采集重新占用时不告警。
+					if batchCtx.ownsOccupy(src.Id) {
+						emitSourceFailedNotify(src.Id, src.Name, reason)
+					}
 				}
 			}()
 			stored, err := collectFilmById(sourceMid, &src, batchCtx)

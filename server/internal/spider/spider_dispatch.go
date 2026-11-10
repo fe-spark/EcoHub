@@ -276,8 +276,11 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			defer scheduler.FinishSource(fs.Id)
 			defer func() {
 				if r := recover(); r != nil {
-					reportSourcePanic(tag, fs, batchCtx, r)
-					batchCtx.markSourceFailed(fs.Id)
+					reason := reportSourcePanic(tag, fs, batchCtx, r)
+					// 进度已被新的采集接手时不告警，也不碰新采集的进度。
+					if batchCtx.markSourceFailed(fs.Id) {
+						emitSourceFailedNotify(fs.Id, fs.Name, reason)
+					}
 					batchCtx.releaseSourceOccupy(fs.Id)
 				}
 			}()
