@@ -323,3 +323,26 @@ func TestConvertFilmDetails_FiltersUnplayableFilms(t *testing.T) {
 		t.Fatalf("unexpected film: %+v", converted[0])
 	}
 }
+
+func TestGenFilmPlayListKeepsVarietySegments(t *testing.T) {
+	playURL := "先导片上$https://cdn.example/x0a.m3u8#先导片下$https://cdn.example/x0b.m3u8" +
+		"#第1期上$https://cdn.example/x1a.m3u8#第1期中$https://cdn.example/x1b.m3u8#第1期下$https://cdn.example/x1c.m3u8" +
+		"#第1期上纯享$https://cdn.example/x1d.m3u8#第1期加更上$https://cdn.example/x1e.m3u8" +
+		"#超前彩蛋$https://cdn.example/x2a.m3u8#超前彩蛋$https://cdn.example/x2b.m3u8" +
+		"#第1期下$https://cdn.example/x1c.m3u8" +
+		"$$$" +
+		"第20260803期上$https://cdn.example/y1.m3u8#第20260803期上纯享$https://cdn.example/y2.m3u8#第20260803期中$https://cdn.example/y3.m3u8"
+	got := GenFilmPlayList(playURL, "$$$")
+	if len(got) != 2 {
+		t.Fatalf("groups=%d", len(got))
+	}
+	if len(got[0]) != 9 {
+		t.Fatalf("group0 len=%d %+v", len(got[0]), got[0])
+	}
+	if got[0][8].Episode != "超前彩蛋" || got[0][8].Link != "https://cdn.example/x2b.m3u8" {
+		t.Fatalf("same-name episode lost: %+v", got[0][8])
+	}
+	if len(got[1]) != 3 {
+		t.Fatalf("group1 len=%d %+v", len(got[1]), got[1])
+	}
+}
