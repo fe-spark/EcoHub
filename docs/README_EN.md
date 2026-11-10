@@ -20,7 +20,7 @@
 </div>
 
 > [!WARNING]
-> v3.0 does not read v2.x databases and there is no migration. Do not pull on an old `./data/mysql`, and do not use in-app upgrade. Deploy in a new directory or after wiping data, then run a full collect. Steps: [v2 to v3](./v2-to-v3.md). The current release is `3.0.1`. File problems as [Issues](https://github.com/fe-spark/EcoHub/issues).
+> v3.0 does not read v2.x databases and there is no migration. Do not pull on an old `./data/mysql`, and do not use in-app upgrade. Deploy in a new directory or after wiping data, then run a full collect. Steps: [v2 to v3](./v2-to-v3.md). The current release is `3.0.2`. File problems as [Issues](https://github.com/fe-spark/EcoHub/issues).
 
 Updates are slow. Pull requests are welcome.
 
@@ -56,7 +56,7 @@ Docker 20+ and Compose 2+. Aim for 2 CPU cores and 2 GB RAM.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.1 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
 ```
 
 Data goes to `~/ecohub`. The command is `ecohub`. Install prints the web port, site, admin, and three subscription URLs. The default web port is `3000`. Passwords, reverse proxy, and 1Panel: [Deploy guide](./README-Deploy_EN.md).
