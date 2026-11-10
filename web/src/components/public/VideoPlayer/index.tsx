@@ -104,6 +104,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             artplayerPluginDanmuku({
               danmuku: [],
               speed: 5,
+              margin: [10, "50%"],
               opacity: 1,
               fontSize: 25,
               color: "#ffffff",
