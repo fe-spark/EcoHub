@@ -46,7 +46,7 @@ function SearchParamsBridge({
   onChange: (next: { pid: string | null }) => void;
 }) {
   const searchParams = useSearchParams();
-  const pid = searchParams.get("Pid");
+  const pid = searchParams.get("pid");
 
   useEffect(() => {
     onChange({ pid });
