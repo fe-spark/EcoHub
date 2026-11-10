@@ -178,7 +178,7 @@ func (s *collectLifecycleState) beginMaintenanceWait(timeout time.Duration) erro
 }
 
 // runMaintenance 占用闸门、停止在途采集，等已开始的写事务、运行和这批收尾发布退出后独占执行。
-// 闸门被占用时立即返回，不等待另一条维护。
+// 闸门被其他独占操作占用时最多等 maintenanceGateWait，超时返回 errMaintenanceBusy；维护之间的先后由串行队列保证。
 func (s *collectLifecycleState) runMaintenance(reason string, action func() error) error {
 	if err := s.beginMaintenanceWait(maintenanceGateWait); err != nil {
 		return err
