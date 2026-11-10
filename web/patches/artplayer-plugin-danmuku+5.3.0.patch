@@ -191,16 +191,29 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
          result.push(danmu);
        }
      });
-@@ -370,6 +515,8 @@
-         await this.emit(danmu);
+@@ -358,7 +503,7 @@
+         danmus = target;
+       }
+       errorHandle(Array.isArray(danmus), "Danmuku need return an array as result");
+-      if (danmuku === void 0) {
++      if (danmuku === void 0 || Array.isArray(danmuku)) {
+         this.reset();
+         this.queue = [];
+         this.states = { wait: [], ready: [], emit: [], stop: [] };
+@@ -366,10 +511,10 @@
+         this.$danmuku.textContent = "";
+       }
+       for (let index = 0; index < danmus.length; index++) {
+-        const danmu = danmus[index];
+-        await this.emit(danmu);
++        this.emit(danmus[index]);
        }
        this.art.emit("artplayerPluginDanmuku:loaded", this.queue);
-+      this.lastTime = -1;
-+      void this.resync();
++      await this.resync();
      } catch (error) {
        this.art.emit("artplayerPluginDanmuku:error", error);
        throw error;
-@@ -397,8 +544,8 @@
+@@ -397,8 +542,8 @@
      });
      if (!danmu.text.trim())
        return this;
@@ -211,7 +224,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
      } else {
        danmu.time = this.art.currentTime + 0.5;
      }
-@@ -428,7 +575,7 @@
+@@ -428,7 +573,7 @@
        $lastStartTime: 0
        // 弹幕上次开始时间
      };
@@ -220,7 +233,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
      this.queue.push(item);
      return this;
    }
-@@ -449,8 +596,8 @@
+@@ -449,8 +594,8 @@
      this.option.lockTime = clamp(this.option.lockTime, 1, 60);
      this.option.maxLength = clamp(this.option.maxLength, 1, 1e3);
      this.option.mount = this.option.mount || $controlsCenter;
@@ -231,7 +244,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
      }
      if (this.option.visible) {
        this.show();
-@@ -488,6 +635,7 @@
+@@ -488,6 +633,7 @@
    }
    // 设置弹幕状态
    setState(danmu, state) {
@@ -239,10 +252,12 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
      this.states[danmu.$state] = this.states[danmu.$state].filter((item) => item !== danmu);
      danmu.$state = state;
      if (danmu.$ref) {
-@@ -508,11 +656,134 @@
+@@ -508,11 +654,184 @@
        danmu.$ref = null;
      }
    }
+-  // 实时更新弹幕
+-  update() {
 +  onSeeking() {
 +    if (!this._seeking) {
 +      this._seeking = true;
@@ -254,9 +269,10 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +    this._seeking = false;
 +    void this.resync();
 +  }
-+  async reveal(danmu, elapsed = 0) {
-+    const { setStyles } = this.utils;
-+    const state = await this.option.beforeVisible(danmu);
++  async reveal(danmu, elapsed = 0, opts = {}) {
+     const { setStyles } = this.utils;
++    const pending = this.option.beforeVisible(danmu);
++    const state = pending && typeof pending.then === "function" ? await pending : pending;
 +    if (!state) return;
 +    const { clientWidth, clientHeight } = this.$player;
 +    danmu.$ref = this.$ref;
@@ -268,18 +284,20 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +    danmu.$ref.style.border = danmu.border ? `1px solid ${danmu.color}` : null;
 +    danmu.$ref.style.backgroundColor = danmu.border ? "rgb(0 0 0 / 50%)" : null;
 +    setStyles(danmu.$ref, danmu.style);
-+    const duration = this.speed;
++    const videoDuration = this.option.speed;
 +    const travel = Math.max(elapsed, 0);
-+    danmu.$lastStartTime = Date.now();
-+    danmu.$restTime = Math.max(duration - travel, 0);
-+    if (danmu.$restTime <= 0) {
++    if (travel >= videoDuration) {
 +      this.makeWait(danmu);
 +      return;
 +    }
++    const rate = this.option.synchronousPlayback ? Number(this.art.playbackRate) || 1 : 1;
++    danmu.$lastStartTime = Date.now();
++    danmu.$restTime = (videoDuration - travel) / rate;
 +    const distance = clientWidth + danmu.$ref.clientWidth;
-+    const travelRatio = duration > 0 ? travel / duration : 0;
++    const travelRatio = travel / videoDuration;
 +    const visualLeft = clientWidth - distance * travelRatio;
-+    const top = travel > 0 && danmu.mode === 0
++    const placed = opts.placed || this.placedTracks();
++    const top = danmu.mode === 0 && travel > 0
 +      ? getTrackTop({
 +          target: {
 +            mode: danmu.mode,
@@ -287,7 +305,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +            width: danmu.$ref.clientWidth,
 +            left: visualLeft
 +          },
-+          visibles: this.visibles,
++          visibles: placed,
 +          antiOverlap: this.option.antiOverlap,
 +          clientHeight,
 +          marginBottom: this.marginBottom,
@@ -297,7 +315,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +          target: {
 +            mode: danmu.mode,
 +            height: danmu.$ref.clientHeight,
-+            speed: distance / duration
++            speed: distance / this.speed
 +          },
 +          visibles: this.visibles,
 +          antiOverlap: this.option.antiOverlap,
@@ -318,11 +336,11 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +          danmu.$ref.style.left = `${clientWidth}px`;
 +          danmu.$ref.style.marginLeft = "0px";
 +          danmu.$ref.style.transition = "none";
-+          danmu.$ref.style.transform = `translateX(${-distance * (travel / duration)}px)`;
++          danmu.$ref.style.transform = `translateX(${-distance * travelRatio}px)`;
 +          if (travel > 0) {
 +            void danmu.$ref.offsetWidth;
 +          }
-+          if (!this.isStop) {
++          if (!opts.freeze && !this.isStop) {
 +            danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
 +            danmu.$ref.style.transform = `translateX(${-distance}px)`;
 +          }
@@ -334,6 +352,15 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +          danmu.$ref.style.marginLeft = `-${danmu.$ref.clientWidth / 2}px`;
 +          break;
 +      }
++      if (opts.placed) {
++        opts.placed.push({
++          mode: danmu.mode,
++          top,
++          left: visualLeft,
++          width: danmu.$ref.clientWidth,
++          height: danmu.$ref.clientHeight
++        });
++      }
 +      this.art.emit("artplayerPluginDanmuku:visible", danmu);
 +    } else {
 +      this.setState(danmu, "ready");
@@ -341,33 +368,70 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +      danmu.$ref = null;
 +    }
 +  }
++  placedTracks() {
++    const currentTime = this.art.currentTime;
++    const videoDuration = this.option.speed;
++    const clientWidth = this.$player.clientWidth;
++    const result = [];
++    const collect = (danmu) => {
++      if (!danmu.$ref || danmu.mode !== 0) return;
++      const elapsed = Math.max(0, currentTime - (danmu.time || 0));
++      const width = danmu.$ref.clientWidth;
++      const distance = clientWidth + width;
++      result.push({
++        mode: danmu.mode,
++        top: danmu.$ref.offsetTop,
++        left: clientWidth - distance * Math.min(elapsed / videoDuration, 1),
++        width,
++        height: danmu.$ref.clientHeight
++      });
++    };
++    this.filter("emit", collect);
++    this.filter("stop", collect);
++    return result;
++  }
++  startEmittingScroll() {
++    const { clientWidth } = this.$player;
++    this.filter("emit", (danmu) => {
++      if (danmu.mode !== 0 || !danmu.$ref) return;
++      const distance = clientWidth + danmu.$ref.clientWidth;
++      danmu.$lastStartTime = Date.now();
++      danmu.$ref.style.transition = `transform ${danmu.$restTime}s linear 0s`;
++      danmu.$ref.style.transform = `translateX(${-distance}px)`;
++    });
++  }
 +  async resync() {
 +    const gen = ++this.resyncGen;
 +    const currentTime = this.art.currentTime;
-+    const duration = this.speed;
++    const videoDuration = this.option.speed;
 +    this.reset();
 +    this.lastTime = currentTime;
 +    if (this.isHide) return this;
 +    const midflight = [];
 +    this.filter("wait", (danmu) => {
 +      const elapsed = currentTime - (danmu.time || 0);
-+      if (elapsed > 0 && elapsed < duration) {
++      if (elapsed >= 0 && elapsed < videoDuration) {
 +        midflight.push(danmu);
 +      }
 +    });
 +    midflight.sort((a, b) => (a.time || 0) - (b.time || 0));
++    const placed = [];
 +    for (let index = 0; index < midflight.length; index++) {
 +      if (gen !== this.resyncGen) return this;
-+      await this.reveal(midflight[index], currentTime - (midflight[index].time || 0));
++      await this.reveal(midflight[index], currentTime - (midflight[index].time || 0), {
++        placed,
++        freeze: true
++      });
 +    }
-+    if (gen === this.resyncGen && this.isStop) {
++    if (gen !== this.resyncGen) return this;
++    if (this.isStop) {
 +      this.suspend();
++    } else {
++      this.startEmittingScroll();
 +    }
 +    return this;
 +  }
-   // 实时更新弹幕
-   update() {
--    const { setStyles } = this.utils;
++  update() {
      this.timer = window.requestAnimationFrame(async () => {
 -      if (this.art.playing && !this.isHide) {
 +      if (this.art.playing && !this.isHide && !this._seeking) {
@@ -376,7 +440,7 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
          this.filter("emit", (danmu) => {
            const emitTime = (Date.now() - danmu.$lastStartTime) / 1e3;
            danmu.$restTime -= emitTime;
-@@ -521,70 +792,16 @@
+@@ -521,70 +840,17 @@
              this.makeWait(danmu);
            }
          });
@@ -450,14 +514,15 @@ diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku
 +          const readys = this.readys;
 +          for (let index = 0; index < readys.length; index++) {
 +            if (gen !== this.resyncGen || this.isStop || this._seeking) break;
-+            await this.reveal(readys[index], 0);
++            const danmu = readys[index];
++            await this.reveal(danmu, Math.max(0, currentTime - (danmu.time || 0)));
 +          }
 +          if (gen === this.resyncGen) {
 +            this.lastTime = currentTime;
            }
          }
        }
-@@ -695,6 +912,8 @@
+@@ -695,6 +961,8 @@
      this.art.off("video:pause", this.stop);
      this.art.off("video:waiting", this.stop);
      this.art.off("resize", this.reset);
