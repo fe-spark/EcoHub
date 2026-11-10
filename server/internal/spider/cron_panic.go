@@ -30,8 +30,8 @@ func withCronRecover(ft model.FilmCollectTask, fn func()) {
 }
 
 // runCronTaskSafely 执行定时任务并兜住 panic，避免一条任务把整个进程带崩。
-func runCronTaskSafely(ft model.FilmCollectTask) {
-	withCronRecover(ft, func() { executeTask(ft) })
+func runCronTaskSafely(ft model.FilmCollectTask, manual bool) {
+	withCronRecover(ft, func() { executeTask(ft, manual) })
 }
 
 // reportSourcePanic 记录单站采集协程 panic，标记该站失败并发送采集站失败通知。
