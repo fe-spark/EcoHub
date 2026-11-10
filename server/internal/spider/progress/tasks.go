@@ -29,14 +29,16 @@ type task struct {
 	reqID  string
 }
 
-// TryRegisterTask 在 canStart() 为真且无同名活跃任务时登记任务，返回其取消上下文。
-// canStart 在任务表互斥区内求值，用于与「一键终止」保持互斥。
-func TryRegisterTask(id, reqID string, canStart func() bool) (context.Context, error) {
+// TryRegisterTask 在 canStart() 返回 nil 且无同名活跃任务时登记任务，返回其取消上下文。
+// canStart 在任务表互斥区内求值，用于与「一键终止」、单站停止后的新采集保持互斥；它返回的错误原样带回。
+func TryRegisterTask(id, reqID string, canStart func() error) (context.Context, error) {
 	taskMu.Lock()
 	defer taskMu.Unlock()
 
-	if canStart != nil && !canStart() {
-		return nil, ErrDispatchStopped
+	if canStart != nil {
+		if err := canStart(); err != nil {
+			return nil, err
+		}
 	}
 	if _, ok := tasks.Load(id); ok {
 		return nil, ErrTaskExists

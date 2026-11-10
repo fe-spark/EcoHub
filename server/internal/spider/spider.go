@@ -87,27 +87,7 @@ func init() {
 	})
 }
 
-func HandlePreparedCollect(id string, h int) error {
-	s := repository.FindCollectSourceById(id)
-	if s == nil {
-		abortUnstartedCollect(id, nil)
-		return errors.New("采集任务开启失败，采集站信息不存在")
-	}
-	if err := probeSourcePageCount(s, h, model.CollectTriggerManual, nil); err != nil {
-		abortUnstartedCollect(id, nil)
-		return err
-	}
-	batchCtx := newCollectBatchContext(model.CollectTriggerManual, model.CollectTagSingleCollect, []model.FilmSource{*s}, time.Now()).withHour(h)
-	batchCtx.isStandalone = true
-	if err := batchCtx.recordStart(); err != nil {
-		abandonQueuedCollectSource(*s, batchCtx)
-		batchCtx.close()
-		return err
-	}
-	return handleCollectWithStopVersion(id, h, nil, true, true, batchCtx)
-}
-
-func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStandalone bool, allowPreparedStart bool, batchCtx *collectBatchContext) (retErr error) {
+func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx *collectBatchContext) (retErr error) {
 	hadWrites := false
 	successPagesCount := 0
 	failedPagesCount := 0
@@ -136,12 +116,12 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
 		return fmt.Errorf("停止采集：%s", reason)
 	}
-	if (runVersion != nil || allowPreparedStart) && (progress.IsStopped(id) || progress.IsStopping(id)) {
+	if runVersion != nil && (progress.IsStopped(id) || progress.IsStopping(id)) {
 		reason := collectStopReason(id)
 		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
 		return fmt.Errorf("停止采集：%s", reason)
 	}
-	if runVersion == nil && !allowPreparedStart && progress.IsStarting(id) {
+	if runVersion == nil && progress.IsStarting(id) {
 		return errors.New("该采集站已在批量队列中，已跳过本次采集")
 	}
 
@@ -178,13 +158,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		retErr = err
 		return err
 	}
-	if isStandalone {
-		batchCtx = newCollectBatchContext(model.CollectTriggerManual, model.CollectTagSingleCollect, []model.FilmSource{*s}, time.Now(), true).withHour(h)
-		if err := batchCtx.recordStart(); err != nil {
-			log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", batchCtx.batchID, err)
-			return err
-		}
-	}
 	defer func() {
 		originalErr := retErr
 		// 用户停止也走待检索：先等本次收尾，封口周期结束再落成已停止。
@@ -220,11 +193,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		}
 		progress.FlushHotpathSideEffects(s.Id)
 		if originalErr != nil && !hadWrites {
-			if isStandalone && batchCtx != nil {
-				batchCtx.emitSummary()
-				batchCtx.close()
-				releasedPreparedOccupy = true
-			}
 			return
 		}
 		if batchCtx != nil {
@@ -290,14 +258,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 				log.Printf("[Spider] 站点 %s 封口入队失败: %v", s.Name, err)
 			}
 		}
-		if isStandalone && batchCtx != nil {
-			if flushErr := batchCtx.flushAndFinalize(); flushErr != nil {
-				log.Printf("[Spider] 站点 %s 收尾封口失败: %v", s.Name, flushErr)
-			}
-			batchCtx.emitSummary()
-			batchCtx.close()
-			releasedPreparedOccupy = true
-		}
 	}()
 
 	reqId, err := utils.GenerateSalt()
@@ -305,8 +265,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		return err
 	}
 
-	ctx, err := progress.TryRegisterTask(id, reqId, func() bool {
-		return runVersion == nil || !isDispatchStopped(*runVersion)
+	if beforeRegisterCollectRunHook != nil {
+		beforeRegisterCollectRunHook(id)
+	}
+	ctx, err := progress.TryRegisterTask(id, reqId, func() error {
+		return canRegisterCollectRun(id, runVersion, batchCtx)
 	})
 	switch {
 	case errors.Is(err, progress.ErrDispatchStopped):
@@ -323,7 +286,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	case err != nil:
 		return err
 	}
-	collectCtx = progress.WithRunEpoch(ctx, progress.Epoch(id))
+	runEpoch, hasEpoch := batchCtx.progressEpoch(id)
+	if !hasEpoch {
+		runEpoch = progress.Epoch(id)
+	}
+	collectCtx = progress.WithRunEpoch(ctx, runEpoch)
 	repository.SuppressCollectSourceStats(s.Id)
 	statsOwned = true
 
@@ -469,4 +436,27 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 	}
 	goBackgroundCollect(func() { runPreparedBatch(batchCtx, hour, "失败重试") })
 	return batchCtx.batchID, nil
+}
+
+// beforeRegisterCollectRunHook 仅供测试：登记运行之前调用，用于在这个窗口里模拟单站停止 + 重试。
+var beforeRegisterCollectRunHook func(id string)
+
+// canRegisterCollectRun 登记运行前（任务表锁内）复核本次运行仍可开跑：
+// 一键终止过则不开；有批次时占用令牌和进度代次都必须还是本批次的。
+// 单站停止后立刻重试，重试会换掉占用令牌、进度代次加一；旧批次这时才走到登记，
+// 不能顶替重试登记任务、沿用重试的代次去改进度，否则重试会因任务已存在退出并把进度标成失败。
+func canRegisterCollectRun(id string, runVersion *uint64, batchCtx *collectBatchContext) error {
+	if runVersion != nil && isDispatchStopped(*runVersion) {
+		return progress.ErrDispatchStopped
+	}
+	if batchCtx == nil {
+		return nil
+	}
+	if !batchCtx.ownsOccupy(id) {
+		return progress.ErrStopRequested
+	}
+	if epoch, ok := batchCtx.progressEpoch(id); ok && progress.Epoch(id) != epoch {
+		return progress.ErrStopRequested
+	}
+	return nil
 }

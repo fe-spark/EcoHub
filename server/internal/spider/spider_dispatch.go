@@ -323,7 +323,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				}
 				return
 			}
-			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batchCtx); err != nil {
+			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, batchCtx); err != nil {
 				if errors.Is(err, context.Canceled) {
 					syslog.Infof("[%s] 站点 %s 采集已由用户取消", tag, fs.Name)
 				} else {
