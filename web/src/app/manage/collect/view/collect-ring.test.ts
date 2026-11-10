@@ -59,3 +59,17 @@ test("全部失败时环和叉用同一个错误色", () => {
 test("没有进度时不渲染环", () => {
   assert.equal(resolveRingView(null), null);
 });
+
+test("失败页排好序并压成区间，单独放进 failedPages，提示主行只留总数", () => {
+  const view = resolveRingView(
+    progress({ status: "running", total: 5000, current: 120, success: 114, failed: 6, failedPages: [4765, 4762, 4764, 4763, 9, 5000] }),
+  );
+  assert.equal(view?.tooltip.includes("4762"), false);
+  assert.match(view?.tooltip ?? "", /失败 6 页$/);
+  assert.deepEqual(view?.failedPages, { text: "9、4762-4765、5000", count: 6 });
+});
+
+test("没有记录失败页时不带 failedPages", () => {
+  const view = resolveRingView(progress({ status: "done", success: 8, failed: 2 }));
+  assert.equal(view?.failedPages, undefined);
+});
