@@ -526,3 +526,70 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 		t.Errorf("batch B MIDs = %v; want %v", midsB, expectedB)
 	}
 }
+
+// 一键终止后，旧批次的派发循环晚一步才发现"已停止"；此时用户已对同站发起重试。
+// 旧批次只能停自己那一代进度，不能把重试改成已停止，也不能放掉重试的占用。
+func TestStopAllThenRetry_OldBatchDoesNotCancelRetry(t *testing.T) {
+	src := model.FilmSource{Id: "stopall-retry-race", Name: "222"}
+	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("batch occupy failed: %v", err)
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
+	defer batch.close()
+	oldVersion := stopAllVersion.Load()
+
+	// 1. 一键终止：版本号加一，排队中的占用被放掉，进度标成已停止。
+	StopAllCollect("测试一键终止")
+
+	// 2. 旧批次还没走到派发循环，用户对同站发起重试。
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil || len(retried) != 1 {
+		t.Fatalf("retry occupy failed: %v", err)
+	}
+	defer releaseCollectSourceIDs(src.Id)
+	before, ok := progress.Snapshot(src.Id)
+	if !ok || before.Status != progress.StatusStarting {
+		t.Fatalf("retry progress = %+v", before)
+	}
+
+	// 3. 旧批次的派发循环带着旧版本号跑，发现已全部停止，处理剩余站点。
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, oldVersion, batch)
+
+	after, ok := progress.Snapshot(src.Id)
+	if !ok || after.Status != progress.StatusStarting || after.QueueId != before.QueueId {
+		t.Fatalf("old batch must not stop the retry: status=%q queue=%q want starting/%q", after.Status, after.QueueId, before.QueueId)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("old batch must not release the retry occupy")
+	}
+	// 重试能正常登记任务开跑（被误标已停止时会返回 ErrStopRequested）。
+	if _, err := progress.TryRegisterTask(src.Id, "retry-req", nil); err != nil {
+		t.Fatalf("retry should start, got %v", err)
+	}
+	progress.UnregisterTask(src.Id, "retry-req")
+	progress.MarkStopped(src.Id)
+}
+
+// 没有新采集接手时，一键终止后旧批次仍要把自己的排队站标成已停止并放掉占用。
+func TestStopAll_OldBatchStillStopsOwnQueuedSource(t *testing.T) {
+	src := model.FilmSource{Id: "stopall-own-queued", Name: "333"}
+	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("batch occupy failed: %v", err)
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
+	defer batch.close()
+	oldVersion := stopAllVersion.Load()
+	stopAllVersion.Add(1) // 只模拟版本号变化，进度仍是排队中
+
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, oldVersion, batch)
+
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusStopped {
+		t.Fatalf("own queued source should be stopped, got %+v", snap)
+	}
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("own queued source should release occupy")
+	}
+}
