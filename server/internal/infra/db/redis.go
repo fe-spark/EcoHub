@@ -12,15 +12,23 @@ import (
 /*
 redis 工具类
 */
+
+// Rdb Redis 客户端。只在启动时由 InitRedisConn 赋值一次，之后不再替换：
+// 业务协程无锁读取它，运行期替换会产生数据竞争。go-redis 连接池自带重连，不需要换客户端。
 var Rdb *redis.Client
 var Cxt = context.Background()
 
 var redisMu sync.Mutex
 
-// InitRedisConn 初始化redis客户端
+// InitRedisConn 初始化 redis 客户端。必须在启动其他协程之前调用（见 cmd/server）。
+// 已经建好客户端时只探活，不会替换 Rdb。
 func InitRedisConn() error {
 	redisMu.Lock()
 	defer redisMu.Unlock()
+
+	if Rdb != nil {
+		return Rdb.Ping(Cxt).Err()
+	}
 
 	client := redis.NewClient(&redis.Options{
 		Addr:            config.RedisAddr,
@@ -37,45 +45,36 @@ func InitRedisConn() error {
 		ConnMaxLifetime: time.Hour,
 	})
 	// 测试连接是否正常
-	_, err := client.Ping(Cxt).Result()
-	if err != nil {
+	if err := client.Ping(Cxt).Err(); err != nil {
 		_ = client.Close()
 		return err
 	}
-
-	old := Rdb
 	Rdb = client
-	if old != nil && old != client {
-		// 正在执行的命令还拿着旧客户端。立刻 Close 会打断 SCAN/SET。
-		go func(prev *redis.Client) {
-			time.Sleep(30 * time.Second)
-			_ = prev.Close()
-		}(old)
-	}
-
 	return nil
 }
 
+// StartRedisHealthCheck 每 15 秒探活一次。失败只记录日志，由 go-redis 连接池自动重连，不替换 Rdb。
 func StartRedisHealthCheck() {
+	redisMu.Lock()
+	client := Rdb
+	redisMu.Unlock()
+	if client == nil {
+		log.Printf("[Redis] 客户端未初始化，跳过健康检查")
+		return
+	}
 	go func() {
 		ticker := time.NewTicker(time.Second * 15)
 		defer ticker.Stop()
+		healthy := true
 		for range ticker.C {
-			redisMu.Lock()
-			client := Rdb
-			redisMu.Unlock()
-
-			if client == nil {
-				if err := InitRedisConn(); err != nil {
-					log.Printf("[Redis] 重建连接失败: %v", err)
-				}
+			if err := client.Ping(Cxt).Err(); err != nil {
+				log.Printf("[Redis] 健康检查失败，等待连接池自动重连: %v", err)
+				healthy = false
 				continue
 			}
-			if err := client.Ping(Cxt).Err(); err != nil {
-				log.Printf("[Redis] 健康检查失败，尝试重建连接: %v", err)
-				if rebuildErr := InitRedisConn(); rebuildErr != nil {
-					log.Printf("[Redis] 重建连接失败: %v", rebuildErr)
-				}
+			if !healthy {
+				log.Printf("[Redis] 连接已恢复")
+				healthy = true
 			}
 		}
 	}()
