@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,12 +11,13 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	"server/internal/testutil"
 	"server/internal/utils"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -95,7 +95,7 @@ func TestAdminAccess(t *testing.T) {
 
 func seedAuthUser(t *testing.T, id uint) {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

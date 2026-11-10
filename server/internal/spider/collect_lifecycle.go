@@ -158,10 +158,29 @@ func (s *collectLifecycleState) beginMaintenance() error {
 	return nil
 }
 
+// maintenanceGateWait 维护开工时闸门被其他独占操作（如采集站接口探测）占用的最长等待。
+// 维护之间已由串行队列排好顺序，这里只兜底短暂的独占操作。
+var maintenanceGateWait = 10 * time.Minute
+
+// beginMaintenanceWait 占用闸门；被占用时每 200ms 重试，超时返回 errMaintenanceBusy。
+func (s *collectLifecycleState) beginMaintenanceWait(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := s.beginMaintenance()
+		if err == nil || !errors.Is(err, errMaintenanceBusy) {
+			return err
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("等待维护闸门空闲超过 %s: %w", timeout, errMaintenanceBusy)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // runMaintenance 占用闸门、停止在途采集，等已开始的写事务、运行和这批收尾发布退出后独占执行。
-// 闸门被占用时立即返回，不等待另一条维护。
+// 闸门被其他独占操作占用时最多等 maintenanceGateWait，超时返回 errMaintenanceBusy；维护之间的先后由串行队列保证。
 func (s *collectLifecycleState) runMaintenance(reason string, action func() error) error {
-	if err := s.beginMaintenance(); err != nil {
+	if err := s.beginMaintenanceWait(maintenanceGateWait); err != nil {
 		return err
 	}
 	defer s.endDrain()

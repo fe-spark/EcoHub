@@ -1,12 +1,12 @@
 package repository
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -105,7 +105,7 @@ func TestDropCollectSourceStatsPendingClearsHold(t *testing.T) {
 }
 
 func TestNoteCollectSourceRunDoesNotMoveCronAnchor(t *testing.T) {
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)

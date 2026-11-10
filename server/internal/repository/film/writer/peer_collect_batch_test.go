@@ -11,6 +11,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
+	"server/internal/testutil"
 	"server/internal/utils"
 
 	"github.com/glebarez/sqlite"
@@ -281,7 +282,7 @@ func TestSaveCollectedPeerDetails_TransientFilmErrorRetriesPage(t *testing.T) {
 
 func openPeerPageDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {

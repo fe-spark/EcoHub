@@ -4,11 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 )
 
 func TestManageMetaCategory_SourceKey(t *testing.T) {
+	detachGlobalDB(t)
 	s := model.SearchVo{SourceId: "1208629981", Pid: 57}
 	ctx, ok := newManageFilterContext(s)
 	if !ok {
@@ -36,6 +38,7 @@ func TestManageMetaCategory_SourceKey(t *testing.T) {
 }
 
 func TestPageManageMetas_ScalePerformance(t *testing.T) {
+	detachGlobalDB(t)
 	const count = 50000
 	items := make([]FilmSearchMeta, count)
 	byUpdate := make([]int, count)
@@ -82,4 +85,14 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 	if total <= 0 {
 		t.Fatalf("expected positive total, got %d", total)
 	}
+}
+
+// detachGlobalDB 让用例在"未连接数据库"的前提下运行，结束后还原。
+// 这些用例只测纯内存逻辑，但被测函数会读全局 db.Mdb；包内其他用例可能把 db.Mdb 留成已关闭/缺表的库，
+// -count>1 时第二轮起就会读到它而失败。
+func detachGlobalDB(t *testing.T) {
+	t.Helper()
+	prev := db.Mdb
+	db.Mdb = nil
+	t.Cleanup(func() { db.Mdb = prev })
 }

@@ -26,8 +26,19 @@ export default function CollectRing({ view }: { view: RingView }) {
   const center = (size / 2).toFixed(2);
   const isWaiting = view.solid;
 
+  const title = view.failedPages ? (
+    <div className={styles.tip}>
+      <div>{view.tooltip}</div>
+      <div className={styles.tipLabel}>失败页（已记录 {view.failedPages.count} 页）</div>
+      <div className={styles.tipPages}>{view.failedPages.text}</div>
+    </div>
+  ) : (
+    view.tooltip
+  );
+
   return (
-    <Tooltip title={view.tooltip}>
+    // 鼠标可以移进提示框滚动查看；位置随视口自动调整。
+    <Tooltip title={title} styles={{ container: { maxWidth: 360 } }} autoAdjustOverflow>
       <span className={`${styles.ring} ${isWaiting ? styles.waitingRing : ""}`} style={{ color }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
           <circle

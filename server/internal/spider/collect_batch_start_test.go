@@ -1,12 +1,12 @@
 package spider
 
 import (
-	"fmt"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -15,7 +15,7 @@ import (
 
 func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	prev := db.Mdb
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -63,7 +63,7 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	started, result := PrepareBatchCollectStart([]string{
 		"ready", "off", "bare", "both", "busy", "sync", "halt", "missing", "ready", "  ",
 	})
-	if len(started) != 1 || started[0].Id != "ready" {
+	if len(started.Sources) != 1 || started.Sources[0].Id != "ready" {
 		t.Fatalf("started = %+v", started)
 	}
 	if !isOccupiedCollectSource("ready") {
@@ -120,7 +120,7 @@ func TestIsOccupiedCollectSource_SelfHealsStaleOccupy(t *testing.T) {
 
 func TestBatchCollect_ReleasesOccupyAfterFinished(t *testing.T) {
 	prev := db.Mdb
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -141,7 +141,7 @@ func TestBatchCollect_ReleasesOccupyAfterFinished(t *testing.T) {
 	defer releaseCollectSourceIDs(src.Id)
 
 	claimed, res := PrepareBatchCollectStart([]string{src.Id})
-	if len(claimed) != 1 {
+	if len(claimed.Sources) != 1 {
 		t.Fatalf("claimed = %+v, skipped = %+v", claimed, res.Skipped)
 	}
 	if !isOccupiedCollectSource(src.Id) {

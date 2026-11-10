@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"server/internal/config"
@@ -13,36 +14,27 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+// Mdb 业务连接池。只在启动时由 InitMysql 赋值一次，之后不再替换：
+// 业务协程无锁读取它，运行期替换会产生数据竞争，并会打断还在用旧池的查询。
+// database/sql 连接池自带重连：坏连接会被丢弃，下次取用时重新拨号，不需要换池。
 var Mdb *gorm.DB
 
 var mysqlMu sync.Mutex
 
+// InitMysql 确保数据库存在并建立业务连接池。必须在启动其他协程之前调用（见 cmd/server）。
+// 已经建好连接池时只做数据库存在性检查，不会替换 Mdb。
 func InitMysql() (err error) {
 	mysqlMu.Lock()
 	defer mysqlMu.Unlock()
 
+	if err := ensureMysqlDatabase(); err != nil {
+		return err
+	}
+	if Mdb != nil {
+		return nil
+	}
+
 	userDsn := config.MysqlDsn
-	manageDsn := config.GetRootMysqlDsn()
-
-	userConn, userErr := openSQLConn(userDsn)
-	manageConn, manageErr := openSQLConn(manageDsn)
-
-	if userConn != nil {
-		defer userConn.Close()
-	}
-	if manageConn != nil {
-		defer manageConn.Close()
-	}
-
-	if userErr != nil {
-		if manageErr != nil {
-			return userErr
-		}
-		if err = EnsureDatabase(manageConn, config.MysqlDBName); err != nil {
-			return err
-		}
-	}
-
 	// 统一在数据库生命周期处理完成后，再建立业务连接池
 	newDB, err := gorm.Open(mysql.New(mysql.Config{
 		DSN:                       userDsn,
@@ -72,50 +64,82 @@ func InitMysql() (err error) {
 	sqlDB.SetMaxOpenConns(48)
 	sqlDB.SetConnMaxLifetime(time.Minute * 30)
 	sqlDB.SetConnMaxIdleTime(time.Minute * 5)
-	if err := sqlDB.Ping(); err != nil {
+	if err := pingSQL(sqlDB); err != nil {
 		_ = sqlDB.Close()
 		return err
 	}
 
-	old := Mdb
 	Mdb = newDB
-	if old != nil {
-		if oldSQL, closeErr := old.DB(); closeErr == nil {
-			_ = oldSQL.Close()
-		}
-	}
-
 	return nil
 }
 
+// ensureMysqlDatabase 业务账号连不上时，用管理账号确保数据库存在（库被删掉后可自动重建）。
+func ensureMysqlDatabase() error {
+	userConn, userErr := openSQLConn(config.MysqlDsn)
+	if userConn != nil {
+		defer userConn.Close()
+	}
+	if userErr == nil {
+		return nil
+	}
+	manageConn, manageErr := openSQLConn(config.GetRootMysqlDsn())
+	if manageConn != nil {
+		defer manageConn.Close()
+	}
+	if manageErr != nil {
+		return userErr
+	}
+	return EnsureDatabase(manageConn, config.MysqlDBName)
+}
+
+// StartMysqlHealthCheck 每 15 秒探活一次。失败只记录日志并尝试确保数据库存在，不替换连接池：
+// 连接池会自己丢弃坏连接、重新拨号；替换全局 Mdb 会和业务协程的读取竞争，立刻关闭旧池还会打断进行中的查询。
 func StartMysqlHealthCheck() {
+	mysqlMu.Lock()
+	current := Mdb
+	mysqlMu.Unlock()
+	if current == nil {
+		log.Printf("[MySQL] 连接池未初始化，跳过健康检查")
+		return
+	}
 	go func() {
 		ticker := time.NewTicker(time.Second * 15)
 		defer ticker.Stop()
+		healthy := true
 		for range ticker.C {
-			mysqlMu.Lock()
-			current := Mdb
-			mysqlMu.Unlock()
-
-			if current == nil {
-				if err := InitMysql(); err != nil {
-					log.Printf("[MySQL] 重建连接失败: %v", err)
+			if err := pingGormDB(current); err != nil {
+				log.Printf("[MySQL] 健康检查失败，等待连接池自动重连: %v", err)
+				healthy = false
+				mysqlMu.Lock()
+				if ensureErr := ensureMysqlDatabase(); ensureErr != nil {
+					log.Printf("[MySQL] 检查数据库失败: %v", ensureErr)
 				}
+				mysqlMu.Unlock()
 				continue
 			}
-			sqlDB, err := current.DB()
-			if err != nil || sqlDB.Ping() != nil {
-				if err != nil {
-					log.Printf("[MySQL] 获取连接池失败，尝试重建连接: %v", err)
-				} else {
-					log.Printf("[MySQL] 健康检查失败，尝试重建连接")
-				}
-				if rebuildErr := InitMysql(); rebuildErr != nil {
-					log.Printf("[MySQL] 重建连接失败: %v", rebuildErr)
-				}
+			if !healthy {
+				log.Printf("[MySQL] 连接已恢复")
+				healthy = true
 			}
 		}
 	}()
+}
+
+// mysqlPingTimeout 单次 Ping 的上限。库挂死时不让启动或健康检查一直卡住。
+const mysqlPingTimeout = 10 * time.Second
+
+func pingSQL(conn *sql.DB) error {
+	ctx, cancel := context.WithTimeout(context.Background(), mysqlPingTimeout)
+	defer cancel()
+	return conn.PingContext(ctx)
+}
+
+func pingGormDB(g *gorm.DB) error {
+	sqlDB, err := g.DB()
+	if err != nil {
+		return err
+	}
+	return pingSQL(sqlDB)
 }
 
 func openSQLConn(dsn string) (*sql.DB, error) {
@@ -123,7 +147,7 @@ func openSQLConn(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = conn.Ping(); err != nil {
+	if err = pingSQL(conn); err != nil {
 		conn.Close()
 		return nil, err
 	}

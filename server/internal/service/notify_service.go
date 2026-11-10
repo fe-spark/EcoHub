@@ -263,7 +263,7 @@ func (s *NotifyService) PublishCronFailed(taskID, remark, reason string) {
 		"<b>%s 定时任务失败告警</b>\n📌 任务：<b>%s</b>\n⚠️ 原因：<code>%s</code>\n🕒 时间：<code>%s</code>",
 		formatTitlePrefix(siteName),
 		html.EscapeString(title),
-		html.EscapeString(truncateRunes(reason, 200)),
+		html.EscapeString(truncateReasonLines(reason, cronReasonLineMax, cronReasonTotalMax)),
 		time.Now().Format("2006-01-02 15:04:05"),
 	)
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)

@@ -244,6 +244,20 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
 
+	// 本用例要求"冷缓存"：清掉进程内的影片/分类名缓存（-count>1 时上一轮的查询路径会把它们填热）。
+	resetAccessMetaCaches := func() {
+		filmMetaCacheMu.Lock()
+		filmMetaCache = map[int64]filmMetaCacheItem{}
+		filmMetaCacheMu.Unlock()
+		catNameCacheMu.Lock()
+		catNameCache = map[int64]string{}
+		catIdByNameCache = map[string]int64{}
+		catNameCacheAt = time.Time{}
+		catNameCacheMu.Unlock()
+	}
+	resetAccessMetaCaches()
+	t.Cleanup(resetAccessMetaCaches)
+
 	const testVersion = "v_nosql_test"
 	_ = filmsnapshot.SetActiveSnapshotVersion(testVersion)
 

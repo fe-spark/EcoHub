@@ -1,14 +1,13 @@
 package writer
 
 import (
-	"fmt"
-	"strings"
 	"sync"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -17,7 +16,7 @@ import (
 
 func newWriterTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:writer_%s?mode=memory&cache=shared", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})

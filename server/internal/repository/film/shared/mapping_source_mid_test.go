@@ -1,11 +1,11 @@
 package shared
 
 import (
-	"fmt"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -13,7 +13,7 @@ import (
 )
 
 func TestLoadSourceMidsByGlobalMids(t *testing.T) {
-	gdb, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {

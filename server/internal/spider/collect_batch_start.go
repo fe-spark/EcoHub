@@ -10,7 +10,7 @@ import (
 
 // PrepareBatchCollectStart 挑出这次能开的站并占用。跳过的站带原因返回，不占队列。
 // 手动批量采集与计划任务定时采集均复用此逻辑。
-func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, model.CollectBatchResult) {
+func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchResult) {
 	if searchIndexBlocksCollect() {
 		skipped := make([]model.CollectBatchSkip, 0, len(ids))
 		for _, raw := range ids {
@@ -20,7 +20,7 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, model.CollectBa
 			}
 			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: errSearchIndexUpdating.Error()})
 		}
-		return nil, model.CollectBatchResult{Skipped: skipped}
+		return CollectClaim{}, model.CollectBatchResult{Skipped: skipped}
 	}
 	seen := make(map[string]struct{}, len(ids))
 	ready := make([]model.FilmSource, 0, len(ids))
@@ -46,16 +46,16 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, model.CollectBa
 		ready = append(ready, *fs)
 	}
 
-	claimed, err := occupyAndMarkCollectSources(ready, "批量采集")
+	claim, err := claimCollectSources(ready, "批量采集")
 	if err != nil {
 		for _, source := range ready {
 			skipped = append(skipped, model.CollectBatchSkip{Id: source.Id, Name: source.Name, Reason: err.Error()})
 		}
-		return nil, model.CollectBatchResult{Skipped: skipped}
+		return CollectClaim{}, model.CollectBatchResult{Skipped: skipped}
 	}
-	claimedIDs := make(map[string]struct{}, len(claimed))
-	started := make([]model.CollectBatchItem, 0, len(claimed))
-	for _, source := range claimed {
+	claimedIDs := make(map[string]struct{}, len(claim.Sources))
+	started := make([]model.CollectBatchItem, 0, len(claim.Sources))
+	for _, source := range claim.Sources {
 		claimedIDs[source.Id] = struct{}{}
 		started = append(started, model.CollectBatchItem{Id: source.Id, Name: source.Name})
 	}
@@ -65,7 +65,7 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, model.CollectBa
 		}
 		skipped = append(skipped, model.CollectBatchSkip{Id: source.Id, Name: source.Name, Reason: "采集中"})
 	}
-	return claimed, model.CollectBatchResult{Started: started, Skipped: skipped}
+	return claim, model.CollectBatchResult{Started: started, Skipped: skipped}
 }
 
 func batchCollectBlockReason(fs model.FilmSource) string {

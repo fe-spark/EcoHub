@@ -1,19 +1,13 @@
 package spider
 
 import (
-	"fmt"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/spider/progress"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func TestFilterEnabledSources(t *testing.T) {
@@ -152,7 +146,7 @@ func TestBatchCollectErrorReleasesOccupyForRetry(t *testing.T) {
 	defer releaseCollectSourceIDs(id)
 
 	ver := uint64(0)
-	if err := handleCollectWithStopVersion(id, -1, &ver, false, false, nil); err == nil {
+	if err := handleCollectWithStopVersion(id, -1, &ver, nil); err == nil {
 		t.Fatal("expected missing source error")
 	}
 	if isOccupiedCollectSource(id) {
@@ -229,7 +223,9 @@ func TestStopTaskDropsQueuedOccupySoRetryCanStart(t *testing.T) {
 		t.Fatalf("retry progress = ok:%v status:%q queue:%q", ok, before.Status, before.QueueId)
 	}
 
-	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, 0, batch)
+	// 和生产一样用当前的停止版本号；写死 0 时，只要本进程里别的用例调用过 StopAllCollect（-count>1 的第二轮必然如此），
+	// 派发就会被当成"已全部停止"，走另一条分支。
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, stopAllVersion.Load(), batch)
 	after, ok := progress.Snapshot(src.Id)
 	if !ok || after.Status != progress.StatusStarting || after.QueueId != before.QueueId {
 		t.Fatalf("old queue must not overwrite retry, ok=%v status=%q queue=%q want %q", ok, after.Status, after.QueueId, before.QueueId)
@@ -337,61 +333,9 @@ func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
 	progress.Ensure(source.Id, source.Name)
 	progress.MarkStopped(source.Id)
 
-	runSourcesGroupWithLimit([]model.FilmSource{source}, 24, "Batch-Collect", 0, 0, nil)
+	runSourcesGroupWithLimit([]model.FilmSource{source}, 24, "Batch-Collect", 0, stopAllVersion.Load(), nil)
 	if isOccupiedCollectSource(source.Id) {
 		t.Fatal("stopped queued source must release occupy so retry can start")
-	}
-}
-
-func TestHandlePreparedCollect_ProbeFailureReleasesOccupy(t *testing.T) {
-	prev := db.Mdb
-	gdb, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
-
-	src := model.FilmSource{Id: "probe-fail-occupy", Name: "站", Uri: "http://example.test", State: true}
-	if err := gdb.Create(&src).Error; err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if len(occupyCollectSources([]model.FilmSource{src}, "prepared")) != 1 {
-		t.Fatal("occupy failed")
-	}
-	defer releaseCollectSourceIDs(src.Id)
-	progress.MarkSourcesCollectStarting([]model.FilmSource{src}, "q-probe")
-
-	if err := HandlePreparedCollect(src.Id, 0); err == nil {
-		t.Fatal("expected probe error")
-	}
-	if isOccupiedCollectSource(src.Id) {
-		t.Fatal("probe failure must release occupy")
-	}
-	snap, ok := progress.Snapshot(src.Id)
-	if !ok || snap.Status != progress.StatusFailed {
-		t.Fatalf("probe failure must end as failed, ok=%v status=%q", ok, snap.Status)
-	}
-}
-
-func TestHandlePreparedCollect_MissingSourceReleasesOccupy(t *testing.T) {
-	id := "prepared-missing-source"
-	occupied := occupyCollectSources([]model.FilmSource{{Id: id, Name: "gone"}}, "prepared")
-	if len(occupied) != 1 {
-		t.Fatalf("expected occupy, got %d", len(occupied))
-	}
-	defer releaseCollectSourceIDs(id)
-
-	if err := HandlePreparedCollect(id, 24); err == nil {
-		t.Fatal("expected missing source error")
-	}
-	if isOccupiedCollectSource(id) {
-		t.Fatal("prepare occupy must be released when collect never created a batch")
 	}
 }
 
@@ -522,5 +466,72 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	}
 	if !reflect.DeepEqual(midsB, expectedB) {
 		t.Errorf("batch B MIDs = %v; want %v", midsB, expectedB)
+	}
+}
+
+// 一键终止后，旧批次的派发循环晚一步才发现"已停止"；此时用户已对同站发起重试。
+// 旧批次只能停自己那一代进度，不能把重试改成已停止，也不能放掉重试的占用。
+func TestStopAllThenRetry_OldBatchDoesNotCancelRetry(t *testing.T) {
+	src := model.FilmSource{Id: "stopall-retry-race", Name: "222"}
+	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("batch occupy failed: %v", err)
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
+	defer batch.close()
+	oldVersion := stopAllVersion.Load()
+
+	// 1. 一键终止：版本号加一，排队中的占用被放掉，进度标成已停止。
+	StopAllCollect("测试一键终止")
+
+	// 2. 旧批次还没走到派发循环，用户对同站发起重试。
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil || len(retried) != 1 {
+		t.Fatalf("retry occupy failed: %v", err)
+	}
+	defer releaseCollectSourceIDs(src.Id)
+	before, ok := progress.Snapshot(src.Id)
+	if !ok || before.Status != progress.StatusStarting {
+		t.Fatalf("retry progress = %+v", before)
+	}
+
+	// 3. 旧批次的派发循环带着旧版本号跑，发现已全部停止，处理剩余站点。
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, oldVersion, batch)
+
+	after, ok := progress.Snapshot(src.Id)
+	if !ok || after.Status != progress.StatusStarting || after.QueueId != before.QueueId {
+		t.Fatalf("old batch must not stop the retry: status=%q queue=%q want starting/%q", after.Status, after.QueueId, before.QueueId)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("old batch must not release the retry occupy")
+	}
+	// 重试能正常登记任务开跑（被误标已停止时会返回 ErrStopRequested）。
+	if _, err := progress.TryRegisterTask(src.Id, "retry-req", nil); err != nil {
+		t.Fatalf("retry should start, got %v", err)
+	}
+	progress.UnregisterTask(src.Id, "retry-req")
+	progress.MarkStopped(src.Id)
+}
+
+// 没有新采集接手时，一键终止后旧批次仍要把自己的排队站标成已停止并放掉占用。
+func TestStopAll_OldBatchStillStopsOwnQueuedSource(t *testing.T) {
+	src := model.FilmSource{Id: "stopall-own-queued", Name: "333"}
+	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("batch occupy failed: %v", err)
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
+	defer batch.close()
+	oldVersion := stopAllVersion.Load()
+	stopAllVersion.Add(1) // 只模拟版本号变化，进度仍是排队中
+
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, oldVersion, batch)
+
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusStopped {
+		t.Fatalf("own queued source should be stopped, got %+v", snap)
+	}
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("own queued source should release occupy")
 	}
 }
