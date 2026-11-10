@@ -129,7 +129,7 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		if len(ids) == 0 {
 			return model.CollectBatchResult{}, errors.New("单片更新缺少影片编号，无法重试")
 		}
-		go replayCollectFilms(ids)
+		goSafe("单片更新重试", func() { replayCollectFilms(ids) })
 		return model.CollectBatchResult{}, nil
 	}
 
