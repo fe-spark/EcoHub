@@ -255,6 +255,10 @@ func TestAccessDisabledWithHistoricalData(t *testing.T) {
 
 func TestDataStats_Auth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	// 只测鉴权：显式置空 db.Mdb，避免读到其他用例留下的库（缺 access 表时会返回失败）。
+	prevDB := db.Mdb
+	db.Mdb = nil
+	t.Cleanup(func() { db.Mdb = prevDB })
 
 	// 1. Missing claims -> 401
 	c, w := testContext(http.MethodGet, "/api/manage/access/stats")
