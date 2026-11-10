@@ -49,14 +49,14 @@ func (s *SpiderService) StartCollect(id string, h int) error {
 func (s *SpiderService) BatchCollect(time int, ids []string) model.CollectBatchResult {
 	claim, result := spider.PrepareBatchCollectStart(ids)
 	if len(claim.Sources) > 0 {
-		go spider.BatchCollectPrepared(model.CollectTriggerManual, time, claim)
+		goSafe("批量采集", func() { spider.BatchCollectPrepared(model.CollectTriggerManual, time, claim) })
 	}
 	return result
 }
 
 // AutoCollect 自动采集
 func (s *SpiderService) AutoCollect(time int) {
-	go spider.AutoCollect(time)
+	goSafe("自动采集", func() { spider.AutoCollect(time) })
 }
 
 // resetSiteDataRunning 防止并发重复触发站点数据重置。
@@ -207,7 +207,7 @@ func (s *SpiderService) InventoryStats(scope string) (filmrepo.InventoryStats, e
 
 // CollectFilms 触发主站影片采集同步（兼容单个与批量）
 func (s *SpiderService) CollectFilms(ids []int64) {
-	go spider.CollectFilms(ids)
+	goSafe("单片更新", func() { spider.CollectFilms(ids) })
 }
 
 // FilmClassCollect 重新拉取每个采集站的分类副本。已调整的显示和排序保留。
