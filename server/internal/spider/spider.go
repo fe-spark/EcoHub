@@ -467,6 +467,6 @@ func StartBatchCollectRetry(parentBatchID string, hour int, sources []model.Film
 		batchCtx.close()
 		return "", err
 	}
-	go runPreparedBatch(batchCtx, hour, "失败重试")
+	goBackgroundCollect(func() { runPreparedBatch(batchCtx, hour, "失败重试") })
 	return batchCtx.batchID, nil
 }
