@@ -34,12 +34,13 @@ func runCronTaskSafely(ft model.FilmCollectTask, manual bool) {
 	withCronRecover(ft, func() { executeTask(ft, manual) })
 }
 
-// reportSourcePanic 记录单站采集协程 panic，标记该站失败并发送采集站失败通知。
-func reportSourcePanic(tag string, fs model.FilmSource, batchCtx *collectBatchContext, r any) {
+// reportSourcePanic 记录单站采集协程 panic 的堆栈，并写进本批次的采集记录，返回失败原因。
+// 不发通知：进度可能已被新的采集接手，是否告警由调用方按进度归属决定。
+func reportSourcePanic(tag string, fs model.FilmSource, batchCtx *collectBatchContext, r any) string {
 	reason := fmt.Sprintf("panic: %v", r)
 	syslog.Errorf("[%s] 站点 %s 采集 panic: %v\n%s", tag, fs.Name, r, debug.Stack())
 	if batchCtx != nil {
 		batchCtx.RecordSourceError(fs.Id, reason)
 	}
-	emitSourceFailedNotify(fs.Id, fs.Name, reason)
+	return reason
 }
