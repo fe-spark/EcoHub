@@ -6,14 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/spider/progress"
-	"server/internal/testutil"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func TestFilterEnabledSources(t *testing.T) {
@@ -152,7 +146,7 @@ func TestBatchCollectErrorReleasesOccupyForRetry(t *testing.T) {
 	defer releaseCollectSourceIDs(id)
 
 	ver := uint64(0)
-	if err := handleCollectWithStopVersion(id, -1, &ver, false, false, nil); err == nil {
+	if err := handleCollectWithStopVersion(id, -1, &ver, nil); err == nil {
 		t.Fatal("expected missing source error")
 	}
 	if isOccupiedCollectSource(id) {
@@ -342,58 +336,6 @@ func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
 	runSourcesGroupWithLimit([]model.FilmSource{source}, 24, "Batch-Collect", 0, stopAllVersion.Load(), nil)
 	if isOccupiedCollectSource(source.Id) {
 		t.Fatal("stopped queued source must release occupy so retry can start")
-	}
-}
-
-func TestHandlePreparedCollect_ProbeFailureReleasesOccupy(t *testing.T) {
-	prev := db.Mdb
-	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
-
-	src := model.FilmSource{Id: "probe-fail-occupy", Name: "站", Uri: "http://example.test", State: true}
-	if err := gdb.Create(&src).Error; err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if len(occupyCollectSources([]model.FilmSource{src}, "prepared")) != 1 {
-		t.Fatal("occupy failed")
-	}
-	defer releaseCollectSourceIDs(src.Id)
-	progress.MarkSourcesCollectStarting([]model.FilmSource{src}, "q-probe")
-
-	if err := HandlePreparedCollect(src.Id, 0); err == nil {
-		t.Fatal("expected probe error")
-	}
-	if isOccupiedCollectSource(src.Id) {
-		t.Fatal("probe failure must release occupy")
-	}
-	snap, ok := progress.Snapshot(src.Id)
-	if !ok || snap.Status != progress.StatusFailed {
-		t.Fatalf("probe failure must end as failed, ok=%v status=%q", ok, snap.Status)
-	}
-}
-
-func TestHandlePreparedCollect_MissingSourceReleasesOccupy(t *testing.T) {
-	id := "prepared-missing-source"
-	occupied := occupyCollectSources([]model.FilmSource{{Id: id, Name: "gone"}}, "prepared")
-	if len(occupied) != 1 {
-		t.Fatalf("expected occupy, got %d", len(occupied))
-	}
-	defer releaseCollectSourceIDs(id)
-
-	if err := HandlePreparedCollect(id, 24); err == nil {
-		t.Fatal("expected missing source error")
-	}
-	if isOccupiedCollectSource(id) {
-		t.Fatal("prepare occupy must be released when collect never created a batch")
 	}
 }
 
