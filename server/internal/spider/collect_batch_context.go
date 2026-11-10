@@ -10,6 +10,7 @@ import (
 	"server/internal/model"
 	filmcache "server/internal/repository/film/cache"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/spider/progress"
 )
 
 // publishMu 全局快照发布互斥锁，确保向 MySQL 发布快照时单次只有一个线程在执行
@@ -78,8 +79,10 @@ type collectBatchContext struct {
 	finishedSources   map[string]model.FilmSource
 	sourceSnapshots   map[string]model.CollectRecordSourceDetail
 	occupyTokens      map[string]uint64
-	runNoted          atomic.Bool
-	recordStarted     bool
+	// progressEpochs 建批次时各站的进度代次。停止时只改本代的进度，避免把同站新开的重试标成已停止。
+	progressEpochs map[string]uint64
+	runNoted       atomic.Bool
+	recordStarted  bool
 }
 
 func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
@@ -109,6 +112,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		finishedSources:  make(map[string]model.FilmSource),
 		sourceSnapshots:  make(map[string]model.CollectRecordSourceDetail),
 		occupyTokens:     snapshotOccupyTokens(sources),
+		progressEpochs:   snapshotProgressEpochs(sources),
 	}
 
 	registerActiveBatch(b)
@@ -277,6 +281,70 @@ func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	} else {
 		releaseCollectSourceIDs(id)
 	}
+}
+
+// withClaim 用占用那一刻记下的令牌和进度代次，替换建批次时现读的值。
+func (b *collectBatchContext) withClaim(claim CollectClaim) *collectBatchContext {
+	if b == nil {
+		return b
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for id, tok := range claim.tokens {
+		b.occupyTokens[id] = tok
+	}
+	for id, epoch := range claim.epochs {
+		b.progressEpochs[id] = epoch
+	}
+	return b
+}
+
+// markSourceFailed 把本批次这一代的进度标成失败，返回进度是否仍属于本批次。
+// 无批次或没记代次时按站点直接改。
+func (b *collectBatchContext) markSourceFailed(id string) bool {
+	if epoch, ok := b.progressEpoch(id); ok {
+		return progress.MarkFailedIfEpoch(id, epoch)
+	}
+	progress.Update(id, func(cur *model.CollectProgress) {
+		switch cur.Status {
+		case progress.StatusStarting, progress.StatusRunning:
+			cur.Status = progress.StatusFailed
+		}
+	})
+	return true
+}
+
+// setSourcePageTotal 只写本批次这一代的总页，返回进度是否仍属于本批次。
+func (b *collectBatchContext) setSourcePageTotal(id string, pageCount int) bool {
+	if epoch, ok := b.progressEpoch(id); ok {
+		return progress.SetPageTotalIfEpoch(id, epoch, pageCount)
+	}
+	progress.SetPageTotal(id, pageCount)
+	return true
+}
+
+// progressEpoch 建批次时该站的进度代次。
+func (b *collectBatchContext) progressEpoch(id string) (uint64, bool) {
+	if b == nil {
+		return 0, false
+	}
+	id = collectSourceID(id)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	epoch, ok := b.progressEpochs[id]
+	return epoch, ok
+}
+
+func snapshotProgressEpochs(sources []model.FilmSource) map[string]uint64 {
+	epochs := make(map[string]uint64, len(sources))
+	for _, source := range sources {
+		id := collectSourceID(source.Id)
+		if id == "" {
+			continue
+		}
+		epochs[id] = progress.Epoch(id)
+	}
+	return epochs
 }
 
 // ownsOccupy 当前占用令牌仍是本批次抢到的那一个。停止后被新采集重新占用时为 false。

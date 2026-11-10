@@ -38,6 +38,7 @@ func (s *CronService) GetFilmCrontab() ([]model.CronTaskVo, error) {
 			PreV:            preV,
 			Next:            nextV,
 			Running:         spider.IsCronTaskRunning(t.Id),
+			Queued:          spider.IsCronTaskQueued(t.Id),
 		}
 
 		l = append(l, taskVo)
@@ -80,7 +81,7 @@ func (s *CronService) UpdateFilmCron(t model.FilmCollectTask) error {
 	return nil
 }
 
-// RunFilmCronTaskOnce 立即手动执行一次定时任务
-func (s *CronService) RunFilmCronTaskOnce(id string) error {
-	return spider.RunTaskOnce(id)
+// RunFilmCronTaskOnce 立即手动执行一次定时任务。返回给用户的提示：已触发，或维护任务已排队。
+func (s *CronService) RunFilmCronTaskOnce(id string) (string, error) {
+	return spider.RunTaskOnceWithStatus(id)
 }

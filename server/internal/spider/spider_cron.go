@@ -59,21 +59,25 @@ func RemoveCronByTaskId(taskId string) {
 
 // CreateCron 创建定时任务
 func CreateCron() *cron.Cron {
-	return cron.New(cron.WithSeconds())
+	return cron.New(cron.WithSeconds(), cron.WithChain(cron.Recover(cron.PrintfLogger(log.Default()))))
 }
 
 func addFilmCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
 		return -99, fmt.Errorf("定时任务添加失败，Cron 表达式校验失败: %w", err)
 	}
-	return CronCollect.AddFunc(spec, func() {
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Printf("定时任务执行失败 id=%s err=%v", id, err)
-			return
-		}
-		enqueueCronTask(ft)
-	})
+	return CronCollect.AddFunc(spec, func() { fireCronTask(id) })
+}
+
+// fireCronTask 定时任务到点：读取最新配置后入队。读取失败时告警，避免任务静默不跑。
+func fireCronTask(id string) {
+	ft, err := repository.GetFilmTaskById(id)
+	if err != nil {
+		syslog.Errorf("[Cron] 定时任务到点但读取任务配置失败 id=%s err=%v", id, err)
+		emitCronFailedNotify(id, id, fmt.Sprintf("读取定时任务配置失败，本轮未执行: %v", err))
+		return
+	}
+	enqueueCronTask(ft)
 }
 
 // AddAutoUpdateCron 添加所有已启用站点的影片更新定时任务。
@@ -142,7 +146,8 @@ func ReloadCronTask(id string) error {
 
 // executeTask 执行已入队或手动触发的任务。
 // runningCronTasks 保证同一任务同一时刻只跑一份，重叠触发直接跳过。
-func executeTask(ft model.FilmCollectTask) {
+// manual 表示手动“立即执行”，此时失败不发定时任务告警。
+func executeTask(ft model.FilmCollectTask, manual bool) {
 	if !ft.State {
 		return
 	}
@@ -151,16 +156,25 @@ func executeTask(ft model.FilmCollectTask) {
 		return
 	}
 	defer runningCronTasks.Delete(ft.Id)
-	runTaskBody(ft)
+	runTaskBody(ft, manual)
 }
 
-func runTaskBody(ft model.FilmCollectTask) {
+func runTaskBody(ft model.FilmCollectTask, manual bool) {
 
 	log.Printf("开始执行定时任务: Task[%s] Model[%d]\n", ft.Id, ft.Model)
 
 	switch ft.Model {
 	case model.TaskModelAutoCollect:
-		AutoCollectTriggered(model.CollectTriggerCron, ft.Time)
+		if err := autoCollect(model.CollectTriggerCron, ft.Time); err != nil {
+			remark := strings.TrimSpace(ft.Remark)
+			if remark == "" {
+				remark = "自动采集"
+			}
+			syslog.Errorf("[Cron] %s 失败: %v", remark, err)
+			if !manual {
+				emitCronFailedNotify(ft.Id, remark, err.Error())
+			}
+		}
 		log.Println("执行一次已启用站点采集")
 	case model.TaskModelOrphanClean:
 		executeOrphanCleanTask(ft)
@@ -182,6 +196,8 @@ func runTaskBody(ft model.FilmCollectTask) {
 
 var runningMaintenanceTasks sync.Map
 
+// isMaintenanceModel 维护任务：片库清理、日志清理、采集记录清理。
+// 维护任务进串行队列依次执行，执行时占用维护闸门（停止采集、独占执行），同时段到点的采集跳过。
 func isMaintenanceModel(taskModel int) bool {
 	switch taskModel {
 	case model.TaskModelOrphanClean, model.TaskModelLogClean, model.TaskModelCollectClean:
@@ -200,31 +216,46 @@ func maintenanceRunningDetail() string {
 		}
 		return true
 	})
-	if len(ids) == 0 {
+	sort.Strings(ids)
+	current, pending := maintenanceQueueDetail()
+	if len(ids) == 0 && current != "" {
+		ids = append(ids, current)
+	}
+	parts := make([]string, 0, 2)
+	if len(ids) > 0 {
+		parts = append(parts, "执行中："+strings.Join(ids, "，"))
+	}
+	if len(pending) > 0 {
+		parts = append(parts, "排队中："+strings.Join(pending, "，"))
+	}
+	if len(parts) == 0 {
 		if collectLifecycle.isMaintenanceBusy() {
 			return "维护闸门占用中"
 		}
 		return "无记录"
 	}
-	sort.Strings(ids)
-	return strings.Join(ids, "，")
+	return strings.Join(parts, "；")
 }
 
-func isMaintenanceRunning() bool {
+// maintenanceTaskActive 有维护任务在执行或排队（不含闸门被采集站接口探测等短暂独占的情况）。
+func maintenanceTaskActive() bool {
 	count := 0
 	runningMaintenanceTasks.Range(func(_, _ any) bool {
 		count++
 		return false
 	})
-	return count > 0 || collectLifecycle.isMaintenanceBusy()
+	return count > 0 || maintenanceQueueActive()
 }
 
+// isMaintenanceRunning 维护中：有维护在执行、在排队，或维护闸门被占用。此时采集一律跳过。
+func isMaintenanceRunning() bool {
+	return maintenanceTaskActive() || collectLifecycle.isMaintenanceBusy()
+}
+
+// rejectManualRun 维护中手动执行采集直接拒绝；维护任务不拒绝，改为排队。
 func rejectManualRun(ft model.FilmCollectTask) error {
 	if !isMaintenanceRunning() {
 		return nil
-	}
-	if isMaintenanceModel(ft.Model) {
-		return fmt.Errorf("%w（%s）", errMaintenanceBusy, maintenanceRunningDetail())
 	}
 	if ft.Model == model.TaskModelAutoCollect {
 		return fmt.Errorf("%w（%s）", errCollectDuringMaintenance, maintenanceRunningDetail())
@@ -253,10 +284,6 @@ func finishMaintenance(ft model.FilmCollectTask, remark string, err error) {
 	if err == nil {
 		return
 	}
-	if errors.Is(err, errMaintenanceBusy) {
-		log.Printf("定时任务跳过: %s（%s），已有维护任务在执行（%s）", remark, ft.Id, maintenanceRunningDetail())
-		return
-	}
 	syslog.Errorf("[Maintenance] %s 失败: %v", remark, err)
 	emitCronFailedNotify(ft.Id, remark, err.Error())
 }
@@ -281,25 +308,35 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 }
 
 func cleanOrphanData() (int64, int64, error) {
-	var n int64
-	if res := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = film_source_playlists.mid)").Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
-		return 0, 0, res.Error
-	} else {
-		n = res.RowsAffected
+	n, err := filmrepo.CleanOrphanPlaylists()
+	if err != nil {
+		return n, 0, fmt.Errorf("清理孤儿播放列表失败: %w", err)
 	}
-	k := filmrepo.CleanOrphanMatchKeysAndMappings()
+	k, err := filmrepo.CleanOrphanMatchKeysAndMappings()
+	if err != nil {
+		return n, k, err
+	}
 	return n, k, nil
 }
 
 func cleanGhostFilms() (int64, int64, error) {
-	m := filmrepo.CleanEmptyFilms()
-	p := filmrepo.CleanPlaylessFilms(7 * 24 * time.Hour)
+	m, emptyErr := filmrepo.CleanEmptyFilms()
+	if emptyErr != nil {
+		emptyErr = fmt.Errorf("清理空记录失败: %w", emptyErr)
+	}
+	// 与原逻辑一致：空记录清理失败也继续尝试清理无线路幽灵影片，错误最后合并上报。
+	p, playlessErr := filmrepo.CleanPlaylessFilms(7 * 24 * time.Hour)
+	if playlessErr != nil {
+		playlessErr = fmt.Errorf("清理无线路幽灵影片失败: %w", playlessErr)
+	}
+	cleanErr := errors.Join(emptyErr, playlessErr)
+	// 只要删过影片（即使中途出错），都要重建快照，避免读模型继续展示已删除的影片。
 	if m > 0 || p > 0 {
 		if err := filmsnapshot.ActivateRebuiltFilmListSnapshot(""); err != nil {
-			return m, p, err
+			return m, p, errors.Join(cleanErr, fmt.Errorf("重建影片快照失败: %w", err))
 		}
 	}
-	return m, p, nil
+	return m, p, cleanErr
 }
 
 const (
@@ -328,28 +365,51 @@ func executeCollectRecordCleanTask(ft model.FilmCollectTask) {
 	})
 }
 
+// 手动执行的结果提示。
+const (
+	RunOnceStarted = "定时任务已触发，执行结果请查看运行日志"
+	RunOnceQueued  = "已有维护任务在执行，本任务已排队，前一条结束后自动执行"
+)
+
 // RunTaskOnce 立即手动执行一次任务
 func RunTaskOnce(id string) error {
+	_, err := RunTaskOnceWithStatus(id)
+	return err
+}
+
+// RunTaskOnceWithStatus 立即手动执行一次任务，并返回给用户的提示。
+// 维护任务进串行队列：前面有维护在跑时排队等待；采集在维护中直接拒绝。
+func RunTaskOnceWithStatus(id string) (string, error) {
 	ft, err := repository.GetFilmTaskById(id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := rejectManualRun(ft); err != nil {
-		return err
+		return "", err
+	}
+	if isMaintenanceModel(ft.Model) {
+		if IsCronTaskRunning(ft.Id) {
+			return "", fmt.Errorf("定时任务正在执行中，请等待当前执行完成")
+		}
+		// 只有真有维护在执行或排队才提示“已排队”；闸门被接口探测短暂占用时直接开始，开工时等闸门空闲。
+		busy := maintenanceTaskActive()
+		ft.State = true // 手动执行不受启用开关限制
+		if !enqueueManualMaintenance(ft) {
+			return "", fmt.Errorf("该维护任务已在排队或执行中")
+		}
+		if busy {
+			return RunOnceQueued, nil
+		}
+		return RunOnceStarted, nil
 	}
 	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
-		return fmt.Errorf("定时任务正在执行中，请等待当前执行完成")
+		return "", fmt.Errorf("定时任务正在执行中，请等待当前执行完成")
 	}
 	go func() {
 		defer runningCronTasks.Delete(ft.Id)
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("[Spider] Cron task panic recovered: task=%s err=%v", ft.Id, r)
-			}
-		}()
-		runTaskBody(ft)
+		withCronRecover(ft, func() { runTaskBody(ft, true) })
 	}()
-	return nil
+	return RunOnceStarted, nil
 }
 
 func IsCronTaskRunning(id string) bool {

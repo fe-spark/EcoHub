@@ -129,34 +129,14 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		if len(ids) == 0 {
 			return model.CollectBatchResult{}, errors.New("单片更新缺少影片编号，无法重试")
 		}
-		go replayCollectFilms(ids)
+		goSafe("单片更新重试", func() { replayCollectFilms(ids) })
 		return model.CollectBatchResult{}, nil
 	}
 
 	// 从明细解析失败站点，以及各站实际拉过的小时窗口。
-	failedSourceMap := make(map[string]bool)
-	hourBySource := make(map[string]int)
-	failedPagesBySource := make(map[string][]int)
-	if rec.DetailJson != "" {
-		var details []model.CollectRecordSourceDetail
-		if err := json.Unmarshal([]byte(rec.DetailJson), &details); err != nil {
-			return model.CollectBatchResult{}, fmt.Errorf("批次明细损坏: %w", err)
-		}
-		for _, d := range details {
-			id := strings.TrimSpace(d.SourceID)
-			if id == "" {
-				continue
-			}
-			if d.Hour != 0 {
-				hourBySource[id] = d.Hour
-			}
-			if d.Status == "failed" || d.Status == "partial" {
-				failedSourceMap[id] = true
-				if len(d.FailedPages) > 0 {
-					failedPagesBySource[id] = append([]int(nil), d.FailedPages...)
-				}
-			}
-		}
+	failedSourceMap, hourBySource, failedPagesBySource, err := parseRetryDetail(rec.DetailJson)
+	if err != nil {
+		return model.CollectBatchResult{}, err
 	}
 
 	targetIDs := make([]string, 0)
@@ -208,8 +188,8 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 
 		if isWithinHalfHour && len(failedPagesBySource[id]) > 0 {
 			targetPagesMap[id] = failedPagesBySource[id]
-			log.Printf("[Spider] 批次 %s 站点 %s 距批次结束 %v（半小时内），重试失败页 (%d页): %v",
-				rec.BatchID, id, elapsed.Round(time.Second), len(targetPagesMap[id]), targetPagesMap[id])
+			log.Printf("[Spider] 批次 %s 站点 %s 距批次结束 %v（半小时内），重试失败页 %d 页",
+				rec.BatchID, id, elapsed.Round(time.Second), len(targetPagesMap[id]))
 		} else {
 			if len(failedPagesBySource[id]) > 0 {
 				log.Printf("[Spider] 批次 %s 站点 %s 距批次结束 %v（已超半小时），转为重试采集站",
@@ -229,18 +209,18 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 	var firstID string
 	started := 0
 	for _, hour := range hours {
-		sources, part := spider.PrepareBatchCollectStart(groups[hour])
+		claim, part := spider.PrepareBatchCollectStart(groups[hour])
 		result.Skipped = append(result.Skipped, part.Skipped...)
-		if len(sources) == 0 {
+		if len(claim.Sources) == 0 {
 			continue
 		}
 		hourTargetPages := make(map[string][]int)
-		for _, s := range sources {
+		for _, s := range claim.Sources {
 			if pages, ok := targetPagesMap[s.Id]; ok && len(pages) > 0 {
 				hourTargetPages[s.Id] = pages
 			}
 		}
-		retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, hour, sources, hourTargetPages)
+		retryBatchID, err := spider.StartBatchCollectRetry(rec.BatchID, hour, claim, hourTargetPages)
 		if err != nil {
 			if firstID != "" {
 				result.BatchID = firstID
@@ -287,4 +267,34 @@ func parseFilmIDs(raw string) []int64 {
 		out = append(out, id)
 	}
 	return out
+}
+
+// parseRetryDetail 从批次明细取出失败站点、各站小时窗口和全部失败页（不截断，重试失败页要全部重采）。
+func parseRetryDetail(detailJSON string) (map[string]bool, map[string]int, map[string][]int, error) {
+	failedSourceMap := make(map[string]bool)
+	hourBySource := make(map[string]int)
+	failedPagesBySource := make(map[string][]int)
+	if detailJSON == "" {
+		return failedSourceMap, hourBySource, failedPagesBySource, nil
+	}
+	var details []model.CollectRecordSourceDetail
+	if err := json.Unmarshal([]byte(detailJSON), &details); err != nil {
+		return nil, nil, nil, fmt.Errorf("批次明细损坏: %w", err)
+	}
+	for _, d := range details {
+		id := strings.TrimSpace(d.SourceID)
+		if id == "" {
+			continue
+		}
+		if d.Hour != 0 {
+			hourBySource[id] = d.Hour
+		}
+		if d.Status == "failed" || d.Status == "partial" {
+			failedSourceMap[id] = true
+			if len(d.FailedPages) > 0 {
+				failedPagesBySource[id] = append([]int(nil), d.FailedPages...)
+			}
+		}
+	}
+	return failedSourceMap, hourBySource, failedPagesBySource, nil
 }

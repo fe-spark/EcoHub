@@ -1,13 +1,13 @@
 package film
 
 import (
-	"fmt"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/film/cache"
 	"server/internal/repository/film/snapshot"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -24,7 +24,7 @@ func (fileDummy) TableName() string {
 
 func setupFilmZeroTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -107,8 +107,8 @@ func TestCleanEmptyFilms_HardDeletesEmptyAndUnknownCategory(t *testing.T) {
 	gdb.Create(&model.MovieMatchKey{Mid: 1, MatchKey: "empty-name"})
 	gdb.Create(&model.MovieSourceMapping{SourceId: "src", SourceMid: 9, GlobalMid: 2})
 
-	if n := CleanEmptyFilms(); n != 2 {
-		t.Fatalf("cleaned=%d, want 2", n)
+	if n, err := CleanEmptyFilms(); err != nil || n != 2 {
+		t.Fatalf("cleaned=%d, err=%v, want 2", n, err)
 	}
 	var left int64
 	gdb.Unscoped().Model(&model.FilmIndex{}).Count(&left)

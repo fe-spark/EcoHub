@@ -104,3 +104,21 @@
     opacity: 1;
   }
 }
+
+.tip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tipLabel {
+  opacity: 0.75;
+}
+
+.tipPages {
+  max-height: min(60vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+}

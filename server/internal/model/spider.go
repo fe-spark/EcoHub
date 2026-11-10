@@ -105,6 +105,7 @@ type CronTaskVo struct {
 	PreV           string `json:"preV"`                     // 上次执行时间
 	Next           string `json:"next"`                     // 下次执行时间
 	Running        bool   `json:"running"`                  // 当前是否正在执行
+	Queued         bool   `json:"queued"`                   // 是否在维护队列中等待执行
 	DisabledReason string `json:"disabledReason,omitempty"` // 业务锁定禁用的原因提示
 }
 

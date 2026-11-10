@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"server/internal/model"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -32,7 +33,7 @@ func TestMatchKeyLockIndexes_AscendingUnique(t *testing.T) {
 }
 
 func TestSaveStationPlaylists_UpsertByPrimaryKey(t *testing.T) {
-	gdb, err := gorm.Open(sqlite.Open("file:playlist_pk?mode=memory&cache=shared"), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {

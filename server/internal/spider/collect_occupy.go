@@ -23,10 +23,17 @@ func collectSourceID(id string) string {
 }
 
 func occupyCollectSources(sources []model.FilmSource, tag string) []model.FilmSource {
+	occupied, _ := occupyCollectSourcesWithTokens(sources, tag)
+	return occupied
+}
+
+// occupyCollectSourcesWithTokens 占用并返回本次抢到的令牌，令牌与占用在同一把锁里产生。
+func occupyCollectSourcesWithTokens(sources []model.FilmSource, tag string) ([]model.FilmSource, map[string]uint64) {
 	if len(sources) == 0 {
-		return sources
+		return sources, nil
 	}
 	occupied := make([]model.FilmSource, 0, len(sources))
+	tokens := make(map[string]uint64, len(sources))
 	seen := make(map[string]struct{}, len(sources))
 	candidates := make([]model.FilmSource, 0, len(sources))
 
@@ -61,11 +68,22 @@ func occupyCollectSources(sources []model.FilmSource, tag string) []model.FilmSo
 			log.Printf("[%s] 站点 %s 已在正采集队列中，跳过", tag, source.Name)
 			continue
 		}
-		collectingSources[id] = occupySeq.Add(1)
+		tok := occupySeq.Add(1)
+		collectingSources[id] = tok
 		collectingSourcesMu.Unlock()
+		tokens[id] = tok
 		occupied = append(occupied, source)
 	}
-	return occupied
+	return occupied, tokens
+}
+
+// CollectClaim 一次占用的结果：抢到的站，以及占用那一刻的令牌和进度代次。
+// 批次必须用这里记下的令牌/代次，而不是等协程开跑后再去读——中间若一键终止又重试，
+// 读到的会是新重试的令牌/代次，旧批次就会把重试当成自己的去停止或改进度。
+type CollectClaim struct {
+	Sources []model.FilmSource
+	tokens  map[string]uint64
+	epochs  map[string]uint64
 }
 
 func releaseCollectSources(sources []model.FilmSource) {
@@ -185,8 +203,30 @@ func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
 	batchCtx.releaseSourceOccupy(id)
 }
 
+// abandon 占好的站不再采集：只停占用那一代进度，按令牌放占用，不碰同站之后的新采集。
+func (c CollectClaim) abandon() {
+	for _, source := range c.Sources {
+		id := collectSourceID(source.Id)
+		if epoch, ok := c.epochs[id]; ok {
+			progress.MarkStoppedIfEpoch(id, epoch)
+		} else {
+			progress.MarkStopped(id)
+		}
+	}
+	releaseCollectTokens(c.tokens)
+}
+
 // abandonQueuedCollectSource 站点不再采集（排队中停止 / 一键终止未派发）：立刻放占用，允许单独重试。
+// 有批次时只停本批次那一代进度：一键终止后用户可能已对同站发起新的重试（进度代次已加一、占用已换成新令牌），
+// 旧批次的派发循环随后才走到这里，不能把重试的进度改成已停止，否则重试会因"已请求停止"不再开跑。
 func abandonQueuedCollectSource(source model.FilmSource, batchCtx *collectBatchContext) {
-	progress.MarkStopped(source.Id)
+	if epoch, ok := batchCtx.progressEpoch(source.Id); ok {
+		if !progress.MarkStoppedIfEpoch(source.Id, epoch) {
+			log.Printf("[Spider] 站点 %s 已被新的采集接手，旧队列不改它的进度", source.Name)
+		}
+	} else {
+		progress.MarkStopped(source.Id)
+	}
+	// 占用按令牌释放：已被新采集重新占用时不会误放。
 	batchCtx.releaseSourceOccupy(source.Id)
 }

@@ -1,13 +1,13 @@
 package service
 
 import (
-	"fmt"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -16,7 +16,7 @@ import (
 
 func setupFilmServiceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -31,6 +31,7 @@ func setupFilmServiceTestDB(t *testing.T) *gorm.DB {
 		&model.Category{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
+		&model.MovieSourceMapping{}, // 按站筛选会联表 movie_source_mapping
 		&model.SiteConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)

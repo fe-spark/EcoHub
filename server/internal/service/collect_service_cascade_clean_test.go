@@ -1,12 +1,12 @@
 package service
 
 import (
-	"fmt"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -15,7 +15,7 @@ import (
 
 func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -40,8 +40,15 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
+	// 删站会触发切主站的异步预热，它读全局 db；等它结束再换库，避免 -race 报竞争。
+	waitSearchWorkIdle(t)
+	prevMdb, prevRdb := db.Mdb, db.Rdb
 	db.Mdb = gdb
 	db.Rdb = nil
+	t.Cleanup(func() {
+		waitSearchWorkIdle(t)
+		db.Mdb, db.Rdb = prevMdb, prevRdb
+	})
 	return gdb
 }
 

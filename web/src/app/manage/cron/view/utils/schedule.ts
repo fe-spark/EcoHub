@@ -10,6 +10,7 @@ export interface CronTask {
   preV?: string;
   next?: string;
   running?: boolean;
+  queued?: boolean;
   disabledReason?: string;
 }
 

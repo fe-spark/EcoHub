@@ -1,3 +1,4 @@
+import { countPages, formatPageRanges } from "./page-ranges";
 import { resolveCollectProgressStatusText, type CollectProgress } from "./types";
 
 export type RingTone = "primary" | "processing" | "success" | "warning" | "error";
@@ -9,6 +10,8 @@ export interface RingView {
   solid: boolean;
   center: RingCenter;
   tooltip: string;
+  /** 已记录的失败页：排好序、连续页压成区间。没有记录时不带这个字段。 */
+  failedPages?: { text: string; count: number };
 }
 
 function collectPercent(progress: CollectProgress): number {
@@ -19,6 +22,13 @@ function collectPercent(progress: CollectProgress): number {
   if (progress.status === "starting") return 0;
   if (total <= 0) return 0;
   return Math.min(Math.floor((done / total) * 100), 99);
+}
+
+function collectFailedPages(progress: CollectProgress): RingView["failedPages"] {
+  if ((progress.failed ?? 0) <= 0) return undefined;
+  const text = formatPageRanges(progress.failedPages);
+  if (!text) return undefined;
+  return { text, count: countPages(progress.failedPages) };
 }
 
 function collectTooltip(progress: CollectProgress): string {
@@ -39,11 +49,8 @@ function collectTooltip(progress: CollectProgress): string {
           : progress.status === "starting"
             ? "排队中"
             : "即将开始采集";
-  const failedPages = progress.failedPages ?? [];
-  const failedInfo =
-    failed > 0
-      ? ` · 失败 ${failed} 页${failedPages.length > 0 ? `（${failedPages.join("、")}）` : ""}`
-      : "";
+  // 页码明细放到 failedPages 单独渲染，这一行只留总数，避免页多时撑爆提示框。
+  const failedInfo = failed > 0 ? ` · 失败 ${failed} 页` : "";
   const countLine = `${progressText}${failedInfo}`;
   return `${resolveCollectProgressStatusText(progress)} · ${countLine}`;
 }
@@ -68,8 +75,9 @@ export function resolveRingView(progress?: CollectProgress | null): RingView | n
     progress.status === "running" ||
     progress.status === "stopping";
   const tooltip = collectTooltip(progress);
+  const failedPages = collectFailedPages(progress);
   if (fullFail) {
-    return { percent: collectPercent(progress), tone: "error", solid: false, center: "fail", tooltip };
+    return { percent: collectPercent(progress), tone: "error", solid: false, center: "fail", tooltip, ...(failedPages ? { failedPages } : {}) };
   }
   if (progress.status === "done") {
     return {
@@ -78,6 +86,7 @@ export function resolveRingView(progress?: CollectProgress | null): RingView | n
       solid: false,
       center: "success",
       tooltip,
+      ...(failedPages ? { failedPages } : {}),
     };
   }
   return {
@@ -87,5 +96,6 @@ export function resolveRingView(progress?: CollectProgress | null): RingView | n
     solid: false,
     center: "percent",
     tooltip,
+    ...(failedPages ? { failedPages } : {}),
   };
 }

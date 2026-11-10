@@ -1,7 +1,6 @@
 package service
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +10,9 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -20,7 +21,7 @@ import (
 
 func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -42,8 +43,32 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
+	// 上一个用例触发的检索重建/预热在后台跑（防抖 500ms），没结束时改站点会被拒绝；先等它们空闲。
+	waitSearchWorkIdle(t)
+	prev := db.Mdb
 	db.Mdb = gdb
+	t.Cleanup(func() {
+		waitSearchWorkIdle(t)
+		db.Mdb = prev
+	})
 	return gdb
+}
+
+// waitSearchWorkIdle 等后台的检索重建（含防抖定时器）和主站预热结束，避免用例之间互相影响。
+func waitSearchWorkIdle(t *testing.T) {
+	t.Helper()
+	// 先等切主站的预热协程（它会先睡 150ms 才置 isPrimaryWarming，光看标志会漏掉）。
+	if !WaitAsyncWork(15 * time.Second) {
+		t.Fatal("primary warmup / category sync did not finish")
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for IsPrimarySiteSwitching() || filmsnapshot.SearchRebuildScheduled() {
+		if time.Now().After(deadline) {
+			t.Fatal("search index rebuild / primary warmup did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 }
 
 func mockCollectServer() *httptest.Server {
@@ -149,7 +174,15 @@ func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 		t.Fatalf("create src_2: %v", err)
 	}
 	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "src_1", Name: "站1"}}, "q-test")
-	t.Cleanup(func() { progress.MarkStopped("src_1") })
+	// 真实的采集在跑时会登记任务；只有进度、没有任务也没有占用的排队会被当成残留当场清掉，
+	// 所以这里要登记一个任务，才算"正在采集"。
+	if _, err := progress.TryRegisterTask("src_1", "req-test", nil); err != nil {
+		t.Fatalf("register running task: %v", err)
+	}
+	t.Cleanup(func() {
+		progress.UnregisterTask("src_1", "req-test")
+		progress.MarkStopped("src_1")
+	})
 
 	srv := &CollectService{}
 	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {

@@ -1,13 +1,13 @@
 package film
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -16,7 +16,7 @@ import (
 
 func setupResetStatsDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {

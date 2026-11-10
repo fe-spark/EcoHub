@@ -12,6 +12,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/testutil"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -23,7 +24,7 @@ func useAccessFilmDB(t *testing.T, films ...model.FilmIndex) {
 	filmMetaCacheMu.Lock()
 	filmMetaCache = map[int64]filmMetaCacheItem{}
 	filmMetaCacheMu.Unlock()
-	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
+	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)

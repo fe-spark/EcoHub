@@ -526,3 +526,64 @@ func TestSubscribeCategory_Broadcast(t *testing.T) {
 		t.Fatal("expected test-src-1 to not be syncing after ready")
 	}
 }
+
+func TestMarkStoppedIfEpoch_SkipsNewerRun(t *testing.T) {
+	id := "mark-stopped-if-epoch"
+	t.Cleanup(func() { store.Delete(id) })
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-old")
+	oldEpoch := Epoch(id)
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-new")
+
+	if MarkStoppedIfEpoch(id, oldEpoch) {
+		t.Fatal("old epoch must not own the newer run")
+	}
+	if snap, _ := Snapshot(id); snap.Status != StatusStarting || snap.QueueId != "q-new" {
+		t.Fatalf("newer run changed: %+v", snap)
+	}
+	if !MarkStoppedIfEpoch(id, Epoch(id)) {
+		t.Fatal("current epoch should own the run")
+	}
+	if snap, _ := Snapshot(id); snap.Status != StatusStopped {
+		t.Fatalf("current run should be stopped: %+v", snap)
+	}
+}
+
+func TestMarkFailedIfEpoch_SkipsNewerRun(t *testing.T) {
+	id := "mark-failed-if-epoch"
+	t.Cleanup(func() { store.Delete(id) })
+	oldEpoch := MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-old")[id]
+	if oldEpoch != Epoch(id) {
+		t.Fatalf("returned epoch %d != current %d", oldEpoch, Epoch(id))
+	}
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-new")
+
+	if MarkFailedIfEpoch(id, oldEpoch) {
+		t.Fatal("old epoch must not own the newer run")
+	}
+	if snap, _ := Snapshot(id); snap.Status != StatusStarting || snap.QueueId != "q-new" {
+		t.Fatalf("newer run changed: %+v", snap)
+	}
+	if !MarkFailedIfEpoch(id, Epoch(id)) {
+		t.Fatal("current epoch should own the run")
+	}
+	if snap, _ := Snapshot(id); snap.Status != StatusFailed {
+		t.Fatalf("current run should be failed: %+v", snap)
+	}
+}
+
+func TestSetPageTotalIfEpoch_SkipsNewerRun(t *testing.T) {
+	id := "set-page-total-if-epoch"
+	t.Cleanup(func() { store.Delete(id) })
+	oldEpoch := MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-old")[id]
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: id, Name: "x"}}, "q-new")
+
+	if SetPageTotalIfEpoch(id, oldEpoch, 9) {
+		t.Fatal("old epoch must not own the newer run")
+	}
+	if got := PageTotal(id); got != -1 {
+		t.Fatalf("newer run page total = %d, want -1", got)
+	}
+	if !SetPageTotalIfEpoch(id, Epoch(id), 3) || PageTotal(id) != 3 {
+		t.Fatalf("current epoch should set page total, got %d", PageTotal(id))
+	}
+}

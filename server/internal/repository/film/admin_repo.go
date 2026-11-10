@@ -220,7 +220,8 @@ func InvalidateMasterSwitchCaches() {
 	}
 }
 
-const filmCleanBatchSize = 500
+// filmCleanBatchSize 每轮清理的影片数。包级变量，测试可调小。
+var filmCleanBatchSize = 500
 
 type filmCleanRow struct {
 	Mid int64
@@ -228,14 +229,14 @@ type filmCleanRow struct {
 }
 
 // CleanEmptyFilms 分批硬删片名为空或无法识别大类（pid=0）的档案。
-func CleanEmptyFilms() int64 {
+func CleanEmptyFilms() (int64, error) {
 	return cleanFilmBatches("CleanEmptyFilms", func(q *gorm.DB) *gorm.DB {
 		return q.Where("name = ? OR name IS NULL OR pid = 0", "")
 	})
 }
 
 // CleanPlaylessFilms 清理无任何播放线路且超过宽限期的幽灵影片（例如源站全部删除后残留的影片）
-func CleanPlaylessFilms(gracePeriod time.Duration) int64 {
+func CleanPlaylessFilms(gracePeriod time.Duration) (int64, error) {
 	if gracePeriod <= 0 {
 		gracePeriod = 7 * 24 * time.Hour
 	}
@@ -247,24 +248,33 @@ func CleanPlaylessFilms(gracePeriod time.Duration) int64 {
 	})
 }
 
-func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
+// cleanFilmBatches 分批硬删命中 scope 的影片；出错时返回已清理条数与错误。
+func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) (int64, error) {
 	if db.Mdb == nil {
-		return 0
+		return 0, nil
 	}
 	var cleaned int64
+	// 按 mid 升序游标前进：已删除或不命中的行不再重复扫描。
+	var cursor int64
 	for {
 		var rows []filmCleanRow
-		q := scope(db.Mdb.Model(&model.FilmIndex{}).Select("film_index.mid, film_index.pid")).Limit(filmCleanBatchSize)
+		q := scope(db.Mdb.Model(&model.FilmIndex{}).Select("film_index.mid, film_index.pid")).
+			Where("film_index.mid > ?", cursor).
+			Order("film_index.mid").
+			Limit(filmCleanBatchSize)
 		if err := q.Scan(&rows).Error; err != nil {
 			log.Printf("%s Error: %v", logName, err)
-			return cleaned
+			return cleaned, fmt.Errorf("查询待清理影片失败: %w", err)
 		}
 		if len(rows) == 0 {
-			return cleaned
+			return cleaned, nil
 		}
 		mids := make([]int64, 0, len(rows))
 		pidSet := make(map[int64]struct{}, len(rows))
 		for _, row := range rows {
+			if row.Mid > cursor {
+				cursor = row.Mid
+			}
 			if row.Mid <= 0 {
 				continue
 			}
@@ -275,31 +285,122 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
 		}
 		if len(mids) == 0 {
 			log.Printf("%s 跳过无效 mid，停止本轮", logName)
-			return cleaned
+			return cleaned, nil
 		}
 		if err := deleteFilmCascadeBatch(mids, pidSet); err != nil {
 			log.Printf("%s Delete Error: %v", logName, err)
-			return cleaned
+			return cleaned, fmt.Errorf("删除影片失败: %w", err)
 		}
 		cleaned += int64(len(mids))
 		if len(rows) < filmCleanBatchSize {
-			return cleaned
+			return cleaned, nil
 		}
 	}
 }
 
-// CleanOrphanMatchKeysAndMappings 清理关联影片已被删除的悬空匹配键与源映射
-func CleanOrphanMatchKeysAndMappings() int64 {
+// orphanScanBatchSize 每轮按 mid 游标顺序扫描的候选 mid 数；orphanDeleteBatchSize 每条 DELETE 的 mid 上限。
+// 两者都是包级变量，方便测试调小以覆盖多批次。
+var (
+	orphanScanBatchSize   = 5000
+	orphanDeleteBatchSize = 1000
+	// orphanBeforeDeleteHook 仅供测试：在 film_index 预检查之后、DELETE 之前调用，用于模拟并发写入。
+	orphanBeforeDeleteHook func(table string, orphans []int64)
+)
+
+// CleanOrphanPlaylists 分批清理关联影片已不存在的播放列表（film_source_playlists.mid 不在 film_index 中）。
+func CleanOrphanPlaylists() (int64, error) {
+	return cleanOrphanRowsByMid(model.TableFilmSourcePlaylist, "mid")
+}
+
+// CleanOrphanMatchKeysAndMappings 分批清理关联影片已被删除的悬空匹配键与源映射。
+// 任一步出错都会返回已清理条数与错误，交给定时任务告警。
+func CleanOrphanMatchKeysAndMappings() (int64, error) {
+	keys, err := cleanOrphanRowsByMid(model.TableMovieMatchKey, "mid")
+	if err != nil {
+		return keys, fmt.Errorf("清理悬空匹配键失败: %w", err)
+	}
+	mappings, err := cleanOrphanRowsByMid(model.TableMovieSourceMapping, "global_mid")
+	if err != nil {
+		return keys + mappings, fmt.Errorf("清理悬空源映射失败: %w", err)
+	}
+	return keys + mappings, nil
+}
+
+// cleanOrphanRowsByMid 按 mid 升序游标分批找出 table.column 中不在 film_index 的 mid 并删除。
+// 每轮只走索引取一小段 DISTINCT mid，再到 film_index 主键查存在性，最后按 IN 列表删除，
+// 避免整表 NOT EXISTS 的长语句撞上 MySQL readTimeout。
+// film_index 存在性检查与原 SQL 一致，不过滤软删除记录。
+func cleanOrphanRowsByMid(table, column string) (int64, error) {
+	if db.Mdb == nil {
+		return 0, nil
+	}
+	scanSize := orphanScanBatchSize
+	if scanSize <= 0 {
+		scanSize = 5000
+	}
+	deleteSize := orphanDeleteBatchSize
+	if deleteSize <= 0 {
+		deleteSize = 1000
+	}
+	session := db.Mdb.Session(&gorm.Session{SkipDefaultTransaction: true})
 	var cleaned int64
-	res1 := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = movie_match_keys.mid)").Delete(&model.MovieMatchKey{})
-	if res1.Error == nil {
-		cleaned += res1.RowsAffected
+	var cursor int64 = -1 << 63
+	for {
+		var candidates []int64
+		if err := session.Table(table).
+			Distinct(column).
+			Where(column+" > ?", cursor).
+			Order(column).
+			Limit(scanSize).
+			Pluck(column, &candidates).Error; err != nil {
+			return cleaned, fmt.Errorf("扫描 %s 失败: %w", table, err)
+		}
+		if len(candidates) == 0 {
+			return cleaned, nil
+		}
+		next := candidates[len(candidates)-1]
+		if next <= cursor {
+			// 防御：游标不前进时直接结束，避免死循环
+			return cleaned, nil
+		}
+		cursor = next
+
+		var existing []int64
+		if err := session.Unscoped().Model(&model.FilmIndex{}).
+			Where("mid IN ?", candidates).
+			Pluck("mid", &existing).Error; err != nil {
+			return cleaned, fmt.Errorf("查询 film_index 失败: %w", err)
+		}
+		exists := make(map[int64]struct{}, len(existing))
+		for _, mid := range existing {
+			exists[mid] = struct{}{}
+		}
+		orphans := make([]int64, 0, len(candidates)-len(existing))
+		for _, mid := range candidates {
+			if _, ok := exists[mid]; !ok {
+				orphans = append(orphans, mid)
+			}
+		}
+		if orphanBeforeDeleteHook != nil {
+			orphanBeforeDeleteHook(table, orphans)
+		}
+		for i := 0; i < len(orphans); i += deleteSize {
+			end := i + deleteSize
+			if end > len(orphans) {
+				end = len(orphans)
+			}
+			// 删除时再原子复核一次 film_index，避免预检查与删除之间新写入的影片被误删。
+			res := session.Exec("DELETE FROM "+table+" WHERE "+column+" IN ? AND NOT EXISTS (SELECT 1 FROM "+
+				model.TableFilmIndex+" WHERE "+model.TableFilmIndex+".mid = "+table+"."+column+")", orphans[i:end])
+			if res.Error != nil {
+				return cleaned, fmt.Errorf("删除 %s 失败: %w", table, res.Error)
+			}
+			cleaned += res.RowsAffected
+		}
+		if len(candidates) < scanSize {
+			return cleaned, nil
+		}
 	}
-	res2 := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = movie_source_mappings.global_mid)").Delete(&model.MovieSourceMapping{})
-	if res2.Error == nil {
-		cleaned += res2.RowsAffected
-	}
-	return cleaned
 }
 
 func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {

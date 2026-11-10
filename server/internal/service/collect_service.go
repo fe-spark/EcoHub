@@ -26,7 +26,27 @@ var (
 	primarySwitchEpoch atomic.Uint64
 	primarySwitchMu    sync.Mutex
 	isPrimaryWarming   atomic.Bool
+	// primaryWarmups 记录切换主站后异步预热的协程，测试用来等它们结束。
+	primaryWarmups sync.WaitGroup
+	// categorySyncs 记录异步同步分类的协程，测试用来等它们结束。
+	categorySyncs sync.WaitGroup
 )
+
+// WaitAsyncWork 等本包启动的后台协程（切主站预热、异步同步分类）全部结束，超时返回 false。测试用。
+func WaitAsyncWork(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		primaryWarmups.Wait()
+		categorySyncs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
 
 // IsPrimarySiteSwitching 返回当前是否正在构建检索索引或预热主站缓存
 func IsPrimarySiteSwitching() bool {
@@ -177,7 +197,9 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	} else {
 		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
 	}
+	primaryWarmups.Add(1)
 	go func(targetSourceID string, currentEpoch uint64) {
+		defer primaryWarmups.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				syslog.Errorf("[Collect] 切换主站后异步预热索引发生异常: %v", r)

@@ -138,7 +138,8 @@ func CollectSingleFilm(ids string) {
 		targets = append(targets, source)
 		sourceMids[source.Id] = requestID
 	}
-	targets = filterCollectableSources(targets, "单片更新")
+	// 令牌在占用那一刻拿到并交给批次，不在建批次时再现读。
+	targets, tokens := occupyCollectSourcesWithTokens(targets, "单片更新")
 	if len(targets) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 匹配站点均已在正采集队列中，跳过")
 		return
@@ -146,6 +147,7 @@ func CollectSingleFilm(ids string) {
 
 	startedAt := time.Now()
 	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, model.CollectTagSingleUpdate, targets, startedAt).
+		withClaim(CollectClaim{Sources: targets, tokens: tokens}).
 		withReplayFilmIDs([]int64{globalMid})
 	defer batchCtx.close()
 
@@ -165,6 +167,16 @@ func CollectSingleFilm(ids string) {
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
 			defer batchCtx.releaseSourceOccupy(src.Id)
+			defer func() {
+				if r := recover(); r != nil {
+					reason := reportSourcePanic("CollectSingleFilm", src, batchCtx, r)
+					batchCtx.recordSourceSnapshot(singleFilmSourceDetail(src, 0, reason))
+					// 站点已被新的采集重新占用时不告警。
+					if batchCtx.ownsOccupy(src.Id) {
+						emitSourceFailedNotify(src.Id, src.Name, reason)
+					}
+				}
+			}()
 			stored, err := collectFilmById(sourceMid, &src, batchCtx)
 			if errors.Is(err, errCollectDuringMaintenance) {
 				log.Printf("[Spider] 站点 %s 停止采集：维护任务执行中（%s）", src.Name, maintenanceRunningDetail())
