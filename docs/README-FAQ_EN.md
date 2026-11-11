@@ -84,7 +84,18 @@ By `film_index.update_stamp`, newest first, then by `mid`.
 
 All collect sources follow the same rules.
 
-Site category filters and TVBox use the same rules (category, genre, region, language, year, sort). TVBox has an extra Redis cache, so check the cache first when they briefly differ.
+The site category page and TVBox take their filter options from the same filter data and use the same matching rules. The site queries the in-memory index; TVBox queries MySQL:
+
+| Filter | Rule | Same on both? |
+| --- | --- | --- |
+| Category | Expanded by the source's category rules into the same set of source categories (including merged groups); only films with a play line from that source | Yes. The site uses the main source; TVBox uses each subscribed site's own source |
+| Genre (剧情) | The film's genre tags contain the selected value | Yes |
+| Region, language | Exactly equal to the selected value | Yes |
+| Year | Equal to the selected year; no filter when the value is not a number | Yes |
+| "其他" (Other) | Value not in the filter options; empty values count too | Yes |
+| Sort | Recently updated, popularity, rating, year | Mostly. When sorting by year, films in the same year are ordered by update time on the site and by film ID on TVBox, so the order within a year can differ |
+
+Both sides have a Redis cache with different lifetimes: site filter results 2 hours; TVBox list pages without genre, region, language, or year filters about 12 hours, and with filters 3 minutes. When they briefly differ, check the cache first.
 
 ## Network
 
