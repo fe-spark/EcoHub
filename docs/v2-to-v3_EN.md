@@ -33,7 +33,7 @@ Keep the old data until the new site collects films, then delete it.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
 To set passwords before the first initialization, also put `JWT_SECRET`, `ECOHUB_ADMIN_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, and `REDIS_PASSWORD` before `sh`. See [Deploy guide](./README-Deploy_EN.md#set-passwords-on-the-first-install). With the bundled databases, keep `MYSQL_HOST=mysql` and `REDIS_HOST=redis`.
@@ -56,7 +56,7 @@ rm -rf <old-install-dir>/data/mysql <old-install-dir>/data/redis <old-install-di
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=<old-install-dir> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_INSTALL_DIR=<old-install-dir> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
 ## Method 3: bring your own database
