@@ -134,7 +134,7 @@
  * 改成最宽 340px、空间不够时随控制条收窄（不挤掉右侧按钮），文字放不下时以省略号结尾。
  * 全屏和网页全屏不动，仍用插件的 400px。
  */
-.playerWrapper :global(.art-video-player:not(.art-fullscreen):not(.art-fullscreen-web)) {
+.artPlayer:not(:global(.art-fullscreen)):not(:global(.art-fullscreen-web)) {
   :global(.art-controls-center) {
     min-width: 0;
   }
@@ -151,12 +151,12 @@
   }
 }
 
-.playerWrapper :global(.apd-input) {
+.artPlayer :global(.apd-input) {
   text-overflow: ellipsis;
 }
 
 /* 弹幕加载状态点：在输入框左侧，悬停看完整说明 */
-.playerWrapper :global(.ecohub-danmaku-status) {
+.artPlayer :global(.ecohub-danmaku-status) {
   flex-shrink: 0;
   width: 6px;
   height: 6px;
@@ -183,6 +183,73 @@
   &[data-tone="loading"] {
     animation: ecohubDanmakuPulse 1s ease-in-out infinite;
   }
+}
+
+/*
+ * 按播放器显示宽度排版（档位由 playerLayout.ts 写在播放器根节点的 data-ecohub-width 上，
+ * 尺寸变化时实时更新；和浏览器标识、是否触屏无关）。
+ * .artPlayer 直接挂在 Artplayer 的根节点上：网页全屏时 Artplayer 会把根节点移到 body 下，
+ * 挂在外层 .playerWrapper 下的选择器在网页全屏里不生效。
+ * - compact（< 560px）：收起弹幕输入框和网页全屏按钮，按钮收窄，加载状态改在弹幕开关上显示；
+ *   弹幕设置面板改为相对整个控制条居中，不再从按钮处向右伸出播放器。
+ * - medium（560–767px）：收起网页全屏按钮（已在网页全屏里时保留，用来退出）、按钮收窄，给输入框留出位置。
+ * - wide（≥ 768px）：插件和播放器默认布局。
+ */
+.artPlayer[data-ecohub-width="compact"],
+.artPlayer[data-ecohub-width="medium"] {
+  :global(.art-controls .art-control) {
+    min-width: 32px;
+  }
+
+  // 已在网页全屏里时保留按钮，用来退出
+  &:not(:global(.art-fullscreen-web)) :global(.art-controls .art-control-fullscreenWeb) {
+    display: none;
+  }
+
+  :global(.art-controls-center) {
+    padding: 0 6px;
+  }
+
+  :global(.artplayer-plugin-danmuku) {
+    gap: 6px;
+  }
+}
+
+.artPlayer[data-ecohub-width="compact"] {
+  :global(.apd-emitter) {
+    display: none !important;
+  }
+
+  :global(.artplayer-plugin-danmuku),
+  :global(.artplayer-plugin-danmuku .apd-config) {
+    position: static;
+  }
+
+  :global(.artplayer-plugin-danmuku .apd-config .apd-config-panel) {
+    z-index: 99;
+    bottom: 100%;
+    left: 50%;
+    width: min(320px, 100%);
+    transform: translateX(-50%);
+  }
+}
+
+/* 弹幕开关上的状态点：只在输入框收起（compact）时显示 */
+.artPlayer :global(.apd-toggle) {
+  position: relative;
+}
+
+.artPlayer :global(.ecohub-danmaku-status.ecohub-danmaku-status--toggle) {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: -3px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.artPlayer[data-ecohub-width="compact"] :global(.ecohub-danmaku-status.ecohub-danmaku-status--toggle:not([data-tone="none"])) {
+  display: block;
 }
 
 @keyframes ecohubDanmakuPulse {
