@@ -15,12 +15,12 @@
 
 [中文](../README.md) | English
 
-[Demo](https://eco.fe-spark.cn) · [v3 Preview](http://148.135.106.141:3000) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram](https://t.me/ecohub_club)
+[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram](https://t.me/ecohub_club)
 
 </div>
 
 > [!WARNING]
-> v3 cannot read a v2 database, and there is no migration. Do not pull the new image on top of an old `./data/mysql`, and do not click "立即升级" (upgrade now) in the v2 admin. Install into a new directory or wipe the data, then run a full collect. Steps: [v2 to v3](./v2-to-v3.md) (Chinese). The current release is `v3.0.2`. Report problems in [Issues](https://github.com/fe-spark/EcoHub/issues).
+> v3 cannot read a v2 database, and there is no migration. Do not pull the new image on top of an old `./data/mysql`, and do not click "立即升级" (upgrade now) in the v2 admin. Install into a new directory or wipe the data, then run a full collect. Steps: [v2 to v3](./v2-to-v3_EN.md). The current release is `v3.0.2`. Report problems in [Issues](https://github.com/fe-spark/EcoHub/issues).
 
 Updates are slow. Pull requests are welcome.
 
@@ -41,22 +41,10 @@ The clients are separate repositories, included as git submodules under `app-for
 | --- | --- |
 | Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
-| v3 preview | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
-
-Visitor login is `guest` / `guest` (read-only). The demo does not work on China Mobile. Use China Unicom or China Telecom.
-
-## Recommendations
-
-| Kind | Provider | Link |
-| --- | --- | --- |
-| Server | CloudCone (hosts the demo; unthrottled disk I/O) | [Visit](https://app.cloudcone.com/?ref=14393) |
-| Network | LiangXinYun, from ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| Network | PeiQian, from ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| Network | DOVE | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## Install
 
-You need Docker 20+ and Docker Compose 2+. Aim for at least 2 CPU cores and 2 GB RAM. One command installs everything:
+You need Docker 20+ and Docker Compose. Aim for at least 2 CPU cores and 2 GB RAM. One command installs everything:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
@@ -73,33 +61,60 @@ Passwords, ports, reverse proxy, and 1Panel: [Deploy guide](./README-Deploy_EN.m
 
 ## Local development
 
-You need Go 1.27+, Node.js 20.9+, MySQL 8, and Redis 7. If you have no database at hand, the root compose file can start only the databases. It maps MySQL and Redis to `127.0.0.1:3306` and `127.0.0.1:6379`, with the same credentials as `server/.env.example`:
+You need Go 1.27+, Node.js 20.9+, MySQL 8, and Redis 7.
 
-```bash
-docker compose up -d mysql redis
-```
+The `docker-compose.yml` in the repository root is for local development only. Do not use it to deploy. How it differs from the release file [deploy/release/compose.yml](../deploy/release/compose.yml):
 
-Then start the server and the web app in two terminals:
+| | Root `docker-compose.yml` | `deploy/release/compose.yml` |
+| --- | --- | --- |
+| App | Built locally from `server/` and `web/` source, as two containers `Eco-server` and `Eco-web` | Pulls the All-in-One image, one `Eco-hub` container |
+| MySQL and Redis ports | Mapped to `127.0.0.1:3306` and `127.0.0.1:6379` on the host | Not mapped |
+| Data | Docker named volumes `eco-mysql-data`, `eco-redis-data`, `eco-server-uploads` | `data/` in the install directory |
 
-```bash
-cd server && cp .env.example .env && go run ./cmd/server
-```
+Two ways to use it:
 
-```bash
-cd web && cp .env.example .env.local && npm install && npm run dev
-```
+1. Start only the databases and run the server and web app on the host (day-to-day development). The database credentials match `server/.env.example`:
 
-Site `http://127.0.0.1:3000`, admin `http://127.0.0.1:3000/manage`, API `http://127.0.0.1:8080`. Details: [Server](../server/README.md) and [Web](../web/README.md) (Chinese).
+   ```bash
+   docker compose up -d mysql redis
+   ```
+
+   Then start the server and the web app in two terminals:
+
+   ```bash
+   cd server && cp .env.example .env && go run ./cmd/server
+   ```
+
+   ```bash
+   cd web && cp .env.example .env.local && npm install && npm run dev
+   ```
+
+   Site `http://127.0.0.1:3000`, admin `http://127.0.0.1:3000/manage`, API `http://127.0.0.1:8080`.
+
+2. Build the whole stack from source as containers (to check the Dockerfiles or test end to end):
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   Site `http://127.0.0.1:3000`, API `http://127.0.0.1:18080`. Change ports and passwords in a `.env` in the repository root (copy it from [.env.example](../.env.example); the defaults work without it).
+
+Notes:
+
+- The container names `Eco-mysql` and `Eco-redis` are the same as in the release file. Do not run the dev stack and a real deployment on the same machine.
+- If a MySQL or Redis on the host already uses `3306` or `6379`, the dev stack cannot start. Stop the host service, or use it instead.
+
+Details: [Server](../server/README_EN.md) and [Web](../web/README_EN.md).
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
 | [Deploy guide](./README-Deploy_EN.md) | Install, the `ecohub` command, passwords, ports, 1Panel, reverse proxy, environment variables |
-| [v2 to v3](./v2-to-v3.md) (Chinese) | Stop the old stack, reinstall on an empty database, full collect |
+| [v2 to v3](./v2-to-v3_EN.md) | Stop the old stack, reinstall on an empty database, full collect |
 | [FAQ](./README-FAQ_EN.md) | Empty site, main source, collect, cache, login |
-| [Scheduled task conflicts](./cron-task-conflict.md) (Chinese) | Who runs first when collect and maintenance fire together |
-| [Release notes](./RELEASE.md) (Chinese) | What changed in the current release |
+| [Scheduled task conflicts](./cron-task-conflict_EN.md) | Who runs first when collect and maintenance fire together |
+| [Release notes](./RELEASE_EN.md) | What changed in the current release |
 | [Docs index](./README.md) | All documents |
 
 > EcoHub does not provide or store media files. Sources come from collect APIs the operator configures. Follow local law and the collect sources' terms of use.
