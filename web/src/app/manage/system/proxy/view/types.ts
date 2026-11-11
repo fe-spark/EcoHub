@@ -3,6 +3,7 @@ export interface ProxyModulesValues {
   tmdb: boolean;
   notify: boolean;
   upgrade: boolean;
+  danmaku: boolean;
 }
 
 export interface ProxyConfigValues {

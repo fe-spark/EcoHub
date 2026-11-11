@@ -17,6 +17,7 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import ProxyOutletBanner from "@/app/manage/components/proxy-outlet-banner";
 import { isFormValuesEqual } from "@/lib/deep-equal";
 import styles from "./danmaku-config-card.module.less";
 
@@ -181,6 +182,7 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
               {/* 仅在开启自动嗅探时才级联展示外部接口配置 */}
               {currentValues.autoSniff && (
                 <>
+                  <ProxyOutletBanner module="danmaku" />
                   {/* 自定义弹幕 API 地址 */}
                   <div className={styles.field}>
                     <Typography.Text strong>自定义弹幕 API 地址 (可选)</Typography.Text>

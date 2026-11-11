@@ -142,6 +142,32 @@ export default function ProxyModulesScope({
             </Flex>
           </div>
         </Col>
+        <Col xs={24} sm={12}>
+          <div
+            className={styles.moduleCard}
+            style={{
+              opacity: isEnabled ? 1 : 0.55,
+              transition: "opacity 0.2s ease",
+            }}
+          >
+            <Flex justify="space-between" align="center">
+              <div>
+                <div className={styles.moduleTitle}>弹幕抓取</div>
+                <div className={styles.moduleDesc}>
+                  {isEnabled
+                    ? "弹弹play 接口与自建 danmu-api 的弹幕搜索和下载（默认直连）"
+                    : "全局代理未开启，弹幕接口直连访问"}
+                </div>
+              </div>
+              <Form.Item name={["modules", "danmaku"]} valuePropName="checked" noStyle>
+                <Switch
+                  size="small"
+                  disabled={!isEnabled || !canOperate}
+                />
+              </Form.Item>
+            </Flex>
+          </div>
+        </Col>
       </Row>
     </div>
   );
