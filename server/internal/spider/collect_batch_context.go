@@ -448,6 +448,9 @@ func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error 
 	if _, err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
+	if isFullCollectHour(b.sourceHour(source.Id)) {
+		noteSearchResealFullCollect()
+	}
 	mids := b.takeSourceMIDs(source.Id)
 	scheduleSearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
@@ -496,6 +499,9 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
+	if b.hasFullCollectSource() {
+		noteSearchResealFullCollect()
+	}
 	return finalizeStreamPublish(b.takeAffectedMIDs, warmupHome)
 }
 

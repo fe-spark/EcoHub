@@ -11,12 +11,13 @@ import (
 
 // searchResealQueue 全局封口周期。
 // 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
-// 全部空闲后整库合并封一次，再把等检索的站点收成完成。
+// 全部采集队列都结束后再封一次。任一队列里有全量站就整表重建，否则按编号增量封口。
 type searchResealQueue struct {
-	mu      sync.Mutex
-	pending map[int64]struct{}
-	sealing map[string]struct{}
-	running bool
+	mu          sync.Mutex
+	pending     map[int64]struct{}
+	sealing     map[string]struct{}
+	running     bool
+	fullCollect bool
 }
 
 var searchReseal = &searchResealQueue{
@@ -30,6 +31,57 @@ var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 
 var applySearchReseal = filmsnapshot.ResealSearchIndexMids
 
+// requestSearchRebuild 全量站参与本轮时整表重建，不再按编号点查。
+var requestSearchRebuild = filmsnapshot.RequestActiveFilmSearchIndexRebuild
+
+// collectQueueCount 正在跑的采集队列。封口要等每一条队列结束，不能只看当前没有站在抓页。
+type collectQueueCount struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	n    int
+}
+
+func newCollectQueueCount() *collectQueueCount {
+	c := &collectQueueCount{}
+	c.cond = sync.NewCond(&c.mu)
+	return c
+}
+
+var collectQueues = newCollectQueueCount()
+
+func beginCollectQueue() {
+	collectQueues.mu.Lock()
+	collectQueues.n++
+	collectQueues.mu.Unlock()
+}
+
+func endCollectQueue() {
+	collectQueues.mu.Lock()
+	if collectQueues.n > 0 {
+		collectQueues.n--
+	}
+	collectQueues.cond.Broadcast()
+	collectQueues.mu.Unlock()
+}
+
+func collectQueueActive() bool {
+	collectQueues.mu.Lock()
+	defer collectQueues.mu.Unlock()
+	return collectQueues.n > 0
+}
+
+func waitCollectQueues() {
+	collectQueues.mu.Lock()
+	for collectQueues.n > 0 {
+		collectQueues.cond.Wait()
+	}
+	collectQueues.mu.Unlock()
+}
+
+func isFullCollectHour(hour int) bool {
+	return hour < 0
+}
+
 // addSealing 采集跑完后挂进本次封口周期。空封口也要走完，保证每次都有待检索阶段。
 func (q *searchResealQueue) addSealing(sourceID string) {
 	sourceID = strings.TrimSpace(sourceID)
@@ -38,6 +90,23 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	}
 	q.mu.Lock()
 	q.sealing[sourceID] = struct{}{}
+	start := !q.running
+	if start {
+		q.running = true
+	}
+	q.mu.Unlock()
+
+	notifySealWaiting()
+	if start {
+		go q.run()
+	}
+}
+
+// noteSearchResealFullCollect 本轮任一采集队列里有全量站。封口时整表重建。
+func noteSearchResealFullCollect() {
+	q := searchReseal
+	q.mu.Lock()
+	q.fullCollect = true
 	start := !q.running
 	if start {
 		q.running = true
@@ -86,7 +155,7 @@ func notifySealWaiting() {
 func (q *searchResealQueue) run() {
 	for {
 		q.mu.Lock()
-		if len(q.pending) == 0 && len(q.sealing) == 0 {
+		if len(q.pending) == 0 && len(q.sealing) == 0 && !q.fullCollect {
 			q.running = false
 			q.mu.Unlock()
 			return
@@ -97,12 +166,20 @@ func (q *searchResealQueue) run() {
 			waitCollectIdle()
 			continue
 		}
+		if collectQueueActive() {
+			waitCollectQueues()
+			continue
+		}
 
 		q.mu.Lock()
-		mids := q.takePendingLocked()
+		mids, full := q.takePendingLocked()
 		q.mu.Unlock()
 
-		if len(mids) > 0 {
+		if full {
+			searchSealRunning.Store(true)
+			requestSearchRebuild()
+			searchSealRunning.Store(false)
+		} else if len(mids) > 0 {
 			searchSealRunning.Store(true)
 			applySearchReseal(mids)
 			searchSealRunning.Store(false)
@@ -134,13 +211,15 @@ func (q *searchResealQueue) run() {
 	}
 }
 
-func (q *searchResealQueue) takePendingLocked() []int64 {
+func (q *searchResealQueue) takePendingLocked() ([]int64, bool) {
 	mids := make([]int64, 0, len(q.pending))
 	for mid := range q.pending {
 		mids = append(mids, mid)
 	}
 	q.pending = map[int64]struct{}{}
-	return mids
+	full := q.fullCollect
+	q.fullCollect = false
+	return mids, full
 }
 
 // complete 把当前等检索的站点收成完成。已经重开的站点保持原状。

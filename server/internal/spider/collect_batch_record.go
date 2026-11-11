@@ -255,6 +255,23 @@ func (b *collectBatchContext) sourceFilmCount(sourceID string) int {
 	return len(b.sourceFilmMIDs[sourceID])
 }
 
+func (b *collectBatchContext) hasFullCollectSource() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if isFullCollectHour(b.hour) {
+		return true
+	}
+	for _, hour := range b.sourceHours {
+		if isFullCollectHour(hour) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *collectBatchContext) batchHour() int {
 	if b == nil {
 		return 0

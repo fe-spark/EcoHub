@@ -11,7 +11,7 @@ Release **v3.0.4**, image `ghcr.io/fe-spark/ecohub:v3.0.4` (`:latest` also point
 ### v3.0.4 changes
 
 - **Collect replay**: films already in the library are queried by page for identity, update time, and match keys. Unchanged films no longer update the timestamp one by one, and unchanged match keys are not rewritten (#88).
-- **Search index seal**: when the first collect on a new database finishes, a missing in-memory index or an index with 0 entries is loaded by a full sequential scan of the film table and play lines. An index that already has entries is still sealed incrementally by the changed IDs. The collect UI still waits until the rebuild finishes before the round ends (#88).
+- **Search index seal**: sealing starts only after every collect queue has finished. If any queue in the round includes a full collect, or the in-memory index is missing or has 0 entries, the film table and play lines are loaded by a full sequential scan. When every queue is an hourly incremental collect and the index already has entries, the seal updates only this round's IDs. The collect UI still waits until the rebuild finishes before the round ends (#88, #90).
 - **Clients**: the Android client included in this repository is updated to `v1.1.5`, and the OHOS client to `v1.4.7`.
 
 ### Architecture
@@ -35,7 +35,7 @@ Release **v3.0.4**, image `ghcr.io/fe-spark/ecohub:v3.0.4` (`:latest` also point
 
 ### Search and site
 
-- In-memory inverted index (word segmentation, full pinyin, pinyin initials) and category rankings, updated incrementally during collect. A full rebuild runs once at startup. When sealing, a missing in-memory index, an index with 0 entries, or a failed database read loads the film table and play lines sequentially; an index that already has entries is sealed incrementally by changed IDs.
+- In-memory inverted index (word segmentation, full pinyin, pinyin initials) and category rankings, updated incrementally during collect. A full rebuild runs once at startup. Sealing runs after every collect queue has finished. A full collect in any queue, a missing in-memory index, an index with 0 entries, or a failed database read loads the film table and play lines sequentially. When every queue is an hourly incremental collect and the index already has entries, the seal updates only the changed IDs.
 - The home page hides categories without films and shows at most 12 top-level category blocks. Navigation, filters, and TVBox still use all categories of the source.
 - Category rules apply per source. The order and visibility of site categories follow the admin mapping. Hidden categories (including rule-merged groups) are removed from all site APIs, and old URLs indicate that the category is no longer valid; search, daily updates, and TVBox keywords do not return these films either. Collect still stores these films, and category management still lists them and can re-enable them. A subcategory is never promoted to top level automatically.
 - Unmapped films appear in the source's "其他" (Other) category. When a source rename takes over the previous "其他" ID, a new ID is assigned as a fallback.
