@@ -8,7 +8,13 @@ import { Button, Result } from "antd";
 import { CloseCircleFilled, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
-import { loadDanmakuSettings, saveDanmakuSettings } from "./danmakuSettings";
+import {
+  MOBILE_DEFAULT_FONT_SIZE,
+  changedDanmakuSettings,
+  loadDanmakuSettings,
+  pickDanmakuSettings,
+  saveDanmakuSettings,
+} from "./danmakuSettings";
 import {
   DANMAKU_LOADING_STATUS,
   danmakuLoadedStatus,
@@ -132,7 +138,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         ? [
             artplayerPluginDanmuku({
               margin: [10, "50%"],
-              ...loadDanmakuSettings(),
+              // 桌面沿用插件默认 25px；手机按播放器高度取字号，避免 25px 在约 190px 高的画面里占掉一大片
+              fontSize: isMobile ? MOBILE_DEFAULT_FONT_SIZE : 25,
+              ...loadDanmakuSettings(isMobile),
               synchronousPlayback: true,
               // 不按播放器宽度把弹幕栏挪到播放器外面（外层容器 overflow:hidden 会把它裁掉）
               width: 0,
@@ -157,7 +165,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         text: item.text,
                         time: Number(item.time) || 0,
                         color: item.color || "#ffffff",
-                        mode: toMode(item.mode),
+                        // 手机播放器只有三四行高，插件只在同类弹幕之间避让，顶部/底部固定弹幕会压在滚动弹幕上；
+                        // 手机上统一按滚动弹幕显示，全部参与同一套避让
+                        mode: isMobile ? 0 : toMode(item.mode),
                       }));
                       status = danmakuLoadedStatus(list.length, (resp as { meta?: DanmakuMeta }).meta);
                     } else {
@@ -293,9 +303,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     player = art;
     if (danmakuEnabled) {
       art.on("ready", renderDanmakuStatus);
-      art.on("artplayerPluginDanmuku:config", (option) => saveDanmakuSettings(option));
-      art.on("artplayerPluginDanmuku:show", () => saveDanmakuSettings({ visible: true }));
-      art.on("artplayerPluginDanmuku:hide", () => saveDanmakuSettings({ visible: false }));
+      // 插件每次改设置都发整份参数，只存和上次相比真正变了的字段
+      let lastDanmakuSettings = pickDanmakuSettings((art.plugins as any)?.artplayerPluginDanmuku?.option);
+      art.on("artplayerPluginDanmuku:config", (option) => {
+        const next = pickDanmakuSettings(option);
+        const changed = changedDanmakuSettings(lastDanmakuSettings, next);
+        lastDanmakuSettings = next;
+        saveDanmakuSettings(changed, isMobile);
+      });
+      art.on("artplayerPluginDanmuku:show", () => saveDanmakuSettings({ visible: true }, isMobile));
+      art.on("artplayerPluginDanmuku:hide", () => saveDanmakuSettings({ visible: false }, isMobile));
       // 拖动进度后清掉屏幕上正在飞的旧弹幕，新位置之后的弹幕由插件按时间照常发出
       art.on("video:seeking", () => {
         (art.plugins as any)?.artplayerPluginDanmuku?.reset();
