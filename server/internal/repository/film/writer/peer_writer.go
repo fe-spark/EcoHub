@@ -60,8 +60,20 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 
 // syncOwnedFilmTx 用本站最新采集结果更新自己的档案。不改其他站的档案，也不改播放备注和更新时间。
 func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, detail model.MovieDetail) (bool, error) {
+	changed, keys, err := syncOwnedFilmFieldsTx(tx, existing, sourceID, detail)
+	if err != nil || keys == nil {
+		return changed, err
+	}
+	if err := shared.SaveMovieMatchKeysByMidTx(tx, map[int64][]string{existing.Mid: keys}); err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
+// syncOwnedFilmFieldsTx 只更新档案字段。keys 为 nil 表示不用重写匹配键；空切片表示要写成没有键。
+func syncOwnedFilmFieldsTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, detail model.MovieDetail) (bool, []string, error) {
 	if existing == nil || existing.Mid <= 0 || existing.FirstSourceId != sourceID {
-		return false, nil
+		return false, nil, nil
 	}
 	if detail.Pid <= 0 && existing.Pid > 0 {
 		detail.Pid = existing.Pid
@@ -74,20 +86,17 @@ func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, de
 	}
 	next, err := ConvertFilmIndex(sourceID, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	updates := ownedFilmUpdates(existing, &next)
 	changed := len(updates) > 0
 	if changed {
 		updates["updated_at"] = time.Now()
 		if err := tx.Model(&model.FilmIndex{}).Where("mid = ?", existing.Mid).Updates(updates).Error; err != nil {
-			return false, err
+			return false, nil, err
 		}
 	}
-	if err := rewriteOwnedMatchKeysTx(tx, existing, updates, detail); err != nil {
-		return false, err
-	}
-	return changed, nil
+	return changed, ownedMatchKeys(existing, updates, detail), nil
 }
 
 func ownedFilmUpdates(existing, next *model.FilmIndex) map[string]any {
@@ -148,8 +157,7 @@ func putPresentUnlocked(updates map[string]any, locked map[string]struct{}, colu
 	putPresentString(updates, column, oldValue, nextValue)
 }
 
-// rewriteOwnedMatchKeysTx 按更新后的豆瓣、片名、大类重写本片匹配键，并删掉不再成立的旧键。
-func rewriteOwnedMatchKeysTx(tx *gorm.DB, existing *model.FilmIndex, updates map[string]any, detail model.MovieDetail) error {
+func ownedMatchKeys(existing *model.FilmIndex, updates map[string]any, detail model.MovieDetail) []string {
 	if existing == nil || existing.Mid <= 0 {
 		return nil
 	}
@@ -172,7 +180,10 @@ func rewriteOwnedMatchKeysTx(tx *gorm.DB, existing *model.FilmIndex, updates map
 		pid = detail.Pid
 	}
 	keys := shared.BuildMovieMatchKeysWithCategory(dbID, name, pid)
-	return shared.SaveMovieMatchKeysByMidTx(tx, map[int64][]string{existing.Mid: keys})
+	if keys == nil {
+		return []string{}
+	}
+	return keys
 }
 
 func putUnlocked[T comparable](updates map[string]any, locked map[string]struct{}, column string, oldValue, nextValue T) {
