@@ -9,113 +9,152 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io/)
-[![License](https://img.shields.io/github/license/fe-spark/EcoHub)](../LICENSE)
+[![Docker](https://img.shields.io/badge/ghcr.io-fe--spark%2Fecohub-2496ED?logo=docker&logoColor=white)](https://github.com/fe-spark/EcoHub/pkgs/container/ecohub)
+[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue)](../LICENSE)
 
-**Self-hosted media aggregation**
+**A self-hosted media aggregation system that collects film data from collect sources and serves a viewing site, an admin panel, and subscription endpoints for multiple clients.**
 
 [中文](../README.md) | English
 
-[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram](https://t.me/ecohub_club)
+[Demo](https://eco.fe-spark.cn) · [Admin demo](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Release notes](./RELEASE_EN.md) · [Telegram](https://t.me/ecohub_club)
 
 </div>
 
 > [!WARNING]
-> v3 is not compatible with the v2 database, and no data migration is provided. Do not pull the new image on top of an existing `./data/mysql`, and do not use "立即升级" (Upgrade now) in the v2 admin. Install into a new directory or clear the data, then run a full collect. For the procedure, see [Upgrading from v2 to v3](./v2-to-v3_EN.md). The current release is `v3.0.3`. Report issues in [Issues](https://github.com/fe-spark/EcoHub/issues).
+> The v3 database is incompatible with v2, and no data migration is provided. Do not pull the new image onto an existing `./data/mysql`, and do not use "立即升级" (Upgrade now) in the v2 admin panel. For the procedure, see [Upgrade from v2 to v3](./v2-to-v3_EN.md).
 
-The project is maintained in the author's spare time, and updates are infrequent. Pull requests are welcome.
+## Introduction
 
-## Overview
+EcoHub is a self-hosted media aggregation system. Administrators configure one or more collect sources in the admin panel; EcoHub pulls film data from them on a schedule into a single library and serves a viewing site, an admin panel, and subscription URLs for the EcoHub clients, TVBox / 影视仓, and MacCMS.
 
-EcoHub retrieves film data from the collect sources configured by the administrator. It provides a public site, an admin panel, and three subscription URLs (EcoHub client, TVBox / YingShiCang, MacCMS).
+Typical workflow: after installation, enable collect sources in the admin panel and run one full collect. The site then supports search, filtering, and playback. Adding a subscription URL to TVBox enables viewing on a TV.
 
-Typical workflow: after installation, enable collect sources in the admin panel and run a full collect. The site then supports search, filtering, and playback. Adding the TVBox subscription URL to TVBox enables playback on a TV.
+EcoHub is intended for individuals and small teams who want to run a private media site on their own server. It is released as a single Docker image and runs with MySQL and Redis.
 
-The clients are maintained in separate repositories and included as git submodules under `app-for-ohos/` and `app-for-android/`:
+EcoHub does not provide or store any media files. All content comes from the collect APIs configured by the operator.
 
-- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)
-- [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)
+## Features
 
-## Demo
+**Collect**
 
-| Entry | URL |
+- Multiple collect sources, with support for both JSON and XML collect APIs. Each source is stored separately, so a failure in one source does not affect the others.
+- Full collect and incremental collect, with retry for failed pages. Each collect run records its batch, status, and stored items.
+- Scheduled tasks: an hourly incremental collect by default, plus three maintenance tasks (library cleanup, log cleanup, and collect record cleanup). Conflicts between maintenance tasks and collect tasks are resolved by fixed rules.
+
+**Library and search**
+
+- Main source: the first enabled collect source in the list serves as the main source for the site. The play page appends play lines for the same film from other collect sources, matched by match key.
+- In-memory inverted index with support for word segmentation, full pinyin, and pinyin initials. Category rules, category merging, and hiding are configured per collect source.
+- TMDB scraping: adds posters, overviews, ratings, and other metadata to films.
+
+**Viewing site**
+
+- Home page banners, category filters, search, daily updates, and watch history.
+- A player based on Artplayer and Hls.js, with multiple play lines, playback position memory, and a layout that adapts to the displayed width.
+- Danmaku: site users can send danmaku, and danmaku can also be fetched from the official dandanplay API or a self-hosted danmu-api.
+- Private access: when enabled, the site and the subscription endpoints require login or a subscription key.
+
+**Subscription endpoints**
+
+| URL | Purpose |
 | --- | --- |
-| Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
-| Admin | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
+| `/api/provide/app` | EcoHub clients |
+| `/api/provide/tvbox` | TVBox / 影视仓 |
+| `/api/provide/vod` | MacCMS |
 
-## Install
+**Admin panel**
 
-Requirements: Docker 20+ and Docker Compose. At least 2 CPU cores and 2 GB of RAM are recommended. Run the following command to install:
+- Collect center, collect records, scheduled tasks, film list, home page banners (with quick scheduling), categories, and category rules.
+- Asset center, analytics, account management (three roles: super user, normal user, and visitor), and runtime logs.
+- Network proxy: collect, TMDB scraping, Telegram notifications, version check, and danmaku fetching can each be configured to use a proxy.
+- Notifications: a Telegram bot sends collect summaries, collect source failures, scheduled task failures, and main source changes.
+- Data security: site settings, collect sources, banners, category rules, network proxy, TMDB, analytics, and notification settings can be exported as a backup and imported per module.
+- Online upgrade: the admin panel can pull the latest image and restart.
+
+**Clients**
+
+The clients are separate repositories included in this repository as git submodules:
+
+- [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) (`app-for-android/`)
+- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (`app-for-ohos/`)
+
+## Architecture
+
+| Component | Technology | Directory |
+| --- | --- | --- |
+| Backend API | Go 1.27, Gin, GORM | `server/` |
+| Front end | Next.js 16, React 19, TypeScript, Ant Design 6 | `web/` |
+| Database | MySQL 8 | — |
+| Cache | Redis 7 | — |
+| Release | Docker image `ghcr.io/fe-spark/ecohub` (`linux/amd64`, `linux/arm64`) | `Dockerfile`, `deploy/release/` |
+
+The release image is All-in-One: supervisord runs the Go API (port `8080`) and Next.js (port `3000`) in the same container, and Next.js forwards `/api/*` to the Go API.
+
+```mermaid
+flowchart LR
+    Browser["Browser"] --> Web["Next.js front end<br/>web/ :3000"]
+    Clients["EcoHub clients / TVBox / MacCMS"] --> Web
+    Web -- "/api/*" --> API["Go API<br/>server/ :8080"]
+    API --> MySQL[("MySQL")]
+    API --> Redis[("Redis")]
+    API --> Sources["Collect source APIs"]
+    API --> External["TMDB / Telegram / danmaku APIs"]
+```
+
+## Quick start
+
+Requirements: Docker 20+ and Docker Compose; 2 CPU cores and 2 GB of memory or more are recommended. Run the following command to install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
   | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
-After installation:
+After installation, the terminal prints the site and admin URLs, the initial account, and the three subscription URLs. The default web port is `3000`. Data is stored in `~/ecohub` and is managed with the `ecohub` command (for example, `ecohub status` and `ecohub update`). After a full collect is run from "采集中心" (Collect center) in the admin panel, films appear on the site as the collect progresses.
 
-- Data is stored in `~/ecohub` and is managed with the `ecohub` command (for example, `ecohub status` and `ecohub update`).
-- The terminal prints the site URL, the admin URL, and the three subscription URLs. The default web port is `3000`.
-- The site is empty at first. Run a full collect from "采集中心" (Collect center) in the admin panel. Films appear as the collect progresses. The first collect can take several hours.
-
-For passwords, ports, reverse proxy, and 1Panel, see the [Deploy guide](./README-Deploy_EN.md).
-
-## Local development
-
-Requirements: Go 1.27+, Node.js 20.9+, MySQL 8, and Redis 7.
-
-The `docker-compose.yml` in the repository root is intended for local development only and must not be used for deployment. It differs from the release file [deploy/release/compose.yml](../deploy/release/compose.yml) as follows:
-
-| | Root `docker-compose.yml` | `deploy/release/compose.yml` |
-| --- | --- | --- |
-| App | Built locally from the `server/` and `web/` sources, running as two containers, `Eco-server` and `Eco-web` | Pulls the All-in-One image and runs a single `Eco-hub` container |
-| MySQL and Redis ports | Mapped to `127.0.0.1:3306` and `127.0.0.1:6379` on the host | Not mapped |
-| Data | Docker named volumes `eco-mysql-data`, `eco-redis-data`, `eco-server-uploads` | `data/` in the install directory |
-
-Two modes are supported:
-
-1. Start only the databases and run the server and web app on the host (day-to-day development). The database credentials match `server/.env.example`:
-
-   ```bash
-   docker compose up -d mysql redis
-   ```
-
-   Start the server and the web app in two separate terminals:
-
-   ```bash
-   cd server && cp .env.example .env && go run ./cmd/server
-   ```
-
-   ```bash
-   cd web && cp .env.example .env.local && npm install && npm run dev
-   ```
-
-   The site is available at `http://127.0.0.1:3000`, the admin panel at `http://127.0.0.1:3000/manage`, and the API at `http://127.0.0.1:8080`.
-
-2. Build and run the entire stack from source as containers (to validate the Dockerfiles or for integration testing):
-
-   ```bash
-   docker compose up -d --build
-   ```
-
-   The site is available at `http://127.0.0.1:3000` and the API at `http://127.0.0.1:18080`. Ports and passwords can be changed in a `.env` file in the repository root (copied from [.env.example](../.env.example); the defaults apply when the file is absent).
-
-> [!NOTE]
-> - The container names `Eco-mysql` and `Eco-redis` are the same as in the release file. Do not run the development stack and a production deployment on the same machine.
-> - If a MySQL or Redis instance on the host already uses port `3306` or `6379`, the development stack cannot start. Stop the host service, or use the host database instead.
-
-For details, see [Server](../server/README_EN.md) and [Web](../web/README_EN.md).
+For passwords, the `ecohub` command, 1Panel, manual `docker run`, reverse proxies, and environment variables, see the [Deploy guide](./README-Deploy_EN.md).
 
 ## Documentation
 
 | Document | Contents |
 | --- | --- |
-| [Deploy guide](./README-Deploy_EN.md) | Installation, the `ecohub` command, passwords, ports, 1Panel, reverse proxy, environment variables |
-| [Upgrading from v2 to v3](./v2-to-v3_EN.md) | Stopping the old stack, reinstalling on an empty database, running a full collect |
-| [FAQ](./README-FAQ_EN.md) | Empty site, main source, collect, cache, login |
-| [Scheduled task conflicts](./cron-task-conflict_EN.md) | Execution order when collect and maintenance tasks are due at the same time |
+| [Deploy guide](./README-Deploy_EN.md) | Installation, the `ecohub` command, passwords, ports, 1Panel, reverse proxies, environment variables |
+| [Upgrade from v2 to v3](./v2-to-v3_EN.md) | Removing the old containers, reinstalling with an empty database, running a full collect |
+| [FAQ](./README-FAQ_EN.md) | Empty site, main source, collect, cache, network proxy, danmaku, login, private access |
+| [Scheduled task conflicts](./cron-task-conflict_EN.md) | Execution order when collect and maintenance tasks are triggered at the same time |
+| [Development guide](./README-Dev_EN.md) | Local development environment and the development compose file |
+| [Server](../server/README_EN.md) | Go backend: startup, environment variables, APIs, directory layout |
+| [Web](../web/README_EN.md) | Next.js front end: startup, `API_URL`, authentication, directory layout |
 | [Release notes](./RELEASE_EN.md) | Changes in the current release |
-| [Docs index](./README.md) | All documents |
+| [Documentation index](./README.md) | All documents, including English versions |
 
-> EcoHub does not provide or store any media files. Content comes from collect APIs configured by the operator. Comply with local laws and the terms of use of each collect source.
+## Directory layout
 
-[PolyForm Noncommercial 1.0.0](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram](https://t.me/ecohub_club)
+```text
+EcoHub/
+├── server/              # Go backend API
+├── web/                 # Next.js front end (site and admin panel)
+├── app-for-android/     # Android client (git submodule)
+├── app-for-ohos/        # OHOS client (git submodule)
+├── deploy/release/      # Release compose file compose.yml
+├── scripts/             # Install script install-release.sh (ecohub command)
+├── docs/                # Project documentation
+├── .github/workflows/   # GitHub Release and Docker image workflows
+├── Dockerfile           # All-in-One release image
+├── docker-compose.yml   # Local development compose file
+└── supervisord.conf     # Process manager configuration inside the image
+```
+
+## Contributing
+
+This project is maintained by the author in spare time, and updates are infrequent. [Issues](https://github.com/fe-spark/EcoHub/issues) and [pull requests](https://github.com/fe-spark/EcoHub/pulls) are welcome. Documentation changes must follow the [documentation style guide](./STYLE.md) (Chinese).
+
+### Local development
+
+Requirements: Go 1.27+, Node.js 20.9+, MySQL 8, Redis 7. For the development compose file and startup modes, see the [Development guide](./README-Dev_EN.md). For details on the backend and the front end, see [Server](../server/README_EN.md) and [Web](../web/README_EN.md).
+
+## License
+
+This project is released under the [PolyForm Noncommercial License 1.0.0](../LICENSE), which permits noncommercial use only.
+
+When using EcoHub, comply with local laws and regulations and with the terms of use of the collect sources.

@@ -10,7 +10,7 @@
 
 环境要求：Go 1.27+、MySQL 8+、Redis 7+。
 
-如无可用数据库，可使用仓库根目录的开发编排 `docker-compose.yml` 仅启动数据库容器（该编排仅用于本地开发，与发布编排的区别见 [总览](../README.md#本地开发)）。数据库映射到本机 `127.0.0.1:3306` 和 `127.0.0.1:6379`，账号和密码与 `server/.env.example` 一致：
+如无可用数据库，可使用仓库根目录的开发编排 `docker-compose.yml` 仅启动数据库容器（该编排仅用于本地开发，与发布编排的区别见 [开发指南](../docs/README-Dev.md#开发编排)）。数据库映射到本机 `127.0.0.1:3306` 和 `127.0.0.1:6379`，账号和密码与 `server/.env.example` 一致：
 
 ```bash
 docker compose up -d mysql redis

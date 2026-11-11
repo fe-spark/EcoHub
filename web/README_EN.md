@@ -45,7 +45,7 @@ The site is available at `http://127.0.0.1:3000`, the login page at `/login`, an
 
 ### Run the web app in a container
 
-The development compose file `docker-compose.yml` in the repository root includes a `web` service that is built from source with `web/Dockerfile`; the container is named `Eco-web`. This file is intended for local development only. For its differences from the release file, see [Overview](../docs/README_EN.md#local-development).
+The development compose file `docker-compose.yml` in the repository root includes a `web` service that is built from source with `web/Dockerfile`; the container is named `Eco-web`. This file is intended for local development only. For its differences from the release file, see the [Development guide](../docs/README-Dev_EN.md#development-compose-file).
 
 ```bash
 docker compose up -d mysql redis
