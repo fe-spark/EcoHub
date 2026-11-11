@@ -119,20 +119,24 @@ Example: a proxy runs on port `7890` on the host, and you want the official dand
 
 ### Network danmaku does not show up. How do I check?
 
-First try the "测试" (Test) button in admin → "网站配置" (Website) → "基本信息" (Basic) → "弹幕系统配置" (Danmaku settings), then look at the player notice.
+First try the "测试" (Test) button in admin → "网站配置" (Website) → "基本信息" (Basic) → "弹幕系统配置" (Danmaku settings), then look at the load status on the player's danmaku input box.
 
 Network danmaku needs all of these: "启用弹幕系统" (enable danmaku) and "自动嗅探全网弹幕" (auto-fetch network danmaku) are on, and either a self-hosted danmu-api address or the dandanplay AppId and AppSecret is filled in.
 
 **Test button**: appears once "自动嗅探全网弹幕" is on. Enter a title and click "测试". It uses the settings currently in the form (they do not need to be saved yet) to fetch network danmaku for episode 1 of that title, and shows the result under the button, for example "匹配到「葬送的芙莉莲 第1话」，第 1 集共 N 条全网弹幕" (matched, N network comments) or "失败：弹幕接口请求超时" (failed: request timed out). The test neither reads nor writes the danmaku cache. Whether it uses the proxy follows the "弹幕抓取" switch in "网络代理", the same as the player.
 
-**Player notices**: shown once per episode, when danmaku finishes loading.
+**Load status on the input box**: danmaku load status is shown on the danmaku input box in the player control bar, not over the video. The grey placeholder text gives the result, a small dot on the left shows the state, and hovering over the input or the dot shows the full message (including the failure reason).
 
-| Notice | Meaning |
-| --- | --- |
-| 已加载 N 条弹幕（全网 M 条） | Site and network danmaku both loaded; N is the total |
-| 未找到全网弹幕 | No matching title, or this episode has no danmaku |
-| 全网弹幕加载失败：reason | Timeout, unreachable, auth failure, unreadable response, and so on; when there are site comments, their count is shown in brackets |
-| 已加载 N 条弹幕 | Network danmaku is off; only comments sent on this site |
+| Dot | Placeholder | Meaning |
+| --- | --- | --- |
+| Grey, blinking | 弹幕加载中… | Loading danmaku |
+| Green | 共 N 条弹幕，说点什么吧 | Site and network danmaku both loaded; N is the total. Hover shows "已加载 N 条弹幕（全网 M 条）" (N loaded, M from the network) |
+| Yellow | 共 N 条弹幕，未找到全网弹幕 | No matching title, or this episode has no network danmaku; with no comments at all it shows "未找到全网弹幕，说点什么吧" |
+| Red | 全网弹幕加载失败：reason | Timeout, unreachable, auth failure, unreadable response, and so on; cut off with an ellipsis when too long, hover for the full reason and the site comment count |
+| Red | 弹幕加载失败：reason | The danmaku request itself failed (the API returned an error, or the network dropped) |
+| Hidden | 共 N 条弹幕，说点什么吧 | Network danmaku is off; only comments sent on this site. With none at all it is the plugin default "发个友善的弹幕见证当下" |
+
+Switching episodes rebuilds the player, so the status starts again from "弹幕加载中…".
 
 The reason is a human-readable message and never contains the API address or keys. Network danmaku that loads successfully is cached for 7 days per API address, title, and episode. No-match and failed results are not cached, so the next play retries.
 
@@ -140,7 +144,7 @@ The reason is a human-readable message and never contains the API address or key
 
 Yes. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap set in the player's danmaku settings are stored in the current browser and reused when you switch episodes or come back. A different browser, or clearing site data, goes back to the defaults.
 
-On phones (the browser reports iPhone, iPad, iPod, or Android, or the window is 768 px wide or less) only the danmaku switch and settings are shown, with no input box, so you cannot send danmaku from a phone.
+On phones (the browser reports iPhone, iPad, iPod, or Android, or the window is 768 px wide or less) only the danmaku switch and settings are shown, with no input box, so you cannot send danmaku from a phone. Phones cannot show the status on the input box either: when danmaku fails to load, a short notice with the reason appears over the video once; other states show nothing.
 
 ## Login and permissions
 
