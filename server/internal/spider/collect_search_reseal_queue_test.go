@@ -14,8 +14,12 @@ func resetSearchReseal() {
 	searchReseal.pending = map[int64]struct{}{}
 	searchReseal.sealing = map[string]struct{}{}
 	searchReseal.running = false
+	searchReseal.fullCollect = false
 	searchReseal.mu.Unlock()
 	searchSealRunning.Store(false)
+	for collectQueueActive() {
+		endCollectQueue()
+	}
 	filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
 }
 
@@ -74,6 +78,57 @@ func TestSearchResealRun_WaitsThenSealsOnce(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("did not seal after sources went idle")
+	}
+}
+
+func TestSearchResealRun_FullCollectRebuildsAfterQueuesIdle(t *testing.T) {
+	prevApply := applySearchReseal
+	prevRebuild := requestSearchRebuild
+	t.Cleanup(func() {
+		applySearchReseal = prevApply
+		requestSearchRebuild = prevRebuild
+		resetSearchReseal()
+	})
+
+	applyCalls := 0
+	applySearchReseal = func([]int64) bool {
+		applyCalls++
+		return true
+	}
+	rebuilt := make(chan struct{}, 1)
+	requestSearchRebuild = func() {
+		rebuilt <- struct{}{}
+	}
+
+	beginCollectQueue()
+	beginCollectQueue()
+	noteSearchResealFullCollect()
+	scheduleSearchReseal([]int64{1, 2})
+
+	select {
+	case <-rebuilt:
+		t.Fatal("rebuilt while a collect queue is still running")
+	case <-time.After(40 * time.Millisecond):
+	}
+	if applyCalls != 0 {
+		t.Fatal("full collect must not point-query by mid")
+	}
+
+	endCollectQueue()
+	select {
+	case <-rebuilt:
+		t.Fatal("rebuilt while another collect queue is still running")
+	case <-time.After(40 * time.Millisecond):
+	}
+
+	endCollectQueue()
+	select {
+	case <-rebuilt:
+	case <-time.After(time.Second):
+		t.Fatal("did not rebuild after every collect queue finished")
+	}
+	if applyCalls != 0 {
+		t.Fatal("full collect must not point-query by mid")
 	}
 }
 

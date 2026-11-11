@@ -122,6 +122,9 @@ func runPreparedBatch(batchCtx *collectBatchContext, h int, tag string) {
 		return
 	}
 	defer batchCtx.close()
+	// 封口要看到本队列是否全量，所以队列没结束前不能开始检索。
+	beginCollectQueue()
+	defer endCollectQueue()
 
 	runVersion := stopAllVersion.Load()
 	sourceLimit := config.CollectSourceConcurrency
