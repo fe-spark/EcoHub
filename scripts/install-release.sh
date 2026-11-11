@@ -364,8 +364,10 @@ cmd_help() {
 
 命令安装到 /usr/local/bin/ecohub；该目录不可写时安装到 ~/.local/bin/ecohub。
 数据目录默认 \$HOME/ecohub。换目录把 ECOHUB_INSTALL_DIR 写在 sh 前面。命令会记住上次的数据目录。
-安装和 update 时，写在 sh 前面的 ECOHUB_IMAGE、WEB_PORT、JWT_SECRET、ECOHUB_ADMIN_PASSWORD、
-MYSQL_PASSWORD、REDIS_PASSWORD 会进 .env 再启动。
+安装和 update 时，写在 sh 前面的 ECOHUB_IMAGE、WEB_PORT、SERVER_PORT、JWT_SECRET、
+ECOHUB_ADMIN_PASSWORD、MYSQL_ROOT_PASSWORD、MYSQL_PASSWORD、REDIS_PASSWORD 会进 .env 再启动。
+自定义端口绑定等编排改动写进数据目录下的 docker-compose.override.yml；
+install 和 update 不会覆盖它，它存在时每条命令都会叠加。
 EOF
 }
 
