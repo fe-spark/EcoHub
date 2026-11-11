@@ -76,13 +76,14 @@ func getTelegramHTTPClient(timeout time.Duration) (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if ok && strings.TrimSpace(proxyURL) != "" {
-		return &http.Client{
-			Transport: utils.GetOrCreateProxyTransport(proxyURL),
-			Timeout:   timeout,
-		}, nil
+	// 未启用代理时用共享直连 Transport（不读 HTTPS_PROXY 等环境变量），与 TMDB、版本检查一致。
+	if !ok {
+		proxyURL = ""
 	}
-	return &http.Client{Timeout: timeout}, nil
+	return &http.Client{
+		Transport: utils.GetOrCreateProxyTransport(proxyURL),
+		Timeout:   timeout,
+	}, nil
 }
 
 func parseChatTarget(target string) (chatID string, threadID int64, err error) {
