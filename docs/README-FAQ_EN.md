@@ -93,7 +93,7 @@ The site category page and TVBox take their filter options from the same filter 
 | Region, language | Exactly equal to the selected value | Yes |
 | Year | Equal to the selected year; no filter when the value is not a number | Yes |
 | "其他" (Other) | Value not in the filter options; empty values count too | Yes |
-| Sort | Recently updated, popularity, rating, year | Mostly. When sorting by year, films in the same year are ordered by update time on the site and by film ID on TVBox, so the order within a year can differ |
+| Sort | Recently updated, popularity, rating, year. When sorting by year, films in the same year are then ordered by update time | Yes |
 
 Both sides have a Redis cache with different lifetimes: site filter results 2 hours; TVBox list pages without genre, region, language, or year filters about 12 hours, and with filters 3 minutes. When they briefly differ, check the cache first.
 
