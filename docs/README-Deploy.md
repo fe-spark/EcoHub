@@ -16,7 +16,7 @@ EcoHub 发布的是一个 All-in-One 镜像 `ghcr.io/fe-spark/ecohub`：同一�
 
 ## 准备
 
-- Docker 20+ 和 Docker Compose 2+（手动 `docker run` 部署不需要 Compose）。
+- Docker 20+ 和 Docker Compose（`docker compose` 插件或独立的 `docker-compose` 都可以；手动 `docker run` 部署不需要 Compose）。
 - 建议 2 核 2 GB 以上。
 - 服务器能拉取 `ghcr.io`（应用镜像）和 `docker.io`（MySQL、Redis 镜像）。
 
@@ -25,7 +25,7 @@ EcoHub 发布的是一个 All-in-One 镜像 `ghcr.io/fe-spark/ecohub`：同一�
 | 端口 | 默认 | 用途 |
 | --- | --- | --- |
 | Web 端口 | `3000` | 前台、后台、订阅地址都走这个端口 |
-| API 直连端口 | `18080` | 映射到容器内 `8080`，给播放器直连后端用。用不上可以去掉 |
+| API 直连端口 | `18080` | 映射到容器内 `8080`，直接访问后端 `/api/*`。订阅地址也可以用这个端口，见 [访问地址](#访问地址)。用不上可以去掉 |
 
 准备一个随机密钥给 `JWT_SECRET`：
 
@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 脚本做了这些事：
 
 1. 在安装目录（默认 `~/ecohub`）建 `data/mysql`、`data/redis`、`data/uploads`。
-2. 下载编排存成 `docker-compose.yml`，下载 `.env.example`。没有 `.env` 时用模板生成一份，已有 `.env` 时保留。
+2. 下载编排存成 `docker-compose.yml`，下载 `.env.example`。没有 `.env` 时用模板生成一份，已有 `.env` 时保留。不会创建或改动 `docker-compose.override.yml`。
 3. 把写在 `sh` 前面的变量写进 `.env`（见下文）。新装且没指定镜像时，写入 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2`。
 4. 安装 `ecohub` 命令到 `/usr/local/bin`；这个目录不可写时装到 `~/.local/bin`，并提示把它加进 `PATH`。
 5. 记住安装目录（写在 `~/.ecohub/install-dir`），以后 `ecohub` 命令都操作这个目录。
@@ -113,15 +113,32 @@ ecohub uninstall --purge
 
 升级到新版本：把 `.env` 里的 `ECOHUB_IMAGE` 改成新 tag，再 `ecohub update`；或者直接 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:<新版本> ecohub update`。
 
-注意：`ecohub update` 每次都会重新下载 `docker-compose.yml`，你手改过的编排会被覆盖，`.env` 不受影响。
+`ecohub update` 每次都会重新下载 `docker-compose.yml`，直接改这个文件的内容会被覆盖。要改编排，写到 [自定义编排](#自定义编排) 里的 `docker-compose.override.yml`。
 
 后台的「立即升级并重启」拉的是 `:latest`，不看 `.env` 里固定的 tag。
 
-这套容器会出现在 1Panel 的容器列表里。继续用 `ecohub` 管理，不要再用同样的容器名建第二套编排。
+### 自定义编排
+
+在安装目录（默认 `~/ecohub`）新建 `docker-compose.override.yml`，写你要改的部分。`ecohub install` 和 `ecohub update` 从不创建、覆盖或删除这个文件；它存在时，`ecohub` 的每条命令（`start`、`restart`、`update`、`status` 等）都会叠加它，`ecohub status` 会打印「已叠加 docker-compose.override.yml」。
+
+例：Web 端口只监听本机（配合反向代理），并且不开 API 直连端口：
+
+```yaml
+services:
+  ecohub:
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+```
+
+写好后执行 `ecohub restart`。
+
+- `!override` 表示整段替换原来的 `ports`。不写的话，Compose 会把两边的端口合并，原来监听所有网卡的绑定还在。
+- `!override` 需要 Docker Compose v2.24.4 或更新版本，用 `docker compose version` 查看。独立的 `docker-compose` v1 不支持。
+- 不再需要时删掉这个文件，再 `ecohub restart`。
 
 ## 方式二：1Panel
 
-1. 「容器」→「编排」→「创建」，工作目录例如 `/opt/1panel/apps/ecohub`。
+1. 在 1Panel 里新建一个 Compose 编排，工作目录例如 `/opt/1panel/apps/ecohub`。
 2. 贴入 [deploy/release/compose.yml](../deploy/release/compose.yml) 全文。
 3. 填环境变量：
 
@@ -144,7 +161,7 @@ REDIS_DB=0
 ```
 
 4. 保存并启动，确认 `Eco-hub`、`Eco-mysql`、`Eco-redis` 三个容器在运行。
-5. 「网站」→「反向代理」，指向 `http://127.0.0.1:3000`。
+5. 给站点配置反向代理，指向 `http://127.0.0.1:3000`。
 
 更新：改好 `ECOHUB_IMAGE` 后，在工作目录执行：
 
@@ -208,7 +225,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 ```
 
 - 应用容器里的数据库主机名是容器名 `Eco-mysql`、`Eco-redis`。
-- `until` 那一段在等 MySQL 第一次初始化完成，可能要几十秒。一直等不到就看 `docker logs Eco-mysql`。
+- `until` 那一段在等 MySQL 第一次初始化完成。一直等不到就看 `docker logs Eco-mysql`。
 - 挂载 `/var/run/docker.sock` 是给后台「立即升级并重启」用的，不用这个功能可以去掉。
 
 看日志：`docker logs -f Eco-hub`。更新：`docker pull` 新 tag，`docker rm -f Eco-hub`，再用同样的参数和新 tag 执行一次 `docker run`。
@@ -238,7 +255,11 @@ REDIS_HOST=host.docker.internal
 | `http://<服务器IP>:3000/api/provide/tvbox` | TVBox / 影视仓订阅 |
 | `http://<服务器IP>:3000/api/provide/vod` | MacCMS 订阅 |
 
-`3000` 是默认 Web 端口，以终端打印的地址为准。后台账号 `admin`，密码是 `ECOHUB_ADMIN_PASSWORD`，没设就是 `admin`。登录后马上改密码。
+`3000` 是默认 Web 端口，以终端打印的地址为准。
+
+订阅地址也可以用 API 直连端口，例如 `http://<服务器IP>:18080/api/provide/tvbox`。三条订阅都是 `/api/provide/*`，由 Go 后端直接处理；Web 端口也只是把 `/api/*` 原样转给 Go，所以两个端口返回的内容一样。返回内容里的地址（TVBox 的站点接口、客户端的 `api_base`）按请求用的地址生成，用 `18080` 订阅时它们也是 `18080`。前台和后台页面只在 Web 端口上。
+
+后台账号 `admin`，密码是 `ECOHUB_ADMIN_PASSWORD`，没设就是 `admin`。登录后马上改密码。
 
 后台开启「私有化访问」后，订阅地址要带上订阅密钥，例如 `http://<服务器IP>:3000/api/provide/tvbox?key=你的密钥`。详见 [常见问题](./README-FAQ.md#开启私有化访问后订阅怎么填)。
 
@@ -259,7 +280,7 @@ REDIS_HOST=host.docker.internal
 生产环境建议：
 
 - 反向代理整站指向 `127.0.0.1:3000`，并开启 HTTPS。`/api` 不需要单独转到 `18080`，Web 端口会自己把 `/api/*` 转给容器内的 Go。
-- 不想公网直接访问 `3000`，可以把编排里的端口写成 `127.0.0.1:${WEB_PORT:-3000}:3000`。不用播放器直连，就删掉 `18080` 那一行。用安装脚本时记住：`ecohub update` 会覆盖手改的编排，更新后要重新改。
+- 不想公网直接访问 `3000`、也不用 `18080`：用安装脚本时写 [docker-compose.override.yml](#自定义编排)；自己维护编排时直接改 `ports`。
 - 云服务器安全组只放行 `80`、`443`。
 
 ## 环境变量
