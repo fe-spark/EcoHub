@@ -107,7 +107,7 @@ Requirements: Docker 20+ and Docker Compose; 2 CPU cores and 2 GB of memory or m
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.4 sh
 ```
 
 After installation, the terminal prints the site and admin URLs, the initial account, and the three subscription URLs. The default web port is `3000`. Data is stored in `~/ecohub` and is managed with the `ecohub` command (for example, `ecohub status` and `ecohub update`). After a full collect is run from "采集中心" (Collect center) in the admin panel, films appear on the site as the collect progresses.
