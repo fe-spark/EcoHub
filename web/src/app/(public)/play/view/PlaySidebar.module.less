@@ -369,6 +369,51 @@
   }
 }
 
+/* 选集分段（集数 > 100 时出现）：横向滑动，不换行 */
+.rangeTabs {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rangeTab {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    border: 1px solid var(--public-border-1);
+    border-radius: 999px;
+    background: var(--public-surface-2);
+    color: var(--public-text-3);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      color: var(--public-text-1);
+      border-color: var(--public-border-2);
+    }
+
+    // 正在播放的那一段：没选中时也用橙色字标出来
+    &.playing {
+      color: #fa8c16;
+    }
+
+    &.active {
+      color: #fa8c16;
+      border-color: rgba(250, 140, 22, 0.5);
+      background: rgba(250, 140, 22, 0.12);
+    }
+  }
+}
+
 .episodeList {
   flex: 1;
   min-height: 0;
@@ -606,32 +651,49 @@
   }
 }
 
+/*
+ * 换行后（≤1024px，选集面板排到播放器下面）：面板随内容撑开，不再固定 500px / 400px 高。
+ * 原来固定高度减去标题、播放源、工具条、底部按钮后，选集列表只剩约 185px（≤1024）/ 104px（≤768，一行）。
+ * 现在列表按内容高度显示，最多到屏幕高度的 60%（至少 320px），超出才在列表内滚动；
+ * 集数多时配合上面的分段（每段 50 集），一段在手机上基本不用内滚动。
+ * 内滚动到头后继续滑动会带动整页（不设 overscroll-behavior: contain），手指不会被困在列表里。
+ * 面板不再裁切溢出，播放源下拉菜单在选集很少时也不会被截掉。
+ */
 @media (max-width: 1024px) {
   .sidebarWrapper {
-    height: 500px;
+    height: auto;
   }
 
   .sidebar {
     position: relative;
-    height: 100%;
-    min-height: auto;
-    max-height: none;
+    inset: auto;
+    height: auto;
+    overflow: visible;
+  }
+
+  .episodeList {
+    flex: none;
+    max-height: max(320px, 60vh);
+    max-height: max(320px, 60svh);
+
+    // 格子按 56px、左右各 8px 内边距排时，「第18集」会被省略号截断；放宽到 64px、内边距 4px
+    &.gridMode {
+      grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+
+      .epGridItem {
+        padding: 0 4px;
+      }
+    }
   }
 }
 
 @media (max-width: 768px) {
-  .sidebarWrapper {
-    height: 400px;
-  }
-
   .sidebar {
-    position: relative;
     border-radius: 0;
     border: none;
     background: transparent;
     backdrop-filter: none;
     box-shadow: none;
-    height: 100%;
     padding: 16px;
     border-bottom: 1px solid var(--public-border-1);
   }
