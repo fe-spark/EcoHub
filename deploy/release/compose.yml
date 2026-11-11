@@ -57,10 +57,6 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
       ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
-      # 通用代理供采集等网络请求使用（可选）
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      ALL_PROXY: ${ALL_PROXY:-}
     ports:
       # 前台与管理后台（如需不对公网暴露裸端口，可写为 127.0.0.1:${WEB_PORT:-3000}:3000 配合反向代理）
       - ${WEB_PORT:-3000}:3000
