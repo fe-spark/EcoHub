@@ -1,6 +1,6 @@
 # 计划任务运行冲突
 
-本文只有中文版。
+中文 | [English](./cron-task-conflict_EN.md)
 
 ## 一句话规则
 

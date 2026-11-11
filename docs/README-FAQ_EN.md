@@ -125,4 +125,4 @@ http://<server-ip>:3000/api/provide/tvbox?key=mysecret888
 
 ## Related
 
-[Overview](./README_EN.md) · [Deploy guide](./README-Deploy_EN.md) · [Scheduled task conflicts](./cron-task-conflict.md) (Chinese)
+[Overview](./README_EN.md) · [Deploy guide](./README-Deploy_EN.md) · [Scheduled task conflicts](./cron-task-conflict_EN.md)
