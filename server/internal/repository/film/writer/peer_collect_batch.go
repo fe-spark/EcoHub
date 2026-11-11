@@ -309,8 +309,9 @@ func syncPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem
 		}
 		return items[order[i]].mid < items[order[j]].mid
 	})
+	keyMap := make(map[int64][]string, len(order))
 	for _, idx := range order {
-		changed, err := syncOwnedFilmTx(tx, items[idx].film, source.Id, items[idx].detail)
+		changed, keys, err := syncOwnedFilmFieldsTx(tx, items[idx].film, source.Id, items[idx].detail)
 		if err != nil {
 			if kind := categorySkipKind(err); kind != skipKindNone {
 				items[idx].skipKind = kind
@@ -321,6 +322,9 @@ func syncPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem
 		if changed {
 			items[idx].metaChanged = true
 		}
+		if keys != nil && items[idx].mid > 0 {
+			keyMap[items[idx].mid] = keys
+		}
 	}
-	return nil
+	return shared.SaveMovieMatchKeysByMidTx(tx, keyMap)
 }
