@@ -125,7 +125,7 @@ Network danmaku needs all of these: "启用弹幕系统" (enable danmaku) and "�
 
 **Test button**: appears once "自动嗅探全网弹幕" is on. Enter a title and click "测试". It uses the settings currently in the form (they do not need to be saved yet) to fetch network danmaku for episode 1 of that title, and shows the result under the button, for example "匹配到「葬送的芙莉莲 第1话」，第 1 集共 N 条全网弹幕" (matched, N network comments) or "失败：弹幕接口请求超时" (failed: request timed out). The test neither reads nor writes the danmaku cache. Whether it uses the proxy follows the "弹幕抓取" switch in "网络代理", the same as the player.
 
-**Load status on the input box**: danmaku load status is shown on the danmaku input box in the player control bar, not over the video. The grey placeholder text gives the result, a small dot on the left shows the state, and hovering over the input or the dot shows the full message (including the failure reason).
+**Load status on the input box**: danmaku load status is shown on the danmaku input box in the player control bar, not over the video. The grey placeholder text gives the result, a small dot on the left shows the state, and hovering over the input or the dot shows the full message (including the failure reason). When the player is narrower than 560 px the input box is collapsed: the dot moves to the top-right corner of the danmaku switch, and hovering over the switch shows the full message; on failure a short notice also appears over the video once (see the next section).
 
 | Dot | Placeholder | Meaning |
 | --- | --- | --- |
@@ -140,13 +140,25 @@ Switching episodes rebuilds the player, so the status starts again from "弹幕�
 
 The reason is a human-readable message and never contains the API address or keys. Network danmaku that loads successfully is cached for 7 days per API address, title, and episode. No-match and failed results are not cached, so the next play retries.
 
-### Are danmaku settings saved? Why is there no input box on phones?
+### Are danmaku settings saved? What happens when the player gets narrow?
 
-Yes. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap set in the player's danmaku settings are stored in the current browser and reused when you switch episodes or come back. Only the settings you changed are stored. Font size is stored separately for phones and computers, so a phone does not reuse the computer's font size. A different browser, or clearing site data, goes back to the defaults.
+Yes. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap set in the player's danmaku settings are stored in the current browser and reused when you switch episodes or come back. Only the settings you changed are stored. A different browser, or clearing site data, goes back to the defaults.
 
-On phones (the browser reports iPhone, iPad, iPod, or Android, or the window is 768 px wide or less) only the danmaku switch and settings are shown, with no input box, so you cannot send danmaku from a phone. Phones cannot show the status on the input box either: when danmaku fails to load, a short notice with the reason appears over the video once; other states show nothing.
+The player lays itself out by its own displayed width. It does not check whether you are on a phone or a computer, and does not look at the browser's user agent: a player of the same width behaves the same on a phone and in a narrowed desktop browser window (including devtools responsive mode). It switches live when you resize the window, rotate the screen, or enter or leave fullscreen, with no reload.
 
-On phones the default danmaku font size is 8% of the player height (about 15 px in portrait, larger in landscape fullscreen); once you change the font size in the settings, your choice is used. Top and bottom fixed danmaku are shown as scrolling danmaku on phones, so they avoid each other with the scrolling ones instead of covering them.
+| Player width | Control bar | Load status | Top/bottom fixed danmaku |
+| --- | --- | --- | --- |
+| Under 560 px (phone portrait, very narrow window) | Danmaku input box and web-fullscreen button collapsed (the button stays while you are in web fullscreen, so you can leave it); tighter button spacing | Dot on the top-right of the danmaku switch, hover the switch for the message; a short notice over the video once on failure | Shown as scrolling danmaku |
+| 560–767 px (phone landscape, tablet, narrow window) | Input box shown and shrinks with the bar; web-fullscreen button collapsed | Placeholder and dot on the input box | Shown as scrolling danmaku |
+| 768 px and up | Full control bar | Placeholder and dot on the input box | Stay fixed at the top/bottom |
+
+560 px is the narrowest width at which, with the tighter buttons, the input box still gets about 110 px; any narrower and it shrinks to a few dozen pixels and the send button sticks out of the player. 768 px matches the width at which the play page switches to its phone layout. Below 768 px the half-screen area of the picture holds only five to eight rows and fixed danmaku would cover scrolling ones, so they are shown as scrolling danmaku and take part in the same overlap avoidance.
+
+**Font size**: the font size in the settings (default 25 px) is for a large player. It is used as is when the player is at least 575 px wide; narrower players scale it down with the width and cap it at "player width ÷ 22" (at most 16 px on a player about 360 px wide), with a minimum of 12 px. So a large font set on a computer does not fill a narrow player. When you change the font size on a narrow player, the value saved is converted back to the large-player size.
+
+**Display area**: "1/4", "半屏" (half), "3/4", and "满屏" (full) are measured against the picture itself. When a narrow player is taller than the picture and has black bars above and below it, danmaku stays inside the picture and does not drift onto the bars.
+
+When the player size changes, danmaku currently on screen is cleared and the following danmaku is laid out for the new size, so two sets of row positions never overlap.
 
 ## Login and permissions
 
