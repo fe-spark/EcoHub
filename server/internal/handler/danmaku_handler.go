@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -63,7 +65,7 @@ func signDandanplayRequest(req *http.Request, appID, appSecret, apiPath string) 
 func (h *DanmakuHandler) GetDanmaku(c *gin.Context) {
 	basic, _ := repository.GetSiteBasic()
 	if !basic.Danmaku.Enabled {
-		dto.Success([]model.DanmakuItem{}, "弹幕功能已关闭", c)
+		respondDanmaku(c, []model.DanmakuItem{}, danmakuMeta{NetworkStatus: networkDisabled, NetworkReason: "弹幕功能已关闭"}, "弹幕功能已关闭")
 		return
 	}
 
@@ -93,10 +95,23 @@ func (h *DanmakuHandler) GetDanmaku(c *gin.Context) {
 		}
 	}
 
+	meta := danmakuMeta{Local: len(items)}
+
 	// 2. 自动嗅探外部弹幕（全网弹弹play生态）
-	if basic.Danmaku.AutoSniff && title != "" {
-		sniffed := fetchSniffedDanmaku(basic.Danmaku, title, episode)
-		items = append(items, sniffed...)
+	switch {
+	case !basic.Danmaku.AutoSniff:
+		meta.NetworkStatus = networkDisabled
+		meta.NetworkReason = "未开启全网弹幕"
+	case title == "":
+		meta.NetworkStatus = networkEmpty
+		meta.NetworkReason = "缺少片名，无法匹配"
+	default:
+		res := fetchSniffedDanmaku(basic.Danmaku, title, episode, true)
+		items = append(items, res.Items...)
+		meta.Network = len(res.Items)
+		meta.NetworkStatus = res.Status
+		meta.NetworkReason = res.Reason
+		meta.NetworkCached = res.Cached
 	}
 
 	// 按出现时间升序排序
@@ -104,7 +119,34 @@ func (h *DanmakuHandler) GetDanmaku(c *gin.Context) {
 		return items[i].Time < items[j].Time
 	})
 
-	dto.Success(items, "获取弹幕成功", c)
+	respondDanmaku(c, items, meta, "获取弹幕成功")
+}
+
+// 全网弹幕状态
+const (
+	networkDisabled = "disabled" // 没开全网弹幕
+	networkOK       = "ok"       // 拿到了全网弹幕
+	networkEmpty    = "empty"    // 没匹配到片，或这一集没有弹幕
+	networkError    = "error"    // 接口请求失败、超时、鉴权失败、返回无法解析
+)
+
+// danmakuMeta 弹幕列表的来源统计，挂在响应顶层的 meta 字段。
+// data 仍是弹幕数组，老客户端（鸿蒙端等）不受影响。
+type danmakuMeta struct {
+	Local         int    `json:"local"`                   // 本站用户发送的条数
+	Network       int    `json:"network"`                 // 全网弹幕条数
+	NetworkStatus string `json:"networkStatus"`           // disabled | ok | empty | error
+	NetworkReason string `json:"networkReason,omitempty"` // 给人看的原因，不含地址和密钥
+	NetworkCached bool   `json:"networkCached"`           // 全网弹幕来自缓存
+}
+
+func respondDanmaku(c *gin.Context, items []model.DanmakuItem, meta danmakuMeta, msg string) {
+	c.JSON(http.StatusOK, gin.H{
+		"code": dto.SUCCESS,
+		"data": items,
+		"msg":  msg,
+		"meta": meta,
+	})
 }
 
 // PostDanmaku 发送弹幕入库
@@ -167,31 +209,98 @@ func resolveDanmuBaseURL(cfg model.DanmakuConfig) string {
 	return "https://api.dandanplay.net/api/v2"
 }
 
-// fetchSniffedDanmaku 从公开弹幕库嗅探对应剧集弹幕
-func fetchSniffedDanmaku(cfg model.DanmakuConfig, title string, episode int) []model.DanmakuItem {
+// sniffResult 一次全网弹幕嗅探的结果
+type sniffResult struct {
+	Items        []model.DanmakuItem
+	Status       string // networkOK | networkEmpty | networkError
+	Reason       string
+	Cached       bool
+	AnimeTitle   string // 匹配到的作品名（缓存命中时为空）
+	EpisodeTitle string // 匹配到的分集名（缓存命中时为空）
+}
+
+// danmakuUpstreamError 带给人看的原因；原始错误只写日志，避免把接口地址或 token 回给前端
+type danmakuUpstreamError struct {
+	reason string
+}
+
+func (e *danmakuUpstreamError) Error() string { return e.reason }
+
+func upstreamReason(err error) string {
+	var ue *danmakuUpstreamError
+	if errors.As(err, &ue) {
+		return ue.reason
+	}
+	return "弹幕接口请求失败"
+}
+
+func requestFailure(err error) error {
+	var netErr interface{ Timeout() bool }
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return &danmakuUpstreamError{reason: "弹幕接口请求超时"}
+	}
+	return &danmakuUpstreamError{reason: "无法连接弹幕接口"}
+}
+
+func statusFailure(code int, official bool) error {
+	switch {
+	case (code == http.StatusUnauthorized || code == http.StatusForbidden) && official:
+		return &danmakuUpstreamError{reason: fmt.Sprintf("弹弹play 鉴权失败（HTTP %d），请检查 AppId / AppSecret", code)}
+	case code == http.StatusUnauthorized || code == http.StatusForbidden:
+		return &danmakuUpstreamError{reason: fmt.Sprintf("弹幕接口拒绝访问（HTTP %d），请检查接口地址里的 token", code)}
+	default:
+		return &danmakuUpstreamError{reason: fmt.Sprintf("弹幕接口返回 HTTP %d", code)}
+	}
+}
+
+// fetchSniffedDanmaku 从公开弹幕库嗅探对应剧集弹幕。useCache=false 时跳过读写缓存（后台测试用）。
+func fetchSniffedDanmaku(cfg model.DanmakuConfig, title string, episode int, useCache bool) sniffResult {
+	if strings.TrimSpace(cfg.ApiURL) == "" && strings.TrimSpace(cfg.AppID) == "" {
+		return sniffResult{Status: networkError, Reason: "未配置自建弹幕接口，也没有填写弹弹play AppId"}
+	}
 	baseURL := resolveDanmuBaseURL(cfg)
 	cacheKey := fmt.Sprintf("%s:Danmaku:%s:%s:%d", config.RedisKeyPrefix, url.QueryEscape(baseURL), title, episode)
-	if db.Rdb != nil {
+	if useCache && db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.DanmakuItem
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached
+				return sniffResult{Items: cached, Status: networkOK, Cached: true}
 			}
 		}
 	}
 
-	episodeID := searchDandanplayEpisode(cfg, baseURL, title, episode)
-	if episodeID <= 0 {
-		return nil
+	match, err := searchDandanplayEpisode(cfg, baseURL, title, episode)
+	if err != nil {
+		return sniffResult{Status: networkError, Reason: upstreamReason(err)}
+	}
+	if match.EpisodeID <= 0 {
+		return sniffResult{Status: networkEmpty, Reason: "没有匹配到这部片"}
 	}
 
-	items := loadDandanplayComments(cfg, baseURL, episodeID)
-	if len(items) > 0 && db.Rdb != nil {
+	items, err := loadDandanplayComments(cfg, baseURL, match.EpisodeID)
+	res := sniffResult{AnimeTitle: match.AnimeTitle, EpisodeTitle: match.EpisodeTitle}
+	if err != nil {
+		res.Status, res.Reason = networkError, upstreamReason(err)
+		return res
+	}
+	if len(items) == 0 {
+		res.Status, res.Reason = networkEmpty, "匹配到了这部片，但这一集没有弹幕"
+		return res
+	}
+	if useCache && db.Rdb != nil {
 		if data, err := json.Marshal(items); err == nil {
 			db.Rdb.Set(db.Cxt, cacheKey, string(data), 7*24*time.Hour)
 		}
 	}
-	return items
+	res.Items, res.Status = items, networkOK
+	return res
+}
+
+// dandanMatch 搜索匹配到的分集
+type dandanMatch struct {
+	EpisodeID    int64
+	AnimeTitle   string
+	EpisodeTitle string
 }
 
 type dandanEpisode struct {
@@ -232,13 +341,13 @@ func parseEpisodeNumber(raw string) int {
 	return result
 }
 
-func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, targetEpisode int) int64 {
+func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, targetEpisode int) (dandanMatch, error) {
 	title := cleanSearchTitle(rawTitle)
 	apiPath := "/api/v2/search/episodes"
 	apiURL := fmt.Sprintf("%s/search/episodes?anime=%s", baseURL, url.QueryEscape(title))
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return 0
+		return dandanMatch{}, &danmakuUpstreamError{reason: "弹幕接口地址无效"}
 	}
 	req.Header.Set("User-Agent", "EcoHub-Client/3.0")
 	req.Header.Set("Accept", "application/json")
@@ -248,33 +357,40 @@ func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, 
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[Danmaku] 请求弹幕搜索失败 title=%s err=%v", title, err)
-		return 0
+		return dandanMatch{}, requestFailure(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[Danmaku] 弹幕源返回状态码 status=%d (若使用官方接口请在后台配置 AppId 与 AppSecret，或使用自建免鉴权 danmu-api)", resp.StatusCode)
-		return 0
+		return dandanMatch{}, statusFailure(resp.StatusCode, strings.TrimSpace(cfg.ApiURL) == "")
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0
+		return dandanMatch{}, requestFailure(err)
 	}
 
 	var res struct {
-		Success bool          `json:"success"`
-		Animes  []dandanAnime `json:"animes"`
+		Success      bool          `json:"success"`
+		ErrorMessage string        `json:"errorMessage"`
+		Animes       []dandanAnime `json:"animes"`
 	}
-	if err := json.Unmarshal(body, &res); err != nil || len(res.Animes) == 0 {
-		return 0
+	if err := json.Unmarshal(body, &res); err != nil {
+		return dandanMatch{}, &danmakuUpstreamError{reason: "弹幕接口返回的内容无法解析"}
+	}
+	if !res.Success && strings.TrimSpace(res.ErrorMessage) != "" {
+		return dandanMatch{}, &danmakuUpstreamError{reason: "弹幕接口报错：" + truncateRunes(res.ErrorMessage, 60)}
+	}
+	if len(res.Animes) == 0 {
+		return dandanMatch{}, nil
 	}
 
 	// 1. 各候选剧集标题精确匹配集号
 	for _, anime := range res.Animes {
 		for _, ep := range anime.Episodes {
 			if parseEpisodeNumber(ep.EpisodeTitle) == targetEpisode {
-				return ep.EpisodeID
+				return dandanMatch{EpisodeID: ep.EpisodeID, AnimeTitle: anime.AnimeTitle, EpisodeTitle: ep.EpisodeTitle}, nil
 			}
 		}
 	}
@@ -288,17 +404,26 @@ func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, 
 		if idx >= len(res.Animes[0].Episodes) {
 			idx = len(res.Animes[0].Episodes) - 1
 		}
-		return res.Animes[0].Episodes[idx].EpisodeID
+		ep := res.Animes[0].Episodes[idx]
+		return dandanMatch{EpisodeID: ep.EpisodeID, AnimeTitle: res.Animes[0].AnimeTitle, EpisodeTitle: ep.EpisodeTitle}, nil
 	}
-	return 0
+	return dandanMatch{}, nil
 }
 
-func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID int64) []model.DanmakuItem {
+func truncateRunes(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
+}
+
+func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID int64) ([]model.DanmakuItem, error) {
 	apiPath := fmt.Sprintf("/api/v2/comment/%d", episodeID)
 	apiURL := fmt.Sprintf("%s/comment/%d?withRelated=true&chConvert=1", baseURL, episodeID)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil
+		return nil, &danmakuUpstreamError{reason: "弹幕接口地址无效"}
 	}
 	req.Header.Set("User-Agent", "EcoHub-Client/3.0")
 	req.Header.Set("Accept", "application/json")
@@ -308,18 +433,18 @@ func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID i
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[Danmaku] 请求弹幕详情失败 episodeID=%d err=%v", episodeID, err)
-		return nil
+		return nil, requestFailure(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[Danmaku] 获取弹幕内容失败 status=%d", resp.StatusCode)
-		return nil
+		return nil, statusFailure(resp.StatusCode, strings.TrimSpace(cfg.ApiURL) == "")
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil
+		return nil, requestFailure(err)
 	}
 
 	var res struct {
@@ -328,8 +453,11 @@ func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID i
 			M string `json:"m"` // 弹幕文字
 		} `json:"comments"`
 	}
-	if err := json.Unmarshal(body, &res); err != nil || len(res.Comments) == 0 {
-		return nil
+	if err := json.Unmarshal(body, &res); err != nil {
+		return nil, &danmakuUpstreamError{reason: "弹幕接口返回的内容无法解析"}
+	}
+	if len(res.Comments) == 0 {
+		return nil, nil
 	}
 
 	const maxComments = 30000
@@ -369,5 +497,5 @@ func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID i
 			break
 		}
 	}
-	return items
+	return items, nil
 }
