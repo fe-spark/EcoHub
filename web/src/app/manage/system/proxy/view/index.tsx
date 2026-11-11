@@ -44,6 +44,8 @@ const DEFAULT_CONFIG: ProxyConfigValues = {
     tmdb: true,
     notify: true,
     upgrade: true,
+    // 弹幕默认直连：自建 danmu-api 常在内网，旧配置没有此字段时也按关闭处理
+    danmaku: false,
   },
 };
 
@@ -81,6 +83,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
             tmdb: resp.data.modules?.tmdb ?? true,
             notify: resp.data.modules?.notify ?? true,
             upgrade: resp.data.modules?.upgrade ?? true,
+            danmaku: resp.data.modules?.danmaku ?? false,
           },
         };
         proxyUrlTouched.current = false;
