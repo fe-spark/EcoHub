@@ -1,62 +1,62 @@
-Release **v3.0.3**, image `ghcr.io/fe-spark/ecohub:v3.0.3` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+Release **v3.0.3**, image `ghcr.io/fe-spark/ecohub:v3.0.3` (`:latest` points to it too). For image tags see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
-### Upgrade notes
+### Upgrade
 
-- v3.0.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
-- **v3.0.3 no longer reads `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY`**: the three variables have been removed from the compose files and `.env.example`, and values left in an existing `.env` no longer take effect. Deployments that relied on these variables to route danmaku or Telegram traffic through a proxy must, after upgrading, enable the global proxy in "网络代理" (Network proxy) in the admin panel and enable the "弹幕抓取" (Danmaku fetching) or "Telegram 机器人" (Telegram bot) module; otherwise these requests connect directly.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+- v3.0.x: if installed with `ecohub`, run `ecohub update`. With 1Panel or your own compose file, run `docker compose pull && docker compose up -d` in the install directory.
+- **v3.0.3 no longer reads `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY`**: the three variables are removed from the compose files and `.env.example`, and leaving them in an old `.env` has no effect. If you relied on them to send danmaku or Telegram through a proxy, after upgrading turn on the global proxy in the admin 「网络代理」 page and turn on the 「弹幕抓取」 or 「Telegram 机器人」 module; otherwise those requests connect directly.
+- v2.x: not compatible, no migration. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.0.3 changes
+### v3.0.3 fixes
 
-- **Network proxy**: danmaku fetching and Telegram notifications are now controlled only by "网络代理" (Network proxy) in the admin panel. They use the proxy when the global proxy is enabled and the corresponding module ("弹幕抓取" Danmaku fetching, "Telegram 机器人" Telegram bot) is enabled; otherwise they connect directly. "弹幕抓取" is a new module and is disabled by default.
-- **Danmaku load status**: no longer displayed as a notice over the video. The result is shown as gray placeholder text in the danmaku input box, and a dot on its left indicates loading, success, no network danmaku, or failure; hovering shows the full message and the failure reason. When the player is narrower than `560px`, the input box is collapsed and the dot is shown on the danmaku switch.
-- **Danmaku test**: when "自动嗅探全网弹幕" (Auto-fetch network danmaku) is enabled, the danmaku card in "网站配置" (Site settings) provides a "测试" (Test) button. It fetches network danmaku for episode 1 of a specified title using the settings currently in the form and displays the result below the button. The card also indicates whether danmaku requests use the proxy or connect directly.
-- **Player danmaku**: reverted to the danmaku plugin's built-in scheduling. The patch retains only the loading performance improvement (#63) and the fix that prevents danmaku with time 0 from being delayed. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap settings are stored in the browser and retained across episodes. Fixed the danmaku switch and settings not appearing on phones (#83).
-- **Responsive player layout**: the layout follows the player's own width instead of the device type and switches immediately when the window width changes. Below `560px`, the danmaku input box and the web fullscreen button are collapsed; at `560–767px`, the web fullscreen button is collapsed; at `768px` and above, the full layout is used. The danmaku font size scales down with the player width (minimum `12px`), and the display area is measured against the picture, so danmaku no longer appears on the black bars. Below `768px`, top and bottom danmaku are displayed as scrolling danmaku, which resolves overlapping danmaku on phones.
-- **Player border**: the player shows a 1px border and rounded corners at all widths, so its boundary remains visible against dark backgrounds on phones. No border is shown in fullscreen or web fullscreen.
-- **Player height**: in the single-column layout (width `1024px` or less), the player height is calculated from the video's actual aspect ratio at full width, removing excess black bars above and below the picture. Portrait video is limited to 75% of the screen height, and ultra-wide video has a minimum height of `180px`. The danmaku settings panel scrolls when it does not fit.
-- **Episode panel**: in the single-column layout, the episode panel expands with its content and the list has a maximum height of `max(320px, 60svh)`, instead of showing only one or two rows. Above 100 episodes, the list is divided into ranges of 50 (1-50, 51-100, …), and the range being played is shown by default.
-- **TVBox year sort**: films from the same year are further sorted by update time, consistent with the site.
-- **Install script**: `ecohub` supports a user-maintained `docker-compose.override.yml` in the install directory. Install and update never overwrite this file, and all compose commands apply it. `ecohub help` now documents `SERVER_PORT` and `MYSQL_ROOT_PASSWORD`.
-- **Documentation**: all documents have been rewritten according to the new style guide and corrected against the code. The deploy guide, FAQ, server and web READMEs, v2 upgrade guide, scheduled task conflicts, and release notes are available in English.
+- **Network proxy**: danmaku fetching and Telegram notifications now follow only the admin 「网络代理」 (network proxy) page: they use the proxy when the global proxy is on and the matching module (「弹幕抓取」 danmaku fetching, 「Telegram 机器人」 Telegram bot) is on; otherwise they connect directly. 「弹幕抓取」 is a new module and is off by default.
+- **Danmaku load status**: no longer shown as a notice over the video. The result is the gray placeholder text in the danmaku input, and a dot on its left shows loading, OK, no network danmaku, or failed; hover for the full message and the failure reason. When the player is narrower than `560px` the input is hidden and the dot moves to the danmaku toggle.
+- **Danmaku test**: with 「自动嗅探全网弹幕」 (auto-sniff network danmaku) on, the danmaku card in 「网站配置」 (site config) has a 「测试」 (test) button. It fetches episode 1 of a title with the settings currently filled in and shows the result below the button. The card also shows whether danmaku requests go through the proxy or direct.
+- **Player danmaku**: back to the danmaku plugin's own scheduling; the patch keeps only the faster loading (#63) and stops moving danmaku with time 0 later. On/off, opacity, font size, speed, display area, danmaku types, and anti-overlap are saved in the browser and kept across episodes. Fixes the danmaku toggle and settings not showing on phones (#83).
+- **Player layout by width**: the layout follows the player's own width instead of the device type and switches as soon as the window narrows. Below `560px` the danmaku input and the web fullscreen button are hidden; at `560–767px` the web fullscreen button is hidden; from `768px` the full layout is used. Danmaku font size shrinks with the player width (minimum `12px`) and the display area is measured on the picture, so danmaku no longer floats over the black bars. Below `768px`, top and bottom danmaku scroll instead, so danmaku no longer overlaps on phones.
+- **Player border**: the player has a 1px border and rounded corners at every width, so its edge is visible on dark backgrounds on phones. No border in fullscreen or web fullscreen.
+- **Player height**: when the page is a single column (`1024px` wide or less), the player height follows the video's real aspect ratio at full width, with no extra black bars above and below. Portrait video is capped at 75% of the screen height, and ultra-wide video gets at least `180px`. The danmaku settings panel scrolls when it does not fit.
+- **Episode panel**: in the single-column layout the episode panel grows with its content and the list is at most `max(320px, 60svh)` tall, instead of showing only one or two rows. Above 100 episodes the list is split into ranges of 50 (1-50, 51-100, …), opening on the range that is playing.
+- **TVBox year sort**: films from the same year are then sorted by update time, the same as the site.
+- **Install script**: `ecohub` supports your own `docker-compose.override.yml` in the install directory; install and update never overwrite it, and every compose command applies it. `ecohub help` now lists `SERVER_PORT` and `MYSQL_ROOT_PASSWORD`.
+- **Docs**: all docs are rewritten to the new style guide and corrected against the code. Deploy, FAQ, server, web, v2 upgrade, scheduled task conflicts, and release notes all have English versions.
 
 ### Architecture
 
-- Primary/secondary binding has been removed. Each collect source maintains its own records, and a failure in one source does not affect the others.
-- The first enabled collect source in sort order is the main source for the site. Switching the main source immediately shows that source's existing data, without re-collecting or deleting films; banners are stored per source, and the home page shows the banners of the new main source.
-- The play page appends play lines from other sources by match key, in this order: Douban ID + title, title#category, title only. Play lines remain grouped by source, and records are not merged.
-- Schema migrations retain only an empty baseline; new changes are appended at the end.
+- Primary/secondary binding is removed. Each collect source keeps its own records, and a problem with one source does not affect others.
+- The first enabled source in sort order is the main source for the site. Switching shows that source's existing data right away, with no re-collect and no deleted films; carousels are stored per source, and the home page shows the new main source's own set.
+- The play page adds other sources' lines by match key: Douban ID + title, title#category, title only. Lines stay separate per source, and records are not merged.
+- Schema migrations keep only an empty baseline; new changes are only appended at the end.
 
 ### Collect
 
-- Request intervals and the write token bucket have been removed. Limits: 128 in-flight requests globally, 16 goroutines per source, and a 30-second timeout per page write transaction.
-- The circuit breaker trips only when there are zero successful pages and page fetch failures reach the threshold. A source with successful pages pauses for 5 minutes after 20 consecutive failed pages and then resumes; after 3 consecutive pauses that still fail, the current round ends. On stop or import, pages not yet being written are discarded and open transactions are completed.
-- JSON probes use `detail` and XML probes use `videolist`, consistent with regular page fetches.
-- Scheduled collects yield to maintenance tasks and afterwards fill the uncollected time window, up to 7 days. The gap-fill anchor advances only when an entire scheduled run succeeds. For the rules, see [Scheduled task conflicts](https://github.com/fe-spark/EcoHub/blob/main/docs/cron-task-conflict_EN.md).
-- Batches are recorded in `collect_records`, and stored items in `collect_record_films`. The status reflects the actual storage result: success, partial success, failed, stopped, or aborted. Pages that were not fetched are marked as not fetched.
-- Failed pages are retried within 30 minutes; after that, the entire source is re-collected. Successful batches are archived, and history is cleaned up on a schedule.
-- Unmapped films are placed in the source's top-level "其他" (Other) category (the source's "其它" is treated as the same category). Hidden or disabled categories (including "其他") are still collected and stored but are not shown on the site. A run with successful pages still proceeds to indexing; a run with zero successes fails immediately.
-- While a source is sealing, it cannot be deleted and its URL or protocol cannot be changed. Deleting a source waits for only one index finalization.
-- When available memory is 2 GiB or less, only page concurrency, in-flight fetches, and the write queue are reduced.
+- Request intervals and the write token bucket are removed. 128 in flight globally, 16 goroutines per source, 30-second timeout per page write transaction.
+- The circuit breaker trips only with zero successful pages and page-fetch failures reaching the threshold. A source with successful pages pauses 5 minutes after 20 failed pages in a row and resumes; after 3 pauses in a row that still fail, this round ends. On stop or import, pages not yet writing are dropped and transactions already open are finished.
+- JSON probes use `detail` and XML probes use `videolist`, the same as real page fetches.
+- Scheduled collect yields to maintenance, then fills the uncollected window afterward, up to 7 days. The gap-fill anchor moves only when a whole scheduled run succeeds. Rules: [Scheduled task conflicts](https://github.com/fe-spark/EcoHub/blob/main/docs/cron-task-conflict_EN.md).
+- Batches are recorded in `collect_records` and stored-item details in `collect_record_films`. Status follows what was actually stored: success, partial success, failed, stopped, aborted. Pages not fetched are marked as not fetched.
+- Failed pages are retried within 30 minutes; after that the whole source is re-collected. Successful batches are archived, and history is cleaned on a schedule.
+- Unmapped films go into the source's top-level "其他" (Other) category (the source's "其它" counts as the same). Hidden or disabled categories (including "其他") are still collected and stored but not shown on the site. A run with successful pages still goes to indexing; a run with zero successes fails right away.
+- While a source is sealing, it cannot be deleted and its URL or protocol cannot be changed. Deleting a source waits for only one index finish.
+- When available memory is 2 GiB or less, only page concurrency, in-flight fetches, and the write queue are tightened.
 
 ### Search and site
 
-- In-memory inverted index (word segmentation, full pinyin, pinyin initials) and category rankings, updated incrementally during collect. A full rebuild runs once at startup; an incremental update also triggers a full rebuild when no usable index exists in memory or a database read fails.
-- The home page hides categories without films and shows at most 12 top-level category blocks. Navigation, filters, and TVBox still use all categories of the source.
-- Category rules apply per source. The order and visibility of site categories follow the admin mapping. Hidden categories (including rule-merged groups) are removed from all site APIs, and old URLs indicate that the category is no longer valid; search, daily updates, and TVBox keywords do not return these films either. Collect still stores these films, and category management still lists them and can re-enable them. A subcategory is never promoted to top level automatically.
-- Unmapped films appear in the source's "其他" (Other) category. When a source rename takes over the previous "其他" ID, a new ID is assigned as a fallback.
-- The player supports multiple play lines, playback progress memory, and danmaku. After the danmaku source is changed, the old cache is no longer used.
-- **Image acceleration**: with the media reverse proxy enabled, site and TVBox posters are loaded through the edge CDN automatically, are accessible directly without a proxy, and do not consume the self-hosted server's bandwidth.
+- In-memory inverted index (word segmentation, full pinyin, pinyin initials) and category rankings. Collect updates it incrementally. A full rebuild runs once on start; an incremental update also triggers one full rebuild when there is no usable index in memory or reading the database fails.
+- The home page hides categories with no films, and the category blocks show at most 12 top-level categories. Navigation, filters, and TVBox still use all of the source's categories.
+- Category rules apply per source. Site category order and visibility follow the admin mapping. Hidden categories (including rule-merged groups) disappear from every site API, and old URLs show that the category is no longer valid; search, daily updates, and TVBox keywords do not return those films either. Collect still stores those films. Category management still shows them and can turn them back on. A subcategory never becomes top-level on its own.
+- Unmapped films appear in the source's "其他" (Other). When a source rename takes the old "其他" ID, a new ID is assigned as a fallback.
+- The player supports multiple lines, progress memory, and danmaku. After changing the danmaku source, the old cache is not hit.
+- **Image acceleration**: with media reverse proxy on, site and TVBox posters go through the edge CDN automatically, open directly without a proxy, and do not use your own bandwidth.
 
 ### Admin
 
-- Actions open in drawers. Configuration, collect sources, and rules can be backed up and imported; collect is stopped before an import.
-- **Banners**: stored per source; title, category, remarks, and other fields are assembled from the library at display time. Films without remaining play lines on that source are not shown on the home page and are marked as invalid in the admin panel, where they can be deleted and reordered. Manual add, edit, delete, and reorder operations are validated by version number, and concurrent edits prompt a refresh.
-- **One-click scheduling**: select a strategy (newest, most popular, highest rated) and a count per category, up to 5 per category with no total limit; preview and adjust the result in a drawer, then publish the entire set. The scheduling configuration is not stored. Each one-click run requires confirmation and defaults to most popular, 1 per category; running it again on the same page reuses the last selection for that source, and reloading the page restores the defaults.
-- Category management and the site share one rule tree, which controls only order and visibility. When a parent category is hidden, the switches of its subcategories cannot be changed.
-- Roles: super user, regular user, and visitor.
-- The ID column in the film list shows the source's own ID. During collect, only the failure count of failed pages is highlighted in red.
-- An invalid play line is skipped individually. After a configuration is stored in the database, a failed cache write removes the old cached value.
-- **Media reverse proxy**: supports configuration and validation of edge reverse proxy templates; the server rewrites poster URLs on output without modifying the original data.
+- Actions now open in drawers. Config, sources, and rules can be backed up and imported; collect is stopped before import.
+- **Carousel**: stored per source; title, category, notes, and so on are assembled live from the library. Films with no play line left on that source are not shown on the home page and are marked invalid in admin, where they can be deleted and reordered. Manual add, edit, delete, and reorder are checked by version number, and concurrent edits prompt a refresh.
+- **One-click scheduling**: pick a strategy (newest, hottest, top rated) and a count per category, at most 5 per category, no total limit; preview and adjust the result in a drawer, then publish the whole set. The scheduling config is not stored. Every one-click run asks for confirmation, defaulting to hottest, 1 per category; running it again on the same page reuses that source's last choice, and a reload returns to the defaults.
+- Category management and the site share one rule tree; it only adjusts order and visibility. When a parent is hidden, its children's switches cannot be changed.
+- Roles are super user, regular user, and visitor.
+- The ID column in the film list is the source's own ID. During collect, only the failure count of failed pages is shown in red.
+- A single bad line is skipped on its own. After config is stored in the database, a failed cache write deletes the old value.
+- **Media reverse proxy**: supports configuring and validating edge reverse proxy templates; the server rewrites poster URLs on output without changing the original data.
