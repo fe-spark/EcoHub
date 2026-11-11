@@ -20,17 +20,17 @@
 </div>
 
 > [!WARNING]
-> v3 和 v2 的数据库不兼容，也没有数据迁移。不要在旧的 `./data/mysql` 上直接拉新镜像，也不要在 v2 后台点「立即升级」。请用新目录或清空数据后重新安装，再做一次全量采集。步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。当前正式版是 `v3.0.3`，遇到问题请提 [Issues](https://github.com/fe-spark/EcoHub/issues)。
+> v3 与 v2 的数据库不兼容，且不提供数据迁移。请勿在旧的 `./data/mysql` 上直接拉取新镜像，也请勿使用 v2 后台的「立即升级」。请使用新目录或清空数据后重新安装，再执行一次全量采集。操作步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。当前正式版为 `v3.0.3`，问题反馈请提交 [Issues](https://github.com/fe-spark/EcoHub/issues)。
 
-作者时间有限，更新较慢，欢迎提 [PR](https://github.com/fe-spark/EcoHub/pulls)。
+本项目由作者业余维护，更新频率有限，欢迎提交 [PR](https://github.com/fe-spark/EcoHub/pulls)。
 
 ## 简介
 
-EcoHub 从你配置的采集站拉取影片，提供观影前台、管理后台和三种订阅地址（EcoHub 客户端、TVBox / 影视仓、MacCMS）。
+EcoHub 从管理员配置的采集站拉取影片数据，提供观影前台、管理后台和三种订阅地址（EcoHub 客户端、TVBox / 影视仓、MacCMS）。
 
-举个例子：装好后在后台启用几座采集站，做一次全量采集，前台就能搜索、筛选、播放；把订阅地址填进 TVBox，电视上也能看。
+典型流程：安装后在后台启用采集站并执行一次全量采集，前台即可搜索、筛选和播放；将订阅地址填入 TVBox 后，可在电视端观看。
 
-客户端是独立仓库，以 git submodule 放在 `app-for-ohos/` 和 `app-for-android/`：
+客户端为独立仓库，以 git submodule 形式位于 `app-for-ohos/` 和 `app-for-android/`：
 
 - [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)
 - [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)
@@ -44,42 +44,42 @@ EcoHub 从你配置的采集站拉取影片，提供观影前台、管理后台�
 
 ## 安装
 
-需要 Docker 20+ 和 Docker Compose，建议 2 核 2 GB 以上配置。一条命令装好：
+环境要求：Docker 20+ 和 Docker Compose，建议 2 核 CPU、2 GB 内存及以上。执行以下命令安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
   | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
-装完后：
+安装完成后：
 
-- 数据在 `~/ecohub`，以后用 `ecohub` 命令管理（`ecohub status`、`ecohub update` 等）。
-- 终端会打印前台、后台和三条订阅地址。Web 端口默认 `3000`。
-- 前台一开始是空的。到后台「采集中心」做一次全量采集，影片会边采边出现，第一次可能要几个小时。
+- 数据位于 `~/ecohub`，后续通过 `ecohub` 命令管理（如 `ecohub status`、`ecohub update`）。
+- 终端输出前台、后台和三条订阅地址。Web 端口默认为 `3000`。
+- 前台初始为空。在后台「采集中心」执行一次全量采集后，影片会随采集进度陆续出现；首次采集可能需要数小时。
 
-改密码、换端口、反向代理、1Panel 见 [部署指南](./docs/README-Deploy.md)。
+修改密码、端口、反向代理及 1Panel 部署见 [部署指南](./docs/README-Deploy.md)。
 
 ## 本地开发
 
-本机需要 Go 1.27+、Node.js 20.9+、MySQL 8 和 Redis 7。
+环境要求：Go 1.27+、Node.js 20.9+、MySQL 8、Redis 7。
 
-仓库根目录的 `docker-compose.yml` 只用于本地开发，不要拿来部署。它和发布用的 [deploy/release/compose.yml](./deploy/release/compose.yml) 的区别：
+仓库根目录的 `docker-compose.yml` 仅用于本地开发，不适用于生产部署。它与发布编排 [deploy/release/compose.yml](./deploy/release/compose.yml) 的区别如下：
 
 | | 根目录 `docker-compose.yml` | `deploy/release/compose.yml` |
 | --- | --- | --- |
-| 应用 | 从 `server/`、`web/` 源码本地构建，前后端分成 `Eco-server`、`Eco-web` 两个容器 | 拉取 All-in-One 镜像，一个 `Eco-hub` 容器 |
+| 应用 | 从 `server/`、`web/` 源码本地构建，前后端分别运行在 `Eco-server`、`Eco-web` 两个容器中 | 拉取 All-in-One 镜像，运行单个 `Eco-hub` 容器 |
 | MySQL、Redis 端口 | 映射到本机 `127.0.0.1:3306`、`127.0.0.1:6379` | 不映射 |
 | 数据 | Docker 命名卷 `eco-mysql-data`、`eco-redis-data`、`eco-server-uploads` | 安装目录下的 `data/` |
 
-两种用法：
+支持以下两种用法：
 
-1. 只起数据库，前后端在本机跑（日常开发）。数据库账号密码和 `server/.env.example` 一致：
+1. 仅启动数据库，前后端在本机运行（日常开发）。数据库账号和密码与 `server/.env.example` 一致：
 
    ```bash
    docker compose up -d mysql redis
    ```
 
-   然后在两个终端分别启动后端和前端：
+   在两个终端中分别启动后端和前端：
 
    ```bash
    cd server && cp .env.example .env && go run ./cmd/server
@@ -89,34 +89,33 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
    cd web && cp .env.example .env.local && npm install && npm run dev
    ```
 
-   前台 `http://127.0.0.1:3000`，后台 `http://127.0.0.1:3000/manage`，后端 API `http://127.0.0.1:8080`。
+   前台地址为 `http://127.0.0.1:3000`，后台地址为 `http://127.0.0.1:3000/manage`，后端 API 地址为 `http://127.0.0.1:8080`。
 
-2. 整套从源码构建成容器（验证 Dockerfile 或联调）：
+2. 从源码构建并运行全部容器（用于验证 Dockerfile 或联调）：
 
    ```bash
    docker compose up -d --build
    ```
 
-   前台 `http://127.0.0.1:3000`，后端 API `http://127.0.0.1:18080`。端口和密码可以在仓库根目录的 `.env` 里改（从 [.env.example](./.env.example) 复制，不建也能用默认值）。
+   前台地址为 `http://127.0.0.1:3000`，后端 API 地址为 `http://127.0.0.1:18080`。端口和密码可在仓库根目录的 `.env` 中修改（从 [.env.example](./.env.example) 复制；不创建时使用默认值）。
 
-注意：
+> [!NOTE]
+> - 开发编排的容器名 `Eco-mysql`、`Eco-redis` 与发布编排相同，同一台机器上不能同时运行开发编排和正式部署。
+> - 本机已有 MySQL 或 Redis 占用 `3306`、`6379` 时，开发编排无法启动。请先停止本机服务，或直接使用本机数据库。
 
-- 容器名 `Eco-mysql`、`Eco-redis` 和发布编排相同，同一台机器上不要同时跑开发编排和正式部署。
-- 本机已经有 MySQL 或 Redis 占着 `3306`、`6379` 时，开发编排起不来，先停掉本机的或直接用本机的库。
-
-细节见 [服务端说明](./server/README.md) 和 [前端说明](./web/README.md)。
+详细说明见 [服务端说明](./server/README.md) 和 [前端说明](./web/README.md)。
 
 ## 文档
 
 | 文档 | 内容 |
 | --- | --- |
 | [部署指南](./docs/README-Deploy.md) | 安装、`ecohub` 命令、密码、端口、1Panel、反向代理、环境变量 |
-| [从 v2 升级到 v3](./docs/v2-to-v3.md) | 停掉旧栈、用空库重装、全量采集 |
+| [从 v2 升级到 v3](./docs/v2-to-v3.md) | 停止旧服务、使用空库重装、全量采集 |
 | [常见问题](./docs/README-FAQ.md) | 空站、主站、采集、缓存、登录 |
-| [计划任务运行冲突](./docs/cron-task-conflict.md) | 采集和维护任务同时到点时谁先跑 |
-| [版本说明](./docs/RELEASE.md) | 当前版本改了什么 |
+| [计划任务运行冲突](./docs/cron-task-conflict.md) | 采集任务与维护任务同时触发时的执行顺序 |
+| [版本说明](./docs/RELEASE.md) | 当前版本的变更内容 |
 | [文档索引](./docs/README.md) | 全部文档，含英文版 |
 
-> EcoHub 不提供、不存储影视文件。片源来自使用者自己配置的采集接口。请遵守当地法律和采集站的使用约定。
+> EcoHub 不提供、不存储任何影视文件，片源来自使用者自行配置的采集接口。使用时请遵守当地法律法规及采集站的使用条款。
 
 [PolyForm Noncommercial 1.0.0](./LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram](https://t.me/ecohub_club)
