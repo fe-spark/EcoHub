@@ -32,7 +32,8 @@ func init() {
 			Status:  p.Status,
 		})
 		if p.Status == "done" || p.Status == "idle" {
-			searchReseal.complete()
+			// 只收口本轮停等的重建终态；idle/无关进度不能把 sealing 标成完成。
+			searchReseal.onSearchIndexTerminal(p.Status)
 		}
 	})
 }
