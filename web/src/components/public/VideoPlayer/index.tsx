@@ -9,7 +9,13 @@ import { CloseCircleFilled, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import { loadDanmakuSettings, saveDanmakuSettings } from "./danmakuSettings";
-import { danmakuNoticeText, type DanmakuMeta } from "./danmakuNotice";
+import {
+  DANMAKU_LOADING_STATUS,
+  danmakuLoadedStatus,
+  danmakuRequestFailedStatus,
+  type DanmakuMeta,
+  type DanmakuStatus,
+} from "./danmakuStatus";
 import styles from "./index.module.less";
 
 interface VideoPlayerProps {
@@ -79,6 +85,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // 弹幕列表返回前用户已发出的弹幕：插件 load 完会清空队列，这里记下来随列表一起装回去
     const sentBeforeLoad: { text: string; time: number; color: string; mode: DanmakuMode }[] = [];
     let listLoaded = false;
+    // 弹幕加载状态显示在输入框上（灰字 + 悬停说明 + 左侧状态点），不再用 notice 盖在画面上。
+    // 插件控件可能晚于本函数挂上，记下最新状态，ready 时再补一次。
+    let danmakuStatus: DanmakuStatus | null = null;
+    const renderDanmakuStatus = () => {
+      const $player = art?.template?.$player as HTMLElement | undefined;
+      const $input = $player?.querySelector(".apd-input") as HTMLInputElement | null;
+      if (!danmakuStatus || !$input) return;
+      $input.placeholder = danmakuStatus.placeholder;
+      $input.title = danmakuStatus.title;
+      let $dot = $player?.querySelector(".ecohub-danmaku-status") as HTMLElement | null;
+      if (!$dot) {
+        $dot = document.createElement("span");
+        $dot.className = "ecohub-danmaku-status";
+        $input.before($dot);
+      }
+      $dot.dataset.tone = danmakuStatus.tone;
+      $dot.title = danmakuStatus.title;
+    };
+    const showDanmakuStatus = (status: DanmakuStatus) => {
+      danmakuStatus = status;
+      renderDanmakuStatus();
+    };
     const art = new Artplayer({
       container: artRef.current,
       url: src,
@@ -116,16 +144,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 await Promise.resolve();
                 const meta = danmakuMetaRef.current;
                 let list: { text: string; time: number; color: string; mode: DanmakuMode }[] = [];
-                let notice = "";
-                let stats: DanmakuMeta | undefined;
-                // 超过 500ms 还没回来才提示「加载中」，避免一闪而过；notice 2 秒自动消失，等待期间续上
-                let loadingTimer: ReturnType<typeof setTimeout> | undefined;
-                const showLoading = () => {
-                  art.notice.show = "弹幕加载中…";
-                  loadingTimer = setTimeout(showLoading, 1500);
-                };
                 if (meta.filmId != null && meta.filmId !== "") {
-                  loadingTimer = setTimeout(showLoading, 500);
+                  showDanmakuStatus(DANMAKU_LOADING_STATUS);
+                  let status: DanmakuStatus;
                   try {
                     const resp = await ApiGet<{ text: string; time: number; color?: string; mode?: number }[]>(
                       "/film/danmaku",
@@ -138,24 +159,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         color: item.color || "#ffffff",
                         mode: toMode(item.mode),
                       }));
-                      stats = (resp as { meta?: DanmakuMeta }).meta;
-                      notice = danmakuNoticeText(list.length, stats);
+                      status = danmakuLoadedStatus(list.length, (resp as { meta?: DanmakuMeta }).meta);
                     } else {
-                      notice = `弹幕加载失败：${resp.msg || "未知原因"}`;
+                      status = danmakuRequestFailedStatus(resp.msg);
                     }
                   } catch (e) {
                     console.error("加载弹幕失败", e);
-                    notice = "弹幕加载失败";
-                  } finally {
-                    clearTimeout(loadingTimer);
+                    status = danmakuRequestFailedStatus();
                   }
-                }
-                // 每集只在装载完成时提示一次；没有可说的就收起「加载中」
-                art.notice.show = notice;
-                const $input = art.template?.$player?.querySelector(".apd-input") as HTMLInputElement | null;
-                if ($input) {
-                  if (list.length > 0) $input.placeholder = `共 ${list.length} 条弹幕，说点什么吧`;
-                  if (notice) $input.title = notice;
+                  showDanmakuStatus(status);
+                  // 手机没有输入框：只在失败时用播放器 notice 简短提示一次，其余状态不打扰
+                  if (isMobile && status.tone === "error") art.notice.show = status.title;
                 }
                 listLoaded = true;
                 // 刚发出的弹幕被 load 清掉后按当前进度重新飞一次
@@ -278,6 +292,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
     player = art;
     if (danmakuEnabled) {
+      art.on("ready", renderDanmakuStatus);
       art.on("artplayerPluginDanmuku:config", (option) => saveDanmakuSettings(option));
       art.on("artplayerPluginDanmuku:show", () => saveDanmakuSettings({ visible: true }));
       art.on("artplayerPluginDanmuku:hide", () => saveDanmakuSettings({ visible: false }));
