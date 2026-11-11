@@ -1,9 +1,9 @@
-正式版 **v3.0.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.2`（`:latest` 同步指向它）。镜像 tag 见 [部署指南](./README-Deploy.md)。
+正式版 **v3.0.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.2`（`:latest` 同步指向它）。镜像 tag 见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 ### 升级
 
 - v3.0.x：`ecohub` 安装的执行 `ecohub update`。1Panel 或自建 compose 在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不迁移。见 [从 v2 升级到 v3](./v2-to-v3.md)。
+- v2.x：不兼容，不迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
 ### v3.0.2 修复
 
@@ -29,7 +29,7 @@
 - 去掉请求间隔和写库令牌桶。全局在途 128，单站 16 个协程，单页写事务 30 秒超时。
 - 零成功且取页失败达阈值才熔断。已有成功页的站连续失败 20 页暂停 5 分钟续采，连续暂停 3 次仍失败结束本轮。停止或导入时丢掉未开写的页，写完已经打开的事务。
 - JSON 探页用 `detail`，XML 探页用 `videolist`，与正式抓页一致。
-- 定时采集碰到维护会让行，之后按未采窗口补，最多 7 天。只有定时整次成功才移动补窗锚点。规则见 [计划任务冲突](./cron-task-conflict.md)。
+- 定时采集碰到维护会让行，之后按未采窗口补，最多 7 天。只有定时整次成功才移动补窗锚点。规则见 [计划任务冲突](https://github.com/fe-spark/EcoHub/blob/main/docs/cron-task-conflict.md)。
 - 批次记在 `collect_records`，入库明细记在 `collect_record_films`。状态按实际落库：成功、部分成功、失败、已停止、异常中断。没抓的页写明未抓。
 - 30 分钟内重试失败页，超时则整站重采。成功批次归档，历史记录定时清理。
 - 未映射影片归入该站一级「其他」（源站「其它」视为同一类）。隐藏或停用的分类（含「其他」）仍正常采集入库，前台不展示。有成功页仍进入待检索；零成功直接失败。
