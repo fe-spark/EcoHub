@@ -305,7 +305,7 @@ For production:
 | `REDIS_PASSWORD` | `ecohub` | App, bundled Redis | Edit `.env`, then `ecohub restart` |
 | `REDIS_DB` | `0` | App | |
 
-To send collect, TMDB scraping, Telegram notifications, or the version check through a proxy, open admin → "网络代理" (Network proxy, `/manage/system/proxy`), enter the proxy address (`http://`, `https://`, or `socks5://`), then turn it on per module. This is the only place to configure a proxy.
+To send collect, TMDB scraping, Telegram notifications, the version check, or danmaku fetching through a proxy, open admin → "网络代理" (Network proxy, `/manage/system/proxy`), enter the proxy address (`http://`, `https://`, or `socks5://`), then turn it on per module. This is the only place to configure a proxy. Requests without a proxy turned on always connect directly. Which requests each module covers and its default: [FAQ](./README-FAQ_EN.md#which-requests-use-the-admin-network-proxy).
 
 Go-only variables such as `NODE_NAME` and `ECOHUB_LOG_DIR` are not passed into the container by the release compose file, so putting them in `.env` has no effect. Add them under `environment` in the compose file if you need them. Their meaning is in the [server README](../server/README_EN.md#environment-variables).
 

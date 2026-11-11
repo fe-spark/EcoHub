@@ -86,6 +86,24 @@ All collect sources follow the same rules.
 
 Site category filters and TVBox use the same rules (category, genre, region, language, year, sort). TVBox has an extra Redis cache, so check the cache first when they briefly differ.
 
+## Network
+
+### Which requests use the admin network proxy?
+
+A module's requests go through the proxy only when the global proxy is on in admin → "网络代理" (Network proxy, `/manage/system/proxy`) and that module's switch is on too. Everything else connects directly. Container environment variables do not affect outbound requests.
+
+| Module (admin name) | Requests it covers | Default on new installs |
+| --- | --- | --- |
+| 影视采集爬虫 (collect spider) | Collect source APIs. Each collect source also needs "采集接口代理" (collect API proxy) turned on in its edit page | On |
+| TMDB 刮削 (TMDB scraping) | Requests to the TMDB API (including the admin connection test) | On |
+| Telegram 机器人 (Telegram bot) | Notifications and polling for the paging buttons | On |
+| 系统版本更新 (version update) | GitHub version check | On |
+| 弹幕抓取 (danmaku fetching) | Danmaku search and download from the official dandanplay API or a self-hosted danmu-api | Off |
+
+"弹幕抓取" is off by default because a self-hosted danmu-api is often on the local network, and sending it through the proxy would break it. After upgrading from an older version it is also off, so danmaku keeps connecting directly; the other modules keep their saved switches.
+
+Example: a proxy runs on port `7890` on the host, and you want the official dandanplay API to go through it. Enter `http://host.docker.internal:7890` (inside the container, `127.0.0.1` is the container itself), turn on the global switch, then turn on "弹幕抓取".
+
 ## Login and permissions
 
 ### The admin page opens, but API calls say I am not logged in. Why?
