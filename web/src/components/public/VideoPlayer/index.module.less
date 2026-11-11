@@ -127,3 +127,152 @@
     border-color: var(--public-border-3) !important;
   }
 }
+
+/*
+ * 弹幕输入框（artplayer-plugin-danmuku）。
+ * 非全屏：插件固定 260px，输入框只剩约 160px，「共 5396 条弹幕，说点什么吧」显示不全。
+ * 改成最宽 340px、空间不够时随控制条收窄（不挤掉右侧按钮），文字放不下时以省略号结尾。
+ * 全屏和网页全屏不动，仍用插件的 400px。
+ */
+.artPlayer:not(:global(.art-fullscreen)):not(:global(.art-fullscreen-web)) {
+  :global(.art-controls-center) {
+    min-width: 0;
+  }
+
+  :global(.art-controls-center .artplayer-plugin-danmuku) {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  :global(.art-controls-center .apd-emitter) {
+    flex: 0 1 340px;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+.artPlayer :global(.apd-input) {
+  text-overflow: ellipsis;
+}
+
+/* 弹幕加载状态点：在输入框左侧，悬停看完整说明 */
+.artPlayer :global(.ecohub-danmaku-status) {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin: 0 6px 0 2px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+
+  &[data-tone="ok"] {
+    background: #52c41a;
+  }
+
+  &[data-tone="warn"] {
+    background: #faad14;
+  }
+
+  &[data-tone="error"] {
+    background: #ff4d4f;
+  }
+
+  &[data-tone="none"] {
+    display: none;
+  }
+
+  &[data-tone="loading"] {
+    animation: ecohubDanmakuPulse 1s ease-in-out infinite;
+  }
+}
+
+/*
+ * 按播放器显示宽度排版（档位由 playerLayout.ts 写在播放器根节点的 data-ecohub-width 上，
+ * 尺寸变化时实时更新；和浏览器标识、是否触屏无关）。
+ * .artPlayer 直接挂在 Artplayer 的根节点上：网页全屏时 Artplayer 会把根节点移到 body 下，
+ * 挂在外层 .playerWrapper 下的选择器在网页全屏里不生效。
+ * - compact（< 560px）：收起弹幕输入框和网页全屏按钮，按钮收窄，加载状态改在弹幕开关上显示；
+ *   弹幕设置面板改为相对整个控制条居中，不再从按钮处向右伸出播放器。
+ * - medium（560–767px）：收起网页全屏按钮（已在网页全屏里时保留，用来退出）、按钮收窄，给输入框留出位置。
+ * - wide（≥ 768px）：插件和播放器默认布局。
+ */
+.artPlayer[data-ecohub-width="compact"],
+.artPlayer[data-ecohub-width="medium"] {
+  :global(.art-controls .art-control) {
+    min-width: 32px;
+  }
+
+  // 已在网页全屏里时保留按钮，用来退出
+  &:not(:global(.art-fullscreen-web)) :global(.art-controls .art-control-fullscreenWeb) {
+    display: none;
+  }
+
+  :global(.art-controls-center) {
+    padding: 0 6px;
+  }
+
+  :global(.artplayer-plugin-danmuku) {
+    gap: 6px;
+  }
+}
+
+.artPlayer[data-ecohub-width="compact"] {
+  :global(.apd-emitter) {
+    display: none !important;
+  }
+
+  :global(.artplayer-plugin-danmuku),
+  :global(.artplayer-plugin-danmuku .apd-config) {
+    position: static;
+  }
+
+  :global(.artplayer-plugin-danmuku .apd-config .apd-config-panel) {
+    z-index: 99;
+    bottom: 100%;
+    // 插件悬停时会按按钮位置往面板上写行内 left（让面板对着按钮居中），compact 下要覆盖掉，
+    // 否则面板会被推到播放器左侧外面
+    left: 50% !important;
+    width: min(320px, 100%);
+    transform: translateX(-50%);
+  }
+}
+
+/*
+ * 弹幕设置面板约 270px 高，播放区按视频比例算高度后可能只有 180–300px（超宽视频、窄屏），
+ * 外框 overflow: hidden 会把面板顶部裁掉。按播放器当前高度（playerLayout.ts 写入的
+ * --ecohub-player-height）限制面板高度，放不下时在面板里滚动。
+ * 80px ≈ 控制条（约 50px）+ 面板外层用来衔接鼠标悬停的 10px 上下留白 + 余量。
+ */
+.artPlayer :global(.artplayer-plugin-danmuku .apd-config .apd-config-panel .apd-config-panel-inner) {
+  max-height: calc(var(--ecohub-player-height, 10000px) - 80px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 弹幕开关上的状态点：只在输入框收起（compact）时显示 */
+.artPlayer :global(.apd-toggle) {
+  position: relative;
+}
+
+.artPlayer :global(.ecohub-danmaku-status.ecohub-danmaku-status--toggle) {
+  display: none;
+  position: absolute;
+  top: 0;
+  right: -3px;
+  margin: 0;
+  pointer-events: none;
+}
+
+.artPlayer[data-ecohub-width="compact"] :global(.ecohub-danmaku-status.ecohub-danmaku-status--toggle:not([data-tone="none"])) {
+  display: block;
+}
+
+@keyframes ecohubDanmakuPulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}

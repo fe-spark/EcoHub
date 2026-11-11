@@ -8,6 +8,30 @@ import { Button, Result } from "antd";
 import { CloseCircleFilled, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
+import {
+  changedDanmakuSettings,
+  loadDanmakuSettings,
+  pickDanmakuSettings,
+  saveDanmakuSettings,
+  type DanmakuSettings,
+} from "./danmakuSettings";
+import {
+  DEFAULT_FONT_SIZE,
+  DEFAULT_MARGIN,
+  bindDanmakuLayout,
+  computeDanmakuLayout,
+  smallPlayerScrollOnly,
+  type DanmakuBase,
+} from "./danmakuLayout";
+import { WIDE_FROM, bindPlayerWidthClass, currentPlayerWidthClass } from "./playerLayout";
+import {
+  DANMAKU_LOADING_STATUS,
+  renderDanmakuStatus as renderDanmakuStatusDom,
+  danmakuLoadedStatus,
+  danmakuRequestFailedStatus,
+  type DanmakuMeta,
+  type DanmakuStatus,
+} from "./danmakuStatus";
 import styles from "./index.module.less";
 
 interface VideoPlayerProps {
@@ -22,6 +46,8 @@ interface VideoPlayerProps {
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onError?: (error: unknown) => void;
   onPlayStart?: () => void;
+  /** 视频真实分辨率可用或变化时回调（loadedmetadata / resize，例如 HLS 切换清晰度）。 */
+  onVideoSize?: (width: number, height: number) => void;
 }
 
 /**
@@ -41,11 +67,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onTimeUpdate,
   onError,
   onPlayStart,
+  onVideoSize,
 }) => {
   const { config: siteConfig } = useSiteConfig();
   const danmakuEnabled = Boolean(siteConfig?.danmaku?.enabled);
   const danmakuMetaRef = useRef({ filmId, filmTitle, episode });
-  danmakuMetaRef.current = { filmId, filmTitle, episode };
+  useEffect(() => {
+    danmakuMetaRef.current = { filmId, filmTitle, episode };
+  }, [filmId, filmTitle, episode]);
   const artRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Artplayer | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -53,32 +82,50 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [retryCount, setRetryCount] = useState(0);
 
   // 回调保护
-  const callbacks = useRef({ onEnded, onTimeUpdate, onError, onPlayStart });
+  const callbacks = useRef({ onEnded, onTimeUpdate, onError, onPlayStart, onVideoSize });
   useEffect(() => {
-    callbacks.current = { onEnded, onTimeUpdate, onError, onPlayStart };
-  }, [onEnded, onTimeUpdate, onError, onPlayStart]);
+    callbacks.current = { onEnded, onTimeUpdate, onError, onPlayStart, onVideoSize };
+  }, [onEnded, onTimeUpdate, onError, onPlayStart, onVideoSize]);
 
   // 核心初始化 Effect
   useEffect(() => {
-    let cancelled = false;
     let player: Artplayer | null = null;
-    let modeTimer: any = null;
-    let seekEndTimer: any = null;
     let miniRafId = 0;
     let onScrollOrResize: (() => void) | null = null;
     let miniObserver: IntersectionObserver | null = null;
 
-    if (!artRef.current) {
-      return () => {
-        cancelled = true;
-      };
-    }
+    if (!artRef.current) return;
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth <= 768;
     Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
     const isM3U8 = src.includes(".m3u8") || src.includes("m3u8");
-    const pendingLive: { text: string; color?: string; mode?: 0 | 1 | 2 }[] = [];
-    let listReady = !danmakuEnabled;
+    type DanmakuMode = 0 | 1 | 2;
+    const toMode = (m?: number): DanmakuMode => (m === 1 ? 1 : m === 2 ? 2 : 0);
+    // 弹幕列表返回前用户已发出的弹幕：插件 load 完会清空队列，这里记下来随列表一起装回去
+    const sentBeforeLoad: { text: string; time: number; color: string; mode: DanmakuMode }[] = [];
+    let listLoaded = false;
+    // 弹幕字号和显示区域：保存的是用户设定（字号按大播放器计，显示区域相对画面），
+    // 实际传给插件的值按播放器尺寸换算，尺寸变化时重算（见 danmakuLayout.ts）
+    const savedDanmaku = loadDanmakuSettings();
+    const danmakuBase: DanmakuBase = {
+      fontSize: savedDanmaku.fontSize ?? DEFAULT_FONT_SIZE,
+      margin: savedDanmaku.margin ?? DEFAULT_MARGIN,
+    };
+    const initialDanmakuLayout = computeDanmakuLayout(
+      danmakuBase,
+      artRef.current.clientWidth,
+      artRef.current.clientHeight,
+    );
+    // 弹幕加载状态画在控制条上，不用 notice 盖在画面上：输入框显示时在输入框（灰字 + 状态点），
+    // 窄播放器收起输入框时在弹幕开关上（状态点），见 danmakuStatus.ts / playerLayout.ts。
+    // 插件控件可能晚于本函数挂上，记下最新状态，ready 时再补一次。
+    let danmakuStatus: DanmakuStatus | null = null;
+    const renderDanmakuStatus = () => renderDanmakuStatusDom(art?.template?.$player, danmakuStatus);
+    const showDanmakuStatus = (status: DanmakuStatus) => {
+      danmakuStatus = status;
+      renderDanmakuStatus();
+      // 输入框收起时状态点很小：失败再用播放器 notice 简短提示一次，其余状态不打扰
+      if (status.tone === "error" && currentPlayerWidthClass(art) === "compact") art.notice.show = status.title;
+    };
     const art = new Artplayer({
       container: artRef.current,
       url: src,
@@ -93,7 +140,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       playbackRate: true,
       aspectRatio: true,
       fullscreen: true,
-      fullscreenWeb: !isMobile,
+      // 网页全屏和弹幕输入框都创建，窄播放器上由样式按宽度收起（playerLayout.ts）
+      fullscreenWeb: true,
       mutex: true,
       backdrop: false,
       playsInline: true,
@@ -103,15 +151,53 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       plugins: danmakuEnabled
         ? [
             artplayerPluginDanmuku({
-              danmuku: [],
-              speed: 5,
-              opacity: 1,
-              fontSize: 25,
-              color: "#ffffff",
-              mode: 0,
-              modes: [0, 1, 2],
-              antiOverlap: true,
+              ...savedDanmaku,
+              fontSize: initialDanmakuLayout.fontSize,
+              margin: initialDanmakuLayout.margin,
+              // 插件类型声明把档位值写成 string | number，实际是 [上边距, 下边距]
+              MARGIN: initialDanmakuLayout.MARGIN as never,
+              // 中、窄播放器上固定弹幕按滚动显示，和滚动弹幕一起避让
+              beforeVisible: smallPlayerScrollOnly(() => art?.template?.$player),
               synchronousPlayback: true,
+              // 不按播放器宽度把弹幕栏挪到播放器外面（外层容器 overflow:hidden 会把它裁掉）
+              width: 0,
+              emitter: true,
+              // 插件创建时自己调用一次，只拉一次列表
+              danmuku: async () => {
+                // 插件在 new Artplayer() 里同步调用本函数，先让出一拍，等 art 赋值后再用
+                await Promise.resolve();
+                const meta = danmakuMetaRef.current;
+                let list: { text: string; time: number; color: string; mode: DanmakuMode }[] = [];
+                if (meta.filmId != null && meta.filmId !== "") {
+                  showDanmakuStatus(DANMAKU_LOADING_STATUS);
+                  let status: DanmakuStatus;
+                  try {
+                    const resp = await ApiGet<{ text: string; time: number; color?: string; mode?: number }[]>(
+                      "/film/danmaku",
+                      { mid: meta.filmId, episode: meta.episode || 1, title: meta.filmTitle || "" },
+                    );
+                    if (resp.code === 0 && Array.isArray(resp.data)) {
+                      list = resp.data.map((item) => ({
+                        text: item.text,
+                        time: Number(item.time) || 0,
+                        color: item.color || "#ffffff",
+                        mode: toMode(item.mode),
+                      }));
+                      status = danmakuLoadedStatus(list.length, (resp as { meta?: DanmakuMeta }).meta);
+                    } else {
+                      status = danmakuRequestFailedStatus(resp.msg);
+                    }
+                  } catch (e) {
+                    console.error("加载弹幕失败", e);
+                    status = danmakuRequestFailedStatus();
+                  }
+                  showDanmakuStatus(status);
+                }
+                listLoaded = true;
+                // 刚发出的弹幕被 load 清掉后按当前进度重新飞一次
+                const sent = sentBeforeLoad.splice(0);
+                return sent.length ? list.concat(sent.map((d) => ({ ...d, time: Math.max(d.time, art.currentTime) }))) : list;
+              },
               beforeEmit: async (danmu) => {
                 const meta = danmakuMetaRef.current;
                 const mid = Number(meta.filmId);
@@ -132,18 +218,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     art.notice.show = resp.msg || "发送弹幕失败";
                     return false;
                   }
-                  if (!listReady) {
-                    pendingLive.push({
-                      text: danmu.text,
-                      color: danmu.color,
-                      mode: danmu.mode === 1 ? 1 : danmu.mode === 2 ? 2 : 0,
-                    });
-                  } else {
-                    sourceComments.push({
+                  if (!listLoaded) {
+                    sentBeforeLoad.push({
                       text: danmu.text,
                       time: danmu.time || art.currentTime,
                       color: danmu.color || "#ffffff",
-                      mode: danmu.mode === 1 ? 1 : danmu.mode === 2 ? 2 : 0,
+                      mode: toMode(danmu.mode),
                     });
                   }
                   return true;
@@ -233,92 +313,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       },
     });
     player = art;
-    type DanmakuItem = { text: string; time: number; color: string; mode: 0 | 1 | 2 };
-    let sourceComments: DanmakuItem[] = [];
-    let placeGen = 0;
-    let placeChain: Promise<void> = Promise.resolve();
-    const travelSeconds = () => {
-      const base = art.fullscreen || art.fullscreenWeb ? 10 : 5;
-      const rate = Number(art.playbackRate) || 1;
-      return base / rate;
-    };
-    const placeDanmaku = (now: number) => {
-      const gen = ++placeGen;
-      placeChain = placeChain
-        .then(async () => {
-          if (cancelled || gen !== placeGen) return;
-          const dm = (art.plugins as any)?.artplayerPluginDanmuku;
-          if (!dm || typeof dm.load !== "function") return;
-          const duration = travelSeconds();
-          const view = sourceComments.flatMap((item) => {
-            const start = item.time || 0;
-            const elapsed = now - start;
-            if (elapsed < 0) return [item];
-            if (elapsed < duration) return [{ ...item, time: now, id: `seek:${start}` }];
-            return [];
-          });
-          await dm.load();
-          if (cancelled || gen !== placeGen) return;
-          if (view.length > 0) await dm.load(view);
-        })
-        .catch(() => {});
-      return placeChain;
-    };
-    art.on("artplayerPluginDanmuku:visible", (danmu: any) => {
-      const id = String(danmu?.id || "");
-      if (!id.startsWith("seek:") || !danmu.$ref) return;
-      const start = Number(id.slice(5));
-      const duration = travelSeconds();
-      const elapsed = art.currentTime - start;
-      if (!(elapsed > 0 && elapsed < duration)) return;
-      danmu.$restTime = duration - elapsed;
-      danmu.$lastStartTime = Date.now();
-      if (danmu.mode !== 0) return;
-      const width = (art.template?.$player?.clientWidth || 0) + danmu.$ref.clientWidth;
-      const remain = duration - elapsed;
-      danmu.$ref.style.transition = "none";
-      danmu.$ref.style.transform = `translateX(${-width * (elapsed / duration)}px)`;
-      requestAnimationFrame(() => {
-        if (!danmu.$ref) return;
-        danmu.$ref.style.transition = `transform ${remain}s linear 0s`;
-        danmu.$ref.style.transform = `translateX(${-width}px)`;
-      });
-    });
+    // 本组件的播放器样式挂在根节点上（网页全屏时根节点会被移出外层容器）
+    art.template.$player?.classList.add(styles.artPlayer);
+    // 按播放器显示宽度切换控制条排版（输入框、网页全屏按钮、状态显示位置），尺寸变化时实时切换
+    const unbindWidthClass = bindPlayerWidthClass(art, () => renderDanmakuStatus());
     if (danmakuEnabled) {
-      void (async () => {
-        const meta = danmakuMetaRef.current;
-        let comments: DanmakuItem[] = [];
-        if (meta.filmId != null && meta.filmId !== "") {
-          try {
-            const resp = await ApiGet<{ text: string; time: number; color?: string; mode?: number }[]>(
-              "/film/danmaku",
-              { mid: meta.filmId, episode: meta.episode || 1, title: meta.filmTitle || "" },
-            );
-            if (!cancelled && resp.code === 0 && Array.isArray(resp.data)) {
-              comments = resp.data.map((item) => ({
-                text: item.text,
-                time: item.time,
-                color: item.color || "#ffffff",
-                mode: (item.mode === 1 ? 1 : item.mode === 2 ? 2 : 0) as 0 | 1 | 2,
-              }));
-            }
-          } catch (e) {
-            console.error("加载弹幕失败", e);
-          }
-        }
-        if (cancelled) return;
-        sourceComments = comments.concat(
-          pendingLive.map((item) => ({
-            text: item.text,
-            time: art.currentTime,
-            color: item.color || "#ffffff",
-            mode: item.mode || 0,
-          })),
-        );
-        pendingLive.length = 0;
-        listReady = true;
-        await placeDanmaku(art.currentTime);
-      })();
+      art.on("ready", renderDanmakuStatus);
+      // 插件每次改设置都发整份参数：只存用户真正改过的字段；按尺寸换算出来的字号、显示区域不存
+      bindDanmakuLayout(
+        art,
+        danmakuBase,
+        (changed) => saveDanmakuSettings(changed as DanmakuSettings),
+        (option) => pickDanmakuSettings(option) as Record<string, unknown>,
+        (prev, next) => changedDanmakuSettings(prev as DanmakuSettings, next as DanmakuSettings) as Record<string, unknown>,
+      );
+      art.on("artplayerPluginDanmuku:show", () => saveDanmakuSettings({ visible: true }));
+      art.on("artplayerPluginDanmuku:hide", () => saveDanmakuSettings({ visible: false }));
+      // 拖动进度后清掉屏幕上正在飞的旧弹幕，新位置之后的弹幕由插件按时间照常发出
+      art.on("video:seeking", () => {
+        (art.plugins as any)?.artplayerPluginDanmuku?.reset();
+      });
     }
     if (art.template?.$video) {
       const v = art.template.$video;
@@ -331,10 +345,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     playerRef.current = art;
 
-    if (!isMobile && artRef.current) {
+    if (artRef.current) {
       const updateMiniState = () => {
         if (!artRef.current || !art) return;
-        if (art.fullscreen || art.fullscreenWeb) {
+        // 小窗只在宽屏页面上用：窄窗口、手机上小窗会盖住大半页面。按当前窗口宽度实时判断
+        if (art.fullscreen || art.fullscreenWeb || window.innerWidth < WIDE_FROM) {
           if (art.mini) art.mini = false;
           return;
         }
@@ -371,19 +386,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         art.currentTime = initialTime;
       }
     });
-    const updateDanmukuMode = () => {
-      const dm = (art.plugins as any)?.artplayerPluginDanmuku;
-      if (!dm || typeof dm.config !== "function") return;
-      dm.config({ speed: art.fullscreen || art.fullscreenWeb ? 10 : 5 });
-      void placeDanmaku(art.currentTime);
-    };
-    const scheduleDanmukuMode = () => {
-      clearTimeout(modeTimer);
-      modeTimer = setTimeout(updateDanmukuMode, 50);
-    };
-    art.on("fullscreen", scheduleDanmukuMode);
-    art.on("fullscreenWeb", scheduleDanmukuMode);
-
     art.on("video:ended", () => callbacks.current.onEnded?.());
     art.on("video:timeupdate", () =>
       callbacks.current.onTimeUpdate?.(art.currentTime, art.duration),
@@ -403,76 +405,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       callbacks.current.onError?.(err);
     });
 
-    let isSeeking = false;
-    let wasPlayingBeforeSeek = false;
-    let seekGen = 0;
-    let seekedGen = 0;
-     let placeFrame = 0;
-     const syncDanmukuSeek = () => {
-       if (!danmakuEnabled) return;
-       cancelAnimationFrame(placeFrame);
-       placeFrame = requestAnimationFrame(() => {
-         void placeDanmaku(art.currentTime);
-       });
-     };
-     art.on("seek", syncDanmukuSeek);
- 
-     art.on("video:seeking", () => {
-       isSeeking = true;
-       seekGen += 1;
-       clearTimeout(seekEndTimer);
-       syncDanmukuSeek();
-       const v = art.template?.$video;
-       if (v && !v.paused) {
-         wasPlayingBeforeSeek = true;
-         v.pause();
-       }
-       if (art.loading) art.loading.show = true;
-     });
- 
-     const resumePlaybackAfterSeek = () => {
-       if (!isSeeking) return;
-       isSeeking = false;
-       if (art.loading) art.loading.show = false;
-       if (wasPlayingBeforeSeek) {
-         wasPlayingBeforeSeek = false;
-         art.play().catch(() => {});
-       }
-     };
- 
-     art.on("video:seeked", () => {
-       seekedGen = seekGen;
-       if (!isSeeking) return;
-       cancelAnimationFrame(placeFrame);
-       void placeDanmaku(art.currentTime).then(() => {
-         requestAnimationFrame(() => {
-           const v = art.template?.$video;
-           if (v && v.readyState >= 3) {
-             resumePlaybackAfterSeek();
-             return;
-           }
-           clearTimeout(seekEndTimer);
-           seekEndTimer = setTimeout(resumePlaybackAfterSeek, 2500);
-         });
-       });
-     });
- 
-     art.on("video:canplay", () => {
-       if (!isSeeking || seekedGen !== seekGen) return;
-       clearTimeout(seekEndTimer);
-       resumePlaybackAfterSeek();
-     });
- 
-     art.on("video:playing", () => {
-       setHasError(false);
-       callbacks.current.onPlayStart?.();
-     });
- 
-     return () => {
-       cancelled = true;
-       clearTimeout(modeTimer);
-       clearTimeout(seekEndTimer);
-       if (placeFrame) cancelAnimationFrame(placeFrame);
+    // 把视频真实宽高报给外层，用来按「撑满宽度」算播放区高度。
+    // 直接监听原生 video 事件：resize 在 HLS 切换清晰度、分辨率变化时也会触发。
+    const reportVideoSize = () => {
+      const { videoWidth, videoHeight } = art.video;
+      if (videoWidth > 0 && videoHeight > 0) {
+        callbacks.current.onVideoSize?.(videoWidth, videoHeight);
+      }
+    };
+    art.video.addEventListener("loadedmetadata", reportVideoSize);
+    art.video.addEventListener("resize", reportVideoSize);
+
+    art.on("video:playing", () => {
+      setHasError(false);
+      callbacks.current.onPlayStart?.();
+    });
+
+    return () => {
+      art.video.removeEventListener("loadedmetadata", reportVideoSize);
+      art.video.removeEventListener("resize", reportVideoSize);
+      unbindWidthClass();
       if (miniRafId) cancelAnimationFrame(miniRafId);
       if (onScrollOrResize) {
         window.removeEventListener("scroll", onScrollOrResize);

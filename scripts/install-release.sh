@@ -52,7 +52,7 @@ cli_dest() {
   fi
   case "${0:-}" in
     */ecohub)
-      dir=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+      dir=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
       printf '%s' "${dir}/ecohub"
       return
       ;;
@@ -92,13 +92,25 @@ have_compose() {
   return 1
 }
 
+# 用户自己的覆盖编排。install / update 只覆盖 docker-compose.yml，从不写这个文件；
+# 存在时每条 compose 命令都叠加它，用来保留端口绑定等自定义。
+override_file="docker-compose.override.yml"
+
 compose() {
   if docker compose version >/dev/null 2>&1; then
-    docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" "$@"
+    if [ -f "$install_dir/$override_file" ]; then
+      docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" -f "$install_dir/$override_file" "$@"
+    else
+      docker compose --project-directory "$install_dir" -f "$install_dir/docker-compose.yml" "$@"
+    fi
     return
   fi
   if command -v docker-compose >/dev/null 2>&1; then
-    (cd "$install_dir" && docker-compose -f docker-compose.yml "$@")
+    if [ -f "$install_dir/$override_file" ]; then
+      (cd "$install_dir" && docker-compose -f docker-compose.yml -f "$override_file" "$@")
+    else
+      (cd "$install_dir" && docker-compose -f docker-compose.yml "$@")
+    fi
     return
   fi
   die "未检测到 Docker Compose。请安装 Docker 20+ 与 Compose 插件。"
@@ -200,7 +212,11 @@ print_access() {
 
   printf '\nEcoHub 已就绪\n'
   printf '%s\n' "$image"
-  printf '%s\n\n' "$install_dir"
+  printf '%s\n' "$install_dir"
+  if [ -f "$install_dir/$override_file" ]; then
+    printf '已叠加 %s\n' "$override_file"
+  fi
+  printf '\n'
   printf '前台    %s\n' "$web"
   printf '后台    %s/manage\n' "$web"
   printf '账号    admin\n'
@@ -220,6 +236,7 @@ print_access() {
     case ":${PATH}:" in
       *":${bindir}:"*) ;;
       *)
+        # shellcheck disable=SC2016 # 原样打印 $PATH，让用户复制到自己的终端
         printf '\n当前终端还找不到 ecohub：\nexport PATH="%s:$PATH"\n' "$bindir"
         ;;
     esac
@@ -242,7 +259,7 @@ fetch_bundle() {
   apply_env_overrides
   # 模板里镜像是注释掉的，不写时 compose 会落到 :latest。新安装默认钉当前正式版。
   if [ "$fresh" -eq 1 ] && [ -z "$(env_get ECOHUB_IMAGE "")" ]; then
-    set_env_key ECOHUB_IMAGE "ghcr.io/fe-spark/ecohub:v3.0.2"
+    set_env_key ECOHUB_IMAGE "ghcr.io/fe-spark/ecohub:v3.0.3"
   fi
   install_cli
 }
@@ -343,12 +360,14 @@ cmd_help() {
 
 首次安装（变量要写在 sh 前面，写在 curl 前面不会进脚本）：
 
-  curl -fsSL ${raw_base}/scripts/install-release.sh | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  curl -fsSL ${raw_base}/scripts/install-release.sh | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 
 命令安装到 /usr/local/bin/ecohub；该目录不可写时安装到 ~/.local/bin/ecohub。
 数据目录默认 \$HOME/ecohub。换目录把 ECOHUB_INSTALL_DIR 写在 sh 前面。命令会记住上次的数据目录。
-安装和 update 时，写在 sh 前面的 ECOHUB_IMAGE、WEB_PORT、JWT_SECRET、ECOHUB_ADMIN_PASSWORD、
-MYSQL_PASSWORD、REDIS_PASSWORD 会进 .env 再启动。
+安装和 update 时，写在 sh 前面的 ECOHUB_IMAGE、WEB_PORT、SERVER_PORT、JWT_SECRET、
+ECOHUB_ADMIN_PASSWORD、MYSQL_ROOT_PASSWORD、MYSQL_PASSWORD、REDIS_PASSWORD 会进 .env 再启动。
+自定义端口绑定等编排改动写进数据目录下的 docker-compose.override.yml；
+install 和 update 不会覆盖它，它存在时每条命令都会叠加。
 EOF
 }
 

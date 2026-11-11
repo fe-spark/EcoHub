@@ -83,6 +83,7 @@ func SetupRouter() *gin.Engine {
 
 			sysConfig.GET(`/danmaku`, handler.ManageHd.SiteDanmakuConfig)
 			sysConfig.POST(`/danmaku`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteDanmaku)
+			sysConfig.POST(`/danmaku/test`, middleware.AdminAccess(), handler.ManageHd.TestSiteDanmaku)
 
 			sysConfig.GET(`/tip`, handler.ManageHd.SiteTipConfig)
 			sysConfig.POST(`/tip`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteTip)

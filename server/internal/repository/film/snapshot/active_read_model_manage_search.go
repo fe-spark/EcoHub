@@ -35,7 +35,8 @@ func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 	case "latest":
 		return "update_stamp DESC, mid DESC"
 	case "year":
-		return "year DESC, mid DESC"
+		// 同年内按更新时间，和前台 tagRankBefore 的次序一致
+		return "year DESC, update_stamp DESC, mid DESC"
 	case "score":
 		return "score DESC, mid DESC"
 	default:
