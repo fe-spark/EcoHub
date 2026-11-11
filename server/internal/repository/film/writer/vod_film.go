@@ -18,8 +18,16 @@ func vodKeepsMappedFilmTx(tx *gorm.DB, sourceID string, sourceMid, mid int64) (b
 		Pluck("source_mid", &vods).Error; err != nil {
 		return false, err
 	}
+	return vodKeepsMappedFilm(sourceMid, vods), nil
+}
+
+// vodKeepsMappedFilm 一个 mid 只留给该站最小的 vod_id。只有一条映射时保留。
+func vodKeepsMappedFilm(sourceMid int64, vods []int64) bool {
+	if sourceMid <= 0 {
+		return false
+	}
 	if len(vods) <= 1 {
-		return true, nil
+		return true
 	}
 	keeper := vods[0]
 	for _, id := range vods[1:] {
@@ -27,19 +35,40 @@ func vodKeepsMappedFilmTx(tx *gorm.DB, sourceID string, sourceMid, mid int64) (b
 			keeper = id
 		}
 	}
-	return sourceMid == keeper, nil
+	return sourceMid == keeper
 }
 
 func detachSharedSourceVodsTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
+	mids := make([]int64, 0, len(items))
+	seen := make(map[int64]struct{}, len(items))
 	for i := range items {
 		if items[i].mid <= 0 || items[i].film == nil {
 			continue
 		}
-		keep, err := vodKeepsMappedFilmTx(tx, sourceID, items[i].detail.Id, items[i].mid)
-		if err != nil {
-			return err
+		if _, ok := seen[items[i].mid]; ok {
+			continue
 		}
-		if keep {
+		seen[items[i].mid] = struct{}{}
+		mids = append(mids, items[i].mid)
+	}
+	if len(mids) == 0 {
+		return nil
+	}
+	var rows []model.MovieSourceMapping
+	if err := tx.Select("global_mid", "source_mid").
+		Where("source_id = ? AND global_mid IN ?", sourceID, mids).
+		Find(&rows).Error; err != nil {
+		return err
+	}
+	vodsByMid := make(map[int64][]int64, len(mids))
+	for _, row := range rows {
+		vodsByMid[row.GlobalMid] = append(vodsByMid[row.GlobalMid], row.SourceMid)
+	}
+	for i := range items {
+		if items[i].mid <= 0 || items[i].film == nil {
+			continue
+		}
+		if vodKeepsMappedFilm(items[i].detail.Id, vodsByMid[items[i].mid]) {
 			continue
 		}
 		items[i].film = nil

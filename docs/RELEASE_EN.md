@@ -1,4 +1,4 @@
-Release **v3.0.3**, image `ghcr.io/fe-spark/ecohub:v3.0.3` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+Release **v3.0.4**, image `ghcr.io/fe-spark/ecohub:v3.0.4` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -8,19 +8,11 @@ Release **v3.0.3**, image `ghcr.io/fe-spark/ecohub:v3.0.3` (`:latest` also point
 - **v3.0.3 no longer reads `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY`**: the three variables have been removed from the compose files and `.env.example`, and values left in an existing `.env` no longer take effect. Deployments that relied on these variables to route danmaku or Telegram traffic through a proxy must, after upgrading, enable the global proxy in "网络代理" (Network proxy) in the admin panel and enable the "弹幕抓取" (Danmaku fetching) or "Telegram 机器人" (Telegram bot) module; otherwise these requests connect directly.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.0.3 changes
+### v3.0.4 changes
 
-- **Network proxy**: danmaku fetching and Telegram notifications are now controlled only by "网络代理" (Network proxy) in the admin panel. They use the proxy when the global proxy is enabled and the corresponding module ("弹幕抓取" Danmaku fetching, "Telegram 机器人" Telegram bot) is enabled; otherwise they connect directly. "弹幕抓取" is a new module and is disabled by default.
-- **Danmaku load status**: no longer displayed as a notice over the video. The result is shown as gray placeholder text in the danmaku input box, and a dot on its left indicates loading, success, no network danmaku, or failure; hovering shows the full message and the failure reason. When the player is narrower than `560px`, the input box is collapsed and the dot is shown on the danmaku switch.
-- **Danmaku test**: when "自动嗅探全网弹幕" (Auto-fetch network danmaku) is enabled, the danmaku card in "网站配置" (Site settings) provides a "测试" (Test) button. It fetches network danmaku for episode 1 of a specified title using the settings currently in the form and displays the result below the button. The card also indicates whether danmaku requests use the proxy or connect directly.
-- **Player danmaku**: reverted to the danmaku plugin's built-in scheduling. The patch retains only the loading performance improvement (#63) and the fix that prevents danmaku with time 0 from being delayed. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap settings are stored in the browser and retained across episodes. Fixed the danmaku switch and settings not appearing on phones (#83).
-- **Responsive player layout**: the layout follows the player's own width instead of the device type and switches immediately when the window width changes. Below `560px`, the danmaku input box and the web fullscreen button are collapsed; at `560–767px`, the web fullscreen button is collapsed; at `768px` and above, the full layout is used. The danmaku font size scales down with the player width (minimum `12px`), and the display area is measured against the picture, so danmaku no longer appears on the black bars. Below `768px`, top and bottom danmaku are displayed as scrolling danmaku, which resolves overlapping danmaku on phones.
-- **Player border**: the player shows a 1px border and rounded corners at all widths, so its boundary remains visible against dark backgrounds on phones. No border is shown in fullscreen or web fullscreen.
-- **Player height**: in the single-column layout (width `1024px` or less), the player height is calculated from the video's actual aspect ratio at full width, removing excess black bars above and below the picture. Portrait video is limited to 75% of the screen height, and ultra-wide video has a minimum height of `180px`. The danmaku settings panel scrolls when it does not fit.
-- **Episode panel**: in the single-column layout, the episode panel expands with its content and the list has a maximum height of `max(320px, 60svh)`, instead of showing only one or two rows. Above 100 episodes, the list is divided into ranges of 50 (1-50, 51-100, …), and the range being played is shown by default.
-- **TVBox year sort**: films from the same year are further sorted by update time, consistent with the site.
-- **Install script**: `ecohub` supports a user-maintained `docker-compose.override.yml` in the install directory. Install and update never overwrite this file, and all compose commands apply it. `ecohub help` now documents `SERVER_PORT` and `MYSQL_ROOT_PASSWORD`.
-- **Documentation**: all documents have been rewritten according to the new style guide and corrected against the code. The deploy guide, FAQ, server and web READMEs, v2 upgrade guide, scheduled task conflicts, and release notes are available in English.
+- **Collect replay**: films already in the library are queried by page for identity, update time, and match keys. Unchanged films no longer update the timestamp one by one, and unchanged match keys are not rewritten (#88).
+- **Search index seal**: when the first collect on a new database finishes, a missing in-memory index or an index with 0 entries is loaded by a full sequential scan of the film table and play lines. An index that already has entries is still sealed incrementally by the changed IDs. The collect UI still waits until the rebuild finishes before the round ends (#88).
+- **Clients**: the Android client included in this repository is updated to `v1.1.5`, and the OHOS client to `v1.4.7`.
 
 ### Architecture
 
@@ -43,7 +35,7 @@ Release **v3.0.3**, image `ghcr.io/fe-spark/ecohub:v3.0.3` (`:latest` also point
 
 ### Search and site
 
-- In-memory inverted index (word segmentation, full pinyin, pinyin initials) and category rankings, updated incrementally during collect. A full rebuild runs once at startup; an incremental update also triggers a full rebuild when no usable index exists in memory or a database read fails.
+- In-memory inverted index (word segmentation, full pinyin, pinyin initials) and category rankings, updated incrementally during collect. A full rebuild runs once at startup. When sealing, a missing in-memory index, an index with 0 entries, or a failed database read loads the film table and play lines sequentially; an index that already has entries is sealed incrementally by changed IDs.
 - The home page hides categories without films and shows at most 12 top-level category blocks. Navigation, filters, and TVBox still use all categories of the source.
 - Category rules apply per source. The order and visibility of site categories follow the admin mapping. Hidden categories (including rule-merged groups) are removed from all site APIs, and old URLs indicate that the category is no longer valid; search, daily updates, and TVBox keywords do not return these films either. Collect still stores these films, and category management still lists them and can re-enable them. A subcategory is never promoted to top level automatically.
 - Unmapped films appear in the source's "其他" (Other) category. When a source rename takes over the previous "其他" ID, a new ID is assigned as a fallback.

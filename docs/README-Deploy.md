@@ -8,7 +8,7 @@ EcoHub 以 All-in-One 镜像 `ghcr.io/fe-spark/ecohub` 发布：同一容器内�
 
 | tag | 指向 | 适用场景 |
 | --- | --- | --- |
-| `:v3.0.3` 等 | 固定的正式版 | 推荐。升级时手动修改 tag |
+| `:v3.0.4` 等 | 固定的正式版 | 推荐。升级时手动修改 tag |
 | `:latest` | 最新正式版，每次发布正式版时更新 | 始终跟随最新版本 |
 | 以 `-beta` 结尾的 tag | 测试版 | 不得用于生产环境。正式版发布后自动删除 |
 
@@ -37,14 +37,14 @@ openssl rand -hex 32
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.4 sh
 ```
 
 脚本执行以下操作：
 
 1. 在安装目录（默认 `~/ecohub`）中创建 `data/mysql`、`data/redis`、`data/uploads`。
 2. 下载编排文件并保存为 `docker-compose.yml`，下载 `.env.example`。不存在 `.env` 时由模板生成；已存在时保留。不会创建或修改 `docker-compose.override.yml`。
-3. 将写在 `sh` 前的变量写入 `.env`（见下文）。全新安装且未指定镜像时，写入 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3`。
+3. 将写在 `sh` 前的变量写入 `.env`（见下文）。全新安装且未指定镜像时，写入 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.4`。
 4. 将 `ecohub` 命令安装到 `/usr/local/bin`；该目录不可写时安装到 `~/.local/bin`，并提示将其加入 `PATH`。
 5. 记录安装目录（写入 `~/.ecohub/install-dir`），之后的 `ecohub` 命令均操作该目录。
 6. 启动容器，输出前台、后台地址、初始账号和三条订阅地址。
@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.4 \
     JWT_SECRET="$(openssl rand -hex 32)" \
     ECOHUB_ADMIN_PASSWORD='请改成强密码' \
     MYSQL_ROOT_PASSWORD='请改成强密码' \
@@ -143,7 +143,7 @@ services:
 3. 填写环境变量：
 
 ```env
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.4
 WEB_PORT=3000
 SERVER_PORT=18080
 JWT_SECRET=请替换为长随机串
@@ -184,7 +184,7 @@ JWT_SECRET="$(openssl rand -hex 32)"
 
 docker pull mysql:8.4
 docker pull redis:7.4-alpine
-docker pull ghcr.io/fe-spark/ecohub:v3.0.3
+docker pull ghcr.io/fe-spark/ecohub:v3.0.4
 
 docker run -d --name Eco-mysql --restart always --network Eco-network \
   -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -221,7 +221,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -e REDIS_DB=0 \
   -v ~/ecohub/data/uploads:/app/static/upload \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/fe-spark/ecohub:v3.0.3
+  ghcr.io/fe-spark/ecohub:v3.0.4
 ```
 
 - 应用容器中的数据库主机名为容器名 `Eco-mysql`、`Eco-redis`。
@@ -289,7 +289,7 @@ REDIS_HOST=host.docker.internal
 
 | 变量 | 默认值 | 读取方 | 说明 |
 | --- | --- | --- | --- |
-| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest`（安装脚本全新安装时写入 `:v3.0.3`） | Compose | 镜像 tag |
+| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest`（安装脚本全新安装时写入 `:v3.0.4`） | Compose | 镜像 tag |
 | `WEB_PORT` | `3000` | Compose | 宿主机 Web 端口，映射到容器内 `3000` |
 | `SERVER_PORT` | `18080` | Compose | 宿主机 API 直连端口，映射到容器内 `8080` |
 | `JWT_SECRET` | 仓库中的示例值 | 应用 | 登录签名密钥。必须改为随机字符串；修改后所有用户需要重新登录 |
