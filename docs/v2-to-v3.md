@@ -1,10 +1,10 @@
 # 从 v2 升级到 v3
 
-本文只有中文版。
+中文 | [English](./v2-to-v3_EN.md)
 
 ## 结论
 
-v3 读不了 v2 的数据库，也没有数据迁移。升级的做法是：停掉旧栈，用空的 MySQL 和 Redis 重新装 v3，再做一次全量采集。
+v3 读不了 v2 的数据库，也没有数据迁移。升级的做法是：删掉旧容器，用空的 MySQL 和 Redis 重新装 v3，再做一次全量采集。
 
 安装、密码、端口和反向代理见 [部署指南](./README-Deploy.md)，变更内容见 [版本说明](./RELEASE.md)。
 
@@ -14,7 +14,13 @@ v3 读不了 v2 的数据库，也没有数据迁移。升级的做法是：停�
 - 在 v2 后台点「立即升级」。
 - 把旧的 `data/mysql`、`data/redis`、`data/uploads` 拷到新目录。
 
-另外，旧容器 `Eco-hub`、`Eco-mysql`、`Eco-redis` 和端口 `3000`、`18080` 会和新栈冲突，装 v3 之前先停掉旧容器。
+v2 和 v3 的编排用的是同样的容器名 `Eco-hub`、`Eco-mysql`、`Eco-redis` 和同样的端口 `3000`、`18080`。旧容器还在时，新栈起不来，所以装 v3 之前先删掉旧容器：
+
+```bash
+docker rm -f Eco-hub Eco-mysql Eco-redis
+```
+
+这条命令只删容器。旧数据在 v2 安装目录下的 `data/` 里，不受影响。
 
 装好后是一个空库：只有管理员账号、12 个预设采集站和默认的计划任务。
 
@@ -22,14 +28,8 @@ v3 读不了 v2 的数据库，也没有数据迁移。升级的做法是：停�
 
 旧数据先留着，确认新站能采到片再删。
 
-1. 停掉旧栈：
-
-```bash
-cd ~/ecohub
-docker compose down
-```
-
-2. 装到新目录 `~/ecohub-v3`：
+1. 按上文删掉旧容器。
+2. 装到一个新目录，例如 `~/ecohub-v3`：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
@@ -44,21 +44,19 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 
 ## 方式二：在原目录清空重装
 
-确认旧数据可以丢掉再做。
+确认旧数据可以丢掉再做。下面的 `<旧安装目录>` 换成 v2 的安装目录，也就是放着 `docker-compose.yml`、`.env` 和 `data/` 的那个目录。
 
-1. 停掉旧栈并删除数据：
+1. 按上文删掉旧容器，再删除旧数据：
 
 ```bash
-cd ~/ecohub
-docker compose down
-rm -rf data/mysql data/redis data/uploads
+rm -rf <旧安装目录>/data/mysql <旧安装目录>/data/redis <旧安装目录>/data/uploads
 ```
 
-2. 重新安装。已有的 `.env` 会保留，旧密钥可以接着用。因为 `.env` 已经存在，脚本不会自动写入镜像版本，所以要在 `sh` 前面写上 v3 镜像：
+2. 重新安装。脚本会保留已有的 `.env`，只改写写在 `sh` 前面的变量，所以先检查一遍 `.env` 里的值。因为 `.env` 已经存在，脚本不会自动写入镜像版本，要在 `sh` 前面写上 v3 镜像：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=~/ecohub ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_INSTALL_DIR=<旧安装目录> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
 ```
 
 ## 方式三：自备数据库
@@ -71,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 - 终端打印的前台地址能打开，`/api/config/basic` 返回 JSON。
 - 登录后台做一次全量采集，前台出现影片。
 
-反向代理原来就指向 `127.0.0.1:3000` 的，不用改。新栈起不来、提示端口被占用，说明旧容器还在。
+反向代理原来就指向 `127.0.0.1:3000` 的，不用改。新栈起不来、提示端口或容器名被占用，说明旧容器还在。
 
 ## 相关
 
