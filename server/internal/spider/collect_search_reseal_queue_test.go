@@ -15,6 +15,7 @@ func resetSearchReseal() {
 	searchReseal.sealing = map[string]struct{}{}
 	searchReseal.running = false
 	searchReseal.fullCollect = false
+	searchReseal.awaitDone = false
 	searchReseal.mu.Unlock()
 	searchSealRunning.Store(false)
 	for collectQueueActive() {
@@ -180,6 +181,96 @@ func TestBeginSource_RejectsWhileSearchIndexBuilding(t *testing.T) {
 	err := collectLifecycle.beginSource("during-index")
 	if err != errSearchIndexUpdating {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBeginSource_RejectsWhileSealQueueWaiting(t *testing.T) {
+	t.Cleanup(resetSearchReseal)
+	searchReseal.mu.Lock()
+	searchReseal.running = true
+	searchReseal.sealing["wait-block"] = struct{}{}
+	searchReseal.mu.Unlock()
+	if !searchIndexBlocksCollect() {
+		t.Fatal("waiting seal queue should block collect")
+	}
+	err := collectLifecycle.beginSource("during-waiting")
+	if err != errSearchIndexUpdating {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResealQueue_IdleDoesNotCompleteSealing(t *testing.T) {
+	prevWait := waitCollectIdle
+	prevApply := applySearchReseal
+	t.Cleanup(func() {
+		waitCollectIdle = prevWait
+		applySearchReseal = prevApply
+		collectLifecycle.endSource("idle-seal")
+		resetSearchReseal()
+	})
+	if err := collectLifecycle.beginSource("idle-seal"); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	waitCollectIdle = func() { <-release }
+	applySearchReseal = func([]int64) bool {
+		filmsnapshot.NotifySearchIndexProgress(10, 0, "indexing")
+		return false
+	}
+
+	progress.Ensure("idle-seal", "IdleSeal")
+	progress.Update("idle-seal", func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+	searchReseal.addSealing("idle-seal")
+	scheduleSearchReseal([]int64{999})
+	collectLifecycle.endSource("idle-seal")
+	close(release)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		searchReseal.mu.Lock()
+		awaiting := searchReseal.awaitDone
+		searchReseal.mu.Unlock()
+		if awaiting {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	searchReseal.mu.Lock()
+	awaiting := searchReseal.awaitDone
+	searchReseal.mu.Unlock()
+	if !awaiting {
+		t.Fatal("expected awaitDone while rebuild in progress")
+	}
+
+	// 无关/失败 idle 不得收口 sealing。
+	filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
+	if snap, _ := progress.Snapshot("idle-seal"); snap.Status != progress.StatusSealing {
+		t.Fatalf("idle 后应保持 sealing, got %q", snap.Status)
+	}
+	searchReseal.mu.Lock()
+	awaiting = searchReseal.awaitDone
+	searchReseal.mu.Unlock()
+	if awaiting {
+		t.Fatal("idle 应清掉 awaitDone，避免后续无关 done 误收口")
+	}
+}
+
+func TestResealQueue_UnrelatedDoneDoesNotCompleteWithoutAwait(t *testing.T) {
+	t.Cleanup(resetSearchReseal)
+	progress.Ensure("no-await", "NoAwait")
+	progress.Update("no-await", func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+	searchReseal.mu.Lock()
+	searchReseal.sealing["no-await"] = struct{}{}
+	searchReseal.awaitDone = false
+	searchReseal.mu.Unlock()
+
+	filmsnapshot.NotifySearchIndexProgress(1, 1, "done")
+	if snap, _ := progress.Snapshot("no-await"); snap.Status != progress.StatusSealing {
+		t.Fatalf("未停等重建时 done 不应收口, got %q", snap.Status)
 	}
 }
 

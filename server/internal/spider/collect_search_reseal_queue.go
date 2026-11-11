@@ -18,6 +18,8 @@ type searchResealQueue struct {
 	sealing     map[string]struct{}
 	running     bool
 	fullCollect bool
+	// awaitDone 停等本轮触发的全量重建终态。只有这时才响应 done/idle。
+	awaitDone bool
 }
 
 var searchReseal = &searchResealQueue{
@@ -196,6 +198,7 @@ func (q *searchResealQueue) run() {
 					return
 				}
 				q.running = false
+				q.awaitDone = true
 				parked = true
 			})
 			if parked {
@@ -203,8 +206,9 @@ func (q *searchResealQueue) run() {
 			}
 			continue
 		}
+		// 增量成功时 ResealSearchIndexMids 已发过 done；这里只收口 sealing，不再依赖全局监听。
 		q.complete()
-		if len(mids) == 0 {
+		if len(mids) == 0 && !full {
 			// 没有编号也要发一次终态，让前端把待检索收成完成。
 			filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
 		}
@@ -234,7 +238,27 @@ func (q *searchResealQueue) complete() {
 	progress.MarkSealed(ids)
 }
 
-// searchIndexBlocksCollect 检索索引正在加载或封口时，不许再开采集。
+// onSearchIndexTerminal 仅在停等本轮重建时处理终态：done 收口，idle 表示失败不收口。
+func (q *searchResealQueue) onSearchIndexTerminal(status string) {
+	q.mu.Lock()
+	if !q.awaitDone {
+		q.mu.Unlock()
+		return
+	}
+	q.awaitDone = false
+	q.mu.Unlock()
+	if status == "done" {
+		q.complete()
+	}
+}
+
+// searchIndexBlocksCollect 检索索引正在加载、重建排队或封口队列运行时，不许再开采集。
 func searchIndexBlocksCollect() bool {
-	return searchSealRunning.Load() || filmsnapshot.IsSearchIndexBuilding()
+	if searchSealRunning.Load() || filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
+		return true
+	}
+	searchReseal.mu.Lock()
+	running := searchReseal.running || searchReseal.awaitDone
+	searchReseal.mu.Unlock()
+	return running
 }

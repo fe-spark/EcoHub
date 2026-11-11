@@ -11,7 +11,7 @@ Release **v3.0.4**, image `ghcr.io/fe-spark/ecohub:v3.0.4` (`:latest` also point
 ### v3.0.4 changes
 
 - **Collect replay**: films already in the library are queried by page for identity, update time, and match keys. Unchanged films no longer update the timestamp one by one, and unchanged match keys are not rewritten (#88).
-- **Search index seal**: sealing starts only after every collect queue has finished. If any queue in the round includes a full collect, or the in-memory index is missing or has 0 entries, the film table and play lines are loaded by a full sequential scan. When every queue is an hourly incremental collect and the index already has entries, the seal updates only this round's IDs. The collect UI still waits until the rebuild finishes before the round ends (#88, #90).
+- **Search index seal**: sealing starts only after every collect queue has finished. If any queue in the round includes a full collect, or the in-memory index is missing or has 0 entries, the film table and play lines are loaded by a full sequential scan. When every queue is an hourly incremental collect and the index already has entries, the seal updates only this round's IDs. A collect round ends only after this round's rebuild succeeds; a failed rebuild or an unrelated search-index progress event does not mark the collect finished. New collects stay blocked while the seal queue is waiting or a rebuild is queued (#88, #90).
 - **Clients**: the Android client included in this repository is updated to `v1.1.5`, and the OHOS client to `v1.4.7`.
 
 ### Architecture
