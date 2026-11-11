@@ -20,6 +20,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -232,6 +233,22 @@ func parseEpisodeNumber(raw string) int {
 	return result
 }
 
+// danmakuHTTPClient 按后台「网络代理」的弹幕模块开关选择出口：
+// 代理开启且弹幕模块开启时走代理，否则用共享直连 Transport（不读 HTTPS_PROXY 等环境变量）。
+func danmakuHTTPClient(timeout time.Duration) (*http.Client, error) {
+	ok, proxyURL, err := repository.ResolveDanmakuProxy()
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		proxyURL = ""
+	}
+	return &http.Client{
+		Transport: utils.GetOrCreateProxyTransport(proxyURL),
+		Timeout:   timeout,
+	}, nil
+}
+
 func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, targetEpisode int) int64 {
 	title := cleanSearchTitle(rawTitle)
 	apiPath := "/api/v2/search/episodes"
@@ -244,7 +261,11 @@ func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, 
 	req.Header.Set("Accept", "application/json")
 	signDandanplayRequest(req, cfg.AppID, cfg.AppSecret, apiPath)
 
-	client := &http.Client{Timeout: 6 * time.Second}
+	client, err := danmakuHTTPClient(6 * time.Second)
+	if err != nil {
+		log.Printf("[Danmaku] 读取网络代理配置失败 err=%v", err)
+		return 0
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[Danmaku] 请求弹幕搜索失败 title=%s err=%v", title, err)
@@ -304,7 +325,11 @@ func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID i
 	req.Header.Set("Accept", "application/json")
 	signDandanplayRequest(req, cfg.AppID, cfg.AppSecret, apiPath)
 
-	client := &http.Client{Timeout: 8 * time.Second}
+	client, err := danmakuHTTPClient(8 * time.Second)
+	if err != nil {
+		log.Printf("[Danmaku] 读取网络代理配置失败 err=%v", err)
+		return nil
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[Danmaku] 请求弹幕详情失败 episodeID=%d err=%v", episodeID, err)

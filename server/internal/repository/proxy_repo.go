@@ -23,6 +23,7 @@ func DefaultProxyConfig() model.ProxyConfig {
 			TMDB:    true,
 			Notify:  true,
 			Upgrade: true,
+			Danmaku: false, // 弹幕默认直连，见 model.ProxyModuleScope.Danmaku
 		},
 	}
 }
@@ -192,5 +193,15 @@ func ResolveUpgradeProxy() (bool, string, error) {
 		return false, "", err
 	}
 	ok, proxyURL := proxyChannel(cfg, cfg.Modules.Upgrade)
+	return ok, proxyURL, nil
+}
+
+// ResolveDanmakuProxy 判断弹幕抓取是否启用代理
+func ResolveDanmakuProxy() (bool, string, error) {
+	cfg, err := GetProxyConfig()
+	if err != nil {
+		return false, "", err
+	}
+	ok, proxyURL := proxyChannel(cfg, cfg.Modules.Danmaku)
 	return ok, proxyURL, nil
 }
