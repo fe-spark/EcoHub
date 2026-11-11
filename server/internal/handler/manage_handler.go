@@ -210,6 +210,45 @@ func (h *ManageHandler) UpdateSiteDanmaku(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
+// TestSiteDanmaku 用后台填写的弹幕配置（可未保存）试拉一次全网弹幕，不读写缓存。
+// AppId / AppSecret 留空时沿用已保存的值，和保存接口一致。
+func (h *ManageHandler) TestSiteDanmaku(c *gin.Context) {
+	var req struct {
+		Config  model.DanmakuConfig `json:"config"`
+		Title   string              `json:"title"`
+		Episode int                 `json:"episode"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		dto.Failed("请填写用来测试的片名", c)
+		return
+	}
+	if req.Episode <= 0 {
+		req.Episode = 1
+	}
+	cfg := req.Config
+	if saved, err := service.ManageSvc.GetSiteDanmakuConfig(); err == nil {
+		if strings.TrimSpace(cfg.AppID) == "" {
+			cfg.AppID = saved.AppID
+		}
+		if strings.TrimSpace(cfg.AppSecret) == "" {
+			cfg.AppSecret = saved.AppSecret
+		}
+	}
+	res := fetchSniffedDanmaku(cfg, title, req.Episode, false)
+	dto.Success(gin.H{
+		"status":       res.Status,
+		"count":        len(res.Items),
+		"reason":       res.Reason,
+		"animeTitle":   res.AnimeTitle,
+		"episodeTitle": res.EpisodeTitle,
+	}, "测试完成", c)
+}
+
 // SiteTipConfig 获取赞赏配置
 func (h *ManageHandler) SiteTipConfig(c *gin.Context) {
 	tip, err := service.ManageSvc.GetSiteTipConfig()
