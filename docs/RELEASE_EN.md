@@ -1,23 +1,26 @@
-Release **v3.0.2**, image `ghcr.io/fe-spark/ecohub:v3.0.2` (`:latest` points to it too). For image tags see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+Release **v3.0.3**, image `ghcr.io/fe-spark/ecohub:v3.0.3` (`:latest` points to it too). For image tags see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade
 
 - v3.0.x: if installed with `ecohub`, run `ecohub update`. With 1Panel or your own compose file, run `docker compose pull && docker compose up -d` in the install directory.
+- **v3.0.3 no longer reads `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY`**: the three variables are removed from the compose files and `.env.example`, and leaving them in an old `.env` has no effect. If you relied on them to send danmaku or Telegram through a proxy, after upgrading turn on the global proxy in the admin 「网络代理」 page and turn on the 「弹幕抓取」 or 「Telegram 机器人」 module; otherwise those requests connect directly.
 - v2.x: not compatible, no migration. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.0.2 fixes
+### v3.0.3 fixes
 
-- **Orphan data cleanup**: now deletes in batches by mid and reports errors per batch, so long transactions no longer trigger invalid connection alerts.
-- **Scheduled task hardening**: maintenance tasks take priority and queue serially, and "run now" is disabled while queued; expired collect records are cleaned in batches; panics in scheduled tasks and collect goroutines are recovered and raise an alert.
-- **Database connections**: health checks no longer replace the global MySQL/Redis connections, removing a data race; MySQL connect and Ping have a 10-second timeout.
-- **Retry after stop**: when you retry right after "stop all" or stopping one source, the old batch no longer overwrites the new retry's progress, lock, or status.
-- **Rate-limit resume**: after a source has successful pages, 20 failed pages in a row pause it for 5 minutes, then it resumes from the breakpoint; after 3 pauses in a row that still fail, this round ends. Other sources are not affected.
-- **Failed pages**: no longer limited to the first 500 pages, so retrying failed pages can recover all of them. `collect_records.detail_json` is now MEDIUMTEXT and is widened automatically on start.
-- **Collect progress tooltip**: failed pages in the hover tooltip are sorted by page number, consecutive pages are merged into ranges, and long content scrolls.
-- **Variety show segments**: the play list only removes entries with exactly the same URL, so segments such as "第1期上 / 第1期下 / 纯享 / 加更" (part 1 / part 2 / extended / bonus) are no longer merged into one episode (#80). For shows that have already ended, run one full collect to recover missing episodes.
-- **Category nav highlight**: entering a category section or reloading a category page now highlights the matching category in the top nav (#82).
+- **Network proxy**: danmaku fetching and Telegram notifications now follow only the admin 「网络代理」 (network proxy) page: they use the proxy when the global proxy is on and the matching module (「弹幕抓取」 danmaku fetching, 「Telegram 机器人」 Telegram bot) is on; otherwise they connect directly. 「弹幕抓取」 is a new module and is off by default.
+- **Danmaku load status**: no longer shown as a notice over the video. The result is the gray placeholder text in the danmaku input, and a dot on its left shows loading, OK, no network danmaku, or failed; hover for the full message and the failure reason. When the player is narrower than `560px` the input is hidden and the dot moves to the danmaku toggle.
+- **Danmaku test**: with 「自动嗅探全网弹幕」 (auto-sniff network danmaku) on, the danmaku card in 「网站配置」 (site config) has a 「测试」 (test) button. It fetches episode 1 of a title with the settings currently filled in and shows the result below the button. The card also shows whether danmaku requests go through the proxy or direct.
+- **Player danmaku**: back to the danmaku plugin's own scheduling; the patch keeps only the faster loading (#63) and stops moving danmaku with time 0 later. On/off, opacity, font size, speed, display area, danmaku types, and anti-overlap are saved in the browser and kept across episodes. Fixes the danmaku toggle and settings not showing on phones (#83).
+- **Player layout by width**: the layout follows the player's own width instead of the device type and switches as soon as the window narrows. Below `560px` the danmaku input and the web fullscreen button are hidden; at `560–767px` the web fullscreen button is hidden; from `768px` the full layout is used. Danmaku font size shrinks with the player width (minimum `12px`) and the display area is measured on the picture, so danmaku no longer floats over the black bars. Below `768px`, top and bottom danmaku scroll instead, so danmaku no longer overlaps on phones.
+- **Player border**: the player has a 1px border and rounded corners at every width, so its edge is visible on dark backgrounds on phones. No border in fullscreen or web fullscreen.
+- **Player height**: when the page is a single column (`1024px` wide or less), the player height follows the video's real aspect ratio at full width, with no extra black bars above and below. Portrait video is capped at 75% of the screen height, and ultra-wide video gets at least `180px`. The danmaku settings panel scrolls when it does not fit.
+- **Episode panel**: in the single-column layout the episode panel grows with its content and the list is at most `max(320px, 60svh)` tall, instead of showing only one or two rows. Above 100 episodes the list is split into ranges of 50 (1-50, 51-100, …), opening on the range that is playing.
+- **TVBox year sort**: films from the same year are then sorted by update time, the same as the site.
+- **Install script**: `ecohub` supports your own `docker-compose.override.yml` in the install directory; install and update never overwrite it, and every compose command applies it. `ecohub help` now lists `SERVER_PORT` and `MYSQL_ROOT_PASSWORD`.
+- **Docs**: all docs are rewritten to the new style guide and corrected against the code. Deploy, FAQ, server, web, v2 upgrade, scheduled task conflicts, and release notes all have English versions.
 
 ### Architecture
 

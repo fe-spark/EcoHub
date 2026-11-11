@@ -33,7 +33,7 @@ docker rm -f Eco-hub Eco-mysql Eco-redis
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
 想在第一次初始化前就设好密码，把 `JWT_SECRET`、`ECOHUB_ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD` 也写在 `sh` 前面，写法见 [部署指南](./README-Deploy.md#第一次安装就设好密码)。内置数据库保持 `MYSQL_HOST=mysql`、`REDIS_HOST=redis`。
@@ -56,7 +56,7 @@ rm -rf <旧安装目录>/data/mysql <旧安装目录>/data/redis <旧安装目�
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=<旧安装目录> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_INSTALL_DIR=<旧安装目录> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
 ## 方式三：自备数据库

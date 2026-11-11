@@ -20,7 +20,7 @@
 </div>
 
 > [!WARNING]
-> v3 cannot read a v2 database, and there is no migration. Do not pull the new image on top of an old `./data/mysql`, and do not click "立即升级" (upgrade now) in the v2 admin. Install into a new directory or wipe the data, then run a full collect. Steps: [v2 to v3](./v2-to-v3_EN.md). The current release is `v3.0.2`. Report problems in [Issues](https://github.com/fe-spark/EcoHub/issues).
+> v3 cannot read a v2 database, and there is no migration. Do not pull the new image on top of an old `./data/mysql`, and do not click "立即升级" (upgrade now) in the v2 admin. Install into a new directory or wipe the data, then run a full collect. Steps: [v2 to v3](./v2-to-v3_EN.md). The current release is `v3.0.3`. Report problems in [Issues](https://github.com/fe-spark/EcoHub/issues).
 
 Updates are slow. Pull requests are welcome.
 
@@ -48,7 +48,7 @@ You need Docker 20+ and Docker Compose. Aim for at least 2 CPU cores and 2 GB RA
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
 After install:

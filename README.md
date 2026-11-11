@@ -20,7 +20,7 @@
 </div>
 
 > [!WARNING]
-> v3 和 v2 的数据库不兼容，也没有数据迁移。不要在旧的 `./data/mysql` 上直接拉新镜像，也不要在 v2 后台点「立即升级」。请用新目录或清空数据后重新安装，再做一次全量采集。步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。当前正式版是 `v3.0.2`，遇到问题请提 [Issues](https://github.com/fe-spark/EcoHub/issues)。
+> v3 和 v2 的数据库不兼容，也没有数据迁移。不要在旧的 `./data/mysql` 上直接拉新镜像，也不要在 v2 后台点「立即升级」。请用新目录或清空数据后重新安装，再做一次全量采集。步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。当前正式版是 `v3.0.3`，遇到问题请提 [Issues](https://github.com/fe-spark/EcoHub/issues)。
 
 作者时间有限，更新较慢，欢迎提 [PR](https://github.com/fe-spark/EcoHub/pulls)。
 
@@ -48,7 +48,7 @@ EcoHub 从你配置的采集站拉取影片，提供观影前台、管理后台�
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
 装完后：
