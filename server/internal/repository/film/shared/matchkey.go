@@ -2,6 +2,7 @@ package shared
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"server/internal/infra/db"
@@ -112,32 +113,45 @@ func SaveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error 
 	}
 
 	mids := make([]int64, 0, len(midToKeys))
-	records := make([]model.MovieMatchKey, 0, len(midToKeys)*4)
-	for mid, keys := range midToKeys {
+	for mid := range midToKeys {
 		if mid <= 0 {
 			continue
 		}
 		mids = append(mids, mid)
-		records = append(records, buildMovieMatchKeyRecords(mid, keys)...)
 	}
 	if len(mids) == 0 {
 		return nil
 	}
+	sort.Slice(mids, func(i, j int) bool { return mids[i] < mids[j] })
 
 	existing := LoadMovieMatchKeysByMidsTx(tx, mids)
-	if len(records) > 0 {
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&records).Error; err != nil {
-			return err
+	have := make(map[int64]map[string]struct{}, len(existing))
+	for mid, keys := range existing {
+		set := make(map[string]struct{}, len(keys))
+		for _, key := range keys {
+			set[key] = struct{}{}
+		}
+		have[mid] = set
+	}
+	missing := make([]model.MovieMatchKey, 0)
+	want := make(map[int64]map[string]struct{}, len(mids))
+	for _, mid := range mids {
+		for _, record := range buildMovieMatchKeyRecords(mid, midToKeys[mid]) {
+			set := want[record.Mid]
+			if set == nil {
+				set = make(map[string]struct{})
+				want[record.Mid] = set
+			}
+			set[record.MatchKey] = struct{}{}
+			if _, ok := have[mid][record.MatchKey]; !ok {
+				missing = append(missing, record)
+			}
 		}
 	}
-	want := make(map[int64]map[string]struct{}, len(mids))
-	for _, record := range records {
-		set := want[record.Mid]
-		if set == nil {
-			set = make(map[string]struct{})
-			want[record.Mid] = set
+	if len(missing) > 0 {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&missing).Error; err != nil {
+			return err
 		}
-		set[record.MatchKey] = struct{}{}
 	}
 	for mid, keys := range existing {
 		kept := want[mid]

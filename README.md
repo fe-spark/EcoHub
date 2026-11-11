@@ -107,7 +107,7 @@ flowchart LR
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.4 sh
 ```
 
 安装完成后，终端输出前台、后台地址、初始账号和三条订阅地址，默认 Web 端口为 `3000`。数据位于 `~/ecohub`，之后通过 `ecohub` 命令管理（如 `ecohub status`、`ecohub update`）。在后台「采集中心」执行一次全量采集后，影片随采集进度陆续出现在前台。
