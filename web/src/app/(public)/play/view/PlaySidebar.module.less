@@ -112,6 +112,16 @@
   text-overflow: ellipsis;
 }
 
+.sourcePickerProbe {
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+
+  .probeBadge {
+    margin-left: 0;
+  }
+}
+
 .sourcePickerArrow {
   width: 8px;
   height: 8px;
@@ -235,6 +245,51 @@
   margin-left: 6px;
   line-height: 1.2;
   flex-shrink: 0;
+}
+
+.probeBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+.probeOk {
+  background: rgba(82, 196, 26, 0.14);
+  color: #73d13d;
+  border: 1px solid rgba(82, 196, 26, 0.35);
+}
+
+.probeBad {
+  background: rgba(255, 77, 79, 0.12);
+  color: #ff7875;
+  border: 1px solid rgba(255, 77, 79, 0.3);
+}
+
+.probePending {
+  background: rgba(250, 140, 22, 0.12);
+  color: #fa8c16;
+  border: 1px solid rgba(250, 140, 22, 0.28);
+}
+
+.preferMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(250, 140, 22, 0.2);
+  color: #fa8c16;
 }
 
 .sourceTabs {
@@ -612,6 +667,7 @@
 
 .sideFooter {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding-top: 14px;
   margin-top: 14px;
@@ -619,7 +675,8 @@
   flex-shrink: 0;
 
   .footerBtn {
-    flex: 1;
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
     height: 40px;
     background: var(--public-surface-2);
     border-radius: 10px;
@@ -641,6 +698,12 @@
     &.active {
       color: #fa8c16;
       background: rgba(250, 140, 22, 0.1);
+    }
+
+    &.disabled {
+      opacity: 0.55;
+      cursor: default;
+      pointer-events: none;
     }
   }
 }

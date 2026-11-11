@@ -8,8 +8,14 @@ import {
   BarsOutlined,
   SortAscendingOutlined,
   SortDescendingOutlined,
+  ThunderboltOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import { makeEpisodeKey } from "./formatters";
+import {
+  formatProbeLabel,
+  type SourceProbeResult,
+} from "@/lib/playSourceProbe";
 import styles from "./PlaySidebar.module.less";
 
 interface PlaySidebarProps {
@@ -23,6 +29,10 @@ interface PlaySidebarProps {
   visibleActiveEpisodeKey: string;
   currentEpisodeKey: string;
   autoplay: boolean;
+  preferEnabled: boolean;
+  isProbing: boolean;
+  preferredSourceId?: string;
+  probeBySourceId: Record<string, SourceProbeResult>;
   hasNext: boolean;
   sourceMenuRef: React.RefObject<HTMLDivElement | null>;
   sourceTabsRef: React.RefObject<HTMLDivElement | null>;
@@ -33,6 +43,8 @@ interface PlaySidebarProps {
   onSelectViewingSource: (id: string) => void;
   onSelectEpisode: (sourceId: string, index: number, item: any) => void;
   onToggleAutoplay: () => void;
+  onTogglePrefer: () => void;
+  onRetestPrefer: () => void;
   onPlayNext: () => void;
 }
 
@@ -85,6 +97,10 @@ export default function PlaySidebar({
   visibleActiveEpisodeKey,
   currentEpisodeKey,
   autoplay,
+  preferEnabled,
+  isProbing,
+  preferredSourceId,
+  probeBySourceId,
   hasNext,
   sourceMenuRef,
   sourceTabsRef,
@@ -95,11 +111,32 @@ export default function PlaySidebar({
   onSelectViewingSource,
   onSelectEpisode,
   onToggleAutoplay,
+  onTogglePrefer,
+  onRetestPrefer,
   onPlayNext,
 }: PlaySidebarProps) {
   const linkList: any[] = useMemo(() => {
     return Array.isArray(viewingSource?.linkList) ? viewingSource.linkList : [];
   }, [viewingSource]);
+
+  const renderProbeMeta = (sourceId: string) => {
+    const result = probeBySourceId[sourceId];
+    const label = formatProbeLabel(result, isProbing && !result);
+    if (!label) return null;
+    const isBest = preferredSourceId === sourceId && result?.status === "ok";
+    const toneClass =
+      result?.status === "ok"
+        ? styles.probeOk
+        : result?.status === "timeout" || result?.status === "unreachable"
+          ? styles.probeBad
+          : styles.probePending;
+    return (
+      <span className={`${styles.probeBadge} ${toneClass}`}>
+        {isBest ? "优选 · " : ""}
+        {label}
+      </span>
+    );
+  };
 
   // 智能识别当前源是适合列表视图（综艺/长标题）还是网格视图（短集数/数字）
   const isLongTitle = useMemo(() => {
@@ -192,6 +229,11 @@ export default function PlaySidebar({
                   <span className={styles.proxyBadge}>代理</span>
                 )}
               </span>
+              {viewingSourceId ? (
+                <span className={styles.sourcePickerProbe}>
+                  {renderProbeMeta(viewingSourceId)}
+                </span>
+              ) : null}
             </div>
             <span className={styles.sourcePickerArrow} aria-hidden="true" />
           </button>
@@ -216,6 +258,7 @@ export default function PlaySidebar({
                       )}
                     </span>
                     <div className={styles.sourcePickerOptionMeta}>
+                      {renderProbeMeta(item.id)}
                       {isPlaying && <span className={styles.playingBadge}>正在播放</span>}
                       <span>{episodeCount} 集</span>
                     </div>
@@ -230,17 +273,25 @@ export default function PlaySidebar({
         <div className={styles.sourceTabs} ref={sourceTabsRef}>
           {sources?.map((item: any) => {
             const isActive = viewingSourceId === item.id;
+            const probeLabel = formatProbeLabel(
+              probeBySourceId[item.id],
+              isProbing && !probeBySourceId[item.id],
+            );
             return (
               <div
                 key={item.id}
                 ref={isActive ? activeTabRef : null}
                 className={`${styles.tab} ${isActive ? styles.active : ""}`}
                 onClick={() => onSelectViewingSource(item.id)}
+                title={probeLabel ? `${item.name} · ${probeLabel}` : item.name}
               >
                 {item.name}
                 {item.proxy && (
                   <span className={styles.proxyBadge}>代理</span>
                 )}
+                {preferredSourceId === item.id && preferEnabled ? (
+                  <span className={styles.preferMark}>优</span>
+                ) : null}
               </div>
             );
           })}
@@ -364,6 +415,24 @@ export default function PlaySidebar({
             <PlayCircleOutlined />
             <span>{autoplay ? "自动播放 开" : "自动播放 关"}</span>
           </div>
+          <div
+            className={`${styles.footerBtn} ${preferEnabled ? styles.active : ""}`}
+            onClick={onTogglePrefer}
+          >
+            <ThunderboltOutlined />
+            <span>{preferEnabled ? "测速优选 开" : "测速优选 关"}</span>
+          </div>
+          {preferEnabled && (
+            <div
+              className={`${styles.footerBtn} ${isProbing ? styles.disabled : ""}`}
+              onClick={() => {
+                if (!isProbing) onRetestPrefer();
+              }}
+            >
+              <ReloadOutlined spin={isProbing} />
+              <span>{isProbing ? "测速中" : "重新测速"}</span>
+            </div>
+          )}
           {hasNext && (
             <div className={styles.footerBtn} onClick={onPlayNext}>
               <StepForwardOutlined />
