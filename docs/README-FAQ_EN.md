@@ -109,11 +109,38 @@ A module's requests go through the proxy only when the global proxy is on in adm
 | TMDB 刮削 (TMDB scraping) | Requests to the TMDB API (including the admin connection test) | On |
 | Telegram 机器人 (Telegram bot) | Notifications and polling for the paging buttons | On |
 | 系统版本更新 (version update) | GitHub version check | On |
-| 弹幕抓取 (danmaku fetching) | Danmaku search and download from the official dandanplay API or a self-hosted danmu-api | Off |
+| 弹幕抓取 (danmaku fetching) | Danmaku search and download from the official dandanplay API or a self-hosted danmu-api (including the "测试" (Test) button in the admin danmaku settings) | Off |
 
 "弹幕抓取" is off by default because a self-hosted danmu-api is often on the local network, and sending it through the proxy would break it. After upgrading from an older version it is also off, so danmaku keeps connecting directly; the other modules keep their saved switches.
 
 Example: a proxy runs on port `7890` on the host, and you want the official dandanplay API to go through it. Enter `http://host.docker.internal:7890` (inside the container, `127.0.0.1` is the container itself), turn on the global switch, then turn on "弹幕抓取".
+
+## Danmaku
+
+### Network danmaku does not show up. How do I check?
+
+First try the "测试" (Test) button in admin → "网站配置" (Website) → "基本信息" (Basic) → "弹幕系统配置" (Danmaku settings), then look at the player notice.
+
+Network danmaku needs all of these: "启用弹幕系统" (enable danmaku) and "自动嗅探全网弹幕" (auto-fetch network danmaku) are on, and either a self-hosted danmu-api address or the dandanplay AppId and AppSecret is filled in.
+
+**Test button**: appears once "自动嗅探全网弹幕" is on. Enter a title and click "测试". It uses the settings currently in the form (they do not need to be saved yet) to fetch network danmaku for episode 1 of that title, and shows the result under the button, for example "匹配到「葬送的芙莉莲 第1话」，第 1 集共 N 条全网弹幕" (matched, N network comments) or "失败：弹幕接口请求超时" (failed: request timed out). The test neither reads nor writes the danmaku cache. Whether it uses the proxy follows the "弹幕抓取" switch in "网络代理", the same as the player.
+
+**Player notices**: shown once per episode, when danmaku finishes loading.
+
+| Notice | Meaning |
+| --- | --- |
+| 已加载 N 条弹幕（全网 M 条） | Site and network danmaku both loaded; N is the total |
+| 未找到全网弹幕 | No matching title, or this episode has no danmaku |
+| 全网弹幕加载失败：reason | Timeout, unreachable, auth failure, unreadable response, and so on; when there are site comments, their count is shown in brackets |
+| 已加载 N 条弹幕 | Network danmaku is off; only comments sent on this site |
+
+The reason is a human-readable message and never contains the API address or keys. Network danmaku that loads successfully is cached for 7 days per API address, title, and episode. No-match and failed results are not cached, so the next play retries.
+
+### Are danmaku settings saved? Why is there no input box on phones?
+
+Yes. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap set in the player's danmaku settings are stored in the current browser and reused when you switch episodes or come back. A different browser, or clearing site data, goes back to the defaults.
+
+On phones (the browser reports iPhone, iPad, iPod, or Android, or the window is 768 px wide or less) only the danmaku switch and settings are shown, with no input box, so you cannot send danmaku from a phone.
 
 ## Login and permissions
 
