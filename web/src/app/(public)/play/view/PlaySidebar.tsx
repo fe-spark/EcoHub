@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   PlayCircleOutlined,
   StepForwardOutlined,
@@ -35,6 +35,10 @@ interface PlaySidebarProps {
   onToggleAutoplay: () => void;
   onPlayNext: () => void;
 }
+
+/** 集数超过 RANGE_THRESHOLD 时按 RANGE_SIZE 集一段分页显示（1-50、51-100…），避免几百上千个按钮挤在一个列表里 */
+const RANGE_THRESHOLD = 100;
+const RANGE_SIZE = 50;
 
 function parseEpisodeMeta(rawTitle: string, index: number) {
   const title = (rawTitle || "").trim();
@@ -113,14 +117,55 @@ export default function PlaySidebar({
 
   const viewMode = userSelectedMode ?? (isLongTitle ? "list" : "grid");
 
+  // 当前播放的是本源第几集（看的不是正在播放的源时为 -1）
+  const activeIndex = useMemo(() => {
+    if (!visibleActiveEpisodeKey) return -1;
+    return linkList.findIndex(
+      (_: any, index: number) => makeEpisodeKey(viewingSourceId, index) === visibleActiveEpisodeKey,
+    );
+  }, [linkList, viewingSourceId, visibleActiveEpisodeKey]);
+
+  // 分段：默认落在正在播放的那一段；用户手动切段后保持，直到换源或换集
+  const rangeCount = linkList.length > RANGE_THRESHOLD ? Math.ceil(linkList.length / RANGE_SIZE) : 1;
+  const autoRange = activeIndex >= 0 ? Math.floor(activeIndex / RANGE_SIZE) : 0;
+  const rangeKey = `${viewingSourceId}:${activeIndex}:${linkList.length}`;
+  const [pickedRange, setPickedRange] = useState<{ key: string; range: number } | null>(null);
+  const rangeIndex = Math.min(
+    rangeCount - 1,
+    pickedRange && pickedRange.key === rangeKey ? pickedRange.range : autoRange,
+  );
+  const ranges = useMemo(() => {
+    const list = Array.from({ length: rangeCount }, (_, i) => ({
+      index: i,
+      label: `${i * RANGE_SIZE + 1}-${Math.min((i + 1) * RANGE_SIZE, linkList.length)}`,
+    }));
+    return sortOrder === "desc" ? list.reverse() : list;
+  }, [rangeCount, linkList.length, sortOrder]);
+
   const displayEpisodes = useMemo(() => {
     if (!linkList.length) return [];
-    const listWithIndex = linkList.map((item: any, originalIndex: number) => ({
+    const start = rangeCount > 1 ? rangeIndex * RANGE_SIZE : 0;
+    const end = rangeCount > 1 ? start + RANGE_SIZE : linkList.length;
+    const listWithIndex = linkList.slice(start, end).map((item: any, i: number) => ({
       ...item,
-      originalIndex,
+      originalIndex: start + i,
     }));
     return sortOrder === "desc" ? [...listWithIndex].reverse() : listWithIndex;
-  }, [linkList, sortOrder]);
+  }, [linkList, sortOrder, rangeCount, rangeIndex]);
+
+  // 选中的分段横向滚到可见处（只滚分段条自己，不带动整页）
+  const rangeTabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const bar = rangeTabsRef.current;
+    const tab = bar?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!bar || !tab) return;
+    bar.scrollTo({ left: tab.offsetLeft - bar.clientWidth / 2 + tab.offsetWidth / 2 });
+  }, [rangeIndex, rangeCount, sortOrder]);
+
+  const selectRange = (index: number) => {
+    setPickedRange({ key: rangeKey, range: index });
+    episodeListRef.current?.scrollTo({ top: 0 });
+  };
 
   return (
     <div className={styles.sidebarWrapper}>
@@ -236,6 +281,25 @@ export default function PlaySidebar({
             </div>
           </div>
         </div>
+
+        {rangeCount > 1 && (
+          <div className={styles.rangeTabs} role="tablist" aria-label="选集分段" ref={rangeTabsRef}>
+            {ranges.map((range) => (
+              <button
+                key={range.index}
+                type="button"
+                role="tab"
+                aria-selected={range.index === rangeIndex}
+                className={`${styles.rangeTab} ${range.index === rangeIndex ? styles.active : ""} ${
+                  range.index === autoRange && activeIndex >= 0 ? styles.playing : ""
+                }`}
+                onClick={() => selectRange(range.index)}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div
           className={`${styles.episodeList} ${viewMode === "list" ? styles.listMode : styles.gridMode}`}
