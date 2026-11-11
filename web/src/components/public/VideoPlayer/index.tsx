@@ -9,6 +9,7 @@ import { CloseCircleFilled, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import { loadDanmakuSettings, saveDanmakuSettings } from "./danmakuSettings";
+import { danmakuNoticeText, type DanmakuMeta } from "./danmakuNotice";
 import styles from "./index.module.less";
 
 interface VideoPlayerProps {
@@ -111,9 +112,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               emitter: !isMobile,
               // 插件创建时自己调用一次，只拉一次列表
               danmuku: async () => {
+                // 插件在 new Artplayer() 里同步调用本函数，先让出一拍，等 art 赋值后再用
+                await Promise.resolve();
                 const meta = danmakuMetaRef.current;
                 let list: { text: string; time: number; color: string; mode: DanmakuMode }[] = [];
+                let notice = "";
+                let stats: DanmakuMeta | undefined;
+                // 超过 500ms 还没回来才提示「加载中」，避免一闪而过；notice 2 秒自动消失，等待期间续上
+                let loadingTimer: ReturnType<typeof setTimeout> | undefined;
+                const showLoading = () => {
+                  art.notice.show = "弹幕加载中…";
+                  loadingTimer = setTimeout(showLoading, 1500);
+                };
                 if (meta.filmId != null && meta.filmId !== "") {
+                  loadingTimer = setTimeout(showLoading, 500);
                   try {
                     const resp = await ApiGet<{ text: string; time: number; color?: string; mode?: number }[]>(
                       "/film/danmaku",
@@ -126,10 +138,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         color: item.color || "#ffffff",
                         mode: toMode(item.mode),
                       }));
+                      stats = (resp as { meta?: DanmakuMeta }).meta;
+                      notice = danmakuNoticeText(list.length, stats);
+                    } else {
+                      notice = `弹幕加载失败：${resp.msg || "未知原因"}`;
                     }
                   } catch (e) {
                     console.error("加载弹幕失败", e);
+                    notice = "弹幕加载失败";
+                  } finally {
+                    clearTimeout(loadingTimer);
                   }
+                }
+                // 每集只在装载完成时提示一次；没有可说的就收起「加载中」
+                art.notice.show = notice;
+                const $input = art.template?.$player?.querySelector(".apd-input") as HTMLInputElement | null;
+                if ($input) {
+                  if (list.length > 0) $input.placeholder = `共 ${list.length} 条弹幕，说点什么吧`;
+                  if (notice) $input.title = notice;
                 }
                 listLoaded = true;
                 // 刚发出的弹幕被 load 清掉后按当前进度重新飞一次
