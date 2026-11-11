@@ -1,6 +1,6 @@
 # 服务端说明
 
-本文只有中文版。
+中文 | [English](./README_EN.md)
 
 `server/` 是 EcoHub 的 Go 后端：采集、片库、列表和缓存、订阅接口、后台鉴权都在这里。
 
@@ -10,7 +10,7 @@
 
 需要 Go 1.27+、MySQL 8+、Redis 7+。
 
-没有现成的数据库，可以在仓库根目录只起数据库容器。它们映射到本机 `127.0.0.1:3306` 和 `127.0.0.1:6379`，账号密码和 `server/.env.example` 一致：
+没有现成的数据库，可以用仓库根目录的开发编排 `docker-compose.yml` 只起数据库容器（这个编排只用于本地开发，和发布编排的区别见 [总览](../README.md#本地开发)）。它们映射到本机 `127.0.0.1:3306` 和 `127.0.0.1:6379`，账号密码和 `server/.env.example` 一致：
 
 ```bash
 docker compose up -d mysql redis
@@ -45,6 +45,18 @@ REDIS_DB=0
 - API 默认监听 `:8080`。
 - 第一次启动会建表，写入网站配置、管理员 `admin`、12 个预设采集站和 4 条计划任务。
 - 对外部署时 `JWT_SECRET` 要换成随机串，可以用 `openssl rand -hex 32` 生成。
+
+### 用容器跑后端
+
+开发编排里的 `server` 服务用 `server/Dockerfile` 从源码构建，只含 Go 后端，容器名 `Eco-server`：
+
+```bash
+docker compose up -d --build server
+```
+
+- 在仓库根目录执行。`server` 没有声明 `depends_on`，不会自动起数据库，先执行 `docker compose up -d mysql redis`。
+- API 映射到本机 `18080`（`SERVER_PORT`），例如 `http://127.0.0.1:18080/api/config/basic`。
+- 容器里连数据库用服务名 `mysql`、`redis`，变量取仓库根目录 `.env` 的值（没有就用编排里的默认值），不读 `server/.env`。
 
 ## 环境变量
 

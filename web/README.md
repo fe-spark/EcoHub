@@ -1,6 +1,6 @@
 # 前端说明
 
-本文只有中文版。
+中文 | [English](./README_EN.md)
 
 `web/` 是 EcoHub 的 Next.js 前端：前台、登录页和管理后台。
 
@@ -42,6 +42,19 @@ API_URL=http://127.0.0.1:8080
 ```
 
 前台 `http://127.0.0.1:3000`，登录页 `/login`，后台 `/manage`。
+
+### 用容器跑前端
+
+仓库根目录的开发编排 `docker-compose.yml` 里有 `web` 服务，用 `web/Dockerfile` 从源码构建，容器名 `Eco-web`。这个编排只用于本地开发，和发布编排的区别见 [总览](../README.md#本地开发)。
+
+```bash
+docker compose up -d mysql redis
+docker compose up -d --build web
+```
+
+- 在仓库根目录执行。`web` 依赖 `server` 健康检查通过，所以会连带构建并启动 `server`。
+- 构建和运行时的 `API_URL` 都是 `http://server:8080`，即同一编排里的 `server` 服务，不读 `web/.env.local`。
+- 前台映射到本机 `3000`（`WEB_PORT`）。
 
 ## 环境变量
 

@@ -15,7 +15,7 @@
 
 中文 | [English](./docs/README_EN.md)
 
-[在线演示](https://eco.fe-spark.cn) · [v3 体验地址](http://148.135.106.141:3000) · [管理后台](https://eco.fe-spark.cn/manage) · [部署指南](./docs/README-Deploy.md) · [常见问题](./docs/README-FAQ.md) · [交流群组](https://t.me/ecohub_club)
+[在线演示](https://eco.fe-spark.cn) · [管理后台](https://eco.fe-spark.cn/manage) · [部署指南](./docs/README-Deploy.md) · [常见问题](./docs/README-FAQ.md) · [交流群组](https://t.me/ecohub_club)
 
 </div>
 
@@ -41,22 +41,10 @@ EcoHub 从你配置的采集站拉取影片，提供观影前台、管理后台�
 | --- | --- |
 | 前台 | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | 管理后台 | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
-| v3 体验 | [http://148.135.106.141:3000](http://148.135.106.141:3000) |
-
-访客账号 `guest` / `guest`，只能看不能改。演示站不支持移动网络，请用联通或电信。
-
-## 推荐
-
-| 类型 | 服务商 | 链接 |
-| --- | --- | --- |
-| 服务器 | CloudCone（演示站所用，磁盘 I/O 不限） | [选购](https://app.cloudcone.com/?ref=14393) |
-| 网络 | 良心云，低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| 网络 | 赔钱机场，低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| 网络 | DOVE | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## 安装
 
-需要 Docker 20+ 和 Docker Compose 2+，建议 2 核 2 GB 以上配置。一条命令装好：
+需要 Docker 20+ 和 Docker Compose，建议 2 核 2 GB 以上配置。一条命令装好：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
@@ -73,23 +61,50 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 
 ## 本地开发
 
-本机需要 Go 1.27+、Node.js 20.9+、MySQL 8 和 Redis 7。没有现成的库，可以用仓库根目录的编排只起数据库，它会把 MySQL 和 Redis 映射到本机 `127.0.0.1:3306`、`127.0.0.1:6379`，账号密码和 `server/.env.example` 一致：
+本机需要 Go 1.27+、Node.js 20.9+、MySQL 8 和 Redis 7。
 
-```bash
-docker compose up -d mysql redis
-```
+仓库根目录的 `docker-compose.yml` 只用于本地开发，不要拿来部署。它和发布用的 [deploy/release/compose.yml](./deploy/release/compose.yml) 的区别：
 
-然后在两个终端分别启动后端和前端：
+| | 根目录 `docker-compose.yml` | `deploy/release/compose.yml` |
+| --- | --- | --- |
+| 应用 | 从 `server/`、`web/` 源码本地构建，前后端分成 `Eco-server`、`Eco-web` 两个容器 | 拉取 All-in-One 镜像，一个 `Eco-hub` 容器 |
+| MySQL、Redis 端口 | 映射到本机 `127.0.0.1:3306`、`127.0.0.1:6379` | 不映射 |
+| 数据 | Docker 命名卷 `eco-mysql-data`、`eco-redis-data`、`eco-server-uploads` | 安装目录下的 `data/` |
 
-```bash
-cd server && cp .env.example .env && go run ./cmd/server
-```
+两种用法：
 
-```bash
-cd web && cp .env.example .env.local && npm install && npm run dev
-```
+1. 只起数据库，前后端在本机跑（日常开发）。数据库账号密码和 `server/.env.example` 一致：
 
-前台 `http://127.0.0.1:3000`，后台 `http://127.0.0.1:3000/manage`，后端 API `http://127.0.0.1:8080`。细节见 [服务端说明](./server/README.md) 和 [前端说明](./web/README.md)。
+   ```bash
+   docker compose up -d mysql redis
+   ```
+
+   然后在两个终端分别启动后端和前端：
+
+   ```bash
+   cd server && cp .env.example .env && go run ./cmd/server
+   ```
+
+   ```bash
+   cd web && cp .env.example .env.local && npm install && npm run dev
+   ```
+
+   前台 `http://127.0.0.1:3000`，后台 `http://127.0.0.1:3000/manage`，后端 API `http://127.0.0.1:8080`。
+
+2. 整套从源码构建成容器（验证 Dockerfile 或联调）：
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   前台 `http://127.0.0.1:3000`，后端 API `http://127.0.0.1:18080`。端口和密码可以在仓库根目录的 `.env` 里改（从 [.env.example](./.env.example) 复制，不建也能用默认值）。
+
+注意：
+
+- 容器名 `Eco-mysql`、`Eco-redis` 和发布编排相同，同一台机器上不要同时跑开发编排和正式部署。
+- 本机已经有 MySQL 或 Redis 占着 `3306`、`6379` 时，开发编排起不来，先停掉本机的或直接用本机的库。
+
+细节见 [服务端说明](./server/README.md) 和 [前端说明](./web/README.md)。
 
 ## 文档
 
