@@ -9,14 +9,24 @@ import { CloseCircleFilled, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import {
-  MOBILE_DEFAULT_FONT_SIZE,
   changedDanmakuSettings,
   loadDanmakuSettings,
   pickDanmakuSettings,
   saveDanmakuSettings,
+  type DanmakuSettings,
 } from "./danmakuSettings";
 import {
+  DEFAULT_FONT_SIZE,
+  DEFAULT_MARGIN,
+  bindDanmakuLayout,
+  computeDanmakuLayout,
+  smallPlayerScrollOnly,
+  type DanmakuBase,
+} from "./danmakuLayout";
+import { WIDE_FROM, bindPlayerWidthClass, currentPlayerWidthClass } from "./playerLayout";
+import {
   DANMAKU_LOADING_STATUS,
+  renderDanmakuStatus as renderDanmakuStatusDom,
   danmakuLoadedStatus,
   danmakuRequestFailedStatus,
   type DanmakuMeta,
@@ -83,7 +93,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     if (!artRef.current) return;
 
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || window.innerWidth <= 768;
     Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
     const isM3U8 = src.includes(".m3u8") || src.includes("m3u8");
     type DanmakuMode = 0 | 1 | 2;
@@ -91,27 +100,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // 弹幕列表返回前用户已发出的弹幕：插件 load 完会清空队列，这里记下来随列表一起装回去
     const sentBeforeLoad: { text: string; time: number; color: string; mode: DanmakuMode }[] = [];
     let listLoaded = false;
-    // 弹幕加载状态显示在输入框上（灰字 + 悬停说明 + 左侧状态点），不再用 notice 盖在画面上。
+    // 弹幕字号和显示区域：保存的是用户设定（字号按大播放器计，显示区域相对画面），
+    // 实际传给插件的值按播放器尺寸换算，尺寸变化时重算（见 danmakuLayout.ts）
+    const savedDanmaku = loadDanmakuSettings();
+    const danmakuBase: DanmakuBase = {
+      fontSize: savedDanmaku.fontSize ?? DEFAULT_FONT_SIZE,
+      margin: savedDanmaku.margin ?? DEFAULT_MARGIN,
+    };
+    const initialDanmakuLayout = computeDanmakuLayout(
+      danmakuBase,
+      artRef.current.clientWidth,
+      artRef.current.clientHeight,
+    );
+    // 弹幕加载状态画在控制条上，不用 notice 盖在画面上：输入框显示时在输入框（灰字 + 状态点），
+    // 窄播放器收起输入框时在弹幕开关上（状态点），见 danmakuStatus.ts / playerLayout.ts。
     // 插件控件可能晚于本函数挂上，记下最新状态，ready 时再补一次。
     let danmakuStatus: DanmakuStatus | null = null;
-    const renderDanmakuStatus = () => {
-      const $player = art?.template?.$player as HTMLElement | undefined;
-      const $input = $player?.querySelector(".apd-input") as HTMLInputElement | null;
-      if (!danmakuStatus || !$input) return;
-      $input.placeholder = danmakuStatus.placeholder;
-      $input.title = danmakuStatus.title;
-      let $dot = $player?.querySelector(".ecohub-danmaku-status") as HTMLElement | null;
-      if (!$dot) {
-        $dot = document.createElement("span");
-        $dot.className = "ecohub-danmaku-status";
-        $input.before($dot);
-      }
-      $dot.dataset.tone = danmakuStatus.tone;
-      $dot.title = danmakuStatus.title;
-    };
+    const renderDanmakuStatus = () => renderDanmakuStatusDom(art?.template?.$player, danmakuStatus);
     const showDanmakuStatus = (status: DanmakuStatus) => {
       danmakuStatus = status;
       renderDanmakuStatus();
+      // 输入框收起时状态点很小：失败再用播放器 notice 简短提示一次，其余状态不打扰
+      if (status.tone === "error" && currentPlayerWidthClass(art) === "compact") art.notice.show = status.title;
     };
     const art = new Artplayer({
       container: artRef.current,
@@ -127,7 +137,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       playbackRate: true,
       aspectRatio: true,
       fullscreen: true,
-      fullscreenWeb: !isMobile,
+      // 网页全屏和弹幕输入框都创建，窄播放器上由样式按宽度收起（playerLayout.ts）
+      fullscreenWeb: true,
       mutex: true,
       backdrop: false,
       playsInline: true,
@@ -137,15 +148,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       plugins: danmakuEnabled
         ? [
             artplayerPluginDanmuku({
-              margin: [10, "50%"],
-              // 桌面沿用插件默认 25px；手机按播放器高度取字号，避免 25px 在约 190px 高的画面里占掉一大片
-              fontSize: isMobile ? MOBILE_DEFAULT_FONT_SIZE : 25,
-              ...loadDanmakuSettings(isMobile),
+              ...savedDanmaku,
+              fontSize: initialDanmakuLayout.fontSize,
+              margin: initialDanmakuLayout.margin,
+              // 插件类型声明把档位值写成 string | number，实际是 [上边距, 下边距]
+              MARGIN: initialDanmakuLayout.MARGIN as never,
+              // 中、窄播放器上固定弹幕按滚动显示，和滚动弹幕一起避让
+              beforeVisible: smallPlayerScrollOnly(() => art?.template?.$player),
               synchronousPlayback: true,
               // 不按播放器宽度把弹幕栏挪到播放器外面（外层容器 overflow:hidden 会把它裁掉）
               width: 0,
-              // 手机只保留开关和设置，不显示输入框
-              emitter: !isMobile,
+              emitter: true,
               // 插件创建时自己调用一次，只拉一次列表
               danmuku: async () => {
                 // 插件在 new Artplayer() 里同步调用本函数，先让出一拍，等 art 赋值后再用
@@ -165,9 +178,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         text: item.text,
                         time: Number(item.time) || 0,
                         color: item.color || "#ffffff",
-                        // 手机播放器只有三四行高，插件只在同类弹幕之间避让，顶部/底部固定弹幕会压在滚动弹幕上；
-                        // 手机上统一按滚动弹幕显示，全部参与同一套避让
-                        mode: isMobile ? 0 : toMode(item.mode),
+                        mode: toMode(item.mode),
                       }));
                       status = danmakuLoadedStatus(list.length, (resp as { meta?: DanmakuMeta }).meta);
                     } else {
@@ -178,8 +189,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     status = danmakuRequestFailedStatus();
                   }
                   showDanmakuStatus(status);
-                  // 手机没有输入框：只在失败时用播放器 notice 简短提示一次，其余状态不打扰
-                  if (isMobile && status.tone === "error") art.notice.show = status.title;
                 }
                 listLoaded = true;
                 // 刚发出的弹幕被 load 清掉后按当前进度重新飞一次
@@ -301,18 +310,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       },
     });
     player = art;
+    // 本组件的播放器样式挂在根节点上（网页全屏时根节点会被移出外层容器）
+    art.template.$player?.classList.add(styles.artPlayer);
+    // 按播放器显示宽度切换控制条排版（输入框、网页全屏按钮、状态显示位置），尺寸变化时实时切换
+    const unbindWidthClass = bindPlayerWidthClass(art, () => renderDanmakuStatus());
     if (danmakuEnabled) {
       art.on("ready", renderDanmakuStatus);
-      // 插件每次改设置都发整份参数，只存和上次相比真正变了的字段
-      let lastDanmakuSettings = pickDanmakuSettings((art.plugins as any)?.artplayerPluginDanmuku?.option);
-      art.on("artplayerPluginDanmuku:config", (option) => {
-        const next = pickDanmakuSettings(option);
-        const changed = changedDanmakuSettings(lastDanmakuSettings, next);
-        lastDanmakuSettings = next;
-        saveDanmakuSettings(changed, isMobile);
-      });
-      art.on("artplayerPluginDanmuku:show", () => saveDanmakuSettings({ visible: true }, isMobile));
-      art.on("artplayerPluginDanmuku:hide", () => saveDanmakuSettings({ visible: false }, isMobile));
+      // 插件每次改设置都发整份参数：只存用户真正改过的字段；按尺寸换算出来的字号、显示区域不存
+      bindDanmakuLayout(
+        art,
+        danmakuBase,
+        (changed) => saveDanmakuSettings(changed as DanmakuSettings),
+        (option) => pickDanmakuSettings(option) as Record<string, unknown>,
+        (prev, next) => changedDanmakuSettings(prev as DanmakuSettings, next as DanmakuSettings) as Record<string, unknown>,
+      );
+      art.on("artplayerPluginDanmuku:show", () => saveDanmakuSettings({ visible: true }));
+      art.on("artplayerPluginDanmuku:hide", () => saveDanmakuSettings({ visible: false }));
       // 拖动进度后清掉屏幕上正在飞的旧弹幕，新位置之后的弹幕由插件按时间照常发出
       art.on("video:seeking", () => {
         (art.plugins as any)?.artplayerPluginDanmuku?.reset();
@@ -329,10 +342,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     playerRef.current = art;
 
-    if (!isMobile && artRef.current) {
+    if (artRef.current) {
       const updateMiniState = () => {
         if (!artRef.current || !art) return;
-        if (art.fullscreen || art.fullscreenWeb) {
+        // 小窗只在宽屏页面上用：窄窗口、手机上小窗会盖住大半页面。按当前窗口宽度实时判断
+        if (art.fullscreen || art.fullscreenWeb || window.innerWidth < WIDE_FROM) {
           if (art.mini) art.mini = false;
           return;
         }
@@ -394,6 +408,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
 
     return () => {
+      unbindWidthClass();
       if (miniRafId) cancelAnimationFrame(miniRafId);
       if (onScrollOrResize) {
         window.removeEventListener("scroll", onScrollOrResize);

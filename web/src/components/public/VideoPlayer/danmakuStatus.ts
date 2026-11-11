@@ -62,3 +62,37 @@ export function danmakuLoadedStatus(total: number, meta?: DanmakuMeta | null): D
       return { placeholder: say, title: total > 0 ? `已加载 ${total} 条弹幕` : "", tone: "none" };
   }
 }
+
+/**
+ * 把状态画到播放器控制条上，两处都画，样式按播放器宽度档位只显示其一（见 playerLayout.ts）：
+ * - 输入框：灰字 + 悬停说明 + 左侧状态点（输入框显示时）
+ * - 弹幕开关：右上角状态点 + 悬停说明（窄播放器收起输入框时）
+ * 插件控件可能晚于状态到达才挂上，调用方在 ready 时再调一次。
+ */
+export function renderDanmakuStatus($player: HTMLElement | null | undefined, status: DanmakuStatus | null): void {
+  if (!$player || !status) return;
+  const $input = $player.querySelector(".apd-input") as HTMLInputElement | null;
+  if ($input) {
+    $input.placeholder = status.placeholder;
+    $input.title = status.title;
+    let $dot = $player.querySelector(".ecohub-danmaku-status:not(.ecohub-danmaku-status--toggle)") as HTMLElement | null;
+    if (!$dot) {
+      $dot = document.createElement("span");
+      $dot.className = "ecohub-danmaku-status";
+      $input.before($dot);
+    }
+    $dot.dataset.tone = status.tone;
+    $dot.title = status.title;
+  }
+  const $toggle = $player.querySelector(".apd-toggle") as HTMLElement | null;
+  if ($toggle) {
+    let $dot = $toggle.querySelector(".ecohub-danmaku-status--toggle") as HTMLElement | null;
+    if (!$dot) {
+      $dot = document.createElement("span");
+      $dot.className = "ecohub-danmaku-status ecohub-danmaku-status--toggle";
+      $toggle.append($dot);
+    }
+    $dot.dataset.tone = status.tone;
+    $toggle.title = status.title;
+  }
+}

@@ -4,12 +4,10 @@
  * 存到 localStorage，下次创建播放器（含换集）时作为插件初始参数传入。
  *
  * 只存用户真正改过的项（和改之前比有变化的字段）。插件每次改设置都会把整份参数发出来，
- * 以前整份存下，插件默认的 25px 字号也被当成「用户选的」带到每次播放。
- *
- * 字号按设备分开存：手机播放器只有约 340×190，桌面的 25px 放到手机上会占掉大半画面。
- * 手机读 mobileFontSize，桌面读 fontSize；手机上调字号只写 mobileFontSize。
+ * 以前整份存下，插件默认值也被当成「用户选的」。
+ * 字号存的是按大播放器计的值，小播放器上由 danmakuLayout 按宽度缩小后再用。
  */
-type Size = number | `${number}%`;
+import type { Size } from "./danmakuLayout";
 
 export interface DanmakuSettings {
   visible?: boolean;
@@ -21,29 +19,21 @@ export interface DanmakuSettings {
   antiOverlap?: boolean;
 }
 
-interface StoredDanmakuSettings extends DanmakuSettings {
-  mobileFontSize?: Size;
-}
-
 const STORAGE_KEY = "ecohub:danmaku-settings";
-
-/** 手机默认字号：按播放器高度的 8%（343×193 约 15px，横屏全屏约 30px），随播放器大小变化 */
-export const MOBILE_DEFAULT_FONT_SIZE: Size = "8%";
 
 const isSize = (v: unknown): v is Size =>
   (typeof v === "number" && Number.isFinite(v)) || (typeof v === "string" && /^\d+(\.\d+)?%$/.test(v));
 
 // 只保留类型正确的字段，插件会对参数做类型校验，脏数据会让插件初始化直接报错
-function sanitize(raw: unknown): StoredDanmakuSettings {
+function sanitize(raw: unknown): DanmakuSettings {
   if (!raw || typeof raw !== "object") return {};
   const src = raw as Record<string, unknown>;
-  const out: StoredDanmakuSettings = {};
+  const out: DanmakuSettings = {};
   if (typeof src.visible === "boolean") out.visible = src.visible;
   if (typeof src.antiOverlap === "boolean") out.antiOverlap = src.antiOverlap;
   if (typeof src.opacity === "number" && src.opacity >= 0 && src.opacity <= 1) out.opacity = src.opacity;
   if (typeof src.speed === "number" && src.speed >= 1 && src.speed <= 10) out.speed = src.speed;
   if (isSize(src.fontSize)) out.fontSize = src.fontSize;
-  if (isSize(src.mobileFontSize)) out.mobileFontSize = src.mobileFontSize;
   if (Array.isArray(src.margin) && src.margin.length === 2 && src.margin.every(isSize)) {
     out.margin = [src.margin[0], src.margin[1]];
   }
@@ -53,7 +43,7 @@ function sanitize(raw: unknown): StoredDanmakuSettings {
   return out;
 }
 
-function readStored(): StoredDanmakuSettings {
+export function loadDanmakuSettings(): DanmakuSettings {
   try {
     return sanitize(JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "null"));
   } catch {
@@ -61,18 +51,9 @@ function readStored(): StoredDanmakuSettings {
   }
 }
 
-/** 创建播放器时的初始参数。手机不沿用桌面字号，只用手机上自己调过的 */
-export function loadDanmakuSettings(isMobile: boolean): DanmakuSettings {
-  const { mobileFontSize, fontSize, ...rest } = readStored();
-  const size = isMobile ? mobileFontSize : fontSize;
-  return size === undefined ? rest : { ...rest, fontSize: size };
-}
-
-/** 从插件参数里取出要持久化的字段（不含 mobileFontSize） */
+/** 从插件参数里取出要持久化的字段 */
 export function pickDanmakuSettings(option: unknown): DanmakuSettings {
-  const { mobileFontSize: _ignored, ...rest } = sanitize(option);
-  void _ignored;
-  return rest;
+  return sanitize(option);
 }
 
 /** next 相对 prev 有变化的字段 */
@@ -84,17 +65,11 @@ export function changedDanmakuSettings(prev: DanmakuSettings, next: DanmakuSetti
   return out as DanmakuSettings;
 }
 
-export function saveDanmakuSettings(patch: DanmakuSettings, isMobile: boolean): void {
+export function saveDanmakuSettings(patch: DanmakuSettings): void {
   try {
-    const clean = pickDanmakuSettings(patch);
+    const clean = sanitize(patch);
     if (Object.keys(clean).length === 0) return;
-    const { fontSize, ...rest } = clean;
-    const next: StoredDanmakuSettings = { ...readStored(), ...rest };
-    if (fontSize !== undefined) {
-      if (isMobile) next.mobileFontSize = fontSize;
-      else next.fontSize = fontSize;
-    }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...loadDanmakuSettings(), ...clean }));
   } catch {
     // localStorage 不可用（隐私模式等）时不持久化
   }
