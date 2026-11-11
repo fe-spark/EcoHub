@@ -10,7 +10,7 @@ For behavior (main source, matching, scraping, caching), see the [FAQ](../docs/R
 
 Requirements: Go 1.27+, MySQL 8+, and Redis 7+.
 
-If no database is available, use the development compose file `docker-compose.yml` in the repository root to start only the database containers (this file is intended for local development only; for its differences from the release file, see [Overview](../docs/README_EN.md#local-development)). The databases are mapped to `127.0.0.1:3306` and `127.0.0.1:6379` on the host and use the same credentials as `server/.env.example`:
+If no database is available, use the development compose file `docker-compose.yml` in the repository root to start only the database containers (this file is intended for local development only; for its differences from the release file, see the [Development guide](../docs/README-Dev_EN.md#development-compose-file)). The databases are mapped to `127.0.0.1:3306` and `127.0.0.1:6379` on the host and use the same credentials as `server/.env.example`:
 
 ```bash
 docker compose up -d mysql redis

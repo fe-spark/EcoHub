@@ -45,7 +45,7 @@ API_URL=http://127.0.0.1:8080
 
 ### 在容器中运行前端
 
-仓库根目录的开发编排 `docker-compose.yml` 包含 `web` 服务，使用 `web/Dockerfile` 从源码构建，容器名为 `Eco-web`。该编排仅用于本地开发，与发布编排的区别见 [总览](../README.md#本地开发)。
+仓库根目录的开发编排 `docker-compose.yml` 包含 `web` 服务，使用 `web/Dockerfile` 从源码构建，容器名为 `Eco-web`。该编排仅用于本地开发，与发布编排的区别见 [开发指南](../docs/README-Dev.md#开发编排)。
 
 ```bash
 docker compose up -d mysql redis
