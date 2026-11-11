@@ -8,65 +8,121 @@ Install, ports, and passwords: [Deploy guide](./README-Deploy_EN.md).
 
 ### Why is the site empty after setup?
 
-The release image does not ship catalog data. First boot writes default collect sources, but it does not finish a collect by itself. Run collect in the administration panel. The first full collect may take several hours; more sources take longer.
+Because nothing has been collected yet. The release image ships no media data. The first start only writes 12 preset collect sources. It does not run a full collect by itself.
 
-The public site, the admin film list, and TVBox / MacCMS all read the snapshot / in-memory read model published after collect, not the tables while collect is still running. Films from the main source appear as each window is published. An empty site before that publish is expected.
+In admin, open "采集中心" (Collect center) and run one full collect. More collect sources take longer, and the first run can take several hours. You do not have to wait for the end: after each batch is collected, it is published to the snapshot the site reads, so films from the main source appear while the collect runs.
+
+The site lists, the admin film list, and the TVBox / MacCMS subscriptions all read the snapshot, not the tables being collected. Until the first batch is published, the site is empty. That is expected.
 
 ### What is the main source?
 
-The main source is the first enabled collect source in sort order. The public home page, categories, search, and daily updates show only that source’s own collected films and categories. Moving another enabled source to the front shows that source’s stored data immediately. Nothing is re-collected, and other sources’ films stay.
+The main source is the first enabled collect source in the sort order. The site's home page, categories, search, and daily updates show only films and categories collected by the main source.
 
-The play page starts from the main source’s film and appends play lines already stored by other enabled sources, matched by key. Lines stay separated by source. The poster source is a separate flag and does not decide the main source. Public covers use the matched poster-source film’s current cover. The main film’s image is used only when nothing matches. When the poster source is the main source, its own image is used. If every source is disabled, the same order picks the first one as a fallback.
+Example: the collect sources are ordered A, B, C, all enabled, so the main source is A. Drag B to the top and the site switches to the data B already collected. Nothing is re-collected, and A's and C's data is not deleted. When every collect source is disabled, there is no main source.
 
-### Where do scrape results live?
+The play page starts from the main source's film, uses match keys to find the same film in other enabled collect sources, and appends their play lines. Play lines are shown per collect source.
 
-A film scrape writes the selected cover, blurb, score, and related fields onto that film. The title and category stay. There is no restore. A homepage banner scrape is stored on that banner row. It does not change the film, and there is no second scrape table. The homepage uses the banner row’s own image and blurb. The update remark still comes from the library.
+The poster source is a separate flag and does not decide the main source. Site covers use the matching film's cover from the poster source first, and fall back to the main source's own image when nothing matches. When the poster source is the main source, its own image is used.
 
 ### What does switching the main source clear?
 
-Films are not deleted and collect does not restart. The live banner deck and the saved scheduling recipe are cleared, and the scheduled banner job is turned off. Switching is allowed while a collect is running.
+Nothing. No films are deleted, nothing is re-collected, and you can switch while a collect is running.
 
-Changing one source’s collect URL clears that source’s films, play lines, failure records, and categories, including films with no play lines, then fetches categories again. Other sources stay. That is separate from switching the main source. Deleting a source clears only that source.
+Homepage banners are stored per collect source. After switching, the home page shows the new main source's own banner set. The old set is still there and comes back if you switch back.
 
-### How are titles deduplicated and aligned across sites?
+Do not confuse this with:
 
-Each source keeps its own film row. Collect does not merge rows.
+- Changing a collect source's URL: clears that source's films, play lines, failure records, and categories (films without play lines too), then fetches categories again. Other sources are not touched.
+- Deleting a collect source: also clears only that source.
 
-- Inside one source, `movie_source_mapping` finds the old row by source id and source `vod_id`. A later collect updates that row only. Items on the same page that share a match key become one film.
-- Across sources, match keys do not merge rows. The play page uses them to find the same film on other enabled sources and append those sources’ own lines. Order is Douban ID plus title, then title#category, then bare title. Several keys hitting one film show it once. Lines stay separated by source.
+### How are films deduplicated and matched across sources?
 
-Category keys are `source:{this source}:{typeId}` and match that source’s own category tree.
+Each collect source keeps its own copy. Collect does not merge them.
 
-### What happens if a collect is stopped manually?
+- Within one source: `movie_source_mapping` uses "collect source + the source's `vod_id`" to find the film's existing row. Collecting again updates only that row. Entries on the same page of the same source with the same match key become one film.
+- Across sources: match keys do not merge rows. The play page uses them at read time to find the same film in other sources, in this order: Douban ID + title, title + top-level category, title only. A film hit by several keys counts once. Play lines stay per source; episodes from different sources are never stitched together.
 
-Stop interrupts tasks that are still fetching pages and cancels their context. Sources already in `page_done` / `waiting_publish` still finish and publish.
+The category key is `source:{collect source ID}:{source category ID}`, one-to-one with that source's own category tree.
 
-Successful pages are already in `film_index`. Stopping or failing later pages leaves those films visible; failed pages go to the retry queue.
+### Where do scrape results and homepage banners live?
+
+- Film scrape: writes the chosen cover, blurb, score, and similar fields directly onto the film. Title and category stay. There is no "restore".
+- Homepage banners: stored per collect source. Each row keeps only the film, the order, and any image, blurb, score, or year edited in admin. Everything else is read from the library when shown. A scrape inside the banner editor writes only that banner row. It does not change the film, and there is no separate scrape table.
+
+### What state is the data in after a manual stop?
+
+Stop interrupts pages that are still being fetched. Pages already stored stay in the library. A page that is being written finishes; pages still waiting to be written are dropped. Failed pages are recorded in "采集记录" (Collect records) and can be retried.
 
 ## Snapshots and cache
 
-### Why publish a snapshot after collect? Why can an incremental publish still take time?
+### Why publish snapshots during a collect?
 
-Tables keep changing during collect. Each window refreshes play summaries for those mids and updates the in-memory search index. Public lists, filters, the admin film list, and TVBox / MacCMS read `film_index`. List caches debounce about 5 seconds so a full collect does not flush Redis on every page.
+Because the site does not read the tables being collected. Those tables change all the time during a collect. After each batch, that batch is written into the snapshot and the in-memory search index is updated film by film. Site lists, filters, the admin film list, and TVBox / MacCMS all read the snapshot.
 
-### Why didn’t the public site change after a config edit?
+After publishing, list-cache cleanup is debounced by 5 seconds: during many batches in a row Redis is not cleared after every batch, but once, about 5 seconds after the last batch.
 
-Saving site config updates Redis and clears the home-page cache. If the page still looks old, typical causes are browser, CDN, or reverse-proxy cache, or a process that is not running the latest code.
+The search index is normally updated incrementally. It is fully loaded once at start. If an incremental update finds no usable index in memory, a full rebuild runs as a fallback.
 
-Film lists, categories, and filters show only the current main source’s own films. Switching the main source shows films that source has already stored. A source that has not been collected yet stays empty. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared after collect. If they still differ, check the running instance and request parameters.
+### I changed a setting. Why did the site not change right away?
 
-### What does “recently updated” use? Do category pages match TVBox?
+Saving site settings updates Redis and clears the home page cache. If the page still looks old, common causes are:
 
-Recently updated sorts `film_index.update_stamp` descending (then `mid`). A new film keeps the time given by its source. An existing film moves to the current collect time only when its play-line content changes. Download-only lines, remarks, cast, and covers do not move the sort. Every collect source uses the same rule.
+- Browser, CDN, or reverse proxy caching.
+- The running code or image is not the latest.
 
-Public category filters and TVBox share the same read-model rules (category, plot / region / language / year, sort). TVBox plain lists add a Redis cache, so short-lived mismatches are usually cache.
+Film lists, categories, and filters show only the current main source. After switching the main source, the site shows the films the new main source already has. If it has not collected anything yet, the site is empty.
+
+The regular TVBox lists have another Redis cache layer, up to about 12 hours, cleared with a debounce after new data is stored. If results still differ, check that you are hitting the same instance with the same request parameters.
+
+### How is "最近更新" (recently updated) sorted? Do category pages and TVBox agree?
+
+By `film_index.update_stamp`, newest first, then by `mid`.
+
+- New films: use the update time given by the collect source.
+- Films already in the library: during collect, the time changes to the current collect time only when play lines changed. Changes to download lines, remarks, cast, or cover do not change the order.
+- Saving a film manually in admin also sets its time to the save time.
+
+All collect sources follow the same rules.
+
+Site category filters and TVBox use the same rules (category, genre, region, language, year, sort). TVBox has an extra Redis cache, so check the cache first when they briefly differ.
 
 ## Login and permissions
 
-### Why can admin pages open while APIs report not logged in?
+### The admin page opens, but API calls say I am not logged in. Why?
 
-The edge middleware only checks that the `ecohub_auth_token` cookie exists. Opening `/manage` also has the server layout call `/api/manage/user/info`, where the backend validates the JWT and Redis token; failure redirects to `/login`. If a token later expires, is replaced by another device, or disappears from Redis while the admin page is already open, subsequent APIs may still return unauthorized. Trust the API response.
+The web app only does a rough check. The real check is on the server:
 
-### How do guest and default accounts work?
+1. `web/src/proxy.ts` only checks that the `ecohub_auth_token` cookie exists.
+2. When `/manage` opens, the server-side layout calls `/api/manage/user/info`. The API checks the JWT and the current token stored in Redis. On failure it redirects to `/login`.
+3. If the token becomes invalid after the page has opened (expired, replaced by a login on another device, or cleared in Redis), later API calls return "not logged in" and the web app goes back to the login page.
 
-First boot creates only the super admin `admin`. The password is `ECOHUB_ADMIN_PASSWORD`, or `admin` when unset. An existing admin keeps the current password. Create normal users and visitors in account management. Visitors may call admin GET; POST / PUT / PATCH / DELETE are rejected by `WriteAccess`. Change the password in admin after login.
+The API response is always the source of truth. A login is valid for 10 days. After that, log in again.
+
+### How do the default account and visitor accounts work?
+
+The first start creates only the super user `admin`. Its password is `ECOHUB_ADMIN_PASSWORD`, or `admin` when unset. If `admin` already exists, its password is not changed. Change the password in admin right after you log in.
+
+Create other accounts in "账号管理" (Accounts). There are three roles:
+
+| Role | What it can do |
+| --- | --- |
+| 超级用户 (super user) | Everything, including site settings, accounts, and upgrades |
+| 普通用户 (regular user) | Day-to-day management, but not the super-user-only actions |
+| 访客 (visitor) | Read only. All GET requests pass; POST / PUT / PATCH / DELETE are rejected |
+
+### How do subscriptions work with private access on?
+
+When you turn on "私有化访问" (private access) in "网站配置" (Site settings), you must fill in a subscription key. After that:
+
+- The site and its APIs need a login or the correct subscription key.
+- Subscription URLs (`/api/provide/app`, `/api/provide/tvbox`, `/api/provide/vod`) always need the subscription key.
+
+Pass the key as a URL parameter or in the `X-Provide-Key` request header. For example, with the key `mysecret888`:
+
+```text
+http://<server-ip>:3000/api/provide/tvbox?key=mysecret888
+```
+
+## Related
+
+[Overview](./README_EN.md) · [Deploy guide](./README-Deploy_EN.md) · [Scheduled task conflicts](./cron-task-conflict.md) (Chinese)
