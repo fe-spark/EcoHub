@@ -142,9 +142,11 @@ The reason is a human-readable message and never contains the API address or key
 
 ### Are danmaku settings saved? Why is there no input box on phones?
 
-Yes. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap set in the player's danmaku settings are stored in the current browser and reused when you switch episodes or come back. A different browser, or clearing site data, goes back to the defaults.
+Yes. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap set in the player's danmaku settings are stored in the current browser and reused when you switch episodes or come back. Only the settings you changed are stored. Font size is stored separately for phones and computers, so a phone does not reuse the computer's font size. A different browser, or clearing site data, goes back to the defaults.
 
 On phones (the browser reports iPhone, iPad, iPod, or Android, or the window is 768 px wide or less) only the danmaku switch and settings are shown, with no input box, so you cannot send danmaku from a phone. Phones cannot show the status on the input box either: when danmaku fails to load, a short notice with the reason appears over the video once; other states show nothing.
+
+On phones the default danmaku font size is 8% of the player height (about 15 px in portrait, larger in landscape fullscreen); once you change the font size in the settings, your choice is used. Top and bottom fixed danmaku are shown as scrolling danmaku on phones, so they avoid each other with the scrolling ones instead of covering them.
 
 ## Login and permissions
 
