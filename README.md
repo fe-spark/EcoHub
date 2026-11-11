@@ -52,7 +52,7 @@
 
 ## 安装
 
-需要 Docker 20+ 和 Compose 2+，建议 2 核 2 GB。
+需要 Docker 20+ 和 Compose 2+，建议 2 核 2 GB以上配置。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
