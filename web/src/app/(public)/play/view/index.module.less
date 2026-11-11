@@ -152,16 +152,35 @@
   min-width: 0;
 }
 
+/*
+ * 播放器外框：所有宽度都是 1px 边框（--public-border-3：深色主题 10% 白，浅色主题 #cbd5e1）+ 20px 圆角，
+ * 和上方影片信息卡片一致；overflow 裁出圆角。
+ * 边框用盖在上面的 ::after 画，不占尺寸：窄屏下播放器按 min-height 撑高，用 border 会让里面的播放器
+ * 比外框内侧高 2px、控制条底边被裁掉。::after 不接收点击，不挡控制条。
+ * 全屏和网页全屏时 Artplayer 把播放器铺满屏幕（网页全屏会把播放器节点移到 body 下），不带这圈边框。
+ */
 .playerWrapper {
+  position: relative;
   width: 100%;
   height: auto;
   aspect-ratio: 16 / 9;
   box-sizing: border-box;
-  border: 1px solid var(--public-border-3);
   border-radius: 20px;
   overflow: hidden;
+  // 让 ::after 的层级只在本容器内生效，不盖到页头等其他元素上
+  isolation: isolate;
   display: grid;
   place-items: stretch;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border: 1px solid var(--public-border-3);
+    border-radius: inherit;
+    pointer-events: none;
+  }
 }
 
 .infoArea {
@@ -259,9 +278,9 @@
     gap: 20px;
   }
 
+  // 窄屏也保留和桌面一致的边框和圆角（原来这里去掉了）：
+  // 黑色播放器放在深色页面背景上，没有边框时几乎看不出播放器的范围
   .playerWrapper {
-    border-radius: 0;
-    border: none;
     height: auto;
     aspect-ratio: 4 / 3;
     display: grid;
