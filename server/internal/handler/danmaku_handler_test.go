@@ -54,12 +54,16 @@ func TestDanmakuHandler_GetAndPost(t *testing.T) {
 	var getResp struct {
 		Code int                 `json:"code"`
 		Data []model.DanmakuItem `json:"data"`
+		Meta *danmakuMeta        `json:"meta"`
 	}
 	if err := json.Unmarshal(wGet.Body.Bytes(), &getResp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if getResp.Code != 0 {
 		t.Fatalf("code = %d, want 0", getResp.Code)
+	}
+	if getResp.Data == nil || getResp.Meta == nil || getResp.Meta.NetworkStatus != networkDisabled {
+		t.Fatalf("want data array and meta.networkStatus=disabled, got %s", wGet.Body.String())
 	}
 
 	// 3. 测试集数智能识别解析
