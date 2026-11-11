@@ -155,7 +155,7 @@
 /*
  * 播放器外框：所有宽度都是 1px 边框（--public-border-3：深色主题 10% 白，浅色主题 #cbd5e1）+ 20px 圆角，
  * 和上方影片信息卡片一致；overflow 裁出圆角。
- * 边框用盖在上面的 ::after 画，不占尺寸：窄屏下播放器按 min-height 撑高，用 border 会让里面的播放器
+ * 边框用盖在上面的 ::after 画，不占尺寸：单列时播放器会被 min-height / max-height 夹住，用 border 会让里面的播放器
  * 比外框内侧高 2px、控制条底边被裁掉。::after 不接收点击，不挡控制条。
  * 全屏和网页全屏时 Artplayer 把播放器铺满屏幕（网页全屏会把播放器节点移到 body 下），不带这圈边框。
  */
@@ -267,6 +267,30 @@
     gap: 24px;
   }
 
+  /*
+   * 单列（≤1024px）时播放区高度 = 实际宽度 × 视频真实高宽比（--video-aspect 由播放器读到
+   * videoWidth / videoHeight 后写入；元数据到达前、或读不到时按 16:9），画面正好撑满宽度、没有上下黑边。
+   * - 竖屏 / 高视频：最高 75svh（不支持 svh 的浏览器退回 75vh），超出部分左右留黑边，
+   *   保证页面上还能看到下面的选集。
+   * - 超宽视频（如 2.35:1 在 378px 手机上只有 ~147px 高）：最低 180px。180px 是 320px 宽手机上
+   *   16:9 视频的自然高度，常见手机上的 16:9 不会被它撑出黑边；控制条约 50px，小播放器上弹幕
+   *   字号约 15–16px、每行约 20px，扣掉控制条还能放下 6 行弹幕，进度条和弹幕设置面板也能正常用。
+   * 桌面双列（>1024px）保持 16:9：右侧选集栏的高度跟左列对齐，跟着视频比例变会让选集栏忽高忽低。
+   */
+  .playerWrapper {
+    aspect-ratio: var(--video-aspect, 16 / 9);
+    min-height: 180px;
+    max-height: 75vh;
+    max-height: 75svh;
+
+    &.isPlayerError {
+      aspect-ratio: auto;
+      height: auto;
+      min-height: 320px;
+      max-height: none;
+    }
+  }
+
   .infoArea {
     padding: 24px 30px;
   }
@@ -276,23 +300,6 @@
   .container {
     padding: 0;
     gap: 20px;
-  }
-
-  // 窄屏也保留和桌面一致的边框和圆角（原来这里去掉了）：
-  // 黑色播放器放在深色页面背景上，没有边框时几乎看不出播放器的范围
-  .playerWrapper {
-    height: auto;
-    aspect-ratio: 4 / 3;
-    display: grid;
-    place-items: stretch;
-    min-height: clamp(240px, 58vh, 420px);
-    max-height: 70vh;
-
-    &.isPlayerError {
-      aspect-ratio: auto;
-      height: auto;
-      min-height: 320px;
-    }
   }
 
   .mainContent {
@@ -336,13 +343,5 @@
 
   .recommendation {
     padding: 0 16px;
-  }
-}
-
-@media (max-width: 480px) {
-  .playerWrapper {
-    aspect-ratio: 16 / 10;
-    min-height: clamp(220px, 52vh, 360px);
-    max-height: 62vh;
   }
 }

@@ -50,6 +50,12 @@ export default function PlayPageView({
   );
   const [autoplay, setAutoplay] = useState(true);
   const [playerError, setPlayerError] = useState(false);
+  // 当前视频的真实宽高比（"宽 / 高"）。换集时保留上一集的值，直到新视频的元数据到达，
+  // 避免先跳回 16:9 再跳到新比例。
+  const [videoAspect, setVideoAspect] = useState<string | null>(null);
+  const handleVideoSize = useCallback((width: number, height: number) => {
+    setVideoAspect(`${width} / ${height}`);
+  }, []);
   const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
   const [openingRelatedId, setOpeningRelatedId] = useState("");
 
@@ -354,7 +360,10 @@ export default function PlayPageView({
             actorText={actorText}
           />
 
-          <div className={`${styles.playerWrapper} ${playerError ? styles.isPlayerError : ""}`}>
+          <div
+            className={`${styles.playerWrapper} ${playerError ? styles.isPlayerError : ""}`}
+            style={videoAspect ? ({ "--video-aspect": videoAspect } as React.CSSProperties) : undefined}
+          >
             {current?.link && (
               <VideoPlayer
                 key={`${playingSourceId}-${current.index}-${current.link}`}
@@ -368,6 +377,7 @@ export default function PlayPageView({
                 onTimeUpdate={handleTimeUpdate}
                 onPlayStart={handlePlayStart}
                 onError={handlePlayerError}
+                onVideoSize={handleVideoSize}
               />
             )}
           </div>
