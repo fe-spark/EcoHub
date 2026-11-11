@@ -46,6 +46,8 @@ interface VideoPlayerProps {
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onError?: (error: unknown) => void;
   onPlayStart?: () => void;
+  /** 视频真实分辨率可用或变化时回调（loadedmetadata / resize，例如 HLS 切换清晰度）。 */
+  onVideoSize?: (width: number, height: number) => void;
 }
 
 /**
@@ -65,6 +67,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onTimeUpdate,
   onError,
   onPlayStart,
+  onVideoSize,
 }) => {
   const { config: siteConfig } = useSiteConfig();
   const danmakuEnabled = Boolean(siteConfig?.danmaku?.enabled);
@@ -79,10 +82,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [retryCount, setRetryCount] = useState(0);
 
   // 回调保护
-  const callbacks = useRef({ onEnded, onTimeUpdate, onError, onPlayStart });
+  const callbacks = useRef({ onEnded, onTimeUpdate, onError, onPlayStart, onVideoSize });
   useEffect(() => {
-    callbacks.current = { onEnded, onTimeUpdate, onError, onPlayStart };
-  }, [onEnded, onTimeUpdate, onError, onPlayStart]);
+    callbacks.current = { onEnded, onTimeUpdate, onError, onPlayStart, onVideoSize };
+  }, [onEnded, onTimeUpdate, onError, onPlayStart, onVideoSize]);
 
   // 核心初始化 Effect
   useEffect(() => {
@@ -402,12 +405,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       callbacks.current.onError?.(err);
     });
 
+    // 把视频真实宽高报给外层，用来按「撑满宽度」算播放区高度。
+    // 直接监听原生 video 事件：resize 在 HLS 切换清晰度、分辨率变化时也会触发。
+    const reportVideoSize = () => {
+      const { videoWidth, videoHeight } = art.video;
+      if (videoWidth > 0 && videoHeight > 0) {
+        callbacks.current.onVideoSize?.(videoWidth, videoHeight);
+      }
+    };
+    art.video.addEventListener("loadedmetadata", reportVideoSize);
+    art.video.addEventListener("resize", reportVideoSize);
+
     art.on("video:playing", () => {
       setHasError(false);
       callbacks.current.onPlayStart?.();
     });
 
     return () => {
+      art.video.removeEventListener("loadedmetadata", reportVideoSize);
+      art.video.removeEventListener("resize", reportVideoSize);
       unbindWidthClass();
       if (miniRafId) cancelAnimationFrame(miniRafId);
       if (onScrollOrResize) {

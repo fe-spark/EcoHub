@@ -40,6 +40,8 @@ export function bindPlayerWidthClass(
   const update = () => {
     const $p = art.template.$player;
     if (!$p) return;
+    // 播放器高度跟着视频比例变（超宽视频最低只有 180px），弹幕设置面板按它限制最大高度
+    $p.style.setProperty("--ecohub-player-height", `${$p.clientHeight}px`);
     const next = playerWidthClass($p.clientWidth);
     if (next === current) return;
     const prev = current;

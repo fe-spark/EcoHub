@@ -228,10 +228,24 @@
   :global(.artplayer-plugin-danmuku .apd-config .apd-config-panel) {
     z-index: 99;
     bottom: 100%;
-    left: 50%;
+    // 插件悬停时会按按钮位置往面板上写行内 left（让面板对着按钮居中），compact 下要覆盖掉，
+    // 否则面板会被推到播放器左侧外面
+    left: 50% !important;
     width: min(320px, 100%);
     transform: translateX(-50%);
   }
+}
+
+/*
+ * 弹幕设置面板约 270px 高，播放区按视频比例算高度后可能只有 180–300px（超宽视频、窄屏），
+ * 外框 overflow: hidden 会把面板顶部裁掉。按播放器当前高度（playerLayout.ts 写入的
+ * --ecohub-player-height）限制面板高度，放不下时在面板里滚动。
+ * 80px ≈ 控制条（约 50px）+ 面板外层用来衔接鼠标悬停的 10px 上下留白 + 余量。
+ */
+.artPlayer :global(.artplayer-plugin-danmuku .apd-config .apd-config-panel .apd-config-panel-inner) {
+  max-height: calc(var(--ecohub-player-height, 10000px) - 80px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* 弹幕开关上的状态点：只在输入框收起（compact）时显示 */
