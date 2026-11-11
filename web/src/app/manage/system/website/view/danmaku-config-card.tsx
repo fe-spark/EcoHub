@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Button,
   Card,
   Flex,
   Input,
@@ -59,6 +60,9 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
   const [isTouched, setIsTouched] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testTitle, setTestTitle] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ type: "success" | "warning" | "danger"; text: string } | null>(null);
 
   const { message } = useAppMessage();
   const { refresh: refreshSiteConfig } = useSiteConfig();
@@ -118,6 +122,34 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  // 用当前填写（可未保存）的配置试拉一次全网弹幕，不读写缓存
+  const handleTest = async () => {
+    const title = testTitle.trim();
+    if (!title) {
+      message.warning("先填一个用来测试的片名");
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const resp = await ApiPost<{ status: string; count: number; reason?: string; animeTitle?: string; episodeTitle?: string }>(
+        "/manage/config/danmaku/test",
+        { config: normalizeDanmakuConfig(draft), title, episode: 1 },
+      );
+      if (resp.code !== 0 || !resp.data) {
+        setTestResult({ type: "danger", text: resp.msg || "测试失败" });
+        return;
+      }
+      const { status, count, reason, animeTitle, episodeTitle } = resp.data;
+      const matched = animeTitle ? `匹配到「${animeTitle}${episodeTitle ? ` ${episodeTitle}` : ""}」，` : "";
+      if (status === "ok") setTestResult({ type: "success", text: `${matched}第 1 集共 ${count} 条全网弹幕` });
+      else if (status === "empty") setTestResult({ type: "warning", text: `${matched}${reason || "未找到全网弹幕"}` });
+      else setTestResult({ type: "danger", text: `失败：${reason || "未知原因"}` });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -238,6 +270,26 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
                     />
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                       在开放平台应用详情页中复制 AppSecret 1 或 AppSecret 2 即可（保存后不明文回显）
+                    </Typography.Text>
+                  </div>
+
+                  {/* 测试全网弹幕 */}
+                  <div className={styles.field}>
+                    <Typography.Text strong>测试全网弹幕</Typography.Text>
+                    <Space.Compact style={{ width: "100%", marginTop: 6 }}>
+                      <Input
+                        disabled={!canWrite}
+                        placeholder="填一个片名，例如 葬送的芙莉莲"
+                        value={testTitle}
+                        onChange={(e) => setTestTitle(e.target.value)}
+                        onPressEnter={() => void handleTest()}
+                      />
+                      <Button disabled={!canWrite} loading={testing} onClick={() => void handleTest()}>
+                        测试
+                      </Button>
+                    </Space.Compact>
+                    <Typography.Text type={testResult?.type ?? "secondary"} style={{ fontSize: 12 }}>
+                      {testResult?.text ?? "用上面填写的配置（可以先不保存）拉这部片第 1 集的全网弹幕，看能不能拿到"}
                     </Typography.Text>
                   </div>
                 </>

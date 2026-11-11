@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -56,9 +57,9 @@ func TestDanmakuFetch_UsesAdminProxyWhenModuleOn(t *testing.T) {
 
 	setupDanmakuProxyDB(t, &model.ProxyConfig{Enabled: true, ProxyURL: proxy.URL, Modules: model.ProxyModuleScope{Danmaku: true}})
 
-	got := searchDandanplayEpisode(model.DanmakuConfig{}, "http://danmaku.example.invalid/api/v2", "测试剧", 1)
-	if got != 4242 {
-		t.Fatalf("episode id = %d, want 4242", got)
+	got, err := searchDandanplayEpisode(model.DanmakuConfig{}, "http://danmaku.example.invalid/api/v2", "测试剧", 1)
+	if err != nil || got.EpisodeID != 4242 {
+		t.Fatalf("episode = %+v err=%v, want 4242", got, err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -91,5 +92,52 @@ func TestDanmakuHTTPClient_DirectWhenOffIgnoresEnv(t *testing.T) {
 				t.Fatal("direct client must not have a Proxy func (would read env proxies)")
 			}
 		})
+	}
+}
+
+// 后台「测试」走 fetchSniffedDanmaku(useCache=false)，同样经过后台代理。
+func TestDanmakuAdminTestPath_UsesAdminProxy(t *testing.T) {
+	var (
+		mu   sync.Mutex
+		seen []string
+	)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/comment/") {
+			_, _ = w.Write([]byte(`{"count":1,"comments":[{"p":"1,1,16777215,u","m":"经过代理"}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(fakeSearchHit))
+	}))
+	defer proxy.Close()
+
+	setupDanmakuProxyDB(t, &model.ProxyConfig{Enabled: true, ProxyURL: proxy.URL, Modules: model.ProxyModuleScope{Danmaku: true}})
+	cfg := model.DanmakuConfig{Enabled: true, AutoSniff: true, ApiURL: "http://danmaku.example.invalid/api/v2"}
+	res := fetchSniffedDanmaku(cfg, "测试动画", 1, false)
+	if res.Status != networkOK || len(res.Items) != 1 {
+		t.Fatalf("status=%s count=%d reason=%q", res.Status, len(res.Items), res.Reason)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 {
+		t.Fatalf("proxy saw %v, want search + comment", seen)
+	}
+}
+
+// 读不到代理配置时不发请求，返回可读的失败原因。
+func TestFetchSniffedDanmaku_ProxyConfigUnreadable(t *testing.T) {
+	prevM, prevR := db.Mdb, db.Rdb
+	db.Mdb, db.Rdb = nil, nil
+	t.Cleanup(func() { db.Mdb, db.Rdb = prevM, prevR })
+
+	hit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))
+	defer srv.Close()
+	res := fetchSniffedDanmaku(model.DanmakuConfig{Enabled: true, AutoSniff: true, ApiURL: srv.URL + "/api/v2"}, "测试动画", 1, false)
+	if res.Status != networkError || res.Reason != "读取网络代理配置失败" || hit {
+		t.Fatalf("status=%s reason=%q hit=%v", res.Status, res.Reason, hit)
 	}
 }

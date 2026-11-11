@@ -1,7 +1,16 @@
 diff --git a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs b/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
-index fac426c..10c71ad 100644
+index fac426c..5bddaaf 100644
 --- a/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
 +++ b/node_modules/artplayer-plugin-danmuku/dist/artplayer-plugin-danmuku.mjs
+@@ -397,7 +397,7 @@ class Danmuku {
+     });
+     if (!danmu.text.trim())
+       return this;
+-    if (danmu.time) {
++    if (typeof danmu.time === "number" && Number.isFinite(danmu.time)) {
+       danmu.time = clamp(danmu.time, 0, Infinity);
+     } else {
+       danmu.time = this.art.currentTime + 0.5;
 @@ -428,7 +428,7 @@ class Danmuku {
        $lastStartTime: 0
        // 弹幕上次开始时间
