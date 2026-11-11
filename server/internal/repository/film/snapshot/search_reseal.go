@@ -10,7 +10,8 @@ import (
 
 // ResealSearchIndexMids 一条采集队列的变动只封口一次。
 // 库里仍在的影片走增量；有物理删除时才在内存里重算倒排和榜单，不扫全库。
-// 没有可用内存索引时才请求全库重建。
+// 没有可用内存索引，或新库还是空索引时，改为整表顺序加载。
+// 空索引若按本次编号逐批点查，全量首采会把上百万行拆成随机查询。
 func ResealSearchIndexMids(mids []int64) bool {
 	startedAt := time.Now()
 	mids = NormalizeSnapshotMIDs(mids)
@@ -20,8 +21,12 @@ func ResealSearchIndexMids(mids []int64) bool {
 
 	version := currentSearchIndexVersion()
 	base := activeFilmSearchMetas.Load()
-	if !searchIndexReady(base, version) {
-		log.Printf("[ActiveReadModel] 内存无可用检索副本，触发全量重建 mids=%d", len(mids))
+	if !searchIndexReady(base, version) || len(base.Items) == 0 {
+		items := 0
+		if base != nil {
+			items = len(base.Items)
+		}
+		log.Printf("[ActiveReadModel] 内存无可用检索副本，触发全量重建 mids=%d items=%d", len(mids), items)
 		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}

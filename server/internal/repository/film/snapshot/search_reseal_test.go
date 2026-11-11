@@ -196,6 +196,33 @@ func TestResealRereadsWhenIndexPointerChanges(t *testing.T) {
 	}
 }
 
+func TestResealEmptyIndexRequestsFullScan(t *testing.T) {
+	setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-empty"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-empty", nil))
+
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	defer stopRebuild()
+
+	prevRead := readSearchMetaUpserts
+	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		t.Error("empty index must not point-query films by mid")
+		return nil, nil, errors.New("should not read by mid")
+	}
+	t.Cleanup(func() { readSearchMetaUpserts = prevRead })
+
+	if ResealSearchIndexMids([]int64{1, 2, 3}) {
+		t.Fatal("empty index should hand off to a sequential rebuild")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if !scanned.Load() {
+		t.Fatal("empty index did not request a sequential rebuild")
+	}
+}
+
 func TestResealReadFailureRequestsRebuild(t *testing.T) {
 	setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-read-fail"); err != nil {
