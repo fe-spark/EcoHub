@@ -127,3 +127,71 @@
     border-color: var(--public-border-3) !important;
   }
 }
+
+/*
+ * 弹幕输入框（artplayer-plugin-danmuku）。
+ * 非全屏：插件固定 260px，输入框只剩约 160px，「共 5396 条弹幕，说点什么吧」显示不全。
+ * 改成最宽 340px、空间不够时随控制条收窄（不挤掉右侧按钮），文字放不下时以省略号结尾。
+ * 全屏和网页全屏不动，仍用插件的 400px。
+ */
+.playerWrapper :global(.art-video-player:not(.art-fullscreen):not(.art-fullscreen-web)) {
+  :global(.art-controls-center) {
+    min-width: 0;
+  }
+
+  :global(.art-controls-center .artplayer-plugin-danmuku) {
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  :global(.art-controls-center .apd-emitter) {
+    flex: 0 1 340px;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+.playerWrapper :global(.apd-input) {
+  text-overflow: ellipsis;
+}
+
+/* 弹幕加载状态点：在输入框左侧，悬停看完整说明 */
+.playerWrapper :global(.ecohub-danmaku-status) {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin: 0 6px 0 2px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+
+  &[data-tone="ok"] {
+    background: #52c41a;
+  }
+
+  &[data-tone="warn"] {
+    background: #faad14;
+  }
+
+  &[data-tone="error"] {
+    background: #ff4d4f;
+  }
+
+  &[data-tone="none"] {
+    display: none;
+  }
+
+  &[data-tone="loading"] {
+    animation: ecohubDanmakuPulse 1s ease-in-out infinite;
+  }
+}
+
+@keyframes ecohubDanmakuPulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
