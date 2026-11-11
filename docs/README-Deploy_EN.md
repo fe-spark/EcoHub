@@ -283,7 +283,8 @@ For production:
 | `REDIS_PORT` | `6379` | App | |
 | `REDIS_PASSWORD` | `ecohub` | App, bundled Redis | Edit `.env`, then `ecohub restart` |
 | `REDIS_DB` | `0` | App | |
-| `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` | empty | App | Do not affect collect. The collect proxy is set in admin under "网络代理" (Network proxy). These variables only affect a few requests that do not use the admin proxy, such as danmaku fetching |
+
+To send collect, TMDB scraping, Telegram notifications, or the version check through a proxy, open admin → "网络代理" (Network proxy, `/manage/system/proxy`), enter the proxy address (`http://`, `https://`, or `socks5://`), then turn it on per module. This is the only place to configure a proxy.
 
 Go-only variables such as `NODE_NAME` and `ECOHUB_LOG_DIR` are not passed into the container by the release compose file, so putting them in `.env` has no effect. Add them under `environment` in the compose file if you need them. Their meaning is in the [server README](../server/README.md#环境变量) (Chinese).
 

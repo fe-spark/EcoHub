@@ -283,7 +283,8 @@ REDIS_HOST=host.docker.internal
 | `REDIS_PORT` | `6379` | 应用 | |
 | `REDIS_PASSWORD` | `ecohub` | 应用、内置 Redis | 改 `.env` 后 `ecohub restart` 生效 |
 | `REDIS_DB` | `0` | 应用 | |
-| `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` | 空 | 应用 | 不影响采集。采集走的代理在后台「网络代理」里配。这几个变量只对少数没走后台代理的请求生效，例如弹幕抓取 |
+
+需要让采集、TMDB 刮削、Telegram 通知或版本检查走代理时，在后台「网络代理」（`/manage/system/proxy`）填写代理地址（`http://`、`https://` 或 `socks5://`），再按模块开启。代理只在这里配置。
 
 `NODE_NAME`、`ECOHUB_LOG_DIR` 等只给 Go 进程用的变量，发布编排没有传进容器，写进 `.env` 不会生效。需要时自己在编排的 `environment` 里加。这些变量的含义见 [服务端说明](../server/README.md#环境变量)。
 
