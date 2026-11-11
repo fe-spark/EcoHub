@@ -84,10 +84,6 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
       ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
-      # 通用代理供采集等网络请求使用（可选）
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      ALL_PROXY: ${ALL_PROXY:-}
     ports:
       - 0.0.0.0:${SERVER_PORT:-18080}:${PORT:-8080}
     volumes:

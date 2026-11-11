@@ -8,65 +8,195 @@ Install, ports, and passwords: [Deploy guide](./README-Deploy_EN.md).
 
 ### Why is the site empty after setup?
 
-The release image does not ship catalog data. First boot writes default collect sources, but it does not finish a collect by itself. Run collect in the administration panel. The first full collect may take several hours; more sources take longer.
+Because nothing has been collected yet. The release image ships no media data. The first start only writes 12 preset collect sources. It does not run a full collect by itself.
 
-The public site, the admin film list, and TVBox / MacCMS all read the snapshot / in-memory read model published after collect, not the tables while collect is still running. Films from the main source appear as each window is published. An empty site before that publish is expected.
+In admin, open "采集中心" (Collect center) and run one full collect. More collect sources take longer, and the first run can take several hours. You do not have to wait for the end: after each batch is collected, it is published to the snapshot the site reads, so films from the main source appear while the collect runs.
+
+The site lists, the admin film list, and the TVBox / MacCMS subscriptions all read the snapshot, not the tables being collected. Until the first batch is published, the site is empty. That is expected.
 
 ### What is the main source?
 
-The main source is the first enabled collect source in sort order. The public home page, categories, search, and daily updates show only that source’s own collected films and categories. Moving another enabled source to the front shows that source’s stored data immediately. Nothing is re-collected, and other sources’ films stay.
+The main source is the first enabled collect source in the sort order. The site's home page, categories, search, and daily updates show only films and categories collected by the main source.
 
-The play page starts from the main source’s film and appends play lines already stored by other enabled sources, matched by key. Lines stay separated by source. The poster source is a separate flag and does not decide the main source. Public covers use the matched poster-source film’s current cover. The main film’s image is used only when nothing matches. When the poster source is the main source, its own image is used. If every source is disabled, the same order picks the first one as a fallback.
+Example: the collect sources are ordered A, B, C, all enabled, so the main source is A. Drag B to the top and the site switches to the data B already collected. Nothing is re-collected, and A's and C's data is not deleted. When every collect source is disabled, there is no main source.
 
-### Where do scrape results live?
+The play page starts from the main source's film, uses match keys to find the same film in other enabled collect sources, and appends their play lines. Play lines are shown per collect source.
 
-A film scrape writes the selected cover, blurb, score, and related fields onto that film. The title and category stay. There is no restore. A homepage banner scrape is stored on that banner row. It does not change the film, and there is no second scrape table. The homepage uses the banner row’s own image and blurb. The update remark still comes from the library.
+The poster source is a separate flag and does not decide the main source. Site covers use the matching film's cover from the poster source first, and fall back to the main source's own image when nothing matches. When the poster source is the main source, its own image is used.
 
 ### What does switching the main source clear?
 
-Films are not deleted and collect does not restart. The live banner deck and the saved scheduling recipe are cleared, and the scheduled banner job is turned off. Switching is allowed while a collect is running.
+Nothing. No films are deleted, nothing is re-collected, and you can switch while a collect is running.
 
-Changing one source’s collect URL clears that source’s films, play lines, failure records, and categories, including films with no play lines, then fetches categories again. Other sources stay. That is separate from switching the main source. Deleting a source clears only that source.
+Homepage banners are stored per collect source. After switching, the home page shows the new main source's own banner set. The old set is still there and comes back if you switch back.
 
-### How are titles deduplicated and aligned across sites?
+Do not confuse this with:
 
-Each source keeps its own film row. Collect does not merge rows.
+- Changing a collect source's URL: clears that source's films, play lines, failure records, and categories (films without play lines too), then fetches categories again. Other sources are not touched.
+- Deleting a collect source: also clears only that source.
 
-- Inside one source, `movie_source_mapping` finds the old row by source id and source `vod_id`. A later collect updates that row only. Items on the same page that share a match key become one film.
-- Across sources, match keys do not merge rows. The play page uses them to find the same film on other enabled sources and append those sources’ own lines. Order is Douban ID plus title, then title#category, then bare title. Several keys hitting one film show it once. Lines stay separated by source.
+### How are films deduplicated and matched across sources?
 
-Category keys are `source:{this source}:{typeId}` and match that source’s own category tree.
+Each collect source keeps its own copy. Collect does not merge them.
 
-### What happens if a collect is stopped manually?
+- Within one source: `movie_source_mapping` uses "collect source + the source's `vod_id`" to find the film's existing row. Collecting again updates only that row. Entries on the same page of the same source with the same match key become one film.
+- Across sources: match keys do not merge rows. The play page uses them at read time to find the same film in other sources, in this order: Douban ID + title, title + top-level category, title only. A film hit by several keys counts once. Play lines stay per source; episodes from different sources are never stitched together.
 
-Stop interrupts tasks that are still fetching pages and cancels their context. Sources already in `page_done` / `waiting_publish` still finish and publish.
+The category key is `source:{collect source ID}:{source category ID}`, one-to-one with that source's own category tree.
 
-Successful pages are already in `film_index`. Stopping or failing later pages leaves those films visible; failed pages go to the retry queue.
+### Where do scrape results and homepage banners live?
+
+- Film scrape: writes the chosen cover, blurb, score, and similar fields directly onto the film. Title and category stay. There is no "restore".
+- Homepage banners: stored per collect source. Each row keeps only the film, the order, and any image, blurb, score, or year edited in admin. Everything else is read from the library when shown. A scrape inside the banner editor writes only that banner row. It does not change the film, and there is no separate scrape table.
+
+### What state is the data in after a manual stop?
+
+Stop interrupts pages that are still being fetched. Pages already stored stay in the library. A page that is being written finishes; pages still waiting to be written are dropped. Failed pages are recorded in "采集记录" (Collect records) and can be retried.
 
 ## Snapshots and cache
 
-### Why publish a snapshot after collect? Why can an incremental publish still take time?
+### Why publish snapshots during a collect?
 
-Tables keep changing during collect. Each window refreshes play summaries for those mids and updates the in-memory search index. Public lists, filters, the admin film list, and TVBox / MacCMS read `film_index`. List caches debounce about 5 seconds so a full collect does not flush Redis on every page.
+Because the site does not read the tables being collected. Those tables change all the time during a collect. After each batch, that batch is written into the snapshot and the in-memory search index is updated film by film. Site lists, filters, the admin film list, and TVBox / MacCMS all read the snapshot.
 
-### Why didn’t the public site change after a config edit?
+After publishing, list-cache cleanup is debounced by 5 seconds: during many batches in a row Redis is not cleared after every batch, but once, about 5 seconds after the last batch.
 
-Saving site config updates Redis and clears the home-page cache. If the page still looks old, typical causes are browser, CDN, or reverse-proxy cache, or a process that is not running the latest code.
+The search index is normally updated incrementally. It is fully loaded once at start. If an incremental update finds no usable index in memory, a full rebuild runs as a fallback.
 
-Film lists, categories, and filters show only the current main source’s own films. Switching the main source shows films that source has already stored. A source that has not been collected yet stays empty. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared after collect. If they still differ, check the running instance and request parameters.
+### I changed a setting. Why did the site not change right away?
 
-### What does “recently updated” use? Do category pages match TVBox?
+Saving site settings updates Redis and clears the home page cache. If the page still looks old, common causes are:
 
-Recently updated sorts `film_index.update_stamp` descending (then `mid`). A new film keeps the time given by its source. An existing film moves to the current collect time only when its play-line content changes. Download-only lines, remarks, cast, and covers do not move the sort. Every collect source uses the same rule.
+- Browser, CDN, or reverse proxy caching.
+- The running code or image is not the latest.
 
-Public category filters and TVBox share the same read-model rules (category, plot / region / language / year, sort). TVBox plain lists add a Redis cache, so short-lived mismatches are usually cache.
+Film lists, categories, and filters show only the current main source. After switching the main source, the site shows the films the new main source already has. If it has not collected anything yet, the site is empty.
+
+The regular TVBox lists have another Redis cache layer, up to about 12 hours, cleared with a debounce after new data is stored. If results still differ, check that you are hitting the same instance with the same request parameters.
+
+### How is "最近更新" (recently updated) sorted? Do category pages and TVBox agree?
+
+By `film_index.update_stamp`, newest first, then by `mid`.
+
+- New films: use the update time given by the collect source.
+- Films already in the library: during collect, the time changes to the current collect time only when play lines changed. Changes to download lines, remarks, cast, or cover do not change the order.
+- Saving a film manually in admin also sets its time to the save time.
+
+All collect sources follow the same rules.
+
+The site category page and TVBox take their filter options from the same filter data and use the same matching rules. The site queries the in-memory index; TVBox queries MySQL:
+
+| Filter | Rule | Same on both? |
+| --- | --- | --- |
+| Category | Expanded by the source's category rules into the same set of source categories (including merged groups); only films with a play line from that source | Yes. The site uses the main source; TVBox uses each subscribed site's own source |
+| Genre (剧情) | The film's genre tags contain the selected value | Yes |
+| Region, language | Exactly equal to the selected value | Yes |
+| Year | Equal to the selected year; no filter when the value is not a number | Yes |
+| "其他" (Other) | Value not in the filter options; empty values count too | Yes |
+| Sort | Recently updated, popularity, rating, year. When sorting by year, films in the same year are then ordered by update time | Yes |
+
+Both sides have a Redis cache with different lifetimes: site filter results 2 hours; TVBox list pages without genre, region, language, or year filters about 12 hours, and with filters 3 minutes. When they briefly differ, check the cache first.
+
+## Network
+
+### Which requests use the admin network proxy?
+
+A module's requests go through the proxy only when the global proxy is on in admin → "网络代理" (Network proxy, `/manage/system/proxy`) and that module's switch is on too. Everything else connects directly. Container environment variables do not affect outbound requests.
+
+| Module (admin name) | Requests it covers | Default on new installs |
+| --- | --- | --- |
+| 影视采集爬虫 (collect spider) | Collect source APIs. Each collect source also needs "采集接口代理" (collect API proxy) turned on in its edit page | On |
+| TMDB 刮削 (TMDB scraping) | Requests to the TMDB API (including the admin connection test) | On |
+| Telegram 机器人 (Telegram bot) | Notifications and polling for the paging buttons | On |
+| 系统版本更新 (version update) | GitHub version check | On |
+| 弹幕抓取 (danmaku fetching) | Danmaku search and download from the official dandanplay API or a self-hosted danmu-api (including the "测试" (Test) button in the admin danmaku settings) | Off |
+
+"弹幕抓取" is off by default because a self-hosted danmu-api is often on the local network, and sending it through the proxy would break it. After upgrading from an older version it is also off, so danmaku keeps connecting directly; the other modules keep their saved switches.
+
+Example: a proxy runs on port `7890` on the host, and you want the official dandanplay API to go through it. Enter `http://host.docker.internal:7890` (inside the container, `127.0.0.1` is the container itself), turn on the global switch, then turn on "弹幕抓取".
+
+## Danmaku
+
+### Network danmaku does not show up. How do I check?
+
+First try the "测试" (Test) button in admin → "网站配置" (Website) → "基本信息" (Basic) → "弹幕系统配置" (Danmaku settings), then look at the load status on the player's danmaku input box.
+
+Network danmaku needs all of these: "启用弹幕系统" (enable danmaku) and "自动嗅探全网弹幕" (auto-fetch network danmaku) are on, and either a self-hosted danmu-api address or the dandanplay AppId and AppSecret is filled in.
+
+**Test button**: appears once "自动嗅探全网弹幕" is on. Enter a title and click "测试". It uses the settings currently in the form (they do not need to be saved yet) to fetch network danmaku for episode 1 of that title, and shows the result under the button, for example "匹配到「葬送的芙莉莲 第1话」，第 1 集共 N 条全网弹幕" (matched, N network comments) or "失败：弹幕接口请求超时" (failed: request timed out). The test neither reads nor writes the danmaku cache. Whether it uses the proxy follows the "弹幕抓取" switch in "网络代理", the same as the player.
+
+**Load status on the input box**: danmaku load status is shown on the danmaku input box in the player control bar, not over the video. The grey placeholder text gives the result, a small dot on the left shows the state, and hovering over the input or the dot shows the full message (including the failure reason). When the player is narrower than 560 px the input box is collapsed: the dot moves to the top-right corner of the danmaku switch, and hovering over the switch shows the full message; on failure a short notice also appears over the video once (see the next section).
+
+| Dot | Placeholder | Meaning |
+| --- | --- | --- |
+| Grey, blinking | 弹幕加载中… | Loading danmaku |
+| Green | 共 N 条弹幕，说点什么吧 | Site and network danmaku both loaded; N is the total. Hover shows "已加载 N 条弹幕（全网 M 条）" (N loaded, M from the network) |
+| Yellow | 共 N 条弹幕，未找到全网弹幕 | No matching title, or this episode has no network danmaku; with no comments at all it shows "未找到全网弹幕，说点什么吧" |
+| Red | 全网弹幕加载失败：reason | Timeout, unreachable, auth failure, unreadable response, and so on; cut off with an ellipsis when too long, hover for the full reason and the site comment count |
+| Red | 弹幕加载失败：reason | The danmaku request itself failed (the API returned an error, or the network dropped) |
+| Hidden | 共 N 条弹幕，说点什么吧 | Network danmaku is off; only comments sent on this site. With none at all it is the plugin default "发个友善的弹幕见证当下" |
+
+Switching episodes rebuilds the player, so the status starts again from "弹幕加载中…".
+
+The reason is a human-readable message and never contains the API address or keys. Network danmaku that loads successfully is cached for 7 days per API address, title, and episode. No-match and failed results are not cached, so the next play retries.
+
+### Are danmaku settings saved? What happens when the player gets narrow?
+
+Yes. The switch, opacity, font size, speed, display area, danmaku types, and anti-overlap set in the player's danmaku settings are stored in the current browser and reused when you switch episodes or come back. Only the settings you changed are stored. A different browser, or clearing site data, goes back to the defaults.
+
+The player lays itself out by its own displayed width. It does not check whether you are on a phone or a computer, and does not look at the browser's user agent: a player of the same width behaves the same on a phone and in a narrowed desktop browser window (including devtools responsive mode). It switches live when you resize the window, rotate the screen, or enter or leave fullscreen, with no reload.
+
+| Player width | Control bar | Load status | Top/bottom fixed danmaku |
+| --- | --- | --- | --- |
+| Under 560 px (phone portrait, very narrow window) | Danmaku input box and web-fullscreen button collapsed (the button stays while you are in web fullscreen, so you can leave it); tighter button spacing | Dot on the top-right of the danmaku switch, hover the switch for the message; a short notice over the video once on failure | Shown as scrolling danmaku |
+| 560–767 px (phone landscape, tablet, narrow window) | Input box shown and shrinks with the bar; web-fullscreen button collapsed | Placeholder and dot on the input box | Shown as scrolling danmaku |
+| 768 px and up | Full control bar | Placeholder and dot on the input box | Stay fixed at the top/bottom |
+
+560 px is the narrowest width at which, with the tighter buttons, the input box still gets about 110 px; any narrower and it shrinks to a few dozen pixels and the send button sticks out of the player. 768 px matches the width at which the play page switches to its phone layout. Below 768 px the half-screen area of the picture holds only five to eight rows and fixed danmaku would cover scrolling ones, so they are shown as scrolling danmaku and take part in the same overlap avoidance.
+
+**Font size**: the font size in the settings (default 25 px) is for a large player. It is used as is when the player is at least 575 px wide; narrower players scale it down with the width and cap it at "player width ÷ 22" (at most 16 px on a player about 360 px wide), with a minimum of 12 px. So a large font set on a computer does not fill a narrow player. When you change the font size on a narrow player, the value saved is converted back to the large-player size.
+
+**Display area**: "1/4", "半屏" (half), "3/4", and "满屏" (full) are measured against the picture itself. When a narrow player is taller than the picture and has black bars above and below it, danmaku stays inside the picture and does not drift onto the bars.
+
+When the player size changes, danmaku currently on screen is cleared and the following danmaku is laid out for the new size, so two sets of row positions never overlap.
 
 ## Login and permissions
 
-### Why can admin pages open while APIs report not logged in?
+### The admin page opens, but API calls say I am not logged in. Why?
 
-The edge middleware only checks that the `ecohub_auth_token` cookie exists. Opening `/manage` also has the server layout call `/api/manage/user/info`, where the backend validates the JWT and Redis token; failure redirects to `/login`. If a token later expires, is replaced by another device, or disappears from Redis while the admin page is already open, subsequent APIs may still return unauthorized. Trust the API response.
+The web app only does a rough check. The real check is on the server:
 
-### How do guest and default accounts work?
+1. `web/src/proxy.ts` only checks that the `ecohub_auth_token` cookie exists.
+2. When `/manage` opens, the server-side layout calls `/api/manage/user/info`. The API checks the JWT and the current token stored in Redis. On failure it redirects to `/login`.
+3. If the token becomes invalid after the page has opened (expired, replaced by a login on another device, or cleared in Redis), later API calls return "not logged in" and the web app goes back to the login page.
 
-First boot creates only the super admin `admin`. The password is `ECOHUB_ADMIN_PASSWORD`, or `admin` when unset. An existing admin keeps the current password. Create normal users and visitors in account management. Visitors may call admin GET; POST / PUT / PATCH / DELETE are rejected by `WriteAccess`. Change the password in admin after login.
+The API response is always the source of truth. A login is valid for 10 days. After that, log in again.
+
+### How do the default account and visitor accounts work?
+
+The first start creates only the super user `admin`. Its password is `ECOHUB_ADMIN_PASSWORD`, or `admin` when unset. If `admin` already exists, its password is not changed. Change the password in admin right after you log in.
+
+Create other accounts in "账号管理" (Accounts). There are three roles:
+
+| Role | What it can do |
+| --- | --- |
+| 超级用户 (super user) | Everything, including site settings, accounts, and upgrades |
+| 普通用户 (regular user) | Day-to-day management, but not the super-user-only actions |
+| 访客 (visitor) | Read only. All GET requests pass; POST / PUT / PATCH / DELETE are rejected |
+
+### How do subscriptions work with private access on?
+
+When you turn on "私有化访问" (private access) in "网站配置" (Site settings), you must fill in a subscription key. After that:
+
+- The site and its APIs need a login or the correct subscription key.
+- Subscription URLs (`/api/provide/app`, `/api/provide/tvbox`, `/api/provide/vod`) always need the subscription key.
+
+Pass the key as a URL parameter or in the `X-Provide-Key` request header. For example, with the key `mysecret888`:
+
+```text
+http://<server-ip>:3000/api/provide/tvbox?key=mysecret888
+```
+
+## Related
+
+[Overview](./README_EN.md) · [Deploy guide](./README-Deploy_EN.md) · [Scheduled task conflicts](./cron-task-conflict_EN.md)

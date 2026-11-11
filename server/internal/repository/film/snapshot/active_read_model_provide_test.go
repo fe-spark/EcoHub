@@ -136,3 +136,50 @@ func mustProvide(t *testing.T, version string, st model.SearchTagsVO, keyword st
 	}
 	return res
 }
+
+func TestListProvideSnapshots_YearSortTieBreakByUpdateStamp(t *testing.T) {
+	gdb := setupOthersFilterTestDB(t)
+	version := "test_provide_year_sort_v1"
+	const targetPid int64 = 9
+
+	if err := gdb.Create(&model.Category{Id: targetPid, Pid: 0, Name: "电影", Show: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+	snapshots := []model.FilmListSnapshot{
+		{SnapshotVersion: version, Mid: 1, Pid: targetPid, Name: "A", Year: 2024, UpdateStamp: 300},
+		{SnapshotVersion: version, Mid: 2, Pid: targetPid, Name: "B", Year: 2024, UpdateStamp: 100},
+		{SnapshotVersion: version, Mid: 3, Pid: targetPid, Name: "C", Year: 2024, UpdateStamp: 200},
+		{SnapshotVersion: version, Mid: 4, Pid: targetPid, Name: "D", Year: 2023, UpdateStamp: 999},
+		{SnapshotVersion: version, Mid: 5, Pid: targetPid, Name: "E", Year: 2024, UpdateStamp: 200},
+	}
+	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+		t.Fatalf("seed live films: %v", err)
+	}
+
+	page := &dto.Page{Current: 1, PageSize: 10}
+	res := mustProvide(t, version, model.SearchTagsVO{Pid: targetPid, Sort: "year"}, "", 0, page)
+	want := []int64{1, 5, 3, 2, 4}
+	if len(res) != len(want) {
+		t.Fatalf("expected %d films, got %d", len(want), len(res))
+	}
+	for i, mid := range want {
+		if res[i].Mid != mid {
+			got := make([]int64, len(res))
+			for j := range res {
+				got[j] = res[j].Mid
+			}
+			t.Fatalf("year sort order = %v, want %v", got, want)
+		}
+	}
+
+	// 与前台内存排序 tagRankBefore 逐对比较，保证两边次序相同
+	for i := 0; i+1 < len(res); i++ {
+		a := &FilmSearchMeta{Mid: res[i].Mid}
+		a.Item.Year, a.Item.UpdateStamp = res[i].Year, res[i].UpdateStamp
+		b := &FilmSearchMeta{Mid: res[i+1].Mid}
+		b.Item.Year, b.Item.UpdateStamp = res[i+1].Year, res[i+1].UpdateStamp
+		if !tagRankBefore("year", a, b) {
+			t.Fatalf("TVBox order disagrees with tagRankBefore at mid %d -> %d", a.Mid, b.Mid)
+		}
+	}
+}

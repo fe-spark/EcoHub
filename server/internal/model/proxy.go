@@ -8,6 +8,9 @@ type ProxyModuleScope struct {
 	TMDB    bool `json:"tmdb"`    // TMDB 刮削
 	Notify  bool `json:"notify"`  // Telegram 通知
 	Upgrade bool `json:"upgrade"` // GitHub 版本检查
+	// Danmaku 弹幕抓取（弹弹play 兼容接口）。默认关闭：旧配置没有此字段时解析为 false，
+	// 保持升级前的直连行为，也避免自建在内网的 danmu-api 被转发到代理上。
+	Danmaku bool `json:"danmaku"`
 }
 
 // ProxyConfig 统一网络代理配置

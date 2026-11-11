@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { ApiGet } from "@/lib/client-api";
 import styles from "./index.module.less";
 
-export type ProxyModuleType = "tmdb" | "notify" | "spider" | "upgrade";
+export type ProxyModuleType = "tmdb" | "notify" | "spider" | "upgrade" | "danmaku";
 
 interface ProxyConfigResp {
   enabled: boolean;
@@ -21,6 +21,7 @@ interface ProxyConfigResp {
     tmdb?: boolean;
     notify?: boolean;
     upgrade?: boolean;
+    danmaku?: boolean;
   };
 }
 
@@ -46,7 +47,8 @@ export default function ProxyOutletBanner({
         const resp = await ApiGet<ProxyConfigResp>("/manage/proxy/config");
         if (!unmounted && resp.code === 0 && resp.data) {
           const gEnabled = Boolean(resp.data.enabled && resp.data.proxyUrl?.trim());
-          const mEnabled = Boolean(resp.data.modules?.[module] ?? true);
+          // 弹幕模块默认关闭，其余默认开启，与服务端默认值一致
+          const mEnabled = Boolean(resp.data.modules?.[module] ?? module !== "danmaku");
           setGlobalEnabled(gEnabled);
           setModuleEnabled(mEnabled);
           setProxyUrl(resp.data.proxyUrl || "");

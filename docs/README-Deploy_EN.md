@@ -2,42 +2,89 @@
 
 [中文](./README-Deploy.md) | English
 
-`ghcr.io/fe-spark/ecohub:latest` points to the latest formal release, v3. Pin a version with `ghcr.io/fe-spark/ecohub:v3.0.2`. Leaving `ECOHUB_IMAGE` unset makes compose use `:latest`.
+EcoHub ships one all-in-one image, `ghcr.io/fe-spark/ecohub`. One container runs the Go API (port `8080` inside the container) and the Next.js web app (port `3000` inside the container). Add one MySQL and one Redis and it works.
 
-The release image is all-in-one: Go API `:8080` and Next.js `:3000` in one container. The old `ecohub-web` / `ecohub-server` pair is retired.
+Which image tag to use:
 
-Compose: [deploy/release/compose.yml](../deploy/release/compose.yml) · env template: [.env.example](../.env.example) · notes: [RELEASE.md](./RELEASE.md)
+| Tag | Points to | When to use |
+| --- | --- | --- |
+| `:v3.0.3` and the like | A fixed release | Recommended. Change the tag yourself to upgrade |
+| `:latest` | The newest release, updated on every release | You always want the newest version |
+| Tags ending in `-beta` | Test builds | Not for production. Deleted automatically after the next release |
 
-`ecohub` starts the app, MySQL, and Redis with Docker Compose. Local development does not use that command. See the [README](../README.md).
+Files used on this page: [compose file deploy/release/compose.yml](../deploy/release/compose.yml) · [variable template .env.example](../.env.example) · [release notes](./RELEASE_EN.md). Coming from v2? Read [v2 to v3](./v2-to-v3_EN.md) first.
 
 ## Prerequisites
 
-Docker 20+. The install script and 1Panel also need Compose 2+. Aim for 2 CPU cores and 2 GB RAM. The host must be able to pull `ghcr.io` and `docker.io`.
+- Docker 20+ and Docker Compose (either the `docker compose` plugin or standalone `docker-compose`; the manual `docker run` method does not need Compose).
+- At least 2 CPU cores and 2 GB RAM.
+- The server can pull from `ghcr.io` (app image) and `docker.io` (MySQL and Redis images).
 
-Web defaults to `3000`. The site, admin, and subscriptions use that port. Direct API defaults to `18080` for players only. Do not put subscriptions on that port.
+Two public ports:
+
+| Port | Default | Purpose |
+| --- | --- | --- |
+| Web port | `3000` | Site, admin, and subscription URLs all use this port |
+| Direct API port | `18080` | Maps to `8080` in the container and serves the backend `/api/*` directly. Subscription URLs can use this port too, see [URLs](#urls). Remove it if you do not need it |
+
+Prepare a random key for `JWT_SECRET`:
 
 ```bash
 openssl rand -hex 32
 ```
 
-Own MySQL / Redis: remove the `mysql` and `redis` services and `depends_on`, then point `MYSQL_*` and `REDIS_*` at your instances. Do not use `127.0.0.1` from inside a container. A database on the host is `host.docker.internal`.
-
-Upgrading from v2: [v2 to v3](./v2-to-v3.md).
-
-## Install script
+## Method 1: install script (recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 sh
 ```
 
-Data defaults to `~/ecohub`. Put `ECOHUB_INSTALL_DIR=~/ecohub-v3` before `sh` to use another directory. A variable before `curl` does not reach the script. The script writes compose and `.env`, installs `ecohub`, starts the stack, and prints the site, admin, three subscription URLs, and the initial account. Later commands are just `ecohub`.
+What the script does:
 
-If `/usr/local/bin` is not writable, the command goes to `~/.local/bin`. Add that directory to `PATH` when the shell says so.
+1. Creates `data/mysql`, `data/redis`, and `data/uploads` in the install directory (default `~/ecohub`).
+2. Downloads the compose file as `docker-compose.yml` and downloads `.env.example`. If there is no `.env`, it creates one from the template. An existing `.env` is kept. It never creates or changes `docker-compose.override.yml`.
+3. Writes the variables placed before `sh` into `.env` (see below). On a fresh install with no image given, it writes `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3`.
+4. Installs the `ecohub` command into `/usr/local/bin`. If that directory is not writable, it uses `~/.local/bin` and tells you to add it to `PATH`.
+5. Remembers the install directory (in `~/.ecohub/install-dir`). Later `ecohub` commands work on that directory.
+6. Starts the containers and prints the site, admin, initial account, and three subscription URLs.
 
-Set `JWT_SECRET`, `ECOHUB_ADMIN_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, and `REDIS_PASSWORD` before the first start. `install` and `update` write those exported values, plus `ECOHUB_IMAGE`, `WEB_PORT`, and `SERVER_PORT`, into `.env`. Other existing lines stay. Bundled databases keep `MYSQL_HOST=mysql` and `REDIS_HOST=redis`.
+### Set passwords on the first install
 
-After the data directory is initialized, changing `ECOHUB_ADMIN_PASSWORD` or `MYSQL_PASSWORD` does not change the stored password. Changing the MySQL password and then running `ecohub restart` makes the app unable to connect. `JWT_SECRET`, ports, and `REDIS_PASSWORD` apply after you edit `.env` and run `ecohub restart`. `start` and `restart` do not copy the current shell environment over `.env`.
+Put the variables before `sh`. Variables placed before `curl` do not reach the script. For example:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3 \
+    JWT_SECRET="$(openssl rand -hex 32)" \
+    ECOHUB_ADMIN_PASSWORD='use-a-strong-password' \
+    MYSQL_ROOT_PASSWORD='use-a-strong-password' \
+    MYSQL_PASSWORD='use-a-strong-password' \
+    REDIS_PASSWORD='use-a-strong-password' \
+    sh
+```
+
+`install` and `update` write only these 8 variables into `.env`: `ECOHUB_IMAGE`, `WEB_PORT`, `SERVER_PORT`, `JWT_SECRET`, `ECOHUB_ADMIN_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `REDIS_PASSWORD`. Variables you do not pass are left alone, and other lines in `.env` are kept.
+
+If you pass no passwords, `.env` uses the public defaults from the template (`JWT_SECRET` is a sample value checked into the repository, the database passwords are `ecohub`, and the admin password is `admin`). Change them before exposing the server to the internet.
+
+To use another install directory, also put `ECOHUB_INSTALL_DIR=~/ecohub-v3` before `sh`.
+
+### When password and port changes take effect
+
+| Variable | Edit `.env`, then `ecohub restart` | Notes |
+| --- | --- | --- |
+| `WEB_PORT`, `SERVER_PORT` | Takes effect | |
+| `REDIS_PASSWORD` | Takes effect | Redis sets its password from this value on every start |
+| `JWT_SECRET` | Takes effect | Everyone who is logged in has to log in again |
+| `ECOHUB_ADMIN_PASSWORD` | No effect | Written only when the `admin` account is first created. Change the password in admin afterwards |
+| `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD` | No effect, and breaks things | MySQL sets its passwords only when `data/mysql` is first initialized |
+
+Example: after install you change `MYSQL_PASSWORD` in `.env` from `ecohub` to `abc` and run `ecohub restart`. The app connects with `abc`, but MySQL still stores `ecohub`. The app cannot connect and the container keeps restarting.
+
+`ecohub start` and `ecohub restart` only read `.env`. They do not copy variables from your current shell into `.env`.
+
+### The ecohub command
 
 ```bash
 ecohub status
@@ -51,56 +98,80 @@ ecohub uninstall
 ecohub uninstall --purge
 ```
 
-`uninstall` removes containers and keeps data. `uninstall --purge` also deletes `data/mysql`, `data/redis`, and `data/uploads`. Both keep `.env` and the `ecohub` command. `ecohub update` keeps the `ECOHUB_IMAGE` already in `.env`. In-app upgrade pulls `:latest`.
-
-| URL | What |
+| Command | What it does |
 | --- | --- |
-| `http://SERVER:3000` | Site |
-| `http://SERVER:3000/manage` | Admin |
-| `http://SERVER:3000/api/provide/app` | EcoHub client source |
-| `http://SERVER:3000/api/provide/tvbox` | TVBox / YingShiCang |
-| `http://SERVER:3000/api/provide/vod` | MacCMS |
+| `ecohub install` | Downloads the compose file, starts, and prints URLs. Running plain `ecohub` is the same |
+| `ecohub status` | Prints URLs and container status |
+| `ecohub logs` | Shows the last 100 log lines. `logs -f` follows, `logs ecohub` shows only the app |
+| `ecohub start` | Starts with the current `.env` |
+| `ecohub stop` | Stops containers and keeps data |
+| `ecohub restart` | Recreates containers so `.env` changes apply |
+| `ecohub update` | Downloads the compose file again, pulls the image in `ECOHUB_IMAGE` from `.env`, and recreates |
+| `ecohub uninstall` | Removes containers. Keeps `data/`, `.env`, and the `ecohub` command |
+| `ecohub uninstall --purge` | Also deletes `data/mysql`, `data/redis`, and `data/uploads`. `.env` and the `ecohub` command stay |
+| `ecohub help` | Shows usage |
 
-`3000` is the default web port. Use the URLs the terminal prints. The account is `admin`. The password is `ECOHUB_ADMIN_PASSWORD`, or `admin` when unset. Change it after login.
+To upgrade: change `ECOHUB_IMAGE` in `.env` to the new tag and run `ecohub update`, or run `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:<new-version> ecohub update`.
 
-Data is in `~/ecohub/data/mysql`, `data/redis`, and `data/uploads`.
+`ecohub update` downloads `docker-compose.yml` again every time, so edits made directly in that file are overwritten. Put compose changes in `docker-compose.override.yml` instead, see [Custom compose settings](#custom-compose-settings).
 
-The site has no films at first. Check the 12 preset sources and run a full collect. Films appear as each window is published. The first run can take several hours.
+The admin button "立即升级并重启" (upgrade now and restart) pulls `:latest`. It ignores the tag pinned in `.env`.
 
-In production, reverse-proxy to `127.0.0.1:3000` and enable HTTPS. Do not send `/api` to `18080` by itself. To keep the raw port off the public internet, publish `127.0.0.1:${WEB_PORT:-3000}:3000`. Drop the `18080` mapping when players do not connect directly. Open only `80` / `443`.
+### Custom compose settings
 
-These containers show up in 1Panel. Keep managing them with `ecohub`. Do not create a second compose project with the same container names.
+Create `docker-compose.override.yml` in the install directory (default `~/ecohub`) with only the parts you want to change. `ecohub install` and `ecohub update` never create, overwrite, or delete this file. When it exists, every `ecohub` command (`start`, `restart`, `update`, `status`, and so on) applies it, and `ecohub status` prints "已叠加 docker-compose.override.yml" (override applied).
 
-## 1Panel
+Example: the web port listens on localhost only (behind a reverse proxy), and the direct API port is not opened:
 
-1. **Containers** → **Compose** → **Create**. Working directory for example `/opt/1panel/apps/ecohub`.
-2. Paste [deploy/release/compose.yml](../deploy/release/compose.yml).
-3. Environment:
+```yaml
+services:
+  ecohub:
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+```
+
+Then run `ecohub restart`.
+
+- `!override` replaces the original `ports` list. Without it, Compose merges both lists and the original binding on all interfaces stays.
+- `!override` needs Docker Compose v2.24.4 or later. Check with `docker compose version`. Standalone `docker-compose` v1 does not support it.
+- To undo, delete the file and run `ecohub restart`.
+
+## Method 2: 1Panel
+
+1. Create a new Compose project in 1Panel. Working directory, for example `/opt/1panel/apps/ecohub`.
+2. Paste the full [deploy/release/compose.yml](../deploy/release/compose.yml).
+3. Fill in the environment:
 
 ```env
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.2
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.3
 WEB_PORT=3000
 SERVER_PORT=18080
 JWT_SECRET=replace-with-a-long-random-string
-ECOHUB_ADMIN_PASSWORD=replace-with-a-strong-password
-MYSQL_ROOT_PASSWORD=replace-with-a-strong-password
+ECOHUB_ADMIN_PASSWORD=use-a-strong-password
+MYSQL_ROOT_PASSWORD=use-a-strong-password
 MYSQL_HOST=mysql
 MYSQL_PORT=3306
 MYSQL_USER=eco
-MYSQL_PASSWORD=replace-with-a-strong-password
+MYSQL_PASSWORD=use-a-strong-password
 MYSQL_DBNAME=eco
 REDIS_HOST=redis
 REDIS_PORT=6379
-REDIS_PASSWORD=replace-with-a-strong-password
+REDIS_PASSWORD=use-a-strong-password
 REDIS_DB=0
 ```
 
-4. Save and start. Confirm `Eco-hub`, `Eco-mysql`, and `Eco-redis` are running.
-5. **Website** → **Reverse proxy** → `http://127.0.0.1:3000`. Update with `docker compose pull && docker compose up -d` in that directory.
+4. Save and start. Check that `Eco-hub`, `Eco-mysql`, and `Eco-redis` are running.
+5. Set up a reverse proxy for the site, pointing to `http://127.0.0.1:3000`.
 
-## Manual deploy
+To update: set the new `ECOHUB_IMAGE`, then run this in the working directory:
 
-No Compose. Replace the passwords before running.
+```bash
+docker compose pull && docker compose up -d
+```
+
+## Method 3: manual docker run
+
+No Compose. Replace the passwords below with strong random values first.
 
 ```bash
 mkdir -p ~/ecohub/data/mysql ~/ecohub/data/redis ~/ecohub/data/uploads
@@ -113,7 +184,7 @@ JWT_SECRET="$(openssl rand -hex 32)"
 
 docker pull mysql:8.4
 docker pull redis:7.4-alpine
-docker pull ghcr.io/fe-spark/ecohub:v3.0.2
+docker pull ghcr.io/fe-spark/ecohub:v3.0.3
 
 docker run -d --name Eco-mysql --restart always --network Eco-network \
   -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -138,7 +209,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -p 18080:8080 \
   -e PORT=8080 \
   -e JWT_SECRET="$JWT_SECRET" \
-  -e ECOHUB_ADMIN_PASSWORD="replace-with-a-strong-password" \
+  -e ECOHUB_ADMIN_PASSWORD="use-a-strong-password" \
   -e MYSQL_HOST=Eco-mysql \
   -e MYSQL_PORT=3306 \
   -e MYSQL_USER=eco \
@@ -150,44 +221,105 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -e REDIS_DB=0 \
   -v ~/ecohub/data/uploads:/app/static/upload \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/fe-spark/ecohub:v3.0.2
+  ghcr.io/fe-spark/ecohub:v3.0.3
 ```
 
-Inside the app container the database hosts are `Eco-mysql` and `Eco-redis`. If you bring your own database, do not start the MySQL and Redis containers above. First-time MySQL init can take tens of seconds. If the ready check fails, read `docker logs Eco-mysql`.
+- Inside the app container, the database hosts are the container names `Eco-mysql` and `Eco-redis`.
+- The `until` loop waits for MySQL's first initialization. If it never finishes, read `docker logs Eco-mysql`.
+- The `/var/run/docker.sock` mount is for the admin button "立即升级并重启". Remove it if you do not use that button.
 
-Logs: `docker logs -f Eco-hub`. To update, `docker pull` the current tag, remove `Eco-hub`, and `docker run` it again with the same flags.
+Logs: `docker logs -f Eco-hub`. To update: `docker pull` the new tag, `docker rm -f Eco-hub`, then run the same `docker run` with the new tag.
+
+## Bring your own MySQL and Redis
+
+1. Remove the `mysql` and `redis` services and the `depends_on` block under `ecohub` from the compose file. For a manual deploy, do not start `Eco-mysql` and `Eco-redis`.
+2. Point `MYSQL_*` and `REDIS_*` at your instances.
+3. The app runs in a container, so `127.0.0.1` means the container itself. For a database on the host, use `host.docker.internal`.
+
+Example with the databases on the host:
+
+```env
+MYSQL_HOST=host.docker.internal
+REDIS_HOST=host.docker.internal
+```
+
+The app creates its tables and initial data on start. Create the database beforehand. It can be empty.
+
+## URLs
+
+| URL | Purpose |
+| --- | --- |
+| `http://<server-ip>:3000` | Site |
+| `http://<server-ip>:3000/manage` | Admin |
+| `http://<server-ip>:3000/api/provide/app` | EcoHub client subscription |
+| `http://<server-ip>:3000/api/provide/tvbox` | TVBox / YingShiCang subscription |
+| `http://<server-ip>:3000/api/provide/vod` | MacCMS subscription |
+
+`3000` is the default web port. Use the URLs the terminal prints.
+
+Subscription URLs can also use the direct API port, for example `http://<server-ip>:18080/api/provide/tvbox`. All three subscriptions are `/api/provide/*` and are handled by the Go backend. The web port only forwards `/api/*` to Go unchanged, so both ports return the same content. URLs inside the response (TVBox site APIs, the client's `api_base`) are built from the address you requested, so subscribing via `18080` gives `18080` URLs. The site and admin pages are only on the web port.
+
+The admin account is `admin`. The password is `ECOHUB_ADMIN_PASSWORD`, or `admin` when unset. Change it right after you log in.
+
+When "私有化访问" (private access) is on in admin, subscription URLs need the subscription key, for example `http://<server-ip>:3000/api/provide/tvbox?key=your-key`. See the [FAQ](./README-FAQ_EN.md#how-do-subscriptions-work-with-private-access-on).
+
+Data locations (install directory defaults to `~/ecohub`):
+
+| Directory | Contents |
+| --- | --- |
+| `data/mysql` | MySQL data |
+| `data/redis` | Redis data |
+| `data/uploads` | Images uploaded in admin, mounted at `/app/static/upload` in the container |
+
+App logs go to `docker logs` (`ecohub logs`) and to `/app/server/logs` inside the container. The in-container copy is not mounted, so recreating the container loses it.
+
+The site is empty at first. In admin, open "采集中心" (Collect center), check the 12 preset collect sources, and run one full collect. Films appear while the collect runs. The first run can take several hours.
+
+## Reverse proxy
+
+For production:
+
+- Point the reverse proxy for the whole site to `127.0.0.1:3000` and enable HTTPS. You do not need to send `/api` to `18080`. The web port already forwards `/api/*` to the Go server in the container.
+- To keep `3000` off the public internet and drop `18080`: with the install script, use [docker-compose.override.yml](#custom-compose-settings); with your own compose file, edit `ports` directly.
+- Open only `80` and `443` in the cloud security group.
 
 ## Environment variables
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest` | Image tag. See the top of this page |
-| `WEB_PORT` | `3000` | Site, admin, subscriptions |
-| `SERVER_PORT` | `18080` | Direct API. Not for subscriptions |
-| `JWT_SECRET` | none, required | Login signing key |
-| `ECOHUB_ADMIN_PASSWORD` | `admin` | Applied only when the admin user is first created |
-| `MYSQL_HOST` | `mysql` | Do not use `127.0.0.1` inside a container |
-| `MYSQL_PORT` | `3306` | |
-| `MYSQL_USER` | `eco` | |
-| `MYSQL_PASSWORD` | `ecohub` | Applied only on first data-directory init |
-| `MYSQL_DBNAME` | `eco` | |
-| `MYSQL_ROOT_PASSWORD` | `ecohub` | First init of the bundled MySQL only |
-| `REDIS_HOST` | `redis` | |
-| `REDIS_PORT` | `6379` | |
-| `REDIS_PASSWORD` | `ecohub` | Applies on `ecohub restart` after editing `.env` |
-| `REDIS_DB` | `0` | |
-| `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` | empty | Outbound proxy for collect |
-| `NODE_NAME` | hostname | Multi-node only |
-| `ECOHUB_LOG_DIR` | `logs/` | Log directory |
+"Read by": Compose means the value is only used by the compose file. App means the Go process reads it.
+
+| Variable | Default | Read by | Notes |
+| --- | --- | --- | --- |
+| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest` (the install script writes `:v3.0.3` on a fresh install) | Compose | Image tag |
+| `WEB_PORT` | `3000` | Compose | Host web port, mapped to `3000` in the container |
+| `SERVER_PORT` | `18080` | Compose | Host direct API port, mapped to `8080` in the container |
+| `JWT_SECRET` | Sample value from the repository | App | Login signing key. Must be a random string. Changing it logs everyone out |
+| `ECOHUB_ADMIN_PASSWORD` | `admin` | App | Written only when `admin` is first created |
+| `MYSQL_ROOT_PASSWORD` | `ecohub` | Bundled MySQL | Applies only on the first init of `data/mysql` |
+| `MYSQL_HOST` | `mysql` | App | Do not use `127.0.0.1` inside a container |
+| `MYSQL_PORT` | `3306` | App | |
+| `MYSQL_USER` | `eco` | App, bundled MySQL | |
+| `MYSQL_PASSWORD` | `ecohub` | App, bundled MySQL | Bundled MySQL sets it only on first init |
+| `MYSQL_DBNAME` | `eco` | App, bundled MySQL | |
+| `REDIS_HOST` | `redis` | App | |
+| `REDIS_PORT` | `6379` | App | |
+| `REDIS_PASSWORD` | `ecohub` | App, bundled Redis | Edit `.env`, then `ecohub restart` |
+| `REDIS_DB` | `0` | App | |
+
+To send collect, TMDB scraping, Telegram notifications, the version check, or danmaku fetching through a proxy, open admin → "网络代理" (Network proxy, `/manage/system/proxy`), enter the proxy address (`http://`, `https://`, or `socks5://`), then turn it on per module. This is the only place to configure a proxy. Requests without a proxy turned on always connect directly. Which requests each module covers and its default: [FAQ](./README-FAQ_EN.md#which-requests-use-the-admin-network-proxy).
+
+Go-only variables such as `NODE_NAME` and `ECOHUB_LOG_DIR` are not passed into the container by the release compose file, so putting them in `.env` has no effect. Add them under `environment` in the compose file if you need them. Their meaning is in the [server README](../server/README_EN.md#environment-variables).
+
+The release image fixes the web app's `API_URL` to `http://127.0.0.1:8080` at build time. Do not set `API_URL` when deploying.
 
 ## Troubleshooting
 
-- Health: `http://HOST:3000/api/config/basic`. Port `18080` also works when it is published.
-- Restart loop: `ecohub logs` or `docker logs Eco-hub`. Check that `JWT_SECRET` and the database passwords still match first init, and that the ports are free.
-- Site opens, APIs fail: the proxy must target the web port. Do not set `API_URL` on the release image.
+- Health check: open `http://<server-ip>:3000/api/config/basic`. A JSON response means both the web app and the API are up. If `18080` is mapped, `http://<server-ip>:18080/api/config/basic` checks the API directly.
+- Container keeps restarting: read `ecohub logs` or `docker logs Eco-hub` first. Common causes are a database password that no longer matches the first init, or a port already in use. On start the API waits for Redis and then MySQL, 30 tries each, 2 seconds apart. If it still cannot connect, it exits and supervisord in the container starts it again.
+- Site loads but API calls fail: check that the reverse proxy sends the whole site to the web port.
+- Port already in use: usually an old container is still there. Find it with `docker ps -a` and remove it.
 
-Behavior questions: [FAQ](./README-FAQ_EN.md).
+Behavior questions (why the site is empty, why the site did not change, and so on): [FAQ](./README-FAQ_EN.md).
 
 ## Related
 
-[README](./README_EN.md) · [Release notes](./RELEASE.md) · [v2 to v3](./v2-to-v3.md)
+[Overview](./README_EN.md) · [v2 to v3](./v2-to-v3_EN.md) · [FAQ](./README-FAQ_EN.md) · [Release notes](./RELEASE_EN.md)
