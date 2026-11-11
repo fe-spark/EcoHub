@@ -2,21 +2,21 @@
 
 中文 | [English](./README_EN.md)
 
-`server/` 是 EcoHub 的 Go 后端：采集、片库、列表和缓存、订阅接口、后台鉴权都在这里。
+`server/` 为 EcoHub 的 Go 后端，负责采集、片库、列表与缓存、订阅接口和后台鉴权。
 
-行为说明（主站、匹配、刮削、缓存）见 [常见问题](../docs/README-FAQ.md)，计划任务的先后规则见 [计划任务运行冲突](../docs/cron-task-conflict.md)，Docker 部署的变量见 [部署指南](../docs/README-Deploy.md#环境变量)。
+功能行为（主站、匹配、刮削、缓存）见 [常见问题](../docs/README-FAQ.md)，计划任务的执行顺序见 [计划任务运行冲突](../docs/cron-task-conflict.md)，Docker 部署所用的变量见 [部署指南](../docs/README-Deploy.md#环境变量)。
 
 ## 本地启动
 
-需要 Go 1.27+、MySQL 8+、Redis 7+。
+环境要求：Go 1.27+、MySQL 8+、Redis 7+。
 
-没有现成的数据库，可以用仓库根目录的开发编排 `docker-compose.yml` 只起数据库容器（这个编排只用于本地开发，和发布编排的区别见 [总览](../README.md#本地开发)）。它们映射到本机 `127.0.0.1:3306` 和 `127.0.0.1:6379`，账号密码和 `server/.env.example` 一致：
+如无可用数据库，可使用仓库根目录的开发编排 `docker-compose.yml` 仅启动数据库容器（该编排仅用于本地开发，与发布编排的区别见 [开发指南](../docs/README-Dev.md#开发编排)）。数据库映射到本机 `127.0.0.1:3306` 和 `127.0.0.1:6379`，账号和密码与 `server/.env.example` 一致：
 
 ```bash
 docker compose up -d mysql redis
 ```
 
-然后：
+然后执行：
 
 ```bash
 cd server
@@ -24,7 +24,7 @@ cp .env.example .env
 go run ./cmd/server
 ```
 
-`.env.example` 的内容：
+`.env.example` 内容如下：
 
 ```env
 PORT=8080
@@ -41,61 +41,61 @@ REDIS_PASSWORD=ecohub
 REDIS_DB=0
 ```
 
-- 进程启动时读取当前目录的 `.env`，所以要在 `server/` 目录里运行。已经存在的环境变量不会被 `.env` 覆盖。
+- 进程启动时读取当前目录的 `.env`，因此须在 `server/` 目录中运行。已存在的环境变量不会被 `.env` 覆盖。
 - API 默认监听 `:8080`。
-- 第一次启动会建表，写入网站配置、管理员 `admin`、12 个预设采集站和 4 条计划任务。
-- 对外部署时 `JWT_SECRET` 要换成随机串，可以用 `openssl rand -hex 32` 生成。
+- 首次启动时建表，并写入网站配置、管理员 `admin`、12 个预设采集站和 4 条计划任务。
+- 对外部署时须将 `JWT_SECRET` 替换为随机字符串，可通过 `openssl rand -hex 32` 生成。
 
-### 用容器跑后端
+### 在容器中运行后端
 
-开发编排里的 `server` 服务用 `server/Dockerfile` 从源码构建，只含 Go 后端，容器名 `Eco-server`：
+开发编排中的 `server` 服务使用 `server/Dockerfile` 从源码构建，仅包含 Go 后端，容器名为 `Eco-server`：
 
 ```bash
 docker compose up -d --build server
 ```
 
-- 在仓库根目录执行。`server` 没有声明 `depends_on`，不会自动起数据库，先执行 `docker compose up -d mysql redis`。
+- 在仓库根目录执行。`server` 未声明 `depends_on`，不会自动启动数据库，须先执行 `docker compose up -d mysql redis`。
 - API 映射到本机 `18080`（`SERVER_PORT`），例如 `http://127.0.0.1:18080/api/config/basic`。
-- 容器里连数据库用服务名 `mysql`、`redis`，变量取仓库根目录 `.env` 的值（没有就用编排里的默认值），不读 `server/.env`。
+- 容器内使用服务名 `mysql`、`redis` 连接数据库，变量取自仓库根目录的 `.env`（不存在时使用编排中的默认值），不读取 `server/.env`。
 
 ## 环境变量
 
 | 变量 | 默认值 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `PORT` | `8080` | 否 | API 监听端口。发布镜像里固定 `8080` |
-| `JWT_SECRET` | 无 | 是 | 登录签名密钥。没设置会 panic |
-| `ECOHUB_ADMIN_PASSWORD` | `admin` | 否 | 只在第一次创建 `admin` 时写入 |
-| `MYSQL_HOST` | 无 | 是 | 本机写 `127.0.0.1`，Compose 里写服务名 `mysql`，容器访问宿主机写 `host.docker.internal` |
+| `JWT_SECRET` | 无 | 是 | 登录签名密钥。未设置时进程 panic |
+| `ECOHUB_ADMIN_PASSWORD` | `admin` | 否 | 仅在首次创建 `admin` 时写入 |
+| `MYSQL_HOST` | 无 | 是 | 本机运行时为 `127.0.0.1`，Compose 中为服务名 `mysql`，容器访问宿主机时为 `host.docker.internal` |
 | `MYSQL_PORT` | 无 | 是 | 通常 `3306` |
 | `MYSQL_USER` | 无 | 是 | |
 | `MYSQL_PASSWORD` | 空 | 否 | |
 | `MYSQL_DBNAME` | 无 | 是 | |
-| `REDIS_HOST` | 无 | 是 | 本机写 `127.0.0.1`，Compose 里写服务名 `redis` |
+| `REDIS_HOST` | 无 | 是 | 本机运行时为 `127.0.0.1`，Compose 中为服务名 `redis` |
 | `REDIS_PORT` | 无 | 是 | 通常 `6379` |
 | `REDIS_PASSWORD` | 空 | 否 | |
-| `REDIS_DB` | `0` | 否 | 不是数字时忽略，仍用 `0` |
-| `ECOHUB_LOG_DIR` | 模块根目录下的 `logs/` | 否 | 运行日志目录。往上找不到 `go.mod` 时用当前目录下的 `logs/` |
-| `NODE_NAME` | 主机名 | 否 | 数据分析里记录的服务节点名。主机名超过 12 个字符时取最后 6 个字符。多实例部署时用来区分 |
-| `GIN_MODE` | `release` | 否 | 没设置时按 release 模式运行 |
+| `REDIS_DB` | `0` | 否 | 非数字时忽略，使用 `0` |
+| `ECOHUB_LOG_DIR` | 模块根目录下的 `logs/` | 否 | 运行日志目录。向上未找到 `go.mod` 时使用当前目录下的 `logs/` |
+| `NODE_NAME` | 主机名 | 否 | 数据分析中记录的服务节点名。主机名超过 12 个字符时取最后 6 个字符。用于区分多实例部署 |
+| `GIN_MODE` | `release` | 否 | 未设置时以 release 模式运行 |
 
-必填项为空时进程直接 panic：`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_USER`、`MYSQL_DBNAME` 任一为空，或 `REDIS_HOST`、`REDIS_PORT` 任一为空，或没有 `JWT_SECRET`。
+以下必填项为空时进程直接 panic：`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_USER`、`MYSQL_DBNAME` 任一为空，`REDIS_HOST`、`REDIS_PORT` 任一为空，或未设置 `JWT_SECRET`。
 
-`WEB_PORT`、`SERVER_PORT`、`MYSQL_ROOT_PASSWORD`、`ECOHUB_IMAGE` 只给 Compose 用，Go 进程不读。
+`WEB_PORT`、`SERVER_PORT`、`MYSQL_ROOT_PASSWORD`、`ECOHUB_IMAGE` 仅供 Compose 使用，Go 进程不读取。
 
-## 启动时做什么
+## 启动流程
 
-1. 连 Redis，再连 MySQL。各重试 30 次、每次间隔 2 秒，还连不上就 panic 退出。
-2. 建表和补表结构（`AutoMigrate`），再按顺序执行 `internal/migration/` 里还没执行过的迁移。
-3. 新库或没有管理员时，写入 12 个预设采集站。
+1. 依次连接 Redis 和 MySQL。各重试 30 次，间隔 2 秒；仍无法连接时 panic 退出。
+2. 建表并补齐表结构（`AutoMigrate`），然后按顺序执行 `internal/migration/` 中尚未执行的迁移。
+3. 新库或不存在管理员时，写入 12 个预设采集站。
 4. 初始化分类、管理员 `admin`、上传目录、网站配置、默认海报源、数据分析配置。
-5. 注册计划任务，加载快照和内存里的列表数据，等搜索索引建好。
+5. 注册计划任务，加载快照和内存中的列表数据，等待搜索索引构建完成。
 6. 开始监听端口，并在后台预热主站首页缓存。
 
-`admin` 已经存在时不会改它的密码。其他账号在后台「账号管理」里新建。
+`admin` 已存在时不会修改其密码。其他账号在后台「账号管理」中创建。
 
 ## 接口
 
-前台接口（后台开启「私有化访问」时需要登录或订阅密钥）：
+前台接口（后台开启「私有化访问」后需要登录或订阅密钥）：
 
 | 方法 | 路径 |
 | --- | --- |
@@ -111,7 +111,7 @@ docker compose up -d --build server
 | POST | `/api/stats/view` |
 | GET、POST | `/api/film/danmaku` |
 
-订阅接口（开启「私有化访问」时必须带订阅密钥 `?key=` 或请求头 `X-Provide-Key`）：
+订阅接口（开启「私有化访问」后须携带订阅密钥 `?key=` 或请求头 `X-Provide-Key`）：
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -125,19 +125,19 @@ docker compose up -d --build server
 | --- | --- | --- |
 | GET | `/api/config/basic` | 网站基本配置，也用作健康检查 |
 | POST | `/api/login` | 登录 |
-| POST | `/api/logout` | 退出，需要已登录 |
+| POST | `/api/logout` | 退出登录，需已登录 |
 | GET | `/api/upload/pic/poster/*name` | 上传的图片 |
 
-后台接口都在 `/api/manage/*` 下，完整列表见 `internal/router/router.go`。
+后台接口均位于 `/api/manage/*` 下，完整列表见 `internal/router/router.go`。
 
 ### 鉴权
 
-- 登录成功后，后端下发 HttpOnly cookie `ecohub_auth_token`，有效期 10 天。也接受 `Authorization: Bearer <token>` 请求头。
-- `/api/manage/*` 和 `/api/logout` 会同时校验 JWT 和 Redis 里存的当前 token。同一账号在别处登录后，旧 token 失效。JWT 过期后要重新登录。
-- 访客账号只能发 GET，写操作由 `WriteAccess` 拒绝，返回 `403`。
-- 部分操作（网站配置、账号管理、升级等）只有超级用户能做，由 `AdminAccess` 控制。
+- 登录成功后，后端下发 HttpOnly cookie `ecohub_auth_token`，有效期 10 天。同时支持 `Authorization: Bearer <token>` 请求头。
+- `/api/manage/*` 和 `/api/logout` 同时校验 JWT 和 Redis 中保存的当前 token。同一账号在其他位置登录后，旧 token 失效。JWT 过期后须重新登录。
+- 访客账号仅能发送 GET 请求，写操作由 `WriteAccess` 拒绝并返回 `403`。
+- 部分操作（网站配置、账号管理、升级等）仅限超级用户，由 `AdminAccess` 控制。
 
-## 目录
+## 目录结构
 
 ```text
 server/
@@ -158,9 +158,9 @@ server/
 └── test/integration/           # 跨模块集成测试
 ```
 
-单元测试放在 `internal/` 各包里，跨模块的测试放 `test/integration/`。
+单元测试位于 `internal/` 各包中，跨模块测试位于 `test/integration/`。
 
-## 命令
+## 常用命令
 
 ```bash
 cd server
@@ -171,12 +171,12 @@ go test ./test/...
 go test ./...
 ```
 
-本机 Go 缓存目录没有写权限时：
+本机 Go 缓存目录不可写时：
 
 ```bash
 GOCACHE=/tmp/ecohub-go-cache go test ./...
 ```
 
-## 相关
+## 相关文档
 
 [总览](../README.md) · [前端说明](../web/README.md) · [部署指南](../docs/README-Deploy.md) · [常见问题](../docs/README-FAQ.md)
