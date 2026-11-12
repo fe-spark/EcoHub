@@ -64,13 +64,14 @@ export default function PlayPageView({
   }, []);
   const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
   const [openingRelatedId, setOpeningRelatedId] = useState("");
-  const [preferEnabled, setPreferEnabled] = useState(true);
+  const [preferEnabled, setPreferEnabled] = useState(false);
   const [preferBootstrapped, setPreferBootstrapped] = useState(false);
   const [isProbing, setIsProbing] = useState(false);
   const [probeReady, setProbeReady] = useState(false);
   const [probeBySourceId, setProbeBySourceId] = useState<Record<string, SourceProbeResult>>(
     {},
   );
+  const [probingSourceIds, setProbingSourceIds] = useState<string[]>([]);
   const [preferredSourceId, setPreferredSourceId] = useState("");
 
   const activeEpRef = useRef<HTMLDivElement>(null);
@@ -170,11 +171,23 @@ export default function PlayPageView({
       setIsProbing(true);
       setProbeReady(false);
       setProbeBySourceId({});
+      setProbingSourceIds([]);
 
       try {
         const results = await probePlaySources(
           targets.map((item) => ({ sourceId: item.sourceId, url: item.url })),
-          { signal: controller.signal },
+          {
+            signal: controller.signal,
+            onStart: (sourceId) => {
+              if (runId !== preferRunIdRef.current) return;
+              setProbingSourceIds((prev) => (prev.includes(sourceId) ? prev : [...prev, sourceId]));
+            },
+            onResult: (result) => {
+              if (runId !== preferRunIdRef.current) return;
+              setProbingSourceIds((prev) => prev.filter((id) => id !== result.sourceId));
+              setProbeBySourceId((prev) => ({ ...prev, [result.sourceId]: result }));
+            },
+          },
         );
         if (runId !== preferRunIdRef.current) return;
 
@@ -211,6 +224,7 @@ export default function PlayPageView({
         if (runId === preferRunIdRef.current) {
           setIsProbing(false);
           setProbeReady(true);
+          setProbingSourceIds([]);
         }
       }
     },
@@ -228,6 +242,7 @@ export default function PlayPageView({
       setIsProbing(false);
       setPreferredSourceId("");
       setProbeBySourceId({});
+      setProbingSourceIds([]);
       return;
     }
 
@@ -250,6 +265,7 @@ export default function PlayPageView({
       setProbeReady(true);
       setPreferredSourceId("");
       setProbeBySourceId({});
+      setProbingSourceIds([]);
       return;
     }
     manualSourceLockRef.current = false;
@@ -267,6 +283,7 @@ export default function PlayPageView({
     preferAbortRef.current?.abort();
     setIsProbing(false);
     setProbeReady(true);
+    setProbingSourceIds([]);
   }, []);
 
   const handlePlayStart = useCallback(() => {
@@ -298,8 +315,7 @@ export default function PlayPageView({
     [playingSourceId, message],
   );
 
-  const holdPlayerForPrefer =
-    !preferBootstrapped || (preferEnabled && (!probeReady || isProbing));
+  const holdPlayerForPrefer = preferEnabled && (!probeReady || isProbing);
 
   const currentEpisodeKey =
     current && playingSourceId ? makeEpisodeKey(playingSourceId, current.index) : "";
@@ -513,7 +529,7 @@ export default function PlayPageView({
                     <span />
                   </div>
                   <div className={styles.preferTitle}>正在测速</div>
-                  <div className={styles.preferHint}>比较各线路速度，自动播放最快的一条</div>
+                  <div className={styles.preferHint}>自动选择最快线路</div>
                   {preferBootstrapped ? (
                     <button type="button" className={styles.preferSkip} onClick={handleSkipPrefer}>
                       跳过，直接播放
@@ -555,6 +571,7 @@ export default function PlayPageView({
           autoplay={autoplay}
           preferEnabled={preferEnabled}
           isProbing={isProbing}
+          probingSourceIds={probingSourceIds}
           preferredSourceId={preferredSourceId}
           probeBySourceId={probeBySourceId}
           hasNext={hasNext}

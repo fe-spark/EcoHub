@@ -30,6 +30,7 @@ interface PlaySidebarProps {
   autoplay: boolean;
   preferEnabled: boolean;
   isProbing: boolean;
+  probingSourceIds: string[];
   preferredSourceId?: string;
   probeBySourceId: Record<string, SourceProbeResult>;
   hasNext: boolean;
@@ -98,6 +99,7 @@ export default function PlaySidebar({
   autoplay,
   preferEnabled,
   isProbing,
+  probingSourceIds,
   preferredSourceId,
   probeBySourceId,
   hasNext,
@@ -120,7 +122,7 @@ export default function PlaySidebar({
 
   const probeOf = (sourceId: string) => {
     const result = probeBySourceId[sourceId];
-    const label = formatProbeLabel(result, isProbing && !result);
+    const label = formatProbeLabel(result, probingSourceIds.includes(sourceId) && !result);
     if (!label) return null;
     const isBest = preferredSourceId === sourceId && result?.status === "ok";
     const toneClass = isBest
@@ -200,11 +202,6 @@ export default function PlaySidebar({
   };
 
   const viewingProbe = viewingSourceId ? probeOf(viewingSourceId) : null;
-  const preferStatus = isProbing
-    ? "正在比较线路速度"
-    : preferEnabled
-      ? "自动选择最快线路"
-      : "使用当前线路播放";
 
   return (
     <div className={styles.sidebarWrapper}>
@@ -216,6 +213,35 @@ export default function PlaySidebar({
           </div>
         </div>
 
+        <div className={styles.sourceBlock}>
+          <div className={styles.sourceHead}>
+            <span className={styles.sourceHeadTitle}>播放源</span>
+            <div className={styles.sourceHeadActions}>
+              <span className={styles.preferLabel}>测速优选</span>
+              <button
+                type="button"
+                className={`${styles.preferSwitch} ${preferEnabled ? styles.on : ""}`}
+                role="switch"
+                aria-checked={preferEnabled}
+                aria-label="测速优选"
+                onClick={onTogglePrefer}
+              >
+                <span className={styles.preferKnob} />
+              </button>
+              {preferEnabled ? (
+                <button
+                  type="button"
+                  className={styles.retestBtn}
+                  disabled={isProbing}
+                  title={isProbing ? "测速中" : "重新测速"}
+                  aria-label={isProbing ? "测速中" : "重新测速"}
+                  onClick={onRetestPrefer}
+                >
+                  <ReloadOutlined spin={isProbing} />
+                </button>
+              ) : null}
+            </div>
+          </div>
         <div className={styles.sourcePicker} ref={sourceMenuRef}>
           <button
             type="button"
@@ -223,7 +249,6 @@ export default function PlaySidebar({
             aria-expanded={isSourceMenuOpen}
             onClick={onToggleSourceMenu}
           >
-            <span className={styles.sourcePickerLabel}>播放源</span>
             <span className={styles.sourcePickerValue}>
               {viewingSource?.name || "选择播放源"}
               {viewingSource?.proxy && (
@@ -276,47 +301,18 @@ export default function PlaySidebar({
             </div>
           )}
         </div>
-        <div className={styles.sourcePickerDivider} />
-
-        <div className={styles.preferBar}>
-          <button
-            type="button"
-            className={`${styles.preferSwitch} ${preferEnabled ? styles.on : ""}`}
-            role="switch"
-            aria-checked={preferEnabled}
-            aria-label="测速优选"
-            onClick={onTogglePrefer}
-          >
-            <span className={styles.preferKnob} />
-          </button>
-          <div className={styles.preferCopy}>
-            <span className={styles.preferName}>测速优选</span>
-            <span className={styles.preferDesc}>{preferStatus}</span>
-          </div>
-          {preferEnabled ? (
-            <button
-              type="button"
-              className={styles.retestBtn}
-              disabled={isProbing}
-              onClick={onRetestPrefer}
-            >
-              <ReloadOutlined spin={isProbing} />
-              <span>{isProbing ? "测速中" : "重测"}</span>
-            </button>
-          ) : null}
-        </div>
-
         <div className={styles.sourceTabs} ref={sourceTabsRef}>
           {sources?.map((item: any) => {
             const isActive = viewingSourceId === item.id;
             const probe = probeOf(item.id);
+            const tabProbe = probe?.toneClass === styles.tonePending ? null : probe;
             return (
               <div
                 key={item.id}
                 ref={isActive ? activeTabRef : null}
                 className={`${styles.tab} ${isActive ? styles.active : ""}`}
                 onClick={() => onSelectViewingSource(item.id)}
-                title={probe ? `${item.name} · ${probe.label}` : item.name}
+                title={tabProbe ? `${item.name} · ${tabProbe.label}` : item.name}
               >
                 <span className={styles.tabName}>
                   {item.name}
@@ -324,14 +320,18 @@ export default function PlaySidebar({
                     <span className={styles.proxyBadge}>代理</span>
                   )}
                 </span>
-                {probe ? (
-                  <span className={`${styles.tabSpeed} ${probe.toneClass}`}>{probe.label}</span>
+                {tabProbe ? (
+                  <span className={`${styles.tabSpeed} ${tabProbe.toneClass}`}>{tabProbe.label}</span>
                 ) : null}
               </div>
             );
           })}
         </div>
+        </div>
 
+        <div className={styles.sectionRule} />
+
+        <div className={styles.episodeSection}>
         <div className={styles.episodesToolbar}>
           <div className={styles.episodesToolbarLeft}>
             <span className={styles.episodesToolbarTitle}>选集</span>
@@ -440,6 +440,7 @@ export default function PlaySidebar({
               </div>
             );
           })}
+        </div>
         </div>
 
         <div className={styles.sideFooter}>
