@@ -152,9 +152,9 @@ func runPreparedBatch(batchCtx *collectBatchContext, h int, tag string, queueHel
 	if sourceLimit > 0 {
 		limitDesc = fmt.Sprintf("%d", sourceLimit)
 	}
-	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 取数在途=%d 写阀 inflight=%d",
+	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 取数在途=%d 写阀 inflight=%d 页速=%d",
 		tag, len(batchCtx.sources), limitDesc, config.CollectPageWorkers, config.CollectFetchInFlight,
-		config.CollectWriteMaxInflight)
+		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
 	runSourcesGroupWithLimit(batchCtx.sources, h, tag, sourceLimit, runVersion, batchCtx)
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[%s] 批量采集缓存刷新失败: %v", tag, err)

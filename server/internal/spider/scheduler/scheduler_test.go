@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
@@ -408,5 +410,50 @@ func TestWriteLaneCancelSourceCompletesPending(t *testing.T) {
 	}
 	if snap := lane.snapshot(); snap.PendingTotal != 0 || snap.PendingSources != 0 {
 		t.Fatalf("queue should be gone after cancel, got pending=%d sources=%d", snap.PendingTotal, snap.PendingSources)
+	}
+}
+
+func TestWriteLaneLimiterWaitsBeforeWrite(t *testing.T) {
+	lane := newWriteLane("test-limit")
+	lane.workers = 2
+	lane.limiter = rate.NewLimiter(rate.Every(80*time.Millisecond), 1)
+	lane.start()
+
+	var mu sync.Mutex
+	var starts []time.Time
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for _, id := range []string{"A", "B"} {
+		sourceID := id
+		if err := lane.submit(context.Background(), Job{
+			SourceID:   sourceID,
+			SourceName: sourceID,
+			Page:       1,
+			Write: func() (Mids, error) {
+				mu.Lock()
+				starts = append(starts, time.Now())
+				mu.Unlock()
+				return Mids{}, nil
+			},
+			Complete: func(Completion) { wg.Done() },
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writes did not finish")
+	}
+	if len(starts) != 2 {
+		t.Fatalf("starts=%d", len(starts))
+	}
+	if gap := starts[1].Sub(starts[0]); gap < 50*time.Millisecond {
+		t.Fatalf("second write started after %s, limiter should hold it", gap)
 	}
 }

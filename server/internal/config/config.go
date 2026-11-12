@@ -51,10 +51,15 @@ const (
 	FilmPictureAccess = "/api/upload/pic/poster/"
 )
 
-// 采集并发初值即 3 核及以上的全速档。2 核及以下由 resolveCollectProfile 在启动时覆盖。
+// 采集并发初值。启动时 resolveCollectProfile 按核数和内存重算。
+// 页速为 0 时写调度不限速，测试直接用这组初值。
 var (
 	// CollectWriteMaxInflight 全局同时进行的写库事务上限。
 	CollectWriteMaxInflight = 16
+	// CollectWritePagesPerSec 写库稳态页速。0 表示不限速。
+	CollectWritePagesPerSec = 0
+	// CollectWriteBurstPages 写库允许的瞬时突发页数。
+	CollectWriteBurstPages = 0
 	// CollectWriteMaxPendingPagesPerSource 单站写库队列上限。
 	CollectWriteMaxPendingPagesPerSource = 500
 	// CollectWriteMaxPendingPagesGlobal 全局写库缓冲上限。
@@ -321,10 +326,10 @@ func loadCollectRuntimeConfig() {
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集配置: 核数=%d 内存=%s 写并发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds\n",
+	fmt.Printf("[Config] 采集配置: 核数=%d 内存=%s 写并发=%d 页速=%d 突发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds\n",
 		runtime.GOMAXPROCS(0),
 		collectMemoryLimitLabel(),
-		CollectWriteMaxInflight,
+		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, srcLimit, CollectFetchInFlight,
 		CollectProgressRetainSec)

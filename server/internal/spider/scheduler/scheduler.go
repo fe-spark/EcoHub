@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"server/internal/config"
+
+	"golang.org/x/time/rate"
 )
 
 // 写库调度模型：
@@ -135,6 +137,8 @@ type writeLane struct {
 	order    []string // sourceID 稳定顺序，用于 round-robin
 	rrCursor int      // 下一次 RR 起始下标
 	workers  int
+	// limiter 只限制已经取到的页进入 SQL。nil 表示不限速。
+	limiter *rate.Limiter
 
 	// 有界水箱（构造时从 config 拷贝，测试可覆盖）。
 	maxPerSource int
@@ -167,9 +171,22 @@ func newWriteLane(name string) *writeLane {
 		workers:      config.CollectWriteMaxInflight,
 		maxPerSource: config.CollectWriteMaxPendingPagesPerSource,
 		maxGlobal:    config.CollectWriteMaxPendingPagesGlobal,
+		limiter:      newWriteLimiter(),
 	}
 	lane.cond = sync.NewCond(&lane.mu)
 	return lane
+}
+
+func newWriteLimiter() *rate.Limiter {
+	pages := config.CollectWritePagesPerSec
+	if pages <= 0 {
+		return nil
+	}
+	burst := config.CollectWriteBurstPages
+	if burst < 1 {
+		burst = 1
+	}
+	return rate.NewLimiter(rate.Limit(pages), burst)
 }
 
 func (l *writeLane) submit(ctx context.Context, job Job) error {
@@ -368,8 +385,21 @@ func (l *writeLane) start() {
 	for workerID := 1; workerID <= l.workers; workerID++ {
 		go l.run(workerID)
 	}
-	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d pending_per_source=%d pending_global=%d",
-		l.name, l.workers, l.maxPerSource, l.maxGlobal)
+	pages, burst := 0, 0
+	if l.limiter != nil {
+		pages = int(l.limiter.Limit())
+		burst = l.limiter.Burst()
+	}
+	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d pages_per_sec=%d burst=%d pending_per_source=%d pending_global=%d",
+		l.name, l.workers, pages, burst, l.maxPerSource, l.maxGlobal)
+}
+
+// waitWriteSlot 在真正写库前领取页速令牌。还没取到页时不消耗令牌。
+func (l *writeLane) waitWriteSlot(ctx context.Context) error {
+	if l.limiter == nil {
+		return nil
+	}
+	return l.limiter.Wait(ctx)
 }
 
 func (l *writeLane) run(workerID int) {
@@ -403,6 +433,10 @@ func (l *writeLane) run(workerID int) {
 						err = fmt.Errorf("write panic: %v", rec)
 					}
 				}()
+				if waitErr := l.waitWriteSlot(context.Background()); waitErr != nil {
+					err = waitErr
+					return
+				}
 				mids, err = job.Write()
 			}()
 			if job.Complete != nil {

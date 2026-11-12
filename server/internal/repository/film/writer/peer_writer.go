@@ -18,6 +18,7 @@ import (
 	"server/internal/repository/support"
 	"server/internal/spider/scheduler"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -255,6 +256,16 @@ func pickPlaylistRemarks(playLines []model.FilmSourcePlaylist, sources []model.F
 	return bestLine.LastEpisode
 }
 
+// stampNewFilmPlaySummary 把新片的备注和播放摘要写进插入行。新片只有本站线路，和事后刷新的结果一样。
+func stampNewFilmPlaySummary(fi *model.FilmIndex, source *model.FilmSource, detail model.MovieDetail, sources []model.FilmSource) {
+	if fi == nil || source == nil {
+		return
+	}
+	lines := buildPlaylistsFromDetail(0, source.Id, detail)
+	fi.Remarks = pickPlaylistRemarks(lines, sources)
+	fi.PlayFromSummary = snapshot.BuildPlayFromSummaryFromPlaylists(lines, sources)
+}
+
 // refreshRemarksAndPlaySummaryWithStampTx 刷新备注与播放摘要；仅 stampMids 中的存量追更影片将 update_stamp 刷为当前采集时间，新片保留源站 vod_time。
 func refreshRemarksAndPlaySummaryWithStampTx(tx *gorm.DB, mids []int64, stampMids map[int64]struct{}, sources []model.FilmSource) error {
 	ordered := uniqueMIDs(mids)
@@ -289,6 +300,61 @@ func refreshRemarksAndPlaySummaryWithStampTx(tx *gorm.DB, mids []int64, stampMid
 		}
 	}
 	return nil
+}
+
+type peerPageTiming struct {
+	path     string
+	mapCost  time.Duration
+	playlist time.Duration
+	remarks  time.Duration
+}
+
+type peerTimingKey struct{}
+
+func peerTimingContext(ctx context.Context) (context.Context, *peerPageTiming) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timing := &peerPageTiming{}
+	return context.WithValue(ctx, peerTimingKey{}, timing), timing
+}
+
+func notePeerTiming(tx *gorm.DB, path string, mapCost, playlist, remarks time.Duration) {
+	if tx == nil || tx.Statement == nil || tx.Statement.Context == nil {
+		return
+	}
+	timing, _ := tx.Statement.Context.Value(peerTimingKey{}).(*peerPageTiming)
+	if timing == nil {
+		return
+	}
+	timing.path = path
+	timing.mapCost = mapCost
+	timing.playlist = playlist
+	timing.remarks = remarks
+}
+
+func isRetryableMySQLLockErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var mysqlErr *mysqldriver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr != nil && (mysqlErr.Number == 1213 || mysqlErr.Number == 1205) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "deadlock found") || strings.Contains(msg, "lock wait timeout")
+}
+
+func runPeerCollectTxWithRetry(ctx context.Context, fn func(tx *gorm.DB) error) error {
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		err = runPeerCollectTx(ctx, fn)
+		if err == nil || !isRetryableMySQLLockErr(err) || attempt == 3 {
+			return err
+		}
+		time.Sleep(time.Duration(attempt) * 300 * time.Millisecond)
+	}
+	return err
 }
 
 func runPeerCollectTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
@@ -451,11 +517,18 @@ func SaveCollectedPeerDetails(
 	var affected []int64
 	var notify []int64
 	var unmapped int
-	err := runPeerCollectTx(ctx, func(tx *gorm.DB) error {
+	pageCtx, timing := peerTimingContext(ctx)
+	started := time.Now()
+	err := runPeerCollectTxWithRetry(pageCtx, func(tx *gorm.DB) error {
+		tx = tx.WithContext(pageCtx)
 		var writeErr error
 		affected, notify, unmapped, writeErr = writePeerPage(tx, source, details, sources)
 		return writeErr
 	})
+	if page > 0 && page%50 == 0 {
+		log.Printf("[Spider][PeerCollect] 页耗时 source=%s page=%d path=%s map_create=%s playlist=%s remarks=%s tx=%s err=%v",
+			source.Id, page, timing.path, timing.mapCost, timing.playlist, timing.remarks, time.Since(started), err)
+	}
 	if err == nil {
 		if unmapped > 0 {
 			log.Printf("[Spider][PeerCollect] 分类跳过 source=%s page=%d unmapped=%d",
