@@ -162,22 +162,108 @@
 .preferOverlay {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  // 留在 .playerWrapper::after 下面，测速时播放区外框仍然可见
+  z-index: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(var(--primary-color-rgb), 0.12), transparent 34%),
+    var(--public-surface-1);
+}
+
+.preferCard {
+  width: min(100%, 300px);
+  padding: 28px 24px 22px;
+  border-radius: 20px;
+  border: 1px solid var(--public-dropdown-border);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(var(--primary-color-rgb), 0.16), transparent 58%),
+    var(--public-dropdown-bg);
+  box-shadow: var(--public-dropdown-shadow);
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: color-mix(in srgb, var(--public-surface-1) 78%, rgba(0, 0, 0, 0.55));
-  color: var(--public-text-1);
-  font-size: 15px;
-  font-weight: 700;
+  text-align: center;
 }
 
-.preferOverlayHint {
-  font-size: 12px;
-  font-weight: 500;
+.preferBars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+  height: 22px;
+  margin-bottom: 16px;
+
+  span {
+    width: 4px;
+    border-radius: 999px;
+    background: var(--primary-color);
+    transform-origin: center bottom;
+    animation: preferWave 1s ease-in-out infinite;
+
+    &:nth-child(1) {
+      height: 10px;
+      animation-delay: 0.1s;
+    }
+
+    &:nth-child(2) {
+      height: 18px;
+      animation-delay: 0.25s;
+    }
+
+    &:nth-child(3) {
+      height: 12px;
+      animation-delay: 0s;
+    }
+  }
+}
+
+.preferTitle {
+  color: var(--public-text-1);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+
+.preferHint {
+  margin-top: 6px;
+  max-width: 220px;
   color: var(--public-text-3);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+.preferSkip {
+  margin-top: 18px;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--public-border-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--public-text-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    border-color: rgba(var(--primary-color-rgb), 0.55);
+    color: var(--primary-color);
+    background: rgba(var(--primary-color-rgb), 0.08);
+  }
+}
+
+@keyframes preferWave {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+
+  50% {
+    transform: scaleY(1);
+  }
 }
 
 .playerWrapper {
@@ -197,7 +283,8 @@
     content: "";
     position: absolute;
     inset: 0;
-    z-index: 1;
+    // 高于测速遮罩（z-index: 0），遮罩铺满时这圈边框仍压在最上面
+    z-index: 2;
     border: 1px solid var(--public-border-3);
     border-radius: inherit;
     pointer-events: none;
