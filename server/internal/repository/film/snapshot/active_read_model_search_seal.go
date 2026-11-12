@@ -43,14 +43,17 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 	if db.Mdb == nil {
 		return nil, ErrSearchIndexMissing
 	}
-	if len(mids) == 0 {
+	if mids == nil {
 		return streamPlaySources()
+	}
+	if len(mids) == 0 {
+		return make(map[int64][]string), nil
 	}
 	type row struct {
 		Mid      int64
 		SourceId string `gorm:"column:source_id"`
 	}
-	const batchSize = 1000
+	const batchSize = 2500
 	var rows []row
 	for i := 0; i < len(mids); i += batchSize {
 		end := i + batchSize

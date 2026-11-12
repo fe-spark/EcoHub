@@ -19,7 +19,7 @@ func TestResealQueue_NoDeadlockWithRebuildNotify(t *testing.T) {
 		filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
 	})
 	waitCollectIdle = func() {}
-	sealSearchIndex = func([]int64, bool) bool {
+	sealSearchIndex = func([]int64) bool {
 		// 模拟增量失败转全量重建，让 run 走等重建的分支。
 		filmsnapshot.NotifySearchIndexProgress(1, 0, "indexing")
 		return false

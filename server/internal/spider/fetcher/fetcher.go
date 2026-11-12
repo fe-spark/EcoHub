@@ -48,36 +48,81 @@ type Deps struct {
 var (
 	deps           Deps
 	fetchSlotsOnce sync.Once
-	fetchSlots     chan struct{}
+	fetchSlots     *fetchGate
 )
+
+type fetchGate struct {
+	mu       sync.Mutex
+	cond     *sync.Cond
+	inflight int
+	limit    func() int
+}
+
+func newFetchGate(limit func() int) *fetchGate {
+	gate := &fetchGate{limit: limit}
+	gate.cond = sync.NewCond(&gate.mu)
+	return gate
+}
+
+func (g *fetchGate) acquire(ctx context.Context) error {
+	stop := context.AfterFunc(ctx, func() {
+		g.mu.Lock()
+		g.cond.Broadcast()
+		g.mu.Unlock()
+	})
+	defer stop()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		limit := g.limit()
+		if limit < 1 {
+			limit = 1
+		}
+		if g.inflight < limit {
+			g.inflight++
+			return nil
+		}
+		// 上限变大时不会有 release。最多 20ms 再看一次当前限额。
+		timer := time.AfterFunc(20*time.Millisecond, func() {
+			g.mu.Lock()
+			g.cond.Broadcast()
+			g.mu.Unlock()
+		})
+		g.cond.Wait()
+		timer.Stop()
+	}
+}
+
+func (g *fetchGate) release() {
+	g.mu.Lock()
+	if g.inflight > 0 {
+		g.inflight--
+	}
+	g.cond.Broadcast()
+	g.mu.Unlock()
+}
 
 // Configure 注入外部能力，由采集编排层在 init 阶段调用一次。
 func Configure(d Deps) {
 	deps = d
 }
 
-func globalFetchSlots() chan struct{} {
+func globalFetchSlots() *fetchGate {
 	fetchSlotsOnce.Do(func() {
-		n := config.CollectFetchInFlight
-		if n < 1 {
-			n = 1
-		}
-		fetchSlots = make(chan struct{}, n)
+		fetchSlots = newFetchGate(config.FetchInFlightLimit)
 	})
 	return fetchSlots
 }
 
-func acquireSlot(ctx context.Context, slots chan struct{}) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case slots <- struct{}{}:
-		return nil
-	}
+func acquireSlot(ctx context.Context, slots *fetchGate) error {
+	return slots.acquire(ctx)
 }
 
-func releaseSlot(slots chan struct{}) {
-	<-slots
+func releaseSlot(slots *fetchGate) {
+	slots.release()
 }
 
 // withFetchSlot 先等站点间隔或冷却，再占用一个全局取页名额。HTTP 结束立即释放。

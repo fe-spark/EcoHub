@@ -109,6 +109,12 @@ func newPageFetchQueue(pages []int) *pageFetchQueue {
 	return queue
 }
 
+func (q *pageFetchQueue) finished() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.closed
+}
+
 func (q *pageFetchQueue) close() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -161,10 +167,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
-	maxWorkers := config.CollectPageWorkers
-	if maxWorkers <= 0 {
-		maxWorkers = 1
-	}
+	maxWorkers := config.CollectWriteSlotMax
 	if totalWork < maxWorkers {
 		maxWorkers = totalWork
 	}
@@ -417,12 +420,24 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	var requestWG sync.WaitGroup
 	requestWG.Add(maxWorkers)
 	for i := 0; i < maxWorkers; i++ {
-		go func() {
+		go func(index int) {
 			defer requestWG.Done()
 			for {
 				if ctx.Err() != nil {
 					markStopped()
 					return
+				}
+				if pages.finished() {
+					return
+				}
+				if index >= config.PageWorkerLimit() {
+					select {
+					case <-ctx.Done():
+						markStopped()
+						return
+					case <-time.After(20 * time.Millisecond):
+					}
+					continue
 				}
 				if !waitPause() {
 					markStopped()
@@ -505,7 +520,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					}
 				}
 			}
-		}()
+		}(i)
 	}
 	go func() {
 		requestWG.Wait()

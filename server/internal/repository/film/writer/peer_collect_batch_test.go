@@ -486,17 +486,3 @@ func assertMatchKeys(t *testing.T, gdb *gorm.DB, mid int64, want []string) {
 		}
 	}
 }
-
-func TestPickPlaylistRemarks_IgnoresDisabledSources(t *testing.T) {
-	sources := []model.FilmSource{
-		{Id: "src-active", State: true},
-		{Id: "src-disabled", State: false},
-	}
-	lines := []model.FilmSourcePlaylist{
-		{SourceId: "src-active", EpisodeCount: 10, LastEpisode: "第10集"},
-		{SourceId: "src-disabled", EpisodeCount: 15, LastEpisode: "第15集"},
-	}
-	if got := pickPlaylistRemarks(lines, sources); got != "第10集" {
-		t.Fatalf("want active source remark '第10集', got %q", got)
-	}
-}

@@ -51,9 +51,10 @@ const (
 	FilmPictureAccess = "/api/upload/pic/poster/"
 )
 
-// 采集并发初值即 3 核及以上的全速档。2 核及以下由 resolveCollectProfile 在启动时覆盖。
+// 采集并发初值。测试不跑 InitConfig，沿用这组数。
+// 进程启动后写并发从 CollectWriteSlotMax 满速起步，变慢或锁错误再减，最低 CollectWriteSlotMin。
 var (
-	// CollectWriteMaxInflight 全局同时进行的写库事务上限。
+	// CollectWriteMaxInflight 当前允许的同时写库事务数。
 	CollectWriteMaxInflight = 16
 	// CollectWriteMaxPendingPagesPerSource 单站写库队列上限。
 	CollectWriteMaxPendingPagesPerSource = 500
@@ -316,15 +317,14 @@ func InitConfig() {
 
 }
 func loadCollectRuntimeConfig() {
-	resolveCollectProfile()
+	ApplyWriteSlots(CollectWriteSlotMax)
 	srcLimit := "不限制"
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集配置: 核数=%d 内存=%s 写并发=%d 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds\n",
+	fmt.Printf("[Config] 采集配置: 核数=%d 写并发=%d/%d 最近耗时=无 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds\n",
 		runtime.GOMAXPROCS(0),
-		collectMemoryLimitLabel(),
-		CollectWriteMaxInflight,
+		CollectWriteMaxInflight, CollectWriteSlotMax,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, srcLimit, CollectFetchInFlight,
 		CollectProgressRetainSec)

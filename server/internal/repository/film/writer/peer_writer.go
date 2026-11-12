@@ -305,16 +305,6 @@ func runPeerCollectTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
 	return conn.Transaction(fn)
 }
 
-func prepareSourceOtherCategory(sourceID string) {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" || sourceID == "manual" {
-		return
-	}
-	if _, _, err := repository.EnsureOtherCategory(sourceID); err != nil {
-		log.Printf("[FilmWrite] 补建「其他」分类失败 source=%s err=%v", sourceID, err)
-	}
-}
-
 func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, stored bool, err error) {
 	if source != nil {
 		prepareSourceOtherCategory(source.Id)
@@ -419,14 +409,6 @@ var (
 	savePeerFilm  = saveSinglePeerDetailTx
 )
 
-func isDeterministicRowError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "Data too long") || strings.Contains(msg, "Error 1406")
-}
-
 // SaveCollectedPeerDetails 全站平权影片采集入库入口。
 // 正常仍是一页一个事务。字段超长导致整页回滚时，改为逐片提交，只丢掉超长的那一部。
 // 这类错误不返回给调用方，因此不会进入页级重试。连接失败等瞬时错误仍让整页重试。
@@ -451,11 +433,18 @@ func SaveCollectedPeerDetails(
 	var affected []int64
 	var notify []int64
 	var unmapped int
-	err := runPeerCollectTx(ctx, func(tx *gorm.DB) error {
+	pageCtx, timing := peerTimingContext(ctx)
+	started := time.Now()
+	err := runPeerCollectTxWithRetry(pageCtx, func(tx *gorm.DB) error {
+		tx = tx.WithContext(pageCtx)
 		var writeErr error
 		affected, notify, unmapped, writeErr = writePeerPage(tx, source, details, sources)
 		return writeErr
 	})
+	if page > 0 && page%50 == 0 {
+		log.Printf("[Spider][PeerCollect] 页耗时 source=%s page=%d path=%s map_create=%s playlist=%s remarks=%s tx=%s err=%v",
+			source.Id, page, timing.path, timing.mapCost, timing.playlist, timing.remarks, time.Since(started), err)
+	}
 	if err == nil {
 		if unmapped > 0 {
 			log.Printf("[Spider][PeerCollect] 分类跳过 source=%s page=%d unmapped=%d",

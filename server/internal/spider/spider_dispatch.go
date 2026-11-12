@@ -140,8 +140,13 @@ func runPreparedBatch(batchCtx *collectBatchContext, h int, tag string, queueHel
 		}
 	}
 	defer batchCtx.close()
-	// 封口要看到本队列是否全量，所以队列没结束前不能开始检索。
-	defer endCollectQueue()
+	// 全量标记和编号入队之后就释放队列。封口不等采集记录落库。
+	releaseQueue := true
+	defer func() {
+		if releaseQueue {
+			endCollectQueue()
+		}
+	}()
 
 	runVersion := stopAllVersion.Load()
 	sourceLimit := config.CollectSourceConcurrency
@@ -152,13 +157,15 @@ func runPreparedBatch(batchCtx *collectBatchContext, h int, tag string, queueHel
 	if sourceLimit > 0 {
 		limitDesc = fmt.Sprintf("%d", sourceLimit)
 	}
-	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 取数在途=%d 写阀 inflight=%d",
+	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 取数在途=%d 写并发=%d/%d",
 		tag, len(batchCtx.sources), limitDesc, config.CollectPageWorkers, config.CollectFetchInFlight,
-		config.CollectWriteMaxInflight)
+		config.CollectWriteMaxInflight, config.CollectWriteSlotMax)
 	runSourcesGroupWithLimit(batchCtx.sources, h, tag, sourceLimit, runVersion, batchCtx)
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[%s] 批量采集缓存刷新失败: %v", tag, err)
 	}
+	endCollectQueue()
+	releaseQueue = false
 	batchCtx.emitSummary()
 	triggerCollectDoneHooks()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +89,40 @@ func (s *collectLifecycleState) waitUntilIdle() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.waitIdleLocked()
+}
+
+// waitUntilIdleFor 最多等 d。到点仍有站在抓页时返回 false。
+func (s *collectLifecycleState) waitUntilIdleFor(d time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeCount == 0 {
+		return true
+	}
+	timer := time.AfterFunc(d, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+	deadline := time.Now().Add(d)
+	for s.activeCount > 0 {
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		s.cond.Wait()
+	}
+	return true
+}
+
+func (s *collectLifecycleState) activity() (active int, publishing int, sources []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sources = make([]string, 0, len(s.activeSources))
+	for id := range s.activeSources {
+		sources = append(sources, id)
+	}
+	sort.Strings(sources)
+	return s.activeCount, s.publishing, sources
 }
 
 func (s *collectLifecycleState) collecting() bool {
