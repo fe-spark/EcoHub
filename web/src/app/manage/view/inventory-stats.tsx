@@ -32,7 +32,7 @@ interface InventoryStatsData {
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
   { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
   { key: "multiSource", label: "多源聚合", hint: "多源覆盖档案" },
-  { key: "failures", label: "采集异常", hint: "未恢复站点" },
+  { key: "failures", label: "采集异常", hint: "最近一次采集" },
 ];
 
 function formatCount(value: number | undefined) {
@@ -212,7 +212,7 @@ export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) 
             <span className={styles.stationCopy}>
               <span className={styles.stationTitle}>各采集站</span>
               <span className={styles.stationHint}>
-                {sourcesOpen ? "已展开各站影片、分类和失败" : "展开后查看各站影片、分类和失败"}
+                {sourcesOpen ? "已展开最近一次采集的各站结果" : "展开后查看最近一次采集的各站结果"}
               </span>
             </span>
           </span>

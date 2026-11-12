@@ -8,6 +8,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -215,4 +217,62 @@ func processIncidentRecords(rows []model.CollectRecord, states map[string]*incid
 			st.streakDone = true
 		}
 	}
+}
+
+// CountLatestCollectExceptions 统计最近一次已结算采集里的异常站点。
+// 单片更新和仍在进行的批次不算这次采集。整站失败、部分失败、异常中断各计 1。
+func CountLatestCollectExceptions() (int64, map[string]int64, error) {
+	bySource := map[string]int64{}
+	if db.Mdb == nil {
+		return 0, bySource, errors.New("数据库未连接")
+	}
+	var rec model.CollectRecord
+	err := db.Mdb.
+		Where("`trigger` != ?", model.CollectTriggerSingleUpdate).
+		Where("status <> ?", model.CollectRecordStatusRunning).
+		Order("started_at DESC, id DESC").
+		First(&rec).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, bySource, nil
+	}
+	if err != nil {
+		return 0, bySource, err
+	}
+
+	raw := strings.TrimSpace(rec.DetailJson)
+	if raw == "" || raw == "[]" || raw == "null" {
+		return fallbackLatestExceptions(rec), bySource, nil
+	}
+	var details []model.CollectRecordSourceDetail
+	if err := json.Unmarshal([]byte(raw), &details); err != nil {
+		return fallbackLatestExceptions(rec), bySource, nil
+	}
+	var total int64
+	for _, d := range details {
+		id := strings.TrimSpace(d.SourceID)
+		if id == "" || bySource[id] == 1 {
+			continue
+		}
+		if !sourceAbnormalInBatch(rec.Status, d.Status) {
+			continue
+		}
+		bySource[id] = 1
+		total++
+	}
+	return total, bySource, nil
+}
+
+func fallbackLatestExceptions(rec model.CollectRecord) int64 {
+	if isOpenIncidentStatus(rec.Status) && rec.FailedSources > 0 {
+		return int64(rec.FailedSources)
+	}
+	return 0
+}
+
+func sourceAbnormalInBatch(batchStatus, sourceStatus string) bool {
+	sourceStatus = strings.TrimSpace(sourceStatus)
+	if isOpenIncidentStatus(sourceStatus) {
+		return true
+	}
+	return batchStatus == model.CollectRecordStatusInterrupted && isInFlightDetailStatus(sourceStatus)
 }

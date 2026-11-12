@@ -82,16 +82,24 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 			BatchID:    id,
 			Trigger:    model.CollectTriggerCron,
 			Status:     model.CollectRecordStatusFailed,
-			StartedAt:  now.Add(-time.Duration(i) * time.Hour),
+			StartedAt:  now.Add(-time.Duration(i+1) * time.Hour),
 			DetailJson: `[{"sourceId":"src_a","sourceName":"首选站A","status":"failed","error":"timeout"}]`,
 		})
 	}
 	gdb.Create(&model.CollectRecord{
-		BatchID:    "partial-b",
+		BatchID:   "latest",
+		Trigger:   model.CollectTriggerCron,
+		Status:    model.CollectRecordStatusPartial,
+		StartedAt: now,
+		DetailJson: `[{"sourceId":"src_a","sourceName":"首选站A","status":"partial","error":"timeout"},` +
+			`{"sourceId":"src_b","sourceName":"备用站B","status":"done"}]`,
+	})
+	gdb.Create(&model.CollectRecord{
+		BatchID:    "still-running",
 		Trigger:    model.CollectTriggerCron,
-		Status:     model.CollectRecordStatusPartial,
+		Status:     model.CollectRecordStatusRunning,
 		StartedAt:  now.Add(time.Minute),
-		DetailJson: `[{"sourceId":"src_b","sourceName":"备用站B","status":"partial","error":"timeout","failedPages":[1,2]}]`,
+		DetailJson: `[{"sourceId":"src_b","sourceName":"备用站B","status":"failed","error":"timeout"}]`,
 	})
 
 	filmsnapshot.ClearActiveFilmReadModel()
@@ -99,7 +107,7 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 2 {
+	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 1 {
 		t.Fatalf("library = %+v", stats.Library)
 	}
 	if len(stats.Sources) != 3 {
@@ -114,7 +122,7 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 		t.Fatalf("src_a = %+v", primary)
 	}
 	other := byID["src_b"]
-	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 1 {
+	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 0 {
 		t.Fatalf("src_b = %+v", other)
 	}
 	off := byID["src_off"]

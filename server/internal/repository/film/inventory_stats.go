@@ -2,7 +2,6 @@ package film
 
 import (
 	"strings"
-	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -11,14 +10,15 @@ import (
 )
 
 // LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。
-// 失败数是最近一次已结算仍未恢复的采集站个数，部分失败和异常中断也算。
+// 失败数是最近一次已结算采集里的异常站点数。
 type LibraryInventory struct {
 	Films       int64 `json:"films"`
 	MultiSource int64 `json:"multiSource"`
 	Failures    int64 `json:"failures"`
 }
 
-// SourceInventory 单个采集站的规模。影片、多源聚合、分类按当前列表口径。失败是该站是否仍有未恢复异常。
+// SourceInventory 单个采集站的规模。影片、多源聚合、分类按当前列表口径。
+// 失败是该站在最近一次已结算采集里是否异常。
 type SourceInventory struct {
 	Id          string `json:"id"`
 	Name        string `json:"name"`
@@ -54,7 +54,7 @@ func GetInventoryStats() (InventoryStats, error) {
 	return InventoryStats{Library: library, Sources: sources}, nil
 }
 
-// GetLibraryInventory 统计当前主站档案、多源聚合和失败记录。
+// GetLibraryInventory 统计当前主站档案、多源聚合，以及最近一次已结算采集的异常站点数。
 func GetLibraryInventory() (LibraryInventory, error) {
 	var library LibraryInventory
 	if db.Mdb == nil {
@@ -68,8 +68,9 @@ func GetLibraryInventory() (LibraryInventory, error) {
 		library.Films = films[primaryID]
 		library.MultiSource = multiSource[primaryID]
 	}
-	incidents, _ := repository.ListOpenSourceIncidents(time.Now())
-	library.Failures = int64(len(incidents))
+	if total, _, err := repository.CountLatestCollectExceptions(); err == nil {
+		library.Failures = total
+	}
 	return library, nil
 }
 
@@ -80,7 +81,7 @@ func activePrimaryID() string {
 	return ""
 }
 
-// GetSourceInventories 按采集站统计影片、多源聚合、分类和失败记录。
+// GetSourceInventories 按采集站统计影片、多源聚合、分类，以及该站在最近一次已结算采集里是否异常。
 // 影片是该站自己的档案，含没有线路的。分类只计该站映射到、且展示分类还在的节点。
 func GetSourceInventories() ([]SourceInventory, error) {
 	sources := []SourceInventory{}
@@ -95,9 +96,8 @@ func GetSourceInventories() ([]SourceInventory, error) {
 	if err != nil {
 		return nil, err
 	}
-	incidents, _ := repository.ListOpenSourceIncidents(time.Now())
+	_, failureCounts, _ := repository.CountLatestCollectExceptions()
 	categoryCounts := indexCounts(categoryRows)
-	failureCounts := incidentCounts(incidents)
 	primaryID := activePrimaryID()
 	sourceList, err := repository.GetCollectSourceList()
 	if err != nil {
@@ -131,18 +131,6 @@ func countCategoriesBySource() ([]sourceCount, error) {
 		Group("source_id").
 		Scan(&rows).Error
 	return rows, err
-}
-
-func incidentCounts(incidents []model.SourceIncident) map[string]int64 {
-	out := make(map[string]int64, len(incidents))
-	for _, inc := range incidents {
-		id := strings.TrimSpace(inc.SourceID)
-		if id == "" {
-			continue
-		}
-		out[id] = 1
-	}
-	return out
 }
 
 func indexCounts(rows []sourceCount) map[string]int64 {
