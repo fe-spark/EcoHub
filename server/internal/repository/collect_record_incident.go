@@ -23,6 +23,7 @@ type incidentAcc struct {
 	errMsg      string
 	batchID     string
 	closed      bool
+	streakDone  bool
 }
 
 func sameDay(a, b time.Time) bool {
@@ -46,7 +47,9 @@ func TrippedSourceIDsToday(now time.Time) (map[string]struct{}, error) {
 }
 
 // ListOpenSourceIncidents 追溯各采集站未自愈的异常状态。
-// 采用分批检索 + 状态闭合早停机制：正常情况下扫描最近 1~2 批即可提前退出，杜绝全表扫描与硬编码截断。
+// 最近一次已结算为失败、部分失败或异常中断都算未恢复；成功、完成和用户停止才闭合。
+// 采集中的进度不算恢复。熔断只看连续整站失败，部分失败不计入熔断。
+// 采用分批检索 + 状态闭合早停：站点一旦自愈或连续失败已经截断，就不再往下扫。
 func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("数据库未连接")
@@ -87,12 +90,11 @@ func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 
 		processIncidentRecords(pageRows, states, &order)
 
-		// 检查是否所有活跃站点都已完成状态结算（已闭合判定自愈或已确定连续失败）
+		// 活跃站点都已自愈，或连续整站失败已经遇到非失败记录，就可以停。
 		if len(activeSourceSet) > 0 {
 			allResolved := true
 			for sid := range activeSourceSet {
-				st := states[sid]
-				if st == nil || !st.closed {
+				if !incidentStateResolved(states[sid]) {
 					allResolved = false
 					break
 				}
@@ -111,7 +113,7 @@ func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 	out := make([]model.SourceIncident, 0)
 	for _, id := range order {
 		st := states[id]
-		if st == nil || st.status != "failed" {
+		if st == nil || st.closed || !isOpenIncidentStatus(st.status) {
 			continue
 		}
 		name := st.name
@@ -125,10 +127,41 @@ func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 			LatestFailedAt:      st.at,
 			LatestError:         st.errMsg,
 			LatestBatchID:       st.batchID,
-			Tripped:             st.consecutive >= sourceIncidentTripAfter,
+			Tripped:             st.status == model.CollectRecordStatusFailed && st.consecutive >= sourceIncidentTripAfter,
 		})
 	}
 	return out, nil
+}
+
+func incidentStateResolved(st *incidentAcc) bool {
+	return st != nil && st.status != "" && (st.closed || st.streakDone || st.status != model.CollectRecordStatusFailed)
+}
+
+func isInFlightDetailStatus(status string) bool {
+	switch status {
+	case model.CollectRecordStatusRunning, "starting", "stopping", "sealing", "waiting", "syncing":
+		return true
+	default:
+		return false
+	}
+}
+
+func isOpenIncidentStatus(status string) bool {
+	switch status {
+	case model.CollectRecordStatusFailed, model.CollectRecordStatusPartial, model.CollectRecordStatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+func isHealedDetailStatus(status string) bool {
+	switch status {
+	case model.CollectRecordStatusSuccess, model.CollectRecordStatusStopped, "done":
+		return true
+	default:
+		return false
+	}
 }
 
 func processIncidentRecords(rows []model.CollectRecord, states map[string]*incidentAcc, order *[]string) {
@@ -143,7 +176,8 @@ func processIncidentRecords(rows []model.CollectRecord, states map[string]*incid
 		}
 		for _, d := range details {
 			id := strings.TrimSpace(d.SourceID)
-			if id == "" {
+			status := strings.TrimSpace(d.Status)
+			if id == "" || status == "" || isInFlightDetailStatus(status) {
 				continue
 			}
 			st := states[id]
@@ -152,27 +186,112 @@ func processIncidentRecords(rows []model.CollectRecord, states map[string]*incid
 				states[id] = st
 				*order = append(*order, id)
 			}
-			if st.closed || st.status != "" && st.status != "failed" {
+			if st.closed || st.streakDone {
 				continue
 			}
 			if st.status == "" {
 				st.name = strings.TrimSpace(d.SourceName)
-				st.status = d.Status
+				st.status = status
 				st.at = rec.StartedAt
 				st.errMsg = strings.TrimSpace(d.Error)
 				st.batchID = rec.BatchID
-				if d.Status == "failed" {
+				switch {
+				case status == model.CollectRecordStatusFailed:
 					st.consecutive = 1
-				} else {
+				case isOpenIncidentStatus(status):
+					st.consecutive = 1
+					st.streakDone = true
+				case isHealedDetailStatus(status):
 					st.closed = true
+				default:
+					st.streakDone = true
 				}
 				continue
 			}
-			if d.Status == "failed" {
+			if status == model.CollectRecordStatusFailed {
 				st.consecutive++
 				continue
 			}
-			st.closed = true
+			st.streakDone = true
 		}
 	}
+}
+
+// CountTodayCollectFailures 统计北京时间当天采集的失败页。
+// 失败请求没有返回影片列表，库里没有失败部数，所以按失败页合计。进行中的批次也算。
+func CountTodayCollectFailures(now time.Time) (int64, map[string]int64, error) {
+	bySource := map[string]int64{}
+	if db.Mdb == nil {
+		return 0, bySource, errors.New("数据库未连接")
+	}
+	start, end := shanghaiDayRange(now)
+	var rows []model.CollectRecord
+	err := db.Mdb.Select("page_failed", "detail_json").
+		Where("started_at >= ? AND started_at < ?", start, end).
+		Find(&rows).Error
+	if err != nil {
+		return 0, bySource, err
+	}
+	var total int64
+	for _, rec := range rows {
+		pages, attributed := failurePagesBySource(rec.DetailJson)
+		if !attributed {
+			if rec.PageFailed > 0 {
+				total += int64(rec.PageFailed)
+			}
+			continue
+		}
+		for id, n := range pages {
+			if n <= 0 {
+				continue
+			}
+			bySource[id] += n
+			total += n
+		}
+	}
+	return total, bySource, nil
+}
+
+func shanghaiDayRange(now time.Time) (time.Time, time.Time) {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.Local
+	}
+	now = now.In(loc)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	return start, start.AddDate(0, 0, 1)
+}
+
+func failurePagesBySource(raw string) (map[string]int64, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" || raw == "null" {
+		return nil, false
+	}
+	var details []model.CollectRecordSourceDetail
+	if err := json.Unmarshal([]byte(raw), &details); err != nil || len(details) == 0 {
+		return nil, false
+	}
+	out := map[string]int64{}
+	for _, d := range details {
+		id := strings.TrimSpace(d.SourceID)
+		if id == "" {
+			continue
+		}
+		out[id] += int64(failurePageCount(d))
+	}
+	return out, true
+}
+
+func failurePageCount(d model.CollectRecordSourceDetail) int {
+	n := d.FailedCnt
+	if pages := len(d.FailedPages); pages > n {
+		n = pages
+	}
+	if n < 0 {
+		return 0
+	}
+	return n
 }
