@@ -367,20 +367,15 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
         }
 
         const pages = formatCollectPages(record);
-        const ledgerLines = pages.secondary ? pages.secondary.split(" · ") : [];
         return (
           <div className={styles.statCell}>
-            <span className={`${styles.statRow} ${pages.alert ? styles.statFail : styles.statTotal}`}>
+            <span className={`${styles.statRow} ${pages.alert ? styles.statFail : ""}`}>
               {pages.alert ? <CloseCircleOutlined /> : <FileTextOutlined />}
               {pages.primary}
             </span>
-            {ledgerLines.length > 0 ? (
-              <span className={styles.pageLedger}>
-                {ledgerLines.map((line, index) => (
-                  <span key={index} className={`${styles.statRow} ${styles.statTotal}`}>
-                    <MarkedFailureText text={line} failClassName={styles.metricFail} />
-                  </span>
-                ))}
+            {pages.secondary ? (
+              <span className={`${styles.statRow} ${styles.statTotal}`}>
+                <MarkedFailureText text={pages.secondary} failClassName={styles.metricFail} />
               </span>
             ) : null}
           </div>
