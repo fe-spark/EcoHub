@@ -1,31 +1,28 @@
 package snapshot
 
 import (
+	"context"
 	"log"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 )
 
-// ResealSearchIndexMids 按编号封口。编号视为完整增量。
+// ResealSearchIndexMids 按编号封口。
 func ResealSearchIndexMids(mids []int64) bool {
-	return ResealSearchIndex(mids, false)
+	return ResealSearchIndex(mids)
 }
 
 // ResealSearchIndex 全部采集队列结束后的唯一封口。
-// incomplete 表示这一轮采集队列里有全量采集。只有这时才整表顺序重建。
-// 内存索引不可用或还是空的，也整表重建，避免把残缺索引发布出去。
+// 内存索引不可用或还是空的，整表顺序重建。
 // 点查失败同样改为顺序加载。成功打进内存索引时返回 true。
-func ResealSearchIndex(mids []int64, incomplete bool) bool {
+func ResealSearchIndex(mids []int64) bool {
 	startedAt := time.Now()
-	log.Printf("[ActiveReadModel] 检索索引封口进入 raw=%d incomplete=%t", len(mids), incomplete)
-	if incomplete {
-		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 raw=%d full=true", len(mids))
-		RequestActiveFilmSearchIndexRebuild()
-		return false
-	}
 	mids = NormalizeSnapshotMIDs(mids)
+	log.Printf("[ActiveReadModel] 检索索引封口进入 raw=%d", len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return false
 	}
@@ -36,8 +33,8 @@ func ResealSearchIndex(mids []int64, incomplete bool) bool {
 	if base != nil {
 		items = len(base.Items)
 	}
-	if incomplete || !searchIndexReady(base, version) || items == 0 {
-		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 mids=%d items=%d full=%t", len(mids), items, incomplete)
+	if !searchIndexReady(base, version) || items == 0 {
+		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 mids=%d items=%d", len(mids), items)
 		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}
@@ -151,35 +148,46 @@ func resealProgressStep(total int64) int64 {
 }
 
 func loadSearchMetaUpserts(mids []int64, onBatch func(n int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+	if len(mids) == 0 {
+		return make(map[int64]FilmSearchMeta), make(map[int64]struct{}), nil
+	}
 	drop := make(map[int64]struct{}, len(mids))
 	for _, id := range mids {
 		drop[id] = struct{}{}
 	}
-	const batchSize = 1000
-	var allRows []dbMetaRow
-	for i := 0; i < len(mids); i += batchSize {
-		end := i + batchSize
-		if end > len(mids) {
-			end = len(mids)
+	const batchSize = 2500
+	allRows := make([]dbMetaRow, 0, len(mids))
+	var plays map[int64][]string
+	g, _ := errgroup.WithContext(context.Background())
+	g.Go(func() error {
+		for i := 0; i < len(mids); i += batchSize {
+			end := i + batchSize
+			if end > len(mids) {
+				end = len(mids)
+			}
+			var batchRows []dbMetaRow
+			if err := db.Mdb.Model(&model.FilmIndex{}).
+				Select(filmMetaSelect).
+				Where("mid IN ?", mids[i:end]).
+				Find(&batchRows).Error; err != nil {
+				return err
+			}
+			allRows = append(allRows, batchRows...)
+			if onBatch != nil {
+				onBatch(end - i)
+			}
 		}
-		var batchRows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmIndex{}).
-			Select(filmMetaSelect).
-			Where("mid IN ?", mids[i:end]).
-			Find(&batchRows).Error; err != nil {
-			return nil, nil, err
-		}
-		allRows = append(allRows, batchRows...)
-		if onBatch != nil {
-			onBatch(end - i)
-		}
-	}
-	log.Printf("[ActiveReadModel] 检索索引基础元数据读取完成 rows=%d，开始读取播放线路 mids=%d", len(allRows), len(mids))
-	plays, err := loadPlaySources(mids)
-	if err != nil {
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		plays, err = loadPlaySources(mids)
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return nil, nil, err
 	}
-	log.Printf("[ActiveReadModel] 检索索引播放线路读取完成 mids=%d", len(mids))
+	log.Printf("[ActiveReadModel] 检索索引元数据与播放线路读取完成 rows=%d mids=%d", len(allRows), len(mids))
 	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
 	for _, r := range allRows {
 		meta := metaFromRow(r)

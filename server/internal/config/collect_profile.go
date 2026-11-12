@@ -3,7 +3,7 @@ package config
 import "sync/atomic"
 
 const (
-	// CollectWriteSlotMin 写并发起点。真实耗时变快再往上加。
+	// CollectWriteSlotMin 写并发下限。变慢或锁等待时减到这里。
 	CollectWriteSlotMin = 2
 	// CollectWriteSlotMax 写并发硬顶，避免把数据库打满。
 	CollectWriteSlotMax = 16

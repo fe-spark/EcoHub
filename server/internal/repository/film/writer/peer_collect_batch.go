@@ -8,6 +8,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
 	"server/internal/utils"
 
@@ -338,6 +339,22 @@ func dropForeignFilms(items []peerPageItem, sourceID string) {
 			items[i].film, items[i].mid = nil, 0
 		}
 	}
+}
+
+// stampNewFilmPlaySummary 把新片的备注和播放摘要写进插入行。只取播放线路，下载组更长时不能盖住正片集标题。
+func stampNewFilmPlaySummary(fi *model.FilmIndex, source *model.FilmSource, detail model.MovieDetail, sources []model.FilmSource) {
+	if fi == nil || source == nil {
+		return
+	}
+	lines := buildPlaylistsFromDetail(0, source.Id, detail)
+	playLines := make([]model.FilmSourcePlaylist, 0, len(lines))
+	for _, line := range lines {
+		if line.LineKind == "play" {
+			playLines = append(playLines, line)
+		}
+	}
+	fi.Remarks = pickPlaylistRemarks(playLines, sources)
+	fi.PlayFromSummary = snapshot.BuildPlayFromSummaryFromPlaylists(playLines, sources)
 }
 
 func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem, sources []model.FilmSource) error {
