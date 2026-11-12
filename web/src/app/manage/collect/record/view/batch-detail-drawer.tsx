@@ -5,7 +5,6 @@ import {
   Drawer,
   Button,
   Popconfirm,
-  Alert,
   Typography,
 } from "antd";
 import {
@@ -104,16 +103,6 @@ export function BatchDetailDrawer({
             })
           }
         />
-
-        {record.errorMsg?.trim() && (
-          <Alert
-            type="error"
-            showIcon
-            message="批次异常摘要"
-            description={record.errorMsg}
-            className={styles.drawerAlert}
-          />
-        )}
 
         <div className={styles.drawerSectionHeader}>
           <div className={styles.tableTitle}>各采集源成果与影片详情</div>
