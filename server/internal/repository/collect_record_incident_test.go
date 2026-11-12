@@ -172,9 +172,13 @@ func TestListOpenSourceIncidentsPartialInterruptedAndInFlight(t *testing.T) {
 	}
 }
 
-func TestCountLatestCollectExceptions(t *testing.T) {
+func TestCountTodayCollectFailures(t *testing.T) {
 	setupTestDB(t)
-	now := time.Date(2026, 11, 12, 15, 0, 0, 0, time.Local)
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 12, 15, 0, 0, 0, loc)
 	write := func(rec *model.CollectRecord) {
 		t.Helper()
 		if err := CreateCollectRecord(rec); err != nil {
@@ -182,66 +186,31 @@ func TestCountLatestCollectExceptions(t *testing.T) {
 		}
 	}
 	write(&model.CollectRecord{
-		BatchID: "old-fail", Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusFailed,
-		StartedAt: now.Add(-2 * time.Hour), FailedSources: 1,
-		DetailJson: `[{"sourceId":"src-old","status":"failed"}]`,
+		BatchID: "yesterday", Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusPartial,
+		StartedAt: now.AddDate(0, 0, -1), PageFailed: 50,
+		DetailJson: `[{"sourceId":"src-old","status":"partial","failedCnt":50}]`,
 	})
 	write(&model.CollectRecord{
-		BatchID: "latest", Trigger: model.CollectTriggerManual, Status: model.CollectRecordStatusPartial,
-		StartedAt: now,
-		DetailJson: `[{"sourceId":"src-a","status":"partial"},{"sourceId":"src-b","status":"done"},` +
-			`{"sourceId":"src-c","status":"interrupted"},{"sourceId":"src-d","status":"stopped"},{"sourceId":"src-a","status":"failed"}]`,
+		BatchID: "today-a", Trigger: model.CollectTriggerManual, Status: model.CollectRecordStatusPartial,
+		StartedAt: now, PageFailed: 13,
+		DetailJson: `[{"sourceId":"src-a","status":"partial","failedCnt":11,"failedPages":[1,2]},{"sourceId":"src-b","status":"done","failedCnt":0}]`,
 	})
 	write(&model.CollectRecord{
-		BatchID: "single", Trigger: model.CollectTriggerSingleUpdate, Status: model.CollectRecordStatusFailed,
-		StartedAt:  now.Add(time.Minute),
-		DetailJson: `[{"sourceId":"src-single","status":"failed"}]`,
+		BatchID: "today-b", Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusRunning,
+		StartedAt: now.Add(time.Minute), PageFailed: 2,
+		DetailJson: `[{"sourceId":"src-a","status":"running","failedCnt":2}]`,
 	})
 	write(&model.CollectRecord{
-		BatchID: "running", Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusRunning,
-		StartedAt:  now.Add(2 * time.Minute),
-		DetailJson: `[{"sourceId":"src-run","status":"failed"}]`,
-	})
-
-	total, bySource, err := CountLatestCollectExceptions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total != 2 || bySource["src-a"] != 1 || bySource["src-c"] != 1 || bySource["src-b"] != 0 || bySource["src-d"] != 0 || bySource["src-old"] != 0 || bySource["src-single"] != 0 || bySource["src-run"] != 0 {
-		t.Fatalf("total=%d by=%v", total, bySource)
-	}
-}
-
-func TestCountLatestCollectExceptionsInterruptedAndEmptyDetail(t *testing.T) {
-	setupTestDB(t)
-	now := time.Date(2026, 11, 12, 16, 0, 0, 0, time.Local)
-	if err := CreateCollectRecord(&model.CollectRecord{
-		BatchID: "cut", Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusInterrupted,
-		StartedAt:  now.Add(-time.Hour),
-		DetailJson: `[{"sourceId":"src-live","status":"running"},{"sourceId":"src-ok","status":"done"}]`,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	total, bySource, err := CountLatestCollectExceptions()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total != 1 || bySource["src-live"] != 1 || bySource["src-ok"] != 0 {
-		t.Fatalf("interrupted in-flight total=%d by=%v", total, bySource)
-	}
-
-	if err := CreateCollectRecord(&model.CollectRecord{
 		BatchID: "bare", Trigger: model.CollectTriggerCron, Status: model.CollectRecordStatusFailed,
-		StartedAt: now, FailedSources: 4,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	total, bySource, err = CountLatestCollectExceptions()
+		StartedAt: now.Add(2 * time.Minute), PageFailed: 4,
+	})
+
+	total, bySource, err := CountTodayCollectFailures(now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 4 || len(bySource) != 0 {
-		t.Fatalf("empty detail total=%d by=%v", total, bySource)
+	if total != 17 || bySource["src-a"] != 13 || bySource["src-b"] != 0 || bySource["src-old"] != 0 {
+		t.Fatalf("total=%d by=%v", total, bySource)
 	}
 }
 

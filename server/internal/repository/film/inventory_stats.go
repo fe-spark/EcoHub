@@ -2,6 +2,7 @@ package film
 
 import (
 	"strings"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -10,7 +11,7 @@ import (
 )
 
 // LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。
-// 失败数是最近一次已结算采集里的异常站点数。
+// 失败数是北京时间当天采集的失败页合计。失败请求没有影片列表，不能按部数统计。
 type LibraryInventory struct {
 	Films       int64 `json:"films"`
 	MultiSource int64 `json:"multiSource"`
@@ -18,7 +19,7 @@ type LibraryInventory struct {
 }
 
 // SourceInventory 单个采集站的规模。影片、多源聚合、分类按当前列表口径。
-// 失败是该站在最近一次已结算采集里是否异常。
+// 失败是该站北京时间当天的失败页数。
 type SourceInventory struct {
 	Id          string `json:"id"`
 	Name        string `json:"name"`
@@ -54,7 +55,7 @@ func GetInventoryStats() (InventoryStats, error) {
 	return InventoryStats{Library: library, Sources: sources}, nil
 }
 
-// GetLibraryInventory 统计当前主站档案、多源聚合，以及最近一次已结算采集的异常站点数。
+// GetLibraryInventory 统计当前主站档案、多源聚合，以及当天采集失败页。
 func GetLibraryInventory() (LibraryInventory, error) {
 	var library LibraryInventory
 	if db.Mdb == nil {
@@ -68,7 +69,7 @@ func GetLibraryInventory() (LibraryInventory, error) {
 		library.Films = films[primaryID]
 		library.MultiSource = multiSource[primaryID]
 	}
-	if total, _, err := repository.CountLatestCollectExceptions(); err == nil {
+	if total, _, err := repository.CountTodayCollectFailures(time.Now()); err == nil {
 		library.Failures = total
 	}
 	return library, nil
@@ -81,7 +82,7 @@ func activePrimaryID() string {
 	return ""
 }
 
-// GetSourceInventories 按采集站统计影片、多源聚合、分类，以及该站在最近一次已结算采集里是否异常。
+// GetSourceInventories 按采集站统计影片、多源聚合、分类，以及该站当天失败页。
 // 影片是该站自己的档案，含没有线路的。分类只计该站映射到、且展示分类还在的节点。
 func GetSourceInventories() ([]SourceInventory, error) {
 	sources := []SourceInventory{}
@@ -96,7 +97,7 @@ func GetSourceInventories() ([]SourceInventory, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, failureCounts, _ := repository.CountLatestCollectExceptions()
+	_, failureCounts, _ := repository.CountTodayCollectFailures(time.Now())
 	categoryCounts := indexCounts(categoryRows)
 	primaryID := activePrimaryID()
 	sourceList, err := repository.GetCollectSourceList()
