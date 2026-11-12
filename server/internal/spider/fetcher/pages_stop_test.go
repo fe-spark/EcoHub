@@ -66,7 +66,12 @@ func TestCollectPages_ZeroSuccessStopAtLimit(t *testing.T) {
 
 func TestCollectPages_WithTargetPages(t *testing.T) {
 	oldDeps := deps
-	t.Cleanup(func() { deps = oldDeps })
+	oldDelay := fetchRetryBase
+	t.Cleanup(func() {
+		deps = oldDeps
+		fetchRetryBase = oldDelay
+	})
+	fetchRetryBase = 0
 
 	deps.WaitTurn = func(ctx context.Context, _ *model.FilmSource, _ string) (func(error), error) {
 		return func(error) {}, nil
