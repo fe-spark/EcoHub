@@ -6,6 +6,10 @@ export interface NamedSkip {
   reason: string;
 }
 
+/** 按钮、提示和跳过原因共用。说清不能新开，以及正在跑的采集不会被停掉。 */
+export const collectIndexUpdatingReason =
+  "检索索引正在更新，现在不能新开采集。正在进行的采集会继续跑完。";
+
 /** 分类采集中的站不能勾选，避免和正在拉取的分类冲突。 */
 export function isSourceSelectable(site: FilmSource): boolean {
   return !site.categorySyncing;
@@ -17,7 +21,7 @@ export function collectBlockReason(
   searchIndex?: SearchIndexProgress | null,
 ): string {
   if (searchIndex?.status === "indexing") {
-    return "检索索引更新中，采集已暂停";
+    return collectIndexUpdatingReason;
   }
   if (site.categorySyncing) {
     return "分类采集中";
