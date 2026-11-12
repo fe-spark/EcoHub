@@ -10,14 +10,15 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
-// LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。失败数是仍未恢复的采集站个数。
+// LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。
+// 失败数是最近一次已结算仍未恢复的采集站个数，部分失败和异常中断也算。
 type LibraryInventory struct {
 	Films       int64 `json:"films"`
 	MultiSource int64 `json:"multiSource"`
 	Failures    int64 `json:"failures"`
 }
 
-// SourceInventory 单个采集站的规模。影片、多源聚合、分类、失败记录各自跟当前列表口径。
+// SourceInventory 单个采集站的规模。影片、多源聚合、分类按当前列表口径。失败是该站是否仍有未恢复异常。
 type SourceInventory struct {
 	Id          string `json:"id"`
 	Name        string `json:"name"`

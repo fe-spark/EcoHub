@@ -131,11 +131,20 @@
   display: flex;
   align-items: flex-start;
   gap: 6px;
+  width: 100%;
   padding: 8px 12px;
   background: var(--ant-color-error-bg);
   border: 1px solid var(--ant-color-error-border);
   border-radius: 6px;
+  font: inherit;
   font-size: 12px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--ant-color-error);
+  }
 }
 
 .sourceCardErrorIcon {
@@ -155,6 +164,18 @@
   line-height: 18px;
   color: var(--ant-color-error-text);
   word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sourceCardErrorAction {
+  flex-shrink: 0;
+  color: var(--ant-color-error);
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .detailEmpty {
