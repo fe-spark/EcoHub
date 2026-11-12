@@ -1,5 +1,6 @@
 import React from "react";
 import { Button, Card, Popconfirm, Space, Tooltip } from "antd";
+import { collectIndexUpdatingReason } from "./collect-selection";
 import styles from "./index.module.less";
 
 export interface CollectToolbarProps {
@@ -55,7 +56,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
           </Button>
         </Space>
         <Space size={8} wrap className={`${styles.toolbarSpace} ${styles.toolbarActions}`}>
-          <Tooltip title={isIndexing ? "检索索引更新中，采集已暂停" : undefined}>
+          <Tooltip title={isIndexing ? collectIndexUpdatingReason : undefined}>
             <span>
               <Button
                 type="primary"

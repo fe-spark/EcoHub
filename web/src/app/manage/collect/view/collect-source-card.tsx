@@ -8,6 +8,7 @@ import {
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { FilmSource, SourceIncident } from "./types";
+import { collectIndexUpdatingReason } from "./collect-selection";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
 import CollectSourceCardMeta from "./collect-source-card-meta";
@@ -94,7 +95,7 @@ export default function CollectSourceCard({
     Boolean(record.categorySyncing) ||
     record.categoryReady === false;
   const startTitle = indexing
-    ? "检索索引更新中，采集已暂停"
+    ? collectIndexUpdatingReason
     : sealing
       ? "待检索"
       : !record.state

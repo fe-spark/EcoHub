@@ -1,5 +1,6 @@
 import { Button, Drawer, Flex, Form, Select, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { collectIndexUpdatingReason } from "./collect-selection";
 import { collectDuration } from "./types";
 import styles from "./batch-collect-drawer.module.less";
 
@@ -61,7 +62,7 @@ export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
       extra={
         <Space>
           <Button onClick={onCancel}>取消</Button>
-          <Tooltip title={isIndexing ? "检索索引更新中，采集已暂停" : undefined}>
+          <Tooltip title={isIndexing ? collectIndexUpdatingReason : undefined}>
             <span>
               <Button
                 type="primary"

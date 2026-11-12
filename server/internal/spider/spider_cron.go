@@ -145,18 +145,39 @@ func ReloadCronTask(id string) error {
 }
 
 // executeTask 执行已入队或手动触发的任务。
-// runningCronTasks 保证同一任务同一时刻只跑一份，重叠触发直接跳过。
+// runningCronTasks 保证同一任务同一时刻只跑一条队列。
+// 自动采集重叠到点时不丢掉这次触发：当前队列结束后再补采一轮当时空闲的站。
 // manual 表示手动“立即执行”，此时失败不发定时任务告警。
 func executeTask(ft model.FilmCollectTask, manual bool) {
 	if !ft.State {
 		return
 	}
 	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
+		if ft.Model == model.TaskModelAutoCollect {
+			noteCronCollectRerun(ft.Id)
+			log.Printf("定时采集仍在执行，本轮结束后补采当前空闲站点: Task[%s]\n", ft.Id)
+			return
+		}
 		log.Printf("定时任务跳过: Task[%s] 已在执行中\n", ft.Id)
 		return
 	}
 	defer runningCronTasks.Delete(ft.Id)
 	runTaskBody(ft, manual)
+}
+
+// cronCollectRerun 记录自动采集执行期间又到的点。一轮结束后只补采一次。
+var cronCollectRerun sync.Map
+
+func noteCronCollectRerun(id string) {
+	if id == "" {
+		return
+	}
+	cronCollectRerun.Store(id, struct{}{})
+}
+
+func takeCronCollectRerun(id string) bool {
+	_, ok := cronCollectRerun.LoadAndDelete(id)
+	return ok
 }
 
 func runTaskBody(ft model.FilmCollectTask, manual bool) {
@@ -165,16 +186,7 @@ func runTaskBody(ft model.FilmCollectTask, manual bool) {
 
 	switch ft.Model {
 	case model.TaskModelAutoCollect:
-		if err := autoCollect(model.CollectTriggerCron, ft.Time); err != nil {
-			remark := strings.TrimSpace(ft.Remark)
-			if remark == "" {
-				remark = "自动采集"
-			}
-			syslog.Errorf("[Cron] %s 失败: %v", remark, err)
-			if !manual {
-				emitCronFailedNotify(ft.Id, remark, err.Error())
-			}
-		}
+		runAutoCollectTask(ft, manual)
 		log.Println("执行一次已启用站点采集")
 	case model.TaskModelOrphanClean:
 		executeOrphanCleanTask(ft)

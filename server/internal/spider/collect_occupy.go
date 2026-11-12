@@ -84,6 +84,8 @@ type CollectClaim struct {
 	Sources []model.FilmSource
 	tokens  map[string]uint64
 	epochs  map[string]uint64
+	// queueHeld 为真时采集队列名额已经占下，后续开工不能再占一次。
+	queueHeld bool
 }
 
 func releaseCollectSources(sources []model.FilmSource) {

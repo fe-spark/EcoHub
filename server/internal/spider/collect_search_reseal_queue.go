@@ -11,7 +11,7 @@ import (
 
 // searchResealQueue 全局封口周期。
 // 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
-// 全部采集队列都结束后再封一次。任一队列里有全量站就整表重建，否则按编号增量封口。
+// 全部采集队列都结束后再封一次。编号是否完整增量交给同一次封口判断。
 type searchResealQueue struct {
 	mu          sync.Mutex
 	pending     map[int64]struct{}
@@ -31,16 +31,16 @@ var searchSealRunning atomic.Bool
 
 var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 
-var applySearchReseal = filmsnapshot.ResealSearchIndexMids
-
-// requestSearchRebuild 全量站参与本轮时整表重建，不再按编号点查。
-var requestSearchRebuild = filmsnapshot.RequestActiveFilmSearchIndexRebuild
+// sealSearchIndex 全部队列结束后的唯一封口。第二个参数为真时编号不是完整增量，函数在点查前整表顺序加载。
+var sealSearchIndex = filmsnapshot.ResealSearchIndex
 
 // collectQueueCount 正在跑的采集队列。封口要等每一条队列结束，不能只看当前没有站在抓页。
+// frozen 只在本轮已经没有队列、准备落地封口时置位。还有队列时新队列可以加入这一轮。
 type collectQueueCount struct {
-	mu   sync.Mutex
-	cond *sync.Cond
-	n    int
+	mu     sync.Mutex
+	cond   *sync.Cond
+	n      int
+	frozen bool
 }
 
 func newCollectQueueCount() *collectQueueCount {
@@ -57,11 +57,51 @@ func beginCollectQueue() {
 	collectQueues.mu.Unlock()
 }
 
+// tryBeginCollectQueue 占用一条采集队列。索引正在更新，或封口已经没有队列、准备落地时，拒绝加入。
+// 拒绝空档的同时冻结入队，和封口线程看到的空闲是同一次判断。
+func tryBeginCollectQueue() (bool, error) {
+	if indexBuildBlocksCollect() {
+		return false, errSearchIndexUpdating
+	}
+	collectQueues.mu.Lock()
+	defer collectQueues.mu.Unlock()
+	if collectQueues.frozen {
+		return false, errSearchSealPending
+	}
+	searchReseal.mu.Lock()
+	open := searchReseal.running
+	searchReseal.mu.Unlock()
+	if open && collectQueues.n == 0 {
+		collectQueues.frozen = true
+		return false, errSearchSealPending
+	}
+	collectQueues.n++
+	return true, nil
+}
+
 func endCollectQueue() {
 	collectQueues.mu.Lock()
 	if collectQueues.n > 0 {
 		collectQueues.n--
 	}
+	collectQueues.cond.Broadcast()
+	collectQueues.mu.Unlock()
+}
+
+// freezeCollectQueuesIfIdle 本轮封口准备落地。还有队列时返回 false，调用方继续等。
+func freezeCollectQueuesIfIdle() bool {
+	collectQueues.mu.Lock()
+	defer collectQueues.mu.Unlock()
+	if collectQueues.n > 0 {
+		return false
+	}
+	collectQueues.frozen = true
+	return true
+}
+
+func unfreezeCollectQueues() {
+	collectQueues.mu.Lock()
+	collectQueues.frozen = false
 	collectQueues.cond.Broadcast()
 	collectQueues.mu.Unlock()
 }
@@ -104,7 +144,7 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	}
 }
 
-// noteSearchResealFullCollect 本轮任一采集队列里有全量站。封口时整表重建。
+// noteSearchResealFullCollect 本轮编号不是完整增量（含全量站）。封口时在点查前整表顺序加载。
 func noteSearchResealFullCollect() {
 	q := searchReseal
 	q.mu.Lock()
@@ -155,6 +195,7 @@ func notifySealWaiting() {
 }
 
 func (q *searchResealQueue) run() {
+	defer unfreezeCollectQueues()
 	for {
 		q.mu.Lock()
 		if len(q.pending) == 0 && len(q.sealing) == 0 && !q.fullCollect {
@@ -168,51 +209,58 @@ func (q *searchResealQueue) run() {
 			waitCollectIdle()
 			continue
 		}
-		if collectQueueActive() {
+		if !freezeCollectQueuesIfIdle() {
 			waitCollectQueues()
 			continue
 		}
-
-		q.mu.Lock()
-		mids, full := q.takePendingLocked()
-		q.mu.Unlock()
-
-		if full {
-			searchSealRunning.Store(true)
-			requestSearchRebuild()
-			searchSealRunning.Store(false)
-		} else if len(mids) > 0 {
-			searchSealRunning.Store(true)
-			applySearchReseal(mids)
-			searchSealRunning.Store(false)
-		}
-		// 增量封口失败会转全量重建。已交出的站点等重建结束再收口。
-		// 重建期间新进来的编号还在 pending，继续封。
-		if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
-			parked := false
-			// 先拿重建锁再拿 q.mu，和重建收尾通知监听的顺序一致。
-			filmsnapshot.WithSearchRebuildScheduled(func(scheduled bool) {
-				q.mu.Lock()
-				defer q.mu.Unlock()
-				if len(q.pending) > 0 || !(scheduled || filmsnapshot.IsSearchIndexBuilding()) {
-					return
-				}
-				q.running = false
-				q.awaitDone = true
-				parked = true
-			})
-			if parked {
-				return
-			}
-			continue
-		}
-		// 增量成功时 ResealSearchIndexMids 已发过 done；这里只收口 sealing，不再依赖全局监听。
-		q.complete()
-		if len(mids) == 0 && !full {
-			// 没有编号也要发一次终态，让前端把待检索收成完成。
-			filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
+		if q.sealFrozenRound() {
+			return
 		}
 	}
+}
+
+// sealFrozenRound 落地已经冻结的这一轮封口。返回 true 表示调用方应结束封口循环。
+func (q *searchResealQueue) sealFrozenRound() bool {
+	defer unfreezeCollectQueues()
+
+	q.mu.Lock()
+	if len(q.pending) == 0 && len(q.sealing) == 0 && !q.fullCollect {
+		q.running = false
+		q.mu.Unlock()
+		return true
+	}
+	mids, full := q.takePendingLocked()
+	q.mu.Unlock()
+
+	if full || len(mids) > 0 {
+		searchSealRunning.Store(true)
+		sealSearchIndex(mids, full)
+		searchSealRunning.Store(false)
+	}
+	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。
+	// 重建期间新进来的编号还在 pending，继续封。
+	if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
+		parked := false
+		// 先拿重建锁再拿 q.mu，和重建收尾通知监听的顺序一致。
+		filmsnapshot.WithSearchRebuildScheduled(func(scheduled bool) {
+			q.mu.Lock()
+			defer q.mu.Unlock()
+			if len(q.pending) > 0 || !(scheduled || filmsnapshot.IsSearchIndexBuilding()) {
+				return
+			}
+			q.running = false
+			q.awaitDone = true
+			parked = true
+		})
+		return parked
+	}
+	// 按编号封口成功时 ResealSearchIndex 已发过 done；这里只收口 sealing，不再依赖全局监听。
+	q.complete()
+	if len(mids) == 0 && !full {
+		// 没有编号也要发一次终态，让前端把待检索收成完成。
+		filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
+	}
+	return false
 }
 
 func (q *searchResealQueue) takePendingLocked() ([]int64, bool) {
@@ -252,13 +300,53 @@ func (q *searchResealQueue) onSearchIndexTerminal(status string) {
 	}
 }
 
-// searchIndexBlocksCollect 检索索引正在加载、重建排队或封口队列运行时，不许再开采集。
-func searchIndexBlocksCollect() bool {
+// indexBuildBlocksCollect 索引正在构建、重建已排队，或在等重建终态。
+func indexBuildBlocksCollect() bool {
 	if searchSealRunning.Load() || filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
 		return true
 	}
 	searchReseal.mu.Lock()
-	running := searchReseal.running || searchReseal.awaitDone
+	awaitDone := searchReseal.awaitDone
 	searchReseal.mu.Unlock()
-	return running
+	return awaitDone
+}
+
+// collectAdmissionClosed 封口已冻结，或本轮已打开且当前没有采集队列。
+// 还有队列在跑时返回 false：新队列可以加入，封口会继续等。
+func collectAdmissionClosed() bool {
+	collectQueues.mu.Lock()
+	defer collectQueues.mu.Unlock()
+	if collectQueues.frozen {
+		return true
+	}
+	if collectQueues.n > 0 {
+		return false
+	}
+	searchReseal.mu.Lock()
+	open := searchReseal.running
+	searchReseal.mu.Unlock()
+	return open
+}
+
+// collectPauseErr 现在不能开新的采集队列时返回原因。还有队列在跑时返回 nil。
+func collectPauseErr() error {
+	if indexBuildBlocksCollect() {
+		return errSearchIndexUpdating
+	}
+	if collectAdmissionClosed() {
+		return errSearchSealPending
+	}
+	return nil
+}
+
+func collectPauseReason() string {
+	if err := collectPauseErr(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// searchIndexBlocksCollect 索引正在更新，或封口已经进入空档时，不许再开采集。
+func searchIndexBlocksCollect() bool {
+	return collectPauseErr() != nil
 }

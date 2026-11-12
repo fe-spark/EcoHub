@@ -93,7 +93,7 @@ func NotifySearchIndexProgress(total, current int64, status string) {
 	}
 }
 
-// RequestActiveFilmSearchIndexRebuild 没有可增量的检索索引时才全库扫描。采集结束优先走 ResealSearchIndexMids。
+// RequestActiveFilmSearchIndexRebuild 整表顺序加载检索索引。采集结束先走 ResealSearchIndex，由它决定要不要扫全表。
 func RequestActiveFilmSearchIndexRebuild() {
 	searchRebuild.mu.Lock()
 	searchRebuild.gen++

@@ -19,6 +19,7 @@ import (
 	"server/internal/model"
 	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
+	"server/internal/utils"
 )
 
 // Batch 采集批次上下文在抓取阶段需要的能力；调用方可传 nil（全部方法需 nil-safe）。
@@ -69,11 +70,84 @@ func shouldLogFailure(failed int) bool {
 // 连续失败暂停：站点已有成功页后，连续 sourcePauseFailStreak 页取页失败（多半是被源站按 IP 限流），
 // 整站暂停 sourcePauseDuration 再从断点继续；失败的页照常记为失败，留给「重试失败页」。
 // 连续暂停 sourcePauseMaxTimes 次仍未恢复，再撞上一轮连续失败就结束本站这一轮。包级变量，测试可调小。
+//
+// EOF、连接重置和单页超时经常是同一小波并发一起失败。这种页先整站短暂停，再补抓，不立刻记失败。
 var (
 	sourcePauseFailStreak = 20
 	sourcePauseDuration   = 5 * time.Minute
 	sourcePauseMaxTimes   = 3
+	// transientPageRetries 短暂停之后，同一页最多再补几轮。
+	transientPageRetries = 2
+	// transientPauseAfter 连续这么多页临时失败就停手，避免并发把源站按死。
+	transientPauseAfter = 4
+	transientRetryPause = 15 * time.Second
+	// maxTransientPauses 短暂停次数。用完后不再补抓，改走上面的长暂停。
+	maxTransientPauses = 3
 )
+
+type pageFetch struct {
+	pg        int
+	transient int
+}
+
+// pageFetchQueue 待抓页。补抓放回队尾；全部落地或采集被取消后关闭。
+type pageFetchQueue struct {
+	mu     sync.Mutex
+	ch     chan pageFetch
+	closed bool
+	left   int
+}
+
+func newPageFetchQueue(pages []int) *pageFetchQueue {
+	queue := &pageFetchQueue{
+		ch:   make(chan pageFetch, len(pages)),
+		left: len(pages),
+	}
+	for _, pg := range pages {
+		queue.ch <- pageFetch{pg: pg}
+	}
+	return queue
+}
+
+func (q *pageFetchQueue) close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.closeLocked()
+}
+
+func (q *pageFetchQueue) closeLocked() {
+	if q.closed {
+		return
+	}
+	q.closed = true
+	close(q.ch)
+}
+
+func (q *pageFetchQueue) done() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return
+	}
+	q.left--
+	if q.left <= 0 {
+		q.closeLocked()
+	}
+}
+
+func (q *pageFetchQueue) requeue(ctx context.Context, job pageFetch) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed || ctx.Err() != nil {
+		return false
+	}
+	select {
+	case q.ch <- job:
+		return true
+	default:
+		return false
+	}
+}
 
 func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s *model.FilmSource, h int, batch Batch) (bool, int, int, []int, error) {
 	totalWork := pageCount
@@ -95,28 +169,20 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		maxWorkers = totalWork
 	}
 
-	pages := make(chan int, maxWorkers)
-	writeCompletions := make(chan scheduler.Completion, 2048)
-	go func() {
-		defer close(pages)
-		if useTargetPages {
-			for _, pg := range targetPages {
-				select {
-				case <-ctx.Done():
-					return
-				case pages <- pg:
-				}
-			}
-			return
-		}
+	seed := make([]int, 0, totalWork)
+	if useTargetPages {
+		seed = append(seed, targetPages...)
+	} else {
 		for pg := 1; pg <= pageCount; pg++ {
-			select {
-			case <-ctx.Done():
-				return
-			case pages <- pg:
-			}
+			seed = append(seed, pg)
 		}
+	}
+	pages := newPageFetchQueue(seed)
+	go func() {
+		<-ctx.Done()
+		pages.close()
 	}()
+	writeCompletions := make(chan scheduler.Completion, 2048)
 
 	var writeWG sync.WaitGroup
 	var fetchMu sync.Mutex
@@ -162,12 +228,15 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	}
 	// 连续失败暂停的状态，与 fetchOK/fetchFails 同受 fetchMu 保护。
 	failStreak := 0
+	transientStreak := 0
+	transientPauses := 0
 	pausesInRow := 0
 	var pausedUntil time.Time
 	noteFetchOK := func() {
 		fetchMu.Lock()
 		fetchOK++
 		failStreak = 0
+		transientStreak = 0
 		pausesInRow = 0
 		fetchMu.Unlock()
 	}
@@ -234,6 +303,40 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 			}
 		}()
 	}
+	// noteTransientBurst 连续临时失败时把整站短暂停一次。这次已经停着，只把恢复时间往后推。
+	noteTransientBurst := func() {
+		fetchMu.Lock()
+		if fetchOK == 0 {
+			fetchMu.Unlock()
+			return
+		}
+		transientStreak++
+		if transientStreak < transientPauseAfter {
+			fetchMu.Unlock()
+			return
+		}
+		transientStreak = 0
+		now := time.Now()
+		until := now.Add(transientRetryPause)
+		if now.Before(pausedUntil) {
+			if pausedUntil.Before(until) {
+				pausedUntil = until
+			}
+			fetchMu.Unlock()
+			return
+		}
+		if transientPauses >= maxTransientPauses {
+			fetchMu.Unlock()
+			return
+		}
+		transientPauses++
+		pausedUntil = until
+		nth := transientPauses
+		fetchMu.Unlock()
+		utils.CloseIdleHTTPConnections()
+		log.Printf("[Spider] 站点 %s 连续 %d 页临时失败，暂停 %s 后重试这些页（第 %d/%d 次）",
+			s.Name, transientPauseAfter, transientRetryPause, nth, maxTransientPauses)
+	}
 	noteFetchFail := func(page int, err error) {
 		fetchMu.Lock()
 		fetchFails++
@@ -293,6 +396,23 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		}
 		logProgress(false)
 	}
+	// retryTransient 把 EOF、断连和单页超时放回队尾。还没有成功页的站不补，避免死站放大重试。
+	retryTransient := func(job pageFetch, err error) bool {
+		if !isTransientFetchErr(err) || job.transient >= transientPageRetries {
+			return false
+		}
+		fetchMu.Lock()
+		proven := fetchOK > 0
+		inPause := time.Now().Before(pausedUntil)
+		budgetLeft := transientPauses < maxTransientPauses
+		fetchMu.Unlock()
+		if !proven || (!budgetLeft && !inPause) {
+			return false
+		}
+		noteTransientBurst()
+		job.transient++
+		return pages.requeue(ctx, job)
+	}
 
 	var requestWG sync.WaitGroup
 	requestWG.Add(maxWorkers)
@@ -300,18 +420,27 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		go func() {
 			defer requestWG.Done()
 			for {
+				if ctx.Err() != nil {
+					markStopped()
+					return
+				}
+				if !waitPause() {
+					markStopped()
+					return
+				}
 				select {
 				case <-ctx.Done():
 					markStopped()
 					return
-				case pg, ok := <-pages:
+				case job, ok := <-pages.ch:
 					if !ok {
 						return
 					}
-					if !waitPause() {
+					if ctx.Err() != nil {
 						markStopped()
 						return
 					}
+					pg := job.pg
 					progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 						if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
 							return
@@ -331,11 +460,16 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 							markStopped()
 							return
 						}
+						if retryTransient(job, err) {
+							continue
+						}
 						recordPageFailure(pg, "fetch", err)
 						noteFetchFail(pg, err)
+						pages.done()
 						continue
 					}
 					noteFetchOK()
+					pages.done()
 					page := pg
 					items := list
 					writeWG.Add(1)

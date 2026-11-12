@@ -103,27 +103,44 @@ func runSourcesWithLimitCore(claim CollectClaim, h int, tag, trigger string) {
 		return
 	}
 
+	if !claim.queueHeld {
+		if _, err := tryBeginCollectQueue(); err != nil {
+			log.Printf("[%s] 批量采集跳过：%s", tag, err.Error())
+			claim.abandon()
+			return
+		}
+	}
 	sources := prioritizeCollectSources(claim.Sources)
 	startedAt := time.Now()
 	batchCtx := newCollectBatchContext(trigger, tag, sources, startedAt).withClaim(claim).withHour(h)
 	if err := batchCtx.recordStart(); err != nil {
 		log.Printf("[%s] 初始采集记录写入失败 batchID=%s: %v", tag, batchCtx.batchID, err)
+		endCollectQueue()
 		for _, s := range sources {
 			abandonQueuedCollectSource(s, batchCtx)
 		}
 		batchCtx.close()
 		return
 	}
-	runPreparedBatch(batchCtx, h, tag)
+	runPreparedBatch(batchCtx, h, tag, true)
 }
 
-func runPreparedBatch(batchCtx *collectBatchContext, h int, tag string) {
+func runPreparedBatch(batchCtx *collectBatchContext, h int, tag string, queueHeld bool) {
 	if batchCtx == nil {
 		return
 	}
+	if !queueHeld {
+		if _, err := tryBeginCollectQueue(); err != nil {
+			log.Printf("[%s] 批量采集跳过：%s", tag, err.Error())
+			for _, source := range batchCtx.sources {
+				abandonQueuedCollectSource(source, batchCtx)
+			}
+			batchCtx.close()
+			return
+		}
+	}
 	defer batchCtx.close()
 	// 封口要看到本队列是否全量，所以队列没结束前不能开始检索。
-	beginCollectQueue()
 	defer endCollectQueue()
 
 	runVersion := stopAllVersion.Load()
