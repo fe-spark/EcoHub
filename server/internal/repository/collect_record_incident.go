@@ -8,8 +8,6 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-
-	"gorm.io/gorm"
 )
 
 const (
@@ -219,60 +217,81 @@ func processIncidentRecords(rows []model.CollectRecord, states map[string]*incid
 	}
 }
 
-// CountLatestCollectExceptions 统计最近一次已结算采集里的异常站点。
-// 单片更新和仍在进行的批次不算这次采集。整站失败、部分失败、异常中断各计 1。
-func CountLatestCollectExceptions() (int64, map[string]int64, error) {
+// CountTodayCollectFailures 统计北京时间当天采集的失败页。
+// 失败请求没有返回影片列表，库里没有失败部数，所以按失败页合计。进行中的批次也算。
+func CountTodayCollectFailures(now time.Time) (int64, map[string]int64, error) {
 	bySource := map[string]int64{}
 	if db.Mdb == nil {
 		return 0, bySource, errors.New("数据库未连接")
 	}
-	var rec model.CollectRecord
-	err := db.Mdb.
-		Where("`trigger` != ?", model.CollectTriggerSingleUpdate).
-		Where("status <> ?", model.CollectRecordStatusRunning).
-		Order("started_at DESC, id DESC").
-		First(&rec).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, bySource, nil
-	}
+	start, end := shanghaiDayRange(now)
+	var rows []model.CollectRecord
+	err := db.Mdb.Select("page_failed", "detail_json").
+		Where("started_at >= ? AND started_at < ?", start, end).
+		Find(&rows).Error
 	if err != nil {
 		return 0, bySource, err
 	}
-
-	raw := strings.TrimSpace(rec.DetailJson)
-	if raw == "" || raw == "[]" || raw == "null" {
-		return fallbackLatestExceptions(rec), bySource, nil
-	}
-	var details []model.CollectRecordSourceDetail
-	if err := json.Unmarshal([]byte(raw), &details); err != nil {
-		return fallbackLatestExceptions(rec), bySource, nil
-	}
 	var total int64
-	for _, d := range details {
-		id := strings.TrimSpace(d.SourceID)
-		if id == "" || bySource[id] == 1 {
+	for _, rec := range rows {
+		pages, attributed := failurePagesBySource(rec.DetailJson)
+		if !attributed {
+			if rec.PageFailed > 0 {
+				total += int64(rec.PageFailed)
+			}
 			continue
 		}
-		if !sourceAbnormalInBatch(rec.Status, d.Status) {
-			continue
+		for id, n := range pages {
+			if n <= 0 {
+				continue
+			}
+			bySource[id] += n
+			total += n
 		}
-		bySource[id] = 1
-		total++
 	}
 	return total, bySource, nil
 }
 
-func fallbackLatestExceptions(rec model.CollectRecord) int64 {
-	if isOpenIncidentStatus(rec.Status) && rec.FailedSources > 0 {
-		return int64(rec.FailedSources)
+func shanghaiDayRange(now time.Time) (time.Time, time.Time) {
+	if now.IsZero() {
+		now = time.Now()
 	}
-	return 0
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.Local
+	}
+	now = now.In(loc)
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	return start, start.AddDate(0, 0, 1)
 }
 
-func sourceAbnormalInBatch(batchStatus, sourceStatus string) bool {
-	sourceStatus = strings.TrimSpace(sourceStatus)
-	if isOpenIncidentStatus(sourceStatus) {
-		return true
+func failurePagesBySource(raw string) (map[string]int64, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" || raw == "null" {
+		return nil, false
 	}
-	return batchStatus == model.CollectRecordStatusInterrupted && isInFlightDetailStatus(sourceStatus)
+	var details []model.CollectRecordSourceDetail
+	if err := json.Unmarshal([]byte(raw), &details); err != nil || len(details) == 0 {
+		return nil, false
+	}
+	out := map[string]int64{}
+	for _, d := range details {
+		id := strings.TrimSpace(d.SourceID)
+		if id == "" {
+			continue
+		}
+		out[id] += int64(failurePageCount(d))
+	}
+	return out, true
+}
+
+func failurePageCount(d model.CollectRecordSourceDetail) int {
+	n := d.FailedCnt
+	if pages := len(d.FailedPages); pages > n {
+		n = pages
+	}
+	if n < 0 {
+		return 0
+	}
+	return n
 }
