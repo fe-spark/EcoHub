@@ -2,12 +2,18 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { LoadingOutlined, StepForwardOutlined, PlayCircleOutlined } from "@ant-design/icons";
+import { LoadingOutlined } from "@ant-design/icons";
 import VideoPlayer from "@/components/public/VideoPlayer";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 import { buildPlayPath } from "@/lib/playNavigation";
 import { trackPageView } from "@/lib/track-page-view";
+import { readPreferEnabled, writePreferEnabled } from "@/lib/playPreferSettings";
+import {
+  pickBestProbeResult,
+  probePlaySources,
+  type SourceProbeResult,
+} from "@/lib/playSourceProbe";
 import RelatedFilmsSection from "./RelatedFilmsSection";
 import PlayHeaderCard from "./PlayHeaderCard";
 import PlaySidebar from "./PlaySidebar";
@@ -58,19 +64,45 @@ export default function PlayPageView({
   }, []);
   const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
   const [openingRelatedId, setOpeningRelatedId] = useState("");
+  const [preferEnabled, setPreferEnabled] = useState(false);
+  const [preferBootstrapped, setPreferBootstrapped] = useState(false);
+  const [isProbing, setIsProbing] = useState(false);
+  const [probeReady, setProbeReady] = useState(false);
+  const [probeBySourceId, setProbeBySourceId] = useState<Record<string, SourceProbeResult>>(
+    {},
+  );
+  const [probingSourceIds, setProbingSourceIds] = useState<string[]>([]);
+  const [preferredSourceId, setPreferredSourceId] = useState("");
 
   const activeEpRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLDivElement>(null);
   const sourceTabsRef = useRef<HTMLDivElement>(null);
   const episodeListRef = useRef<HTMLDivElement>(null);
   const sourceMenuRef = useRef<HTMLDivElement>(null);
+  const manualSourceLockRef = useRef(false);
+  const preferRunIdRef = useRef(0);
+  const preferAbortRef = useRef<AbortController | null>(null);
+  const playingSourceIdRef = useRef(playingSourceId);
+  const currentIndexRef = useRef(initialPlaybackState.current?.index ?? 0);
+  const playInitialTimeRef = useRef(initialPlaybackState.playInitialTime);
 
   const currentFilm = data?.detail;
   const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
   const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
 
   const reportedPlaybackKeys = useRef<Set<string>>(new Set());
-  const failedSourcesRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    playingSourceIdRef.current = playingSourceId;
+  }, [playingSourceId]);
+
+  useEffect(() => {
+    currentIndexRef.current = typeof current?.index === "number" ? current.index : 0;
+  }, [current?.index]);
+
+  useEffect(() => {
+    playInitialTimeRef.current = playInitialTime;
+  }, [playInitialTime]);
 
   const applyPlaybackSelection = useCallback(
     (nextSourceId: string, episodeIndex: number, currentPlay: any, nextInitialTime = 0) => {
@@ -82,6 +114,177 @@ export default function PlayPageView({
     },
     [],
   );
+
+  const collectProbeTargets = useCallback(
+    (episodeIndex: number) => {
+      const sources = Array.isArray(currentFilm?.list) ? currentFilm.list : [];
+      return sources
+        .map((source: any) => {
+          const link = source?.linkList?.[episodeIndex]?.link;
+          if (!link) return null;
+          return {
+            sourceId: String(source.id),
+            url: String(link),
+            sourceName: String(source.name || source.id),
+            episodeItem: source.linkList[episodeIndex],
+          };
+        })
+        .filter(Boolean) as Array<{
+        sourceId: string;
+        url: string;
+        sourceName: string;
+        episodeItem: any;
+      }>;
+    },
+    [currentFilm],
+  );
+
+  const runSourcePrefer = useCallback(
+    async (options?: { force?: boolean; episodeIndex?: number }) => {
+      const force = Boolean(options?.force);
+      const episodeIndex =
+        typeof options?.episodeIndex === "number"
+          ? options.episodeIndex
+          : currentIndexRef.current;
+
+      if (!force && manualSourceLockRef.current) {
+        setProbeReady(true);
+        setIsProbing(false);
+        return;
+      }
+
+      const targets = collectProbeTargets(episodeIndex);
+      if (targets.length <= 1) {
+        setProbeBySourceId({});
+        setPreferredSourceId(targets[0]?.sourceId || "");
+        setProbeReady(true);
+        setIsProbing(false);
+        return;
+      }
+
+      preferAbortRef.current?.abort();
+      const controller = new AbortController();
+      preferAbortRef.current = controller;
+      const runId = preferRunIdRef.current + 1;
+      preferRunIdRef.current = runId;
+
+      setIsProbing(true);
+      setProbeReady(false);
+      setProbeBySourceId({});
+      setProbingSourceIds([]);
+
+      try {
+        const results = await probePlaySources(
+          targets.map((item) => ({ sourceId: item.sourceId, url: item.url })),
+          {
+            signal: controller.signal,
+            onStart: (sourceId) => {
+              if (runId !== preferRunIdRef.current) return;
+              setProbingSourceIds((prev) => (prev.includes(sourceId) ? prev : [...prev, sourceId]));
+            },
+            onResult: (result) => {
+              if (runId !== preferRunIdRef.current) return;
+              setProbingSourceIds((prev) => prev.filter((id) => id !== result.sourceId));
+              setProbeBySourceId((prev) => ({ ...prev, [result.sourceId]: result }));
+            },
+          },
+        );
+        if (runId !== preferRunIdRef.current) return;
+
+        const nextMap: Record<string, SourceProbeResult> = {};
+        results.forEach((item) => {
+          nextMap[item.sourceId] = item;
+        });
+        setProbeBySourceId(nextMap);
+
+        const best = pickBestProbeResult(results);
+        setPreferredSourceId(best?.sourceId || "");
+
+        if (best && best.sourceId !== playingSourceIdRef.current) {
+          const matched = targets.find((item) => item.sourceId === best.sourceId);
+          if (matched) {
+            applyPlaybackSelection(
+              matched.sourceId,
+              episodeIndex,
+              matched.episodeItem,
+              playInitialTimeRef.current,
+            );
+            router.replace(buildPlayPath(String(filmId), matched.sourceId, episodeIndex), {
+              scroll: false,
+            });
+            message.success(`已优选播放源：${matched.sourceName}`);
+          }
+        }
+      } catch (error) {
+        if ((error as DOMException)?.name === "AbortError") {
+          return;
+        }
+        console.warn("Source prefer failed:", error);
+      } finally {
+        if (runId === preferRunIdRef.current) {
+          setIsProbing(false);
+          setProbeReady(true);
+          setProbingSourceIds([]);
+        }
+      }
+    },
+    [applyPlaybackSelection, collectProbeTargets, filmId, message, router],
+  );
+
+  useEffect(() => {
+    const enabled = readPreferEnabled();
+    setPreferEnabled(enabled);
+    setPreferBootstrapped(true);
+    manualSourceLockRef.current = false;
+
+    if (!enabled) {
+      setProbeReady(true);
+      setIsProbing(false);
+      setPreferredSourceId("");
+      setProbeBySourceId({});
+      setProbingSourceIds([]);
+      return;
+    }
+
+    void runSourcePrefer({ force: true });
+
+    return () => {
+      preferAbortRef.current?.abort();
+    };
+    // 仅在切换影片时自动测速；开关/重测走显式 handler
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filmId]);
+
+  const handleTogglePrefer = useCallback(() => {
+    const next = !preferEnabled;
+    writePreferEnabled(next);
+    setPreferEnabled(next);
+    if (!next) {
+      preferAbortRef.current?.abort();
+      setIsProbing(false);
+      setProbeReady(true);
+      setPreferredSourceId("");
+      setProbeBySourceId({});
+      setProbingSourceIds([]);
+      return;
+    }
+    manualSourceLockRef.current = false;
+    void runSourcePrefer({ force: true });
+  }, [preferEnabled, runSourcePrefer]);
+
+  const handleRetestPrefer = useCallback(() => {
+    if (!preferEnabled || isProbing) return;
+    manualSourceLockRef.current = false;
+    void runSourcePrefer({ force: true });
+  }, [preferEnabled, isProbing, runSourcePrefer]);
+
+  const handleSkipPrefer = useCallback(() => {
+    manualSourceLockRef.current = true;
+    preferAbortRef.current?.abort();
+    setIsProbing(false);
+    setProbeReady(true);
+    setProbingSourceIds([]);
+  }, []);
 
   const handlePlayStart = useCallback(() => {
     setPlayerError(false);
@@ -106,60 +309,13 @@ export default function PlayPageView({
   const handlePlayerError = useCallback(
     (err?: any) => {
       console.warn("Playback error encountered on source:", playingSourceId, err);
-      if (!playingSourceId || !currentFilm?.list || currentFilm.list.length === 0) {
-        setPlayerError(true);
-        message.error("该视频源加载失败，请尝试重新加载。");
-        return;
-      }
-
-      failedSourcesRef.current.add(playingSourceId);
-
-      // 寻找下一个未失败且包含播放地址的备用线路
-      const nextSource = currentFilm.list.find(
-        (item: any) =>
-          item.id !== playingSourceId &&
-          !failedSourcesRef.current.has(item.id) &&
-          Array.isArray(item.linkList) &&
-          item.linkList.length > 0,
-      );
-
-      if (nextSource) {
-        const targetEpisodeIndex =
-          current?.index !== undefined &&
-          current.index >= 0 &&
-          current.index < nextSource.linkList.length
-            ? current.index
-            : 0;
-        const targetPlay = nextSource.linkList[targetEpisodeIndex];
-        if (targetPlay) {
-          message.warning(
-            `播放源【${playingSource?.name || "当前源"}】连接失败，正在自动切换至【${nextSource.name}】...`,
-          );
-          applyPlaybackSelection(nextSource.id, targetEpisodeIndex, targetPlay, playInitialTime);
-          router.replace(
-            buildPlayPath(String(filmId), nextSource.id, targetEpisodeIndex),
-            { scroll: false },
-          );
-          return;
-        }
-      }
-
-      // 所有播放源均失败，展示播放器错误视图
       setPlayerError(true);
-      message.error("该视频源加载失败，暂无其他可用播放源。");
+      message.error("该视频源加载失败，请尝试切换其他播放源或重新加载。");
     },
-    [
-      playingSourceId,
-      currentFilm,
-      current,
-      playInitialTime,
-      playingSource,
-      applyPlaybackSelection,
-      router,
-      filmId,
-      message,
-    ],
+    [playingSourceId, message],
   );
+
+  const holdPlayerForPrefer = preferEnabled && (!probeReady || isProbing);
 
   const currentEpisodeKey =
     current && playingSourceId ? makeEpisodeKey(playingSourceId, current.index) : "";
@@ -364,21 +520,40 @@ export default function PlayPageView({
             className={`${styles.playerWrapper} ${playerError ? styles.isPlayerError : ""}`}
             style={videoAspect ? ({ "--video-aspect": videoAspect } as React.CSSProperties) : undefined}
           >
-            {current?.link && (
-              <VideoPlayer
-                key={`${playingSourceId}-${current.index}-${current.link}`}
-                src={current.link}
-                filmId={currentFilm?.id}
-                filmTitle={currentFilm?.name}
-                episode={typeof current.index === "number" ? current.index + 1 : 1}
-                initialTime={playInitialTime}
-                autoplay={autoplay}
-                onEnded={() => autoplay && handlePlayNext()}
-                onTimeUpdate={handleTimeUpdate}
-                onPlayStart={handlePlayStart}
-                onError={handlePlayerError}
-                onVideoSize={handleVideoSize}
-              />
+            {holdPlayerForPrefer ? (
+              <div className={styles.preferOverlay}>
+                <div className={styles.preferCard}>
+                  <div className={styles.preferBars} aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <div className={styles.preferTitle}>正在测速</div>
+                  <div className={styles.preferHint}>自动选择最快线路</div>
+                  {preferBootstrapped ? (
+                    <button type="button" className={styles.preferSkip} onClick={handleSkipPrefer}>
+                      跳过，直接播放
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              current?.link && (
+                <VideoPlayer
+                  key={`${playingSourceId}-${current.index}-${current.link}`}
+                  src={current.link}
+                  filmId={currentFilm?.id}
+                  filmTitle={currentFilm?.name}
+                  episode={typeof current.index === "number" ? current.index + 1 : 1}
+                  initialTime={playInitialTime}
+                  autoplay={autoplay}
+                  onEnded={() => autoplay && handlePlayNext()}
+                  onTimeUpdate={handleTimeUpdate}
+                  onPlayStart={handlePlayStart}
+                  onError={handlePlayerError}
+                  onVideoSize={handleVideoSize}
+                />
+              )
             )}
           </div>
         </div>
@@ -394,6 +569,11 @@ export default function PlayPageView({
           visibleActiveEpisodeKey={visibleActiveEpisodeKey}
           currentEpisodeKey={currentEpisodeKey}
           autoplay={autoplay}
+          preferEnabled={preferEnabled}
+          isProbing={isProbing}
+          probingSourceIds={probingSourceIds}
+          preferredSourceId={preferredSourceId}
+          probeBySourceId={probeBySourceId}
           hasNext={hasNext}
           sourceMenuRef={sourceMenuRef}
           sourceTabsRef={sourceTabsRef}
@@ -408,13 +588,18 @@ export default function PlayPageView({
             setIsSourceMenuOpen(false);
           }}
           onSelectEpisode={(sourceId, index, item) => {
-            failedSourcesRef.current.delete(sourceId);
+            manualSourceLockRef.current = true;
+            preferAbortRef.current?.abort();
+            setIsProbing(false);
+            setProbeReady(true);
             applyPlaybackSelection(sourceId, index, item);
             router.replace(buildPlayPath(String(filmId), sourceId, index), {
               scroll: false,
             });
           }}
           onToggleAutoplay={() => setAutoplay(!autoplay)}
+          onTogglePrefer={handleTogglePrefer}
+          onRetestPrefer={handleRetestPrefer}
           onPlayNext={handlePlayNext}
         />
       </div>
