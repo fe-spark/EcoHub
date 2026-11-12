@@ -50,7 +50,7 @@ export const COLLECT_TAG_MAP: Record<string, { label: string; color: string; ico
 
 function columnTitle(icon: React.ReactNode, label: string) {
   return (
-    <span className={styles.withIcon}>
+    <span className={styles.columnTitle}>
       {icon}
       {label}
     </span>
@@ -238,7 +238,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       title: columnTitle(<ClockCircleOutlined />, "时间"),
       dataIndex: "startedAt",
       key: "startedAt",
-      width: "15%",
+      width: "max-content",
       render: (val: string, record) => {
         const effectiveMs =
           record.status === "running" && record.startedAt && record.durationMs <= 0
@@ -259,7 +259,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       title: columnTitle(<CloudDownloadOutlined />, "采集方式"),
       dataIndex: "trigger",
       key: "trigger",
-      width: "12%",
+      width: "max-content",
       render: (trigger: string, record) => {
         const films = singleFilmTargets(record);
         return (
@@ -297,14 +297,14 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
     {
       title: columnTitle(<FieldTimeOutlined />, "采集跨度"),
       key: "hour",
-      width: "8%",
+      width: "max-content",
       render: (_, record) => renderHourTag(record.hour, record),
     },
     {
       title: columnTitle(<CheckCircleOutlined />, "状态"),
       dataIndex: "status",
       key: "status",
-      width: "9%",
+      width: "max-content",
       render: (_: string, record) => (
         <RecordStatusMark
           status={resolveBatchStatus(record)}
@@ -316,7 +316,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
     {
       title: columnTitle(<CloudServerOutlined />, "站点"),
       key: "sources",
-      width: "12%",
+      width: "max-content",
       render: (_, record) => {
         let details: CollectRecordSourceDetail[] = [];
         if (record.detailJson) {
@@ -353,7 +353,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
     {
       title: columnTitle(<FileTextOutlined />, "拉取进度"),
       key: "pages",
-      width: "18%",
+      width: "max-content",
       render: (_, record) => {
         if (isSingleFilmRecord(record)) {
           return (
@@ -367,15 +367,20 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
         }
 
         const pages = formatCollectPages(record);
+        const ledgerLines = pages.secondary ? pages.secondary.split(" · ") : [];
         return (
           <div className={styles.statCell}>
             <span className={`${styles.statRow} ${pages.alert ? styles.statFail : styles.statTotal}`}>
               {pages.alert ? <CloseCircleOutlined /> : <FileTextOutlined />}
               {pages.primary}
             </span>
-            {pages.secondary ? (
-              <span className={`${styles.statRow} ${styles.statTotal}`}>
-                <MarkedFailureText text={pages.secondary} failClassName={styles.metricFail} />
+            {ledgerLines.length > 0 ? (
+              <span className={styles.pageLedger}>
+                {ledgerLines.map((line, index) => (
+                  <span key={index} className={`${styles.statRow} ${styles.statTotal}`}>
+                    <MarkedFailureText text={line} failClassName={styles.metricFail} />
+                  </span>
+                ))}
               </span>
             ) : null}
           </div>
@@ -386,7 +391,7 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       title: columnTitle(<VideoCameraOutlined />, "更新影片"),
       dataIndex: "filmCount",
       key: "filmCount",
-      width: "12%",
+      width: "max-content",
       render: (_, record) => {
         const count = Math.max(0, record.filmCount ?? 0);
         return (
@@ -400,7 +405,8 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
     {
       title: columnTitle(<ReloadOutlined />, "操作"),
       key: "action",
-      width: "14%",
+      fixed: "right",
+      width: 112,
       render: (_, record) => {
         const isRetrying = retryingBatchIds.has(record.batchId);
         const canRetry = canRetryHistoryRecord(record);

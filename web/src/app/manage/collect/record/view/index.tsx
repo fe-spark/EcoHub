@@ -2,13 +2,11 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  ConfigProvider,
   Table,
   Button,
   Space,
   Popconfirm,
   Pagination,
-  theme,
 } from "antd";
 import {
   DeleteOutlined,
@@ -55,20 +53,6 @@ export default function CollectRecordPageView() {
 
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
-  const { token } = theme.useToken();
-
-  const historyTableTheme = useMemo(
-    () => ({
-      components: {
-        Table: {
-          rowHoverBg: token.colorFillQuaternary,
-          rowSelectedBg: token.colorFillTertiary,
-          rowSelectedHoverBg: token.colorFillTertiary,
-        },
-      },
-    }),
-    [token.colorFillQuaternary, token.colorFillTertiary],
-  );
 
   const getRecords = useCallback(async (p?: { current: number; pageSize: number }, overrideParams?: typeof params) => {
     setSelectedRowKeys([]);
@@ -305,16 +289,15 @@ export default function CollectRecordPageView() {
         onReset={handleReset}
       />
 
-      <ConfigProvider theme={historyTableTheme}>
-        <Table
+      <Table
+          className={styles.recordTable}
           columns={columns}
           dataSource={records}
           rowKey="id"
           loading={loading}
           size="middle"
           pagination={false}
-          tableLayout="fixed"
-          scroll={{ x: 1080 }}
+          scroll={{ x: "max-content" }}
           rowSelection={
             canWrite
               ? {
@@ -383,8 +366,7 @@ export default function CollectRecordPageView() {
               />
             </div>
           )}
-        />
-      </ConfigProvider>
+      />
 
       <BatchDetailDrawer
         open={detailDrawerOpen}

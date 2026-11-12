@@ -45,127 +45,86 @@
   font-size: 13px;
 }
 
-.drawerKpiRow {
+.metricGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
+
+  &[data-count="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  &[data-count="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
-.drawerKpiCard {
+.metricCell,
+.pageBoard {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   padding: 12px 14px;
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 8px;
-  min-width: 0;
-  transition: border-color 0.2s, box-shadow 0.2s;
-
-  &:hover {
-    border-color: var(--ant-color-border);
-  }
 }
 
-.drawerKpiHeader {
+.metricLabel {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
   min-width: 0;
+  min-height: 18px;
 }
 
-.kpiTitleGroup {
+.metricLabelMain {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-size: 12px;
   font-weight: 500;
   color: var(--ant-color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.kpiIcon {
+.metricIcon {
   font-size: 13px;
   color: var(--ant-color-text-secondary);
   flex-shrink: 0;
 }
 
-.kpiTag {
+.metricTag {
   margin-inline-end: 0;
   padding: 0 6px;
   font-size: 11px;
   line-height: 18px;
   border-radius: 4px;
-  white-space: nowrap;
   flex-shrink: 0;
 }
 
-.drawerKpiBody {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.kpiMainNumberRow {
+.metricValueRow {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.kpiHeroNumber {
+.metricValue,
+.metricValueLink {
   font-size: 18px;
   font-weight: 700;
   line-height: 1.25;
   color: var(--ant-color-text);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
-.kpiHeroNumberSuccess {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--ant-color-success);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.kpiHeroNumberWarn {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--ant-color-warning);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.kpiHeroNumberFail {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--ant-color-error);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.kpiHeroNumberLink {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.25;
+.metricValueLink {
   color: var(--ant-color-primary, #fa8c16);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
   cursor: pointer;
   text-decoration: none;
-  transition: all 0.2s ease;
 
   &:hover {
     color: var(--ant-color-primary-hover, #ffa940);
@@ -173,44 +132,40 @@
   }
 }
 
-.kpiHeroNumberMuted {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.25;
-  color: var(--ant-color-text-secondary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.toneSuccess {
+  color: var(--ant-color-success);
 }
 
-.kpiUnitSecondary {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--ant-color-text-secondary);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.toneWarning {
+  color: var(--ant-color-warning);
 }
 
-.kpiFail {
+.toneDanger {
   color: var(--ant-color-error);
 }
 
-.kpiFooterSub {
+.toneMuted {
+  color: var(--ant-color-text-secondary);
+}
+
+.metricUnit {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  flex-shrink: 0;
+}
+
+.metricHint {
+  min-height: 16px;
   font-size: 12px;
   line-height: 1.35;
   color: var(--ant-color-text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.kpiSubLink {
+.metricHintLink {
   color: var(--ant-color-primary, #fa8c16);
   cursor: pointer;
   text-decoration: none;
-  transition: color 0.2s ease;
 
   &:hover {
     color: var(--ant-color-primary-hover, #ffa940);
@@ -218,11 +173,47 @@
   }
 }
 
-@media (max-width: 640px) {
-  .drawerMetaStrip {
-    grid-template-columns: repeat(2, 1fr);
+.pageBoardGrid {
+  display: grid;
+  gap: 8px;
+
+  &[data-count="2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .drawerKpiRow {
-    grid-template-columns: 1fr;
+
+  &[data-count="3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  &[data-count="4"],
+  &[data-count="5"] {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.pageCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--ant-color-fill-quaternary);
+}
+
+.pageCellLabel {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--ant-color-text-tertiary);
+}
+
+@media (max-width: 640px) {
+  .drawerMetaStrip,
+  .metricGrid[data-count="2"],
+  .metricGrid[data-count="3"],
+  .pageBoardGrid[data-count="3"],
+  .pageBoardGrid[data-count="4"],
+  .pageBoardGrid[data-count="5"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

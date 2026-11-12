@@ -11,10 +11,9 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { CollectHistoryRecord, CollectRecordSourceDetail } from "./types";
-import { formatDuration, formatPageLedger } from "./record-format";
+import { formatDuration } from "./record-format";
 import {
   isSingleFilmRecord,
-  MarkedFailureText,
   renderHourTag,
   renderTriggerTag,
   resolveBatchStatus,
@@ -27,17 +26,112 @@ export interface BatchOverviewCardsProps {
   onOpenFilmsModal: () => void;
 }
 
+type MetricTone = "success" | "warning" | "danger" | "muted";
+
+interface OverviewMetric {
+  key: string;
+  label: string;
+  icon?: React.ReactNode;
+  tag?: React.ReactNode;
+  value: string;
+  unit?: string;
+  hint?: React.ReactNode;
+  tone?: MetricTone;
+  onClick?: () => void;
+}
+
+interface PageCell {
+  key: string;
+  label: string;
+  value: string;
+  tone?: MetricTone;
+}
+
+interface PageBoard {
+  tag?: React.ReactNode;
+  cells: PageCell[];
+}
+
 function isBatchOngoing(status: string | undefined): boolean {
   return status === "running";
 }
 
-function renderSourceKpi(
+function formatNum(value: number): string {
+  return value.toLocaleString("zh-CN");
+}
+
+function statusTag(color: string, text: string) {
+  return (
+    <Tag color={color} bordered={false} className={styles.metricTag}>
+      {text}
+    </Tag>
+  );
+}
+
+function toneClass(tone: MetricTone | undefined): string {
+  if (tone === "success") return styles.toneSuccess;
+  if (tone === "warning") return styles.toneWarning;
+  if (tone === "danger") return styles.toneDanger;
+  if (tone === "muted") return styles.toneMuted;
+  return "";
+}
+
+function MetricCell({ metric }: { metric: OverviewMetric }) {
+  const value = metric.onClick ? (
+    <a className={styles.metricValueLink} onClick={metric.onClick}>
+      {metric.value}
+    </a>
+  ) : (
+    <span className={`${styles.metricValue} ${toneClass(metric.tone)}`.trim()}>{metric.value}</span>
+  );
+
+  return (
+    <div className={styles.metricCell}>
+      <div className={styles.metricLabel}>
+        <span className={styles.metricLabelMain}>
+          {metric.icon}
+          <span>{metric.label}</span>
+        </span>
+        {metric.tag}
+      </div>
+      <div className={styles.metricValueRow}>
+        {value}
+        {metric.unit ? <span className={styles.metricUnit}>{metric.unit}</span> : null}
+      </div>
+      <div className={styles.metricHint}>{metric.hint}</div>
+    </div>
+  );
+}
+
+function PageBoardView({ board }: { board: PageBoard }) {
+  return (
+    <div className={styles.pageBoard}>
+      <div className={styles.metricLabel}>
+        <span className={styles.metricLabelMain}>
+          <FileTextOutlined className={styles.metricIcon} />
+          <span>拉取页码</span>
+        </span>
+        {board.tag}
+      </div>
+      <div className={styles.pageBoardGrid} data-count={board.cells.length}>
+        {board.cells.map((cell) => (
+          <div key={cell.key} className={styles.pageCell}>
+            <span className={styles.pageCellLabel}>{cell.label}</span>
+            <span className={`${styles.metricValue} ${toneClass(cell.tone)}`.trim()}>{cell.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function buildSiteMetric(
   record: CollectHistoryRecord,
   abnormalCount: number,
   stoppedSources: CollectRecordSourceDetail[],
   doneSources: CollectRecordSourceDetail[],
   interruptedCount: number,
-) {
+): OverviewMetric {
   const isOngoing = isBatchOngoing(record.status);
   const isStopped = record.status === "stopped";
   const isInterrupted = record.status === "interrupted";
@@ -51,257 +145,189 @@ function renderSourceKpi(
     !isStopped &&
     !isInterrupted;
 
-  let tagNode: React.ReactNode = null;
-  let subText = "";
+  let tag: React.ReactNode = null;
+  let hint = "";
 
   if (isOngoing) {
-    tagNode = (
-      <Tag color={(record.pageFailed ?? 0) > 0 ? "error" : "processing"} bordered={false} className={styles.kpiTag}>
-        采集中
-      </Tag>
-    );
-    subText = "尚未结算";
+    tag = statusTag((record.pageFailed ?? 0) > 0 ? "error" : "processing", "采集中");
+    hint = "尚未结算";
   } else if (isOk) {
-    tagNode = <Tag color="success" bordered={false} className={styles.kpiTag}>全部成功</Tag>;
-    subText = "全部完成";
+    tag = statusTag("success", "全部成功");
+    hint = "全部完成";
   } else if (isFailed) {
-    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>采集失败</Tag>;
-    subText = "未能完成采集";
+    tag = statusTag("error", "采集失败");
+    hint = "未能完成采集";
   } else if (isInterrupted) {
-    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>异常中断</Tag>;
-    subText = interruptedCount > 0
+    tag = statusTag("error", "异常中断");
+    hint = interruptedCount > 0
       ? `${interruptedCount} 站中断`
       : `${doneSources.length} / ${record.sourceCount} 站成功`;
   } else if (isStopped) {
-    tagNode = <Tag color="default" bordered={false} className={styles.kpiTag}>已停止</Tag>;
-    subText = `${doneSources.length} / ${record.sourceCount} 站成功`;
+    tag = statusTag("default", "已停止");
+    hint = `${doneSources.length} / ${record.sourceCount} 站成功`;
   } else {
     const abnormal = abnormalCount || record.failedSources || 1;
-    tagNode = <Tag color="warning" bordered={false} className={styles.kpiTag}>{abnormal} 站未完成</Tag>;
-    subText = `${doneSources.length} / ${record.sourceCount} 站成功`;
+    tag = statusTag("warning", `${abnormal} 站未完成`);
+    hint = `${doneSources.length} / ${record.sourceCount} 站成功`;
   }
 
-  return (
-    <div className={styles.drawerKpiCard}>
-      <div className={styles.drawerKpiHeader}>
-        <span className={styles.kpiTitleGroup}>
-          <CloudServerOutlined className={styles.kpiIcon} />
-          <span>覆盖站点</span>
-        </span>
-        {tagNode}
-      </div>
-      <div className={styles.drawerKpiBody}>
-        <div className={styles.kpiMainNumberRow}>
-          <span className={styles.kpiHeroNumber}>{record.sourceCount}</span>
-          <span className={styles.kpiUnitSecondary}>站点</span>
-        </div>
-        <div className={styles.kpiFooterSub} title={subText}>
-          {subText}
-        </div>
-      </div>
-    </div>
-  );
+  return {
+    key: "sites",
+    label: "覆盖站点",
+    icon: <CloudServerOutlined className={styles.metricIcon} />,
+    tag,
+    value: formatNum(record.sourceCount),
+    unit: "站点",
+    hint,
+  };
 }
 
-function renderPageKpi(record: CollectHistoryRecord) {
+function buildPageView(record: CollectHistoryRecord): { summary?: OverviewMetric; board?: PageBoard } {
   if (isSingleFilmRecord(record)) {
-    return (
-      <div className={styles.drawerKpiCard}>
-        <div className={styles.drawerKpiHeader}>
-          <span className={styles.kpiTitleGroup}>
-            <FileTextOutlined className={styles.kpiIcon} />
-            <span>拉取页码</span>
-          </span>
-          <Tag color="purple" bordered={false} className={styles.kpiTag}>单片重放</Tag>
-        </div>
-        <div className={styles.drawerKpiBody}>
-          <div className={styles.kpiMainNumberRow}>
-            <span className={styles.kpiHeroNumber}>1</span>
-            <span className={styles.kpiUnitSecondary}>部影片</span>
-          </div>
-          <div className={styles.kpiFooterSub}>单条记录重试</div>
-        </div>
-      </div>
-    );
+    return {
+      summary: {
+        key: "pages",
+        label: "拉取页码",
+        icon: <FileTextOutlined className={styles.metricIcon} />,
+        tag: statusTag("purple", "单片重放"),
+        value: "1",
+        unit: "部影片",
+        hint: "单条记录重试",
+      },
+    };
   }
 
   const succ = Math.max(0, record.pageSuccess ?? 0);
   const total = Math.max(0, record.pageTotal ?? 0);
   const fail = Math.max(0, record.pageFailed ?? 0);
+  const missed = total > 0 ? Math.max(0, total - succ - fail) : 0;
   const isOngoing = isBatchOngoing(record.status);
   const isStopped = record.status === "stopped";
   const isInterrupted = record.status === "interrupted";
   const isFailed = record.status === "failed";
-  const ledger = formatPageLedger(succ, fail, total);
-  const missed = total > 0 ? Math.max(0, total - succ - fail) : 0;
+  const percent = total > 0 ? Math.min(100, Math.floor((succ / total) * 100)) : 0;
 
-  let tagNode: React.ReactNode = null;
-  let heroNumberNode: React.ReactNode = null;
-  let subText = "";
-
-  if (isOngoing) {
-    tagNode = (
-      <Tag color={fail > 0 ? "error" : "processing"} bordered={false} className={styles.kpiTag}>
-        拉取中
-      </Tag>
-    );
-    if (total > 0) {
-      heroNumberNode = (
-        <>
-          <span className={styles.kpiHeroNumber}>{succ.toLocaleString()}</span>
-          <span className={styles.kpiUnitSecondary}>/ {total.toLocaleString()} 页</span>
-        </>
-      );
-      const percent = Math.min(100, Math.floor((succ / total) * 100));
-      subText = `进度 ${percent}%${fail > 0 ? ` · 失败 ${fail}` : ""}`;
-    } else {
-      heroNumberNode = (
-        <>
-          <span className={styles.kpiHeroNumber}>{succ.toLocaleString()}</span>
-          <span className={styles.kpiUnitSecondary}>页</span>
-        </>
-      );
-      subText = "正在探测页码";
-    }
-  } else if (isInterrupted) {
-    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>异常中断</Tag>;
-    heroNumberNode = (
-      <>
-        <span className={styles.kpiHeroNumber}>{succ.toLocaleString()}</span>
-        <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : succ.toLocaleString()} 页</span>
-      </>
-    );
-    subText = ledger;
-  } else if (isStopped) {
-    tagNode = <Tag color="default" bordered={false} className={styles.kpiTag}>已停止</Tag>;
-    heroNumberNode = (
-      <>
-        <span className={styles.kpiHeroNumber}>{succ.toLocaleString()}</span>
-        <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : succ.toLocaleString()} 页</span>
-      </>
-    );
-    subText = ledger;
-  } else if (fail > 0) {
-    tagNode = <Tag color="warning" bordered={false} className={styles.kpiTag}>{fail} 页失败</Tag>;
-    heroNumberNode = (
-      <>
-        <span className={styles.kpiHeroNumberWarn}>{succ.toLocaleString()}</span>
-        <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : succ.toLocaleString()} 页</span>
-      </>
-    );
-    subText = ledger;
-  } else if (isFailed) {
-    tagNode = <Tag color="error" bordered={false} className={styles.kpiTag}>拉取失败</Tag>;
-    heroNumberNode = (
-      <>
-        <span className={styles.kpiHeroNumberFail}>0</span>
-        <span className={styles.kpiUnitSecondary}>/ {total > 0 ? total.toLocaleString() : "-"} 页</span>
-      </>
-    );
-    subText = total === 0 ? "探测失败" : ledger;
-  } else if (missed > 0) {
-    tagNode = <Tag color="warning" bordered={false} className={styles.kpiTag}>{missed} 页未抓</Tag>;
-    heroNumberNode = (
-      <>
-        <span className={styles.kpiHeroNumber}>{succ.toLocaleString()}</span>
-        <span className={styles.kpiUnitSecondary}>/ {total.toLocaleString()} 页</span>
-      </>
-    );
-    subText = ledger;
-  } else {
-    tagNode = <Tag color="success" bordered={false} className={styles.kpiTag}>全部完成</Tag>;
-    heroNumberNode = (
-      <>
-        <span className={styles.kpiHeroNumberSuccess}>{total > 0 ? total.toLocaleString() : succ.toLocaleString()}</span>
-        <span className={styles.kpiUnitSecondary}>页</span>
-      </>
-    );
-    subText = "全部拉取成功";
+  if (isOngoing && fail === 0) {
+    return {
+      summary: {
+        key: "pages",
+        label: "拉取页码",
+        icon: <FileTextOutlined className={styles.metricIcon} />,
+        tag: statusTag("processing", "拉取中"),
+        value: formatNum(succ),
+        unit: total > 0 ? `/ ${formatNum(total)} 页` : "页",
+        hint: total > 0 ? `进度 ${percent}%` : "正在探测页码",
+      },
+    };
   }
 
-  return (
-    <div className={styles.drawerKpiCard}>
-      <div className={styles.drawerKpiHeader}>
-        <span className={styles.kpiTitleGroup}>
-          <FileTextOutlined className={styles.kpiIcon} />
-          <span>拉取页码</span>
-        </span>
-        {tagNode}
-      </div>
-      <div className={styles.drawerKpiBody}>
-        <div className={styles.kpiMainNumberRow}>
-          {heroNumberNode}
-        </div>
-        <div className={styles.kpiFooterSub} title={subText}>
-          <MarkedFailureText text={subText} failClassName={styles.kpiFail} />
-        </div>
-      </div>
-    </div>
-  );
+  if (isFailed && succ === 0 && fail === 0) {
+    return {
+      summary: {
+        key: "pages",
+        label: "拉取页码",
+        icon: <FileTextOutlined className={styles.metricIcon} />,
+        tag: statusTag("error", "拉取失败"),
+        value: "0",
+        unit: total > 0 ? `/ ${formatNum(total)} 页` : "页",
+        hint: total === 0 ? "探测失败" : undefined,
+        tone: "danger",
+      },
+    };
+  }
+
+  const needsBoard = isOngoing || isStopped || isInterrupted || fail > 0 || missed > 0;
+  if (!needsBoard) {
+    return {
+      summary: {
+        key: "pages",
+        label: "拉取页码",
+        icon: <FileTextOutlined className={styles.metricIcon} />,
+        tag: statusTag("success", "全部完成"),
+        value: formatNum(total > 0 ? total : succ),
+        unit: "页",
+        hint: "全部拉取成功",
+        tone: "success",
+      },
+    };
+  }
+
+  const cells: PageCell[] = [{ key: "succ", label: isOngoing ? "已拉" : "成功", value: formatNum(succ) }];
+  if (fail > 0) cells.push({ key: "fail", label: "失败", value: formatNum(fail), tone: "danger" });
+  if (!isOngoing && missed > 0) cells.push({ key: "miss", label: "未抓", value: formatNum(missed), tone: "warning" });
+  if (total > 0) cells.push({ key: "total", label: "共", value: formatNum(total) });
+  if (isOngoing && total > 0) cells.push({ key: "progress", label: "进度", value: `${percent}%` });
+
+  let tag: React.ReactNode = null;
+  if (isOngoing) tag = statusTag(fail > 0 ? "error" : "processing", "拉取中");
+  else if (isInterrupted) tag = statusTag("error", "异常中断");
+  else if (isStopped) tag = statusTag("default", "已停止");
+  else if (fail > 0) tag = statusTag("warning", "有失败");
+  else tag = statusTag("warning", "未抓完");
+
+  if (cells.length < 2) {
+    return {
+      summary: {
+        key: "pages",
+        label: "拉取页码",
+        icon: <FileTextOutlined className={styles.metricIcon} />,
+        tag,
+        value: cells[0]?.value ?? "0",
+        unit: "页",
+        tone: cells[0]?.tone,
+      },
+    };
+  }
+
+  return { board: { tag, cells } };
 }
 
-function renderFilmKpi(record: CollectHistoryRecord, onOpenModal: () => void) {
+function buildFilmMetric(record: CollectHistoryRecord, onOpenModal: () => void): OverviewMetric {
   const count = Math.max(0, record.filmCount ?? 0);
   const isOngoing = isBatchOngoing(record.status);
-
-  let tagNode: React.ReactNode = null;
-  let subNode: React.ReactNode = null;
+  const openHint = (
+    <a className={styles.metricHintLink} onClick={onOpenModal}>
+      查看清单
+    </a>
+  );
 
   if (isOngoing) {
-    tagNode = (
-      <Tag color="processing" bordered={false} className={styles.kpiTag}>
-        {count > 0 ? "有更新" : "采集中"}
-      </Tag>
-    );
-    subNode = count > 0 ? (
-      <a className={styles.kpiSubLink} onClick={onOpenModal}>
-        点击查看影片清单
-      </a>
-    ) : (
-      "更新中"
-    );
-  } else if (count > 0) {
-    tagNode = <Tag color="cyan" bordered={false} className={styles.kpiTag}>已更新</Tag>;
-    subNode = (
-      <a className={styles.kpiSubLink} onClick={onOpenModal}>
-        点击查看清单
-      </a>
-    );
-  } else {
-    tagNode = <Tag color="default" bordered={false} className={styles.kpiTag}>无更新</Tag>;
-    subNode = "无影片更新";
+    return {
+      key: "films",
+      label: "更新影片",
+      icon: <VideoCameraOutlined className={styles.metricIcon} />,
+      tag: statusTag("processing", count > 0 ? "有更新" : "采集中"),
+      value: count > 0 ? `+${formatNum(count)}` : "0",
+      unit: "部",
+      hint: count > 0 ? openHint : "更新中",
+      tone: count > 0 ? undefined : "muted",
+      onClick: count > 0 ? onOpenModal : undefined,
+    };
   }
 
-  return (
-    <div className={styles.drawerKpiCard}>
-      <div className={styles.drawerKpiHeader}>
-        <span className={styles.kpiTitleGroup}>
-          <VideoCameraOutlined className={styles.kpiIcon} />
-          <span>更新影片</span>
-        </span>
-        {tagNode}
-      </div>
-      <div className={styles.drawerKpiBody}>
-        <div className={styles.kpiMainNumberRow}>
-          {count > 0 ? (
-            <a
-              className={styles.kpiHeroNumberLink}
-              onClick={onOpenModal}
-              title="点击查看影片清单"
-            >
-              +{count.toLocaleString()}
-            </a>
-          ) : (
-            <span className={styles.kpiHeroNumberMuted}>0</span>
-          )}
-          <span className={styles.kpiUnitSecondary}>部</span>
-        </div>
-        <div className={styles.kpiFooterSub}>
-          {subNode}
-        </div>
-      </div>
-    </div>
-  );
+  if (count > 0) {
+    return {
+      key: "films",
+      label: "更新影片",
+      icon: <VideoCameraOutlined className={styles.metricIcon} />,
+      tag: statusTag("cyan", "已更新"),
+      value: `+${formatNum(count)}`,
+      unit: "部",
+      hint: openHint,
+      onClick: onOpenModal,
+    };
+  }
+
+  return {
+    key: "films",
+    label: "更新影片",
+    icon: <VideoCameraOutlined className={styles.metricIcon} />,
+    tag: statusTag("default", "无更新"),
+    value: "0",
+    unit: "部",
+    hint: "无影片更新",
+    tone: "muted",
+  };
 }
 
 export function BatchOverviewCards({ record, details, onOpenFilmsModal }: BatchOverviewCardsProps) {
@@ -312,6 +338,12 @@ export function BatchOverviewCards({ record, details, onOpenFilmsModal }: BatchO
   const doneSources = details.filter((d) => d.status === "done" || d.status === "success");
   const abnormalCount = failedSources.length + partialSources.length;
   const isOngoing = isBatchOngoing(record.status);
+  const page = buildPageView(record);
+  const metrics = [
+    buildSiteMetric(record, abnormalCount, stoppedSources, doneSources, interruptedSources.length),
+    page.summary,
+    buildFilmMetric(record, onOpenFilmsModal),
+  ].filter((metric): metric is OverviewMetric => metric != null);
 
   const effectiveMs =
     record.durationMs > 0
@@ -353,11 +385,12 @@ export function BatchOverviewCards({ record, details, onOpenFilmsModal }: BatchO
         </div>
       </div>
 
-      <div className={styles.drawerKpiRow}>
-        {renderSourceKpi(record, abnormalCount, stoppedSources, doneSources, interruptedSources.length)}
-        {renderPageKpi(record)}
-        {renderFilmKpi(record, onOpenFilmsModal)}
+      <div className={styles.metricGrid} data-count={metrics.length}>
+        {metrics.map((metric) => (
+          <MetricCell key={metric.key} metric={metric} />
+        ))}
       </div>
+      {page.board ? <PageBoardView board={page.board} /> : null}
     </div>
   );
 }
