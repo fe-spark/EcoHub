@@ -159,6 +159,139 @@
  * 比外框内侧高 2px、控制条底边被裁掉。::after 不接收点击，不挡控制条。
  * 全屏和网页全屏时 Artplayer 把播放器铺满屏幕（网页全屏会把播放器节点移到 body 下），不带这圈边框。
  */
+.preferOverlay {
+  position: absolute;
+  inset: 0;
+  // 留在 .playerWrapper::after 下面，测速时播放区外框仍然可见
+  z-index: 0;
+  container-type: size;
+  container-name: prefer;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 4%, 24px);
+  background: var(--public-surface-1);
+}
+
+.preferCard {
+  width: min(100%, 240px);
+  max-height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+
+.preferBars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  height: 16px;
+  margin-bottom: 12px;
+
+  span {
+    width: 3px;
+    border-radius: 999px;
+    background: var(--primary-color);
+    transform-origin: center bottom;
+    animation: preferWave 1s ease-in-out infinite;
+
+    &:nth-child(1) {
+      height: 8px;
+      animation-delay: 0.1s;
+    }
+
+    &:nth-child(2) {
+      height: 14px;
+      animation-delay: 0.25s;
+    }
+
+    &:nth-child(3) {
+      height: 10px;
+      animation-delay: 0s;
+    }
+  }
+}
+
+.preferTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--public-text-1);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+
+  &::before {
+    content: "";
+    width: 4px;
+    height: 14px;
+    border-radius: 2px;
+    background: var(--primary-color);
+    flex-shrink: 0;
+  }
+}
+
+.preferHint {
+  margin-top: 6px;
+  color: var(--public-text-4);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.preferSkip {
+  margin-top: 14px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--public-border-1);
+  border-radius: 10px;
+  background: var(--public-surface-2);
+  color: var(--public-text-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    border-color: rgba(var(--primary-color-rgb), 0.45);
+    color: var(--primary-color);
+    background: rgba(var(--primary-color-rgb), 0.08);
+  }
+}
+
+@container prefer (max-height: 220px) {
+  .preferBars,
+  .preferHint {
+    display: none;
+  }
+
+  .preferSkip {
+    margin-top: 10px;
+    height: 32px;
+  }
+}
+
+@container prefer (max-width: 280px) {
+  .preferTitle {
+    font-size: 14px;
+  }
+}
+
+@keyframes preferWave {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+
+  50% {
+    transform: scaleY(1);
+  }
+}
+
 .playerWrapper {
   position: relative;
   width: 100%;
@@ -176,7 +309,8 @@
     content: "";
     position: absolute;
     inset: 0;
-    z-index: 1;
+    // 高于测速遮罩（z-index: 0），遮罩铺满时这圈边框仍压在最上面
+    z-index: 2;
     border: 1px solid var(--public-border-3);
     border-radius: inherit;
     pointer-events: none;
@@ -243,6 +377,16 @@
 
 .classifyGrid {
   width: 100%;
+
+  /*
+   * 相关推荐固定 14 部。列数随宽度是 3 / 4 / 6 / 7，只有 ≥1440px 的 7 列能整除。
+   * 更窄时藏掉多出来的 2 部，最后一行才是满的（12 能被 3、4、6 整除）。
+   */
+  @media (max-width: 1439px) {
+    :global(.ant-col):nth-child(n + 13) {
+      display: none;
+    }
+  }
 }
 
 @media (max-width: 1200px) {

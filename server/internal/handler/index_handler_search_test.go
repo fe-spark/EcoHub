@@ -81,14 +81,20 @@ func TestResolvePlayableSourceID(t *testing.T) {
 		{Id: "group1", SourceId: "s1", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://1"}}},
 		{Id: "group2", SourceId: "s2", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://2"}}},
 	}
-	if got := resolvePlayableSourceID(sources, "group2"); got != "group2" {
+	if got := resolvePlayableSourceID(sources, "group2", "s1"); got != "group2" {
 		t.Fatalf("preferred id failed: %s", got)
 	}
-	if got := resolvePlayableSourceID(sources, "s2"); got != "group2" {
+	if got := resolvePlayableSourceID(sources, "s2", "s1"); got != "group2" {
 		t.Fatalf("preferred sourceId failed: %s", got)
 	}
-	if got := resolvePlayableSourceID(sources, "unknown"); got != "group1" {
+	if got := resolvePlayableSourceID(sources, "unknown", ""); got != "group1" {
 		t.Fatalf("fallback first failed: %s", got)
+	}
+	if got := resolvePlayableSourceID(sources, "", "s2"); got != "group2" {
+		t.Fatalf("empty request should play primary source, got %s", got)
+	}
+	if got := resolvePlayableSourceID(sources, "missing", "s2"); got != "group2" {
+		t.Fatalf("unknown request should play primary source, got %s", got)
 	}
 }
 
