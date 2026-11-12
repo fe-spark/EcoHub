@@ -32,7 +32,7 @@ interface InventoryStatsData {
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
   { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
   { key: "multiSource", label: "多源聚合", hint: "多源覆盖档案" },
-  { key: "failures", label: "采集异常", hint: "全部来源" },
+  { key: "failures", label: "采集异常", hint: "未恢复站点" },
 ];
 
 function formatCount(value: number | undefined) {

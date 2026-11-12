@@ -446,12 +446,23 @@ func formatFailedPagesError(failedPages []int, totalFailed int, lastErr string) 
 		pagesDesc = fmt.Sprintf("共 %d 页", totalFailed)
 	}
 
-	trimmedErr := strings.TrimSpace(lastErr)
+	trimmedErr := trimErrorRunes(lastErr, failedPageErrorRunes)
 	if trimmedErr != "" {
-		if len(trimmedErr) > 120 {
-			trimmedErr = trimmedErr[:120] + "..."
-		}
 		return fmt.Sprintf("%s抓取失败: %s", pagesDesc, trimmedErr)
 	}
 	return fmt.Sprintf("%s抓取失败", pagesDesc)
+}
+
+const failedPageErrorRunes = 2000
+
+func trimErrorRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || max <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "..."
 }

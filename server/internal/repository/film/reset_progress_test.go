@@ -86,13 +86,20 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 			DetailJson: `[{"sourceId":"src_a","sourceName":"首选站A","status":"failed","error":"timeout"}]`,
 		})
 	}
+	gdb.Create(&model.CollectRecord{
+		BatchID:    "partial-b",
+		Trigger:    model.CollectTriggerCron,
+		Status:     model.CollectRecordStatusPartial,
+		StartedAt:  now.Add(time.Minute),
+		DetailJson: `[{"sourceId":"src_b","sourceName":"备用站B","status":"partial","error":"timeout","failedPages":[1,2]}]`,
+	})
 
 	filmsnapshot.ClearActiveFilmReadModel()
 	stats, err := GetInventoryStats()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 1 {
+	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 2 {
 		t.Fatalf("library = %+v", stats.Library)
 	}
 	if len(stats.Sources) != 3 {
@@ -107,7 +114,7 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 		t.Fatalf("src_a = %+v", primary)
 	}
 	other := byID["src_b"]
-	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 0 {
+	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 1 {
 		t.Fatalf("src_b = %+v", other)
 	}
 	off := byID["src_off"]

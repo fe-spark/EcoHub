@@ -32,6 +32,7 @@ import {
 } from "./history-columns";
 import { BatchFilmsModal } from "./batch-films-modal";
 import { BatchOverviewCards } from "./batch-overview-cards";
+import { ErrorDetailModal } from "./error-detail-button";
 import styles from "./batch-detail-drawer.module.less";
 
 const { Text } = Typography;
@@ -54,6 +55,7 @@ export function BatchDetailDrawer({
   onRetrySingleSource,
 }: BatchDetailDrawerProps) {
   const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
+  const [errorSource, setErrorSource] = useState<CollectRecordSourceDetail | null>(null);
   if (!record) return null;
 
   let details: CollectRecordSourceDetail[] = [];
@@ -209,13 +211,20 @@ export function BatchDetailDrawer({
                     </span>
                   </div>
 
-                  {item.error?.trim() && (
-                    <div className={styles.sourceCardError}>
+                  {(item.error?.trim() || (item.failedPages?.length ?? 0) > 0) && (
+                    <button
+                      type="button"
+                      className={styles.sourceCardError}
+                      onClick={() => setErrorSource(item)}
+                    >
                       <span className={styles.sourceCardErrorIcon}>
                         <CloseCircleOutlined />
                       </span>
-                      <span className={styles.sourceCardErrorText}>{item.error}</span>
-                    </div>
+                      <span className={styles.sourceCardErrorText}>
+                        {item.error?.trim() || `共 ${item.failedPages?.length ?? 0} 页失败`}
+                      </span>
+                      <span className={styles.sourceCardErrorAction}>查看</span>
+                    </button>
                   )}
                 </div>
               );
@@ -230,6 +239,13 @@ export function BatchDetailDrawer({
         sourceId={modalSource?.id || ""}
         sourceName={modalSource?.name || ""}
         onClose={() => setModalSource(null)}
+      />
+      <ErrorDetailModal
+        open={!!errorSource}
+        title={errorSource?.sourceName ? `${errorSource.sourceName} 异常原因` : "异常原因"}
+        text={errorSource?.error || ""}
+        pages={errorSource?.failedPages}
+        onClose={() => setErrorSource(null)}
       />
     </Drawer>
   );

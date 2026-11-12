@@ -112,6 +112,66 @@ func TestListOpenSourceIncidents(t *testing.T) {
 	}
 }
 
+func TestListOpenSourceIncidentsPartialInterruptedAndInFlight(t *testing.T) {
+	setupTestDB(t)
+	now := time.Date(2026, 11, 12, 15, 0, 0, 0, time.Local)
+	write := func(id, batch, status, raw string, at time.Time) {
+		t.Helper()
+		if err := CreateCollectRecord(&model.CollectRecord{
+			BatchID: batch, Trigger: model.CollectTriggerCron, Status: status,
+			StartedAt: at, DetailJson: raw,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := range 3 {
+		write("src-partial", fmt.Sprintf("partial-%d", i), model.CollectRecordStatusPartial,
+			`[{"sourceId":"src-partial","sourceName":"部分站","status":"partial","error":"第 1 页超时"}]`,
+			now.Add(-time.Duration(i)*time.Hour))
+	}
+	write("src-cut", "cut-run", model.CollectRecordStatusRunning,
+		`[{"sourceId":"src-cut","sourceName":"进行中","status":"running"}]`, now)
+	write("src-cut", "cut-fail", model.CollectRecordStatusFailed,
+		`[{"sourceId":"src-cut","sourceName":"进行中","status":"failed","error":"整站失败"}]`, now.Add(-time.Hour))
+	write("src-break", "break-new", model.CollectRecordStatusInterrupted,
+		`[{"sourceId":"src-break","sourceName":"中断站","status":"interrupted","error":"进程退出"}]`, now)
+	write("src-healed-partial", "heal-partial-new", model.CollectRecordStatusSuccess,
+		`[{"sourceId":"src-healed-partial","status":"done"}]`, now)
+	write("src-healed-partial", "heal-partial-old", model.CollectRecordStatusPartial,
+		`[{"sourceId":"src-healed-partial","status":"partial","error":"旧的部分失败"}]`, now.Add(-time.Hour))
+
+	list, err := ListOpenSourceIncidents(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]model.SourceIncident{}
+	for _, inc := range list {
+		byID[inc.SourceID] = inc
+	}
+	partial := byID["src-partial"]
+	if partial.ConsecutiveFailures != 1 || partial.Tripped || partial.LatestError != "第 1 页超时" {
+		t.Fatalf("partial should stay open without tripping: %+v", partial)
+	}
+	cut := byID["src-cut"]
+	if cut.ConsecutiveFailures != 1 || cut.Tripped || cut.LatestBatchID != "cut-fail" || cut.LatestError != "整站失败" {
+		t.Fatalf("in-flight detail should not heal the previous failure: %+v", cut)
+	}
+	if _, ok := byID["src-break"]; !ok {
+		t.Fatal("interrupted source should stay open")
+	}
+	if _, ok := byID["src-healed-partial"]; ok {
+		t.Fatal("success after partial should be hidden")
+	}
+	skip, err := TrippedSourceIDsToday(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := skip["src-partial"]; ok {
+		t.Fatal("partial failures must not trip the breaker")
+	}
+}
+
 func TestListOpenSourceIncidentsCorruptDetailFailOpen(t *testing.T) {
 	setupTestDB(t)
 	now := time.Date(2026, 11, 2, 15, 0, 0, 0, time.Local)
@@ -137,10 +197,10 @@ func TestListOpenSourceIncidentsExcludesSingleUpdate(t *testing.T) {
 	raw := `[{"sourceId":"src-single","sourceName":"单片源","status":"failed","error":"empty"}]`
 	for i := range 3 {
 		if err := CreateCollectRecord(&model.CollectRecord{
-			BatchID: fmt.Sprintf("single-%d", i),
-			Trigger: model.CollectTriggerSingleUpdate,
-			Status:  model.CollectRecordStatusFailed,
-			StartedAt: now.Add(time.Duration(-i) * time.Minute),
+			BatchID:    fmt.Sprintf("single-%d", i),
+			Trigger:    model.CollectTriggerSingleUpdate,
+			Status:     model.CollectRecordStatusFailed,
+			StartedAt:  now.Add(time.Duration(-i) * time.Minute),
 			DetailJson: raw,
 		}); err != nil {
 			t.Fatal(err)
