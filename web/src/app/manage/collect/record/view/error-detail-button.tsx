@@ -3,6 +3,19 @@ import { Button, Modal } from "antd";
 import { InfoCircleOutlined } from "@ant-design/icons";
 import styles from "./index.module.less";
 
+// 旧记录把失败页缩成「第 1, 2... 页」，并把重复的 url= 截断。页码由 failedPages 完整展示，这里只留抓取原因。
+export function collectErrorReason(text: string): string {
+  let message = text.trim();
+  const marker = "抓取失败:";
+  const at = message.lastIndexOf(marker);
+  if (at >= 0) {
+    message = message.slice(at + marker.length).trim();
+  }
+  message = message.replace(/共\s*\d+\s*页失败\s*[（(]第[\s\S]*?\.\.\.\s*页[）)]/g, "").trim();
+  message = message.replace(/,\s*url=https?:\/\/\S*\.\.\.$/i, "").trim();
+  return message;
+}
+
 export function ErrorDetailModal({
   open,
   title = "异常原因",
@@ -16,7 +29,7 @@ export function ErrorDetailModal({
   pages?: number[];
   onClose: () => void;
 }) {
-  const message = text.trim();
+  const message = collectErrorReason(text);
   const failedPages = (pages ?? []).filter((page) => Number.isFinite(page));
   if (!open) return null;
 
@@ -47,7 +60,12 @@ export function ErrorDetailModal({
             <div className={styles.errorPagesBody}>{failedPages.join("、")}</div>
           </div>
         ) : null}
-        {message ? <div className={styles.errorDetail}>{message}</div> : null}
+        {message ? (
+          <div>
+            <div className={styles.errorPagesLabel}>抓取原因</div>
+            <div className={styles.errorDetail}>{message}</div>
+          </div>
+        ) : null}
       </div>
     </Modal>
   );

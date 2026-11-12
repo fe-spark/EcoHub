@@ -9,8 +9,8 @@ func TestFormatFailedPagesErrorKeepsReason(t *testing.T) {
 	pages := []int{3131, 3132, 3133, 3134, 3135, 3136, 3137, 3138, 3139, 3141, 3144}
 	reason := `Get "https://jinyingzy.com/api.php/provide/vod?ac=detail&pg=3144": context deadline exceeded, url=https://jinyingzy.com/api.php/provide/vod?ac=detail&pg=3144`
 	got := formatFailedPagesError(pages, len(pages), reason)
-	if !strings.Contains(got, "共 11 页失败") || !strings.Contains(got, "...") {
-		t.Fatalf("page list should stay a short sample: %s", got)
+	if !strings.Contains(got, "共 11 页失败") || strings.Contains(got, "...") {
+		t.Fatalf("page numbers belong in failedPages, not an ellipsis in the reason: %s", got)
 	}
 	if !strings.Contains(got, reason) {
 		t.Fatalf("reason was truncated: %s", got)
