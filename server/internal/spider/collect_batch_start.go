@@ -65,8 +65,25 @@ func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchRes
 		}
 		skipped = append(skipped, model.CollectBatchSkip{Id: source.Id, Name: source.Name, Reason: "采集中"})
 	}
+	// 名额和「已开始」一起交出去。异步开工后再被封口拒绝，调用方已经拿到了开始名单。
+	if len(claim.Sources) > 0 {
+		if beforeCollectQueueAdmit != nil {
+			beforeCollectQueueAdmit()
+		}
+		if _, err := tryBeginCollectQueue(); err != nil {
+			for _, source := range claim.Sources {
+				skipped = append(skipped, model.CollectBatchSkip{Id: source.Id, Name: source.Name, Reason: err.Error()})
+			}
+			claim.abandon()
+			return CollectClaim{}, model.CollectBatchResult{Skipped: skipped}
+		}
+		claim.queueHeld = true
+	}
 	return claim, model.CollectBatchResult{Started: started, Skipped: skipped}
 }
+
+// beforeCollectQueueAdmit 仅供测试：占用已经成功、队列名额还没占下时调用。
+var beforeCollectQueueAdmit func()
 
 func batchCollectBlockReason(fs model.FilmSource) string {
 	if isMaintenanceRunning() {

@@ -103,10 +103,12 @@ func runSourcesWithLimitCore(claim CollectClaim, h int, tag, trigger string) {
 		return
 	}
 
-	if _, err := tryBeginCollectQueue(); err != nil {
-		log.Printf("[%s] 批量采集跳过：%s", tag, err.Error())
-		claim.abandon()
-		return
+	if !claim.queueHeld {
+		if _, err := tryBeginCollectQueue(); err != nil {
+			log.Printf("[%s] 批量采集跳过：%s", tag, err.Error())
+			claim.abandon()
+			return
+		}
 	}
 	sources := prioritizeCollectSources(claim.Sources)
 	startedAt := time.Now()
