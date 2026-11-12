@@ -10,16 +10,16 @@ import (
 // 重建收尾持有重建锁通知监听，监听会拿 q.mu。封口队列等重建时不能反过来拿锁。
 func TestResealQueue_NoDeadlockWithRebuildNotify(t *testing.T) {
 	prevWait := waitCollectIdle
-	prevApply := applySearchReseal
+	prevApply := sealSearchIndex
 	t.Cleanup(func() {
 		waitCollectIdle = prevWait
-		applySearchReseal = prevApply
+		sealSearchIndex = prevApply
 		resetSearchReseal()
 		// 全局进度回到空闲，别把 indexing 留给后面的测试。
 		filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
 	})
 	waitCollectIdle = func() {}
-	applySearchReseal = func([]int64) bool {
+	sealSearchIndex = func([]int64, bool) bool {
 		// 模拟增量失败转全量重建，让 run 走等重建的分支。
 		filmsnapshot.NotifySearchIndexProgress(1, 0, "indexing")
 		return false

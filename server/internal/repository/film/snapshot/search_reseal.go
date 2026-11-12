@@ -8,25 +8,34 @@ import (
 	"server/internal/model"
 )
 
-// ResealSearchIndexMids 一条采集队列的变动只封口一次。
-// 库里仍在的影片走增量；有物理删除时才在内存里重算倒排和榜单，不扫全库。
-// 没有可用内存索引，或新库还是空索引时，改为整表顺序加载。
-// 空索引若按本次编号逐批点查，全量首采会把上百万行拆成随机查询。
+// ResealSearchIndexMids 按编号封口。编号视为完整增量。
 func ResealSearchIndexMids(mids []int64) bool {
+	return ResealSearchIndex(mids, false)
+}
+
+// ResealSearchIndex 全部采集队列结束后的唯一封口。
+// incomplete 表示本轮编号不是完整增量（含全量站）。这种轮次、内存索引不可用、
+// 或变动编号已经超过当前索引一半时，都在按编号点查之前整表顺序加载。
+// 点查失败同样改为顺序加载。成功打进内存索引时返回 true。
+func ResealSearchIndex(mids []int64, incomplete bool) bool {
 	startedAt := time.Now()
 	mids = NormalizeSnapshotMIDs(mids)
-	if len(mids) == 0 || db.Mdb == nil {
+	if !incomplete && (len(mids) == 0 || db.Mdb == nil) {
+		return false
+	}
+	if db.Mdb == nil {
+		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}
 
 	version := currentSearchIndexVersion()
 	base := activeFilmSearchMetas.Load()
-	if !searchIndexReady(base, version) || len(base.Items) == 0 {
-		items := 0
-		if base != nil {
-			items = len(base.Items)
-		}
-		log.Printf("[ActiveReadModel] 内存无可用检索副本，触发全量重建 mids=%d items=%d", len(mids), items)
+	items := 0
+	if base != nil {
+		items = len(base.Items)
+	}
+	if incomplete || !searchIndexReady(base, version) || items == 0 || resealMidsNeedScan(len(mids), items) {
+		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 mids=%d items=%d incomplete=%t", len(mids), items, incomplete)
 		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}
@@ -88,6 +97,14 @@ func ResealSearchIndexMids(mids []int64) bool {
 			return false
 		}
 	}
+}
+
+// resealMidsNeedScan 变动编号超过当前内存索引的一半时，点查不如顺序扫表。
+func resealMidsNeedScan(mids, items int) bool {
+	if mids <= 0 || items <= 0 {
+		return false
+	}
+	return int64(mids)*2 > int64(items)
 }
 
 func searchIndexReady(cur *filmSearchMetaIndex, version string) bool {

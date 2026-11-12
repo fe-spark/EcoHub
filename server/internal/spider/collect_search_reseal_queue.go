@@ -11,7 +11,7 @@ import (
 
 // searchResealQueue 全局封口周期。
 // 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
-// 全部采集队列都结束后再封一次。任一队列里有全量站就整表重建，否则按编号增量封口。
+// 全部采集队列都结束后再封一次。编号是否完整增量交给同一次封口判断。
 type searchResealQueue struct {
 	mu          sync.Mutex
 	pending     map[int64]struct{}
@@ -31,10 +31,8 @@ var searchSealRunning atomic.Bool
 
 var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 
-var applySearchReseal = filmsnapshot.ResealSearchIndexMids
-
-// requestSearchRebuild 全量站参与本轮时整表重建，不再按编号点查。
-var requestSearchRebuild = filmsnapshot.RequestActiveFilmSearchIndexRebuild
+// sealSearchIndex 全部队列结束后的唯一封口。第二个参数为真时编号不是完整增量，函数在点查前整表顺序加载。
+var sealSearchIndex = filmsnapshot.ResealSearchIndex
 
 // collectQueueCount 正在跑的采集队列。封口要等每一条队列结束，不能只看当前没有站在抓页。
 // frozen 只在本轮已经没有队列、准备落地封口时置位。还有队列时新队列可以加入这一轮。
@@ -146,7 +144,7 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	}
 }
 
-// noteSearchResealFullCollect 本轮任一采集队列里有全量站。封口时整表重建。
+// noteSearchResealFullCollect 本轮编号不是完整增量（含全量站）。封口时在点查前整表顺序加载。
 func noteSearchResealFullCollect() {
 	q := searchReseal
 	q.mu.Lock()
@@ -234,16 +232,12 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	mids, full := q.takePendingLocked()
 	q.mu.Unlock()
 
-	if full {
+	if full || len(mids) > 0 {
 		searchSealRunning.Store(true)
-		requestSearchRebuild()
-		searchSealRunning.Store(false)
-	} else if len(mids) > 0 {
-		searchSealRunning.Store(true)
-		applySearchReseal(mids)
+		sealSearchIndex(mids, full)
 		searchSealRunning.Store(false)
 	}
-	// 增量封口失败会转全量重建。已交出的站点等重建结束再收口。
+	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。
 	// 重建期间新进来的编号还在 pending，继续封。
 	if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
 		parked := false
@@ -260,7 +254,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		})
 		return parked
 	}
-	// 增量成功时 ResealSearchIndexMids 已发过 done；这里只收口 sealing，不再依赖全局监听。
+	// 按编号封口成功时 ResealSearchIndex 已发过 done；这里只收口 sealing，不再依赖全局监听。
 	q.complete()
 	if len(mids) == 0 && !full {
 		// 没有编号也要发一次终态，让前端把待检索收成完成。
