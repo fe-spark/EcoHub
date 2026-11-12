@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Drawer,
   Button,
@@ -56,6 +56,11 @@ export function BatchDetailDrawer({
 }: BatchDetailDrawerProps) {
   const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
   const [errorSource, setErrorSource] = useState<CollectRecordSourceDetail | null>(null);
+  useEffect(() => {
+    if (open) return;
+    setModalSource(null);
+    setErrorSource(null);
+  }, [open]);
   if (!record) return null;
 
   let details: CollectRecordSourceDetail[] = [];
@@ -234,14 +239,14 @@ export function BatchDetailDrawer({
       </div>
 
       <BatchFilmsModal
-        open={!!modalSource}
+        open={open && !!modalSource}
         batchId={record.batchId}
         sourceId={modalSource?.id || ""}
         sourceName={modalSource?.name || ""}
         onClose={() => setModalSource(null)}
       />
       <ErrorDetailModal
-        open={!!errorSource}
+        open={open && !!errorSource}
         title={errorSource?.sourceName ? `${errorSource.sourceName} 异常原因` : "异常原因"}
         text={errorSource?.error || ""}
         pages={errorSource?.failedPages}
