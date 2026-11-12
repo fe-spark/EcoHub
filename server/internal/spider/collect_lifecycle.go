@@ -42,8 +42,8 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	if s.draining {
 		return errCollectDuringMaintenance
 	}
-	if searchIndexBlocksCollect() {
-		return errSearchIndexUpdating
+	if err := collectPauseErr(); err != nil {
+		return err
 	}
 	if _, ok := s.activeSources[sourceID]; ok {
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
@@ -139,7 +139,8 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 var (
 	errMaintenanceBusy          = errors.New("已有维护任务在执行")
 	errCollectDuringMaintenance = errors.New("维护中，已跳过")
-	errSearchIndexUpdating      = errors.New("检索索引更新中，采集已暂停")
+	errSearchIndexUpdating      = errors.New("检索索引正在更新，现在不能新开采集。正在进行的采集会继续跑完。")
+	errSearchSealPending        = errors.New("这一轮检索即将入库，现在不能新开采集。正在进行的采集会继续跑完。")
 	errDrainTimeout             = errors.New("等待采集空闲超时")
 )
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,5 +136,78 @@ func TestEnqueueCronTaskCoalesce(t *testing.T) {
 	cronMu.Unlock()
 	if pendingLen != 0 {
 		t.Fatalf("pending tasks should be flushed, got %d", pendingLen)
+	}
+}
+
+func TestExecuteTask_AutoCollectOverlapRunsOneFollowUp(t *testing.T) {
+	const id = "test_cron_rerun"
+	prev := autoCollectFn
+	t.Cleanup(func() {
+		autoCollectFn = prev
+		runningCronTasks.Delete(id)
+		cronCollectRerun.Delete(id)
+	})
+
+	var calls atomic.Int32
+	started := make(chan struct{})
+	release := make(chan struct{})
+	autoCollectFn = func(string, int) error {
+		n := calls.Add(1)
+		if n == 1 {
+			close(started)
+			<-release
+			return nil
+		}
+		noteCronCollectRerun(id)
+		return nil
+	}
+
+	ft := model.FilmCollectTask{Id: id, Model: model.TaskModelAutoCollect, State: true, Time: 24}
+	done := make(chan struct{})
+	go func() {
+		executeTask(ft, false)
+		close(done)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first collect did not start")
+	}
+	executeTask(ft, false)
+	executeTask(ft, false)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("collect did not finish")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("calls = %d, want 2", got)
+	}
+	if _, ok := cronCollectRerun.Load(id); ok {
+		t.Fatal("ticks during the follow-up must not start another queue")
+	}
+}
+
+func TestExecuteTask_AutoCollectErrorDropsFollowUp(t *testing.T) {
+	const id = "test_cron_rerun_err"
+	prev := autoCollectFn
+	t.Cleanup(func() {
+		autoCollectFn = prev
+		runningCronTasks.Delete(id)
+		cronCollectRerun.Delete(id)
+	})
+	var calls atomic.Int32
+	autoCollectFn = func(string, int) error {
+		calls.Add(1)
+		noteCronCollectRerun(id)
+		return errors.New("读取采集站失败")
+	}
+	executeTask(model.FilmCollectTask{Id: id, Model: model.TaskModelAutoCollect, State: true, Time: 24}, true)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls = %d, want 1", got)
+	}
+	if _, ok := cronCollectRerun.Load(id); ok {
+		t.Fatal("failed collect must drop the follow-up flag")
 	}
 }

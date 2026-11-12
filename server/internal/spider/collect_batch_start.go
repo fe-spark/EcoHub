@@ -11,14 +11,14 @@ import (
 // PrepareBatchCollectStart 挑出这次能开的站并占用。跳过的站带原因返回，不占队列。
 // 手动批量采集与计划任务定时采集均复用此逻辑。
 func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchResult) {
-	if searchIndexBlocksCollect() {
+	if reason := collectPauseReason(); reason != "" {
 		skipped := make([]model.CollectBatchSkip, 0, len(ids))
 		for _, raw := range ids {
 			id := strings.TrimSpace(raw)
 			if id == "" {
 				continue
 			}
-			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: errSearchIndexUpdating.Error()})
+			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: reason})
 		}
 		return CollectClaim{}, model.CollectBatchResult{Skipped: skipped}
 	}
@@ -65,15 +65,32 @@ func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchRes
 		}
 		skipped = append(skipped, model.CollectBatchSkip{Id: source.Id, Name: source.Name, Reason: "采集中"})
 	}
+	// 名额和「已开始」一起交出去。异步开工后再被封口拒绝，调用方已经拿到了开始名单。
+	if len(claim.Sources) > 0 {
+		if beforeCollectQueueAdmit != nil {
+			beforeCollectQueueAdmit()
+		}
+		if _, err := tryBeginCollectQueue(); err != nil {
+			for _, source := range claim.Sources {
+				skipped = append(skipped, model.CollectBatchSkip{Id: source.Id, Name: source.Name, Reason: err.Error()})
+			}
+			claim.abandon()
+			return CollectClaim{}, model.CollectBatchResult{Skipped: skipped}
+		}
+		claim.queueHeld = true
+	}
 	return claim, model.CollectBatchResult{Started: started, Skipped: skipped}
 }
+
+// beforeCollectQueueAdmit 仅供测试：占用已经成功、队列名额还没占下时调用。
+var beforeCollectQueueAdmit func()
 
 func batchCollectBlockReason(fs model.FilmSource) string {
 	if isMaintenanceRunning() {
 		return "维护任务执行中（" + maintenanceRunningDetail() + "），已跳过"
 	}
-	if searchIndexBlocksCollect() {
-		return "检索索引更新中，采集已暂停"
+	if reason := collectPauseReason(); reason != "" {
+		return reason
 	}
 	if progress.IsCategorySyncing(fs.Id) {
 		return "分类采集中"

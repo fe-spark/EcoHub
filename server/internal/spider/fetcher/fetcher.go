@@ -105,8 +105,44 @@ func withFetchSlot(ctx context.Context, s *model.FilmSource, tag string, call fu
 }
 
 const (
+	// maxPageFetchRetries 单页就地重试次数。间隔逐次拉长，避开同一瞬间的断连。
 	maxPageFetchRetries = 2
 )
+
+// fetchRetryBase 第一次重试前的等待。之后按 4 倍增加，上限 8 秒。测试可置 0。
+var fetchRetryBase = time.Second
+
+func fetchRetryDelay(retry int) time.Duration {
+	if retry < 1 || fetchRetryBase <= 0 {
+		return 0
+	}
+	delay := fetchRetryBase
+	for i := 1; i < retry; i++ {
+		delay *= 4
+		if delay > 8*time.Second {
+			return 8 * time.Second
+		}
+	}
+	return delay
+}
+
+// isTransientFetchErr EOF、连接被重置、单页超时。这几类经常是同一小波并发一起失败。
+func isTransientFetchErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "timeout") {
+		return true
+	}
+	if strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe") || strings.Contains(msg, "EOF") {
+		return true
+	}
+	return false
+}
 
 func isRetryableFetchErr(err error) bool {
 	if err == nil {
@@ -136,10 +172,8 @@ func GetPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 			return 0, ctx.Err()
 		}
 		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return 0, ctx.Err()
-			case <-time.After(time.Duration(attempt*200) * time.Millisecond):
+			if err := waitFetchRetry(ctx, attempt); err != nil {
+				return 0, err
 			}
 		}
 		pageCount, err = fetchPageCountOnce(ctx, s, r)
@@ -184,10 +218,8 @@ func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		}
 		if attempt > 0 {
 			log.Printf("[Spider] 站点 %s 第 %s 页抓取遇临时错误 (重试 %d/%d): %v", srcName, page, attempt, maxPageFetchRetries, err)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt*200) * time.Millisecond):
+			if err := waitFetchRetry(ctx, attempt); err != nil {
+				return nil, err
 			}
 		}
 		list, err = fetchFilmDetailOnce(ctx, s, r)
@@ -202,6 +234,21 @@ func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		}
 	}
 	return list, err
+}
+
+func waitFetchRetry(ctx context.Context, attempt int) error {
+	delay := fetchRetryDelay(attempt)
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func fetchFilmDetailOnce(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {

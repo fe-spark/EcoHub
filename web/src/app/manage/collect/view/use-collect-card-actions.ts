@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { collectIndexUpdatingReason } from "./collect-selection";
 import { isActiveCollectStatus, type FilmSource } from "./types";
 import type { SearchIndexProgress } from "./use-collect-stream";
 
@@ -51,7 +52,7 @@ export function useCollectCardActions({
   const startTask = useCallback(
     async (record: FilmSource) => {
       if (searchIndex?.status === "indexing") {
-        message.warning("检索索引更新中，采集已暂停");
+        message.warning(collectIndexUpdatingReason);
         return;
       }
       if (deletingSourceId === record.id) {

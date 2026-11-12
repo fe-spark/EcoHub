@@ -3,6 +3,7 @@ package spider
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"server/internal/infra/syslog"
@@ -22,11 +23,39 @@ func AutoCollectTriggered(trigger string, h int) {
 	}
 }
 
+// autoCollectFn 定时采集入口。测试替换它，避免真的去拉站点。
+var autoCollectFn = autoCollect
+
+// runAutoCollectTask 跑一轮自动采集。执行期间若又到点，结束后再补采一轮空闲站，不再连环。
+func runAutoCollectTask(ft model.FilmCollectTask, manual bool) {
+	report := func(err error) {
+		if err == nil {
+			return
+		}
+		remark := strings.TrimSpace(ft.Remark)
+		if remark == "" {
+			remark = "自动采集"
+		}
+		syslog.Errorf("[Cron] %s 失败: %v", remark, err)
+		if !manual {
+			emitCronFailedNotify(ft.Id, remark, err.Error())
+		}
+	}
+	err := autoCollectFn(model.CollectTriggerCron, ft.Time)
+	report(err)
+	if err == nil && takeCronCollectRerun(ft.Id) {
+		log.Printf("定时采集补采一轮空闲站点: Task[%s]\n", ft.Id)
+		report(autoCollectFn(model.CollectTriggerCron, ft.Time))
+	}
+	// 补采期间又到的点并进这一轮，留给下一次调度，不再开第三条队列。
+	takeCronCollectRerun(ft.Id)
+}
+
 // autoCollect 返回会让本轮采集整体无法开始的错误（例如读取采集站失败），交给定时任务告警。
 // 跳过（维护中、索引更新中、无可采站点）不算错误。
 func autoCollect(trigger string, h int) error {
-	if searchIndexBlocksCollect() {
-		log.Printf("[Spider] 定时采集跳过：%s", errSearchIndexUpdating.Error())
+	if reason := collectPauseReason(); reason != "" {
+		log.Printf("[Spider] 定时采集跳过：%s", reason)
 		return nil
 	}
 	if isMaintenanceRunning() {
