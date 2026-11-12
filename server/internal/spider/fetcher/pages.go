@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -559,33 +558,27 @@ func formatFailedPagesError(failedPages []int, totalFailed int, lastErr string) 
 	if totalFailed <= 0 {
 		return ""
 	}
-	var pagesDesc string
-	samplePages := failedPages
-	if len(samplePages) > 10 {
-		samplePages = samplePages[:10]
+	pagesDesc := fmt.Sprintf("共 %d 页失败", totalFailed)
+	if totalFailed == 1 && len(failedPages) == 1 {
+		pagesDesc = fmt.Sprintf("第 %d 页失败", failedPages[0])
 	}
-	if len(samplePages) == 1 && totalFailed == 1 {
-		pagesDesc = fmt.Sprintf("第 %d 页", samplePages[0])
-	} else if len(samplePages) > 0 {
-		strPages := make([]string, len(samplePages))
-		for i, p := range samplePages {
-			strPages[i] = strconv.Itoa(p)
-		}
-		if totalFailed > len(samplePages) {
-			pagesDesc = fmt.Sprintf("共 %d 页失败 (第 %s... 页)", totalFailed, strings.Join(strPages, ", "))
-		} else {
-			pagesDesc = fmt.Sprintf("第 %s 页", strings.Join(strPages, ", "))
-		}
-	} else {
-		pagesDesc = fmt.Sprintf("共 %d 页", totalFailed)
-	}
-
-	trimmedErr := strings.TrimSpace(lastErr)
+	trimmedErr := trimErrorRunes(lastErr, failedPageErrorRunes)
 	if trimmedErr != "" {
-		if len(trimmedErr) > 120 {
-			trimmedErr = trimmedErr[:120] + "..."
-		}
-		return fmt.Sprintf("%s抓取失败: %s", pagesDesc, trimmedErr)
+		return pagesDesc + "。抓取失败: " + trimmedErr
 	}
-	return fmt.Sprintf("%s抓取失败", pagesDesc)
+	return pagesDesc
+}
+
+const failedPageErrorRunes = 2000
+
+func trimErrorRunes(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || max <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "..."
 }

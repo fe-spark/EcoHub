@@ -1,11 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Drawer,
   Button,
   Popconfirm,
-  Alert,
   Typography,
 } from "antd";
 import {
@@ -33,6 +32,7 @@ import {
 } from "./history-columns";
 import { BatchFilmsModal } from "./batch-films-modal";
 import { BatchOverviewCards } from "./batch-overview-cards";
+import { ErrorDetailModal } from "./error-detail-button";
 import styles from "./batch-detail-drawer.module.less";
 
 const { Text } = Typography;
@@ -55,6 +55,12 @@ export function BatchDetailDrawer({
   onRetrySingleSource,
 }: BatchDetailDrawerProps) {
   const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
+  const [errorSource, setErrorSource] = useState<CollectRecordSourceDetail | null>(null);
+  useEffect(() => {
+    if (open) return;
+    setModalSource(null);
+    setErrorSource(null);
+  }, [open]);
   if (!record) return null;
 
   let details: CollectRecordSourceDetail[] = [];
@@ -104,16 +110,6 @@ export function BatchDetailDrawer({
             })
           }
         />
-
-        {record.errorMsg?.trim() && (
-          <Alert
-            type="error"
-            showIcon
-            message="批次异常摘要"
-            description={record.errorMsg}
-            className={styles.drawerAlert}
-          />
-        )}
 
         <div className={styles.drawerSectionHeader}>
           <div className={styles.tableTitle}>各采集源成果与影片详情</div>
@@ -220,13 +216,20 @@ export function BatchDetailDrawer({
                     </span>
                   </div>
 
-                  {item.error?.trim() && (
-                    <div className={styles.sourceCardError}>
+                  {(item.error?.trim() || (item.failedPages?.length ?? 0) > 0) && (
+                    <button
+                      type="button"
+                      className={styles.sourceCardError}
+                      onClick={() => setErrorSource(item)}
+                    >
                       <span className={styles.sourceCardErrorIcon}>
                         <CloseCircleOutlined />
                       </span>
-                      <span className={styles.sourceCardErrorText}>{item.error}</span>
-                    </div>
+                      <span className={styles.sourceCardErrorText}>
+                        {item.error?.trim() || `共 ${item.failedPages?.length ?? 0} 页失败`}
+                      </span>
+                      <span className={styles.sourceCardErrorAction}>查看</span>
+                    </button>
                   )}
                 </div>
               );
@@ -236,11 +239,18 @@ export function BatchDetailDrawer({
       </div>
 
       <BatchFilmsModal
-        open={!!modalSource}
+        open={open && !!modalSource}
         batchId={record.batchId}
         sourceId={modalSource?.id || ""}
         sourceName={modalSource?.name || ""}
         onClose={() => setModalSource(null)}
+      />
+      <ErrorDetailModal
+        open={open && !!errorSource}
+        title={errorSource?.sourceName ? `${errorSource.sourceName} 异常原因` : "异常原因"}
+        text={errorSource?.error || ""}
+        pages={errorSource?.failedPages}
+        onClose={() => setErrorSource(null)}
       />
     </Drawer>
   );

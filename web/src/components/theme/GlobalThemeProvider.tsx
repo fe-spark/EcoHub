@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { App, ConfigProvider, theme } from "antd";
+import { FastColor } from "@ant-design/fast-color";
 import zhCN from "antd/locale/zh_CN";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
@@ -11,6 +12,11 @@ import { THEME_STORAGE_KEY, writeThemeCookie, isThemeMode } from "@/lib/theme";
 import { setAppMessage } from "@/lib/app-message";
 
 const DEFAULT_PRIMARY_COLOR = "#fa8c16";
+
+/** 固定列是 sticky，悬停色必须铺在实心底上，否则半透明色会把底下的列透出来。 */
+function solidOn(background: string, fill: string) {
+  return new FastColor(fill).onBackground(background).toHexString();
+}
 
 type ThemeContextValue = {
   mode: ThemeMode;
@@ -174,7 +180,12 @@ export default function GlobalThemeProvider({
           headerBg: isDark ? "#1b1d24" : "#f8fafc",
           colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.16)" : "#e2e8f0",
           borderColor: isDark ? "rgba(255, 255, 255, 0.22)" : "#cbd5e1",
-          rowHoverBg: isDark ? "rgba(250, 140, 22, 0.1)" : "rgba(250, 140, 22, 0.05)",
+          rowHoverBg: solidOn(
+            designToken.colorBgContainer,
+            isDark ? "rgba(250, 140, 22, 0.1)" : "rgba(250, 140, 22, 0.05)",
+          ),
+          rowSelectedBg: solidOn(designToken.colorBgContainer, designToken.controlItemBgActive),
+          rowSelectedHoverBg: solidOn(designToken.colorBgContainer, designToken.controlItemBgActiveHover),
         },
         Menu: {
           itemBg: "transparent",

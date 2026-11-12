@@ -7,12 +7,13 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-func resolvePlayableSourceID(playSources []model.PlayLinkVo, playFrom string) string {
+func resolvePlayableSourceID(playSources []model.PlayLinkVo, playFrom, primarySourceID string) string {
 	if playFrom != "" {
 		for _, source := range playSources {
 			if source.Id == playFrom && len(source.LinkList) > 0 {
@@ -22,6 +23,15 @@ func resolvePlayableSourceID(playSources []model.PlayLinkVo, playFrom string) st
 
 		for _, source := range playSources {
 			if source.SourceId == playFrom && len(source.LinkList) > 0 {
+				return source.Id
+			}
+		}
+	}
+
+	// 没有指定线路，或指定线路已不存在：播主站。主站没有可播剧集时再退回第一条。
+	if primarySourceID != "" {
+		for _, source := range playSources {
+			if source.SourceId == primarySourceID && len(source.LinkList) > 0 {
 				return source.Id
 			}
 		}
@@ -87,7 +97,11 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		detail.List[i].LinkList = valid
 	}
 	if len(detail.List) > 0 {
-		playFrom = resolvePlayableSourceID(detail.List, playFrom)
+		primarySourceID := ""
+		if primary := repository.GetActiveCollectSource(); primary != nil {
+			primarySourceID = primary.Id
+		}
+		playFrom = resolvePlayableSourceID(detail.List, playFrom, primarySourceID)
 	}
 	var currentPlay model.MovieUrlInfo
 	for _, v := range detail.List {
