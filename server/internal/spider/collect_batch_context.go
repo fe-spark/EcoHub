@@ -384,9 +384,10 @@ func (b *collectBatchContext) recordSourceSnapshot(detail model.CollectRecordSou
 	}
 	b.mu.Lock()
 	b.sourceSnapshots[detail.SourceID] = detail
+	b.progressDirty = true
 	b.mu.Unlock()
-	// 站点结束后立刻落库，批次还在跑时重启也能看见这一站已经写入的影片。
-	b.flushRecordSync()
+	// 不在站点退出时同步等检查点。封口要等 activeCount 归零，落库留给批次收尾。
+	b.maybeFlushRecord()
 }
 
 func (b *collectBatchContext) getSourceSnapshot(sourceID string) (model.CollectRecordSourceDetail, bool) {
@@ -448,11 +449,7 @@ func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error 
 	if _, err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
-	if isFullCollectHour(b.sourceHour(source.Id)) {
-		noteSearchResealFullCollect()
-	}
-	mids := b.takeSourceMIDs(source.Id)
-	scheduleSearchReseal(mids)
+	scheduleSearchReseal(b.takeSourceMIDs(source.Id))
 	filmcache.ClearTVBoxConfigCache()
 	b.warmPrimaryHome(source.Id)
 	return nil
@@ -499,9 +496,6 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	if b.hasFullCollectSource() {
-		noteSearchResealFullCollect()
-	}
 	return finalizeStreamPublish(b.takeAffectedMIDs, warmupHome)
 }
 

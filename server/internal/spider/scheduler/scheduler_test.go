@@ -410,3 +410,43 @@ func TestWriteLaneCancelSourceCompletesPending(t *testing.T) {
 		t.Fatalf("queue should be gone after cancel, got pending=%d sources=%d", snap.PendingTotal, snap.PendingSources)
 	}
 }
+
+func TestWriteLaneLimitHoldsSecondSource(t *testing.T) {
+	lane := newWriteLane("test-limit")
+	lane.workers = 2
+	lane.writeLimit = 1
+	lane.start()
+
+	hold := make(chan struct{})
+	entered := make(chan struct{}, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for _, id := range []string{"A", "B"} {
+		sourceID := id
+		if err := lane.submit(context.Background(), Job{
+			SourceID:   sourceID,
+			SourceName: sourceID,
+			Page:       1,
+			Write: func() (Mids, error) {
+				entered <- struct{}{}
+				<-hold
+				return Mids{}, nil
+			},
+			Complete: func(Completion) { wg.Done() },
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first write did not start")
+	}
+	select {
+	case <-entered:
+		t.Fatal("second source started while write limit is 1")
+	case <-time.After(80 * time.Millisecond):
+	}
+	close(hold)
+	wg.Wait()
+}

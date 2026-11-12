@@ -15,6 +15,7 @@ import (
 //  1. take 单页 + 跨站 round-robin
 //  2. 同站 writing 互斥；worker panic 必释放 writing
 //  3. 单站 + 全局有界 buffer，满则反压拉页
+//  4. 同时写事务从 2 起步，按真实耗时加减，硬顶 16
 //
 // 对外只暴露 Submit / FinishSource / CancelSource / WaitPendingWrites 门面；
 // 真实落盘逻辑由调用方通过 Job.Write 注入，本包不依赖采集编排层。
@@ -77,12 +78,13 @@ type Mids struct {
 
 // writeSnapshot 写库缓冲水位快照，供日志与后续进度 API 使用。
 type writeSnapshot struct {
-	PendingTotal     int `json:"pendingTotal"`
-	PendingSources   int `json:"pendingSources"`
-	WritingSources   int `json:"writingSources"`
-	MaxPendingSource int `json:"maxPendingSource"`
-	MaxPendingGlobal int `json:"maxPendingGlobal"`
-	MaxInflight      int `json:"maxInflight"`
+	PendingTotal     int           `json:"pendingTotal"`
+	PendingSources   int           `json:"pendingSources"`
+	WritingSources   int           `json:"writingSources"`
+	MaxPendingSource int           `json:"maxPendingSource"`
+	MaxPendingGlobal int           `json:"maxPendingGlobal"`
+	MaxInflight      int           `json:"maxInflight"`
+	LastCost         time.Duration `json:"-"`
 }
 
 type writeScheduler struct {
@@ -90,9 +92,13 @@ type writeScheduler struct {
 }
 
 func newWriteScheduler() *writeScheduler {
-	s := &writeScheduler{lane: newWriteLane("采集")}
-	s.lane.start()
-	return s
+	lane := newWriteLane("采集")
+	lane.workers = config.CollectWriteSlotMax
+	lane.writeLimit = config.CollectWriteMaxInflight
+	lane.adapt = true
+	lane.followConfig = config.WriteSlotsApplied()
+	lane.start()
+	return &writeScheduler{lane: lane}
 }
 
 func (s *writeScheduler) submit(ctx context.Context, job Job) error {
@@ -128,13 +134,18 @@ func (s *writeScheduler) cancelAll() {
 }
 
 type writeLane struct {
-	name     string
-	mu       sync.Mutex
-	cond     *sync.Cond
-	queues   map[string]*writeQueue
-	order    []string // sourceID 稳定顺序，用于 round-robin
-	rrCursor int      // 下一次 RR 起始下标
-	workers  int
+	name         string
+	mu           sync.Mutex
+	cond         *sync.Cond
+	queues       map[string]*writeQueue
+	order        []string // sourceID 稳定顺序，用于 round-robin
+	rrCursor     int      // 下一次 RR 起始下标
+	workers      int
+	writeLimit   int // 0 表示不额外限制，由 workers 数决定。生产环境从硬顶起步。
+	adapt        bool
+	followConfig bool
+	pace         writePace
+	lastCost     time.Duration
 
 	// 有界水箱（构造时从 config 拷贝，测试可覆盖）。
 	maxPerSource int
@@ -368,8 +379,16 @@ func (l *writeLane) start() {
 	for workerID := 1; workerID <= l.workers; workerID++ {
 		go l.run(workerID)
 	}
-	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d pending_per_source=%d pending_global=%d",
-		l.name, l.workers, l.maxPerSource, l.maxGlobal)
+	limit := l.writeLimit
+	if limit <= 0 {
+		limit = l.workers
+	}
+	last := "无"
+	if l.lastCost > 0 {
+		last = l.lastCost.String()
+	}
+	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d 写并发=%d/%d 最近耗时=%s pending_per_source=%d pending_global=%d",
+		l.name, l.workers, limit, config.CollectWriteSlotMax, last, l.maxPerSource, l.maxGlobal)
 }
 
 func (l *writeLane) run(workerID int) {
@@ -405,6 +424,7 @@ func (l *writeLane) run(workerID int) {
 				}()
 				mids, err = job.Write()
 			}()
+			l.noteWrite(time.Since(start), err)
 			if job.Complete != nil {
 				job.Complete(Completion{
 					Page:         job.Page,
@@ -438,7 +458,20 @@ func (l *writeLane) waitUntilWork() {
 	}
 }
 
+func (l *writeLane) writingCountLocked() int {
+	n := 0
+	for _, queue := range l.queues {
+		if queue != nil && queue.writing {
+			n++
+		}
+	}
+	return n
+}
+
 func (l *writeLane) hasReadyWorkLocked() bool {
+	if l.writeLimit > 0 && l.writingCountLocked() >= l.writeLimit {
+		return false
+	}
 	for _, id := range l.order {
 		queue := l.queues[id]
 		if queue != nil && queue.isReady() {

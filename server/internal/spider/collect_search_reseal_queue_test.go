@@ -14,7 +14,6 @@ func resetSearchReseal() {
 	searchReseal.pending = map[int64]struct{}{}
 	searchReseal.sealing = map[string]struct{}{}
 	searchReseal.running = false
-	searchReseal.fullCollect = false
 	searchReseal.awaitDone = false
 	searchReseal.mu.Unlock()
 	searchSealRunning.Store(false)
@@ -48,10 +47,7 @@ func TestSearchResealRun_WaitsThenSealsOnce(t *testing.T) {
 		<-release
 	}
 	sealed := make(chan int, 1)
-	sealSearchIndex = func(mids []int64, incomplete bool) bool {
-		if incomplete {
-			t.Errorf("hourly mids marked incomplete")
-		}
+	sealSearchIndex = func(mids []int64) bool {
 		sealed <- len(mids)
 		return true
 	}
@@ -86,45 +82,41 @@ func TestSearchResealRun_WaitsThenSealsOnce(t *testing.T) {
 	}
 }
 
-func TestSearchResealRun_FullCollectRebuildsAfterQueuesIdle(t *testing.T) {
+func TestSearchResealRun_SealsMidsAfterQueuesIdle(t *testing.T) {
 	prevSeal := sealSearchIndex
 	t.Cleanup(func() {
 		sealSearchIndex = prevSeal
 		resetSearchReseal()
 	})
 
-	sealed := make(chan bool, 1)
-	sealSearchIndex = func(mids []int64, incomplete bool) bool {
-		if len(mids) != 2 || !incomplete {
-			t.Errorf("seal mids=%v incomplete=%t", mids, incomplete)
-		}
-		sealed <- incomplete
-		return false
+	sealed := make(chan int, 1)
+	sealSearchIndex = func(mids []int64) bool {
+		sealed <- len(mids)
+		return true
 	}
 
 	beginCollectQueue()
 	beginCollectQueue()
-	noteSearchResealFullCollect()
 	scheduleSearchReseal([]int64{1, 2})
 
 	select {
-	case <-sealed:
-		t.Fatal("sealed while a collect queue is still running")
+	case n := <-sealed:
+		t.Fatalf("sealed while a collect queue is still running: %d", n)
 	case <-time.After(40 * time.Millisecond):
 	}
 
 	endCollectQueue()
 	select {
-	case <-sealed:
-		t.Fatal("sealed while another collect queue is still running")
+	case n := <-sealed:
+		t.Fatalf("sealed while another collect queue is still running: %d", n)
 	case <-time.After(40 * time.Millisecond):
 	}
 
 	endCollectQueue()
 	select {
-	case incomplete := <-sealed:
-		if !incomplete {
-			t.Fatal("full collect must be sealed as an incomplete mid list")
+	case n := <-sealed:
+		if n != 2 {
+			t.Fatalf("sealed %d mids, want 2", n)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("did not seal after every collect queue finished")
@@ -150,7 +142,7 @@ func TestSearchResealRun_CompletesEmptyCycle(t *testing.T) {
 
 	release := make(chan struct{})
 	waitCollectIdle = func() { <-release }
-	sealSearchIndex = func([]int64, bool) bool { return true }
+	sealSearchIndex = func([]int64) bool { return true }
 
 	searchReseal.addSealing("empty-seal")
 	time.Sleep(30 * time.Millisecond)
@@ -272,7 +264,7 @@ func TestResealQueue_IdleDoesNotCompleteSealing(t *testing.T) {
 	}
 	release := make(chan struct{})
 	waitCollectIdle = func() { <-release }
-	sealSearchIndex = func([]int64, bool) bool {
+	sealSearchIndex = func([]int64) bool {
 		filmsnapshot.NotifySearchIndexProgress(10, 0, "indexing")
 		return false
 	}
@@ -347,7 +339,7 @@ func TestResealQueue_StaysSealingUntilRebuildDone(t *testing.T) {
 	}
 	release := make(chan struct{})
 	waitCollectIdle = func() { <-release }
-	sealSearchIndex = func([]int64, bool) bool {
+	sealSearchIndex = func([]int64) bool {
 		filmsnapshot.NotifySearchIndexProgress(10, 0, "indexing")
 		return false
 	}
@@ -403,7 +395,7 @@ func TestResealQueue_SealsMidsArrivedDuringFailedSeal(t *testing.T) {
 	waitCollectIdle = func() { <-release }
 
 	second := make(chan []int64, 1)
-	sealSearchIndex = func(mids []int64, _ bool) bool {
+	sealSearchIndex = func(mids []int64) bool {
 		if len(mids) == 1 && mids[0] == 999 {
 			filmsnapshot.NotifySearchIndexProgress(10, 0, "indexing")
 			scheduleSearchReseal([]int64{1000})

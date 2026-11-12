@@ -134,39 +134,22 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	}
 }
 
-func TestResealMidsNeedScan_UsesFractionNotAbsoluteCount(t *testing.T) {
-	if resealMidsNeedScan(55000, 120000) {
-		t.Fatal("55000 of 120000 should stay a point query")
-	}
-	if resealMidsNeedScan(50000, 100000) {
-		t.Fatal("exactly half should stay a point query")
-	}
-	if !resealMidsNeedScan(50001, 100000) {
-		t.Fatal("more than half the index should sequential-scan")
-	}
-	if resealMidsNeedScan(0, 100) {
-		t.Fatal("empty mids are not a ratio scan")
-	}
-	if resealMidsNeedScan(1, 2) {
-		t.Fatal("one of two should stay a point query")
-	}
-}
-
-func TestResealSearchIndex_IncompleteSkipsPointQuery(t *testing.T) {
+func TestResealSearchIndex_MidsCoveringIndexStillPointQueries(t *testing.T) {
 	setupSnapshotRepoTestDB(t)
-	if err := SetActiveSnapshotVersion("v-incomplete"); err != nil {
+	if err := SetActiveSnapshotVersion("v-cover"); err != nil {
 		t.Fatal(err)
 	}
 	items := make([]FilmSearchMeta, 8)
 	for i := range items {
 		items[i] = FilmSearchMeta{Mid: int64(i + 1)}
 	}
-	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-incomplete", items))
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-cover", items))
 
 	prevRead := readSearchMetaUpserts
-	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
-		t.Fatal("incomplete round must not point-query by mid")
-		return nil, nil, nil
+	queried := 0
+	readSearchMetaUpserts = func(mids []int64, _ func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		queried = len(mids)
+		return map[int64]FilmSearchMeta{}, map[int64]struct{}{}, nil
 	}
 	var scanned atomic.Bool
 	stopRebuild := stubSearchRebuildScan(t, &scanned)
@@ -175,16 +158,23 @@ func TestResealSearchIndex_IncompleteSkipsPointQuery(t *testing.T) {
 		stopRebuild()
 	})
 
-	if ResealSearchIndex([]int64{1, 2}, true) {
-		t.Fatal("incomplete round must not report a point-query seal")
+	mids := make([]int64, len(items))
+	for i := range mids {
+		mids[i] = int64(i + 1)
+	}
+	if !ResealSearchIndex(mids) {
+		t.Fatal("covering round should report a point-query seal")
+	}
+	if queried != len(items) {
+		t.Fatalf("queried=%d", queried)
 	}
 	time.Sleep(40 * time.Millisecond)
-	if !scanned.Load() {
-		t.Fatal("incomplete round did not sequential-scan")
+	if scanned.Load() {
+		t.Fatal("covering round must not sequential-scan")
 	}
 }
 
-func TestResealSearchIndex_MajorityScansBeforePointQuery(t *testing.T) {
+func TestResealSearchIndex_OverHalfStillPointQueries(t *testing.T) {
 	setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-half"); err != nil {
 		t.Fatal(err)
@@ -196,9 +186,10 @@ func TestResealSearchIndex_MajorityScansBeforePointQuery(t *testing.T) {
 	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-half", items))
 
 	prevRead := readSearchMetaUpserts
-	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
-		t.Fatal("more than half the index must not point-query by mid")
-		return nil, nil, nil
+	queried := 0
+	readSearchMetaUpserts = func(mids []int64, _ func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		queried = len(mids)
+		return map[int64]FilmSearchMeta{}, map[int64]struct{}{}, nil
 	}
 	var scanned atomic.Bool
 	stopRebuild := stubSearchRebuildScan(t, &scanned)
@@ -207,12 +198,15 @@ func TestResealSearchIndex_MajorityScansBeforePointQuery(t *testing.T) {
 		stopRebuild()
 	})
 
-	if ResealSearchIndex([]int64{1, 2, 3}, false) {
-		t.Fatal("more than half the index must not report a point-query seal")
+	if !ResealSearchIndex([]int64{1, 2, 3}) {
+		t.Fatal("incremental round over half the index should still point-query")
+	}
+	if queried != 3 {
+		t.Fatalf("queried=%d", queried)
 	}
 	time.Sleep(40 * time.Millisecond)
-	if !scanned.Load() {
-		t.Fatal("more than half the index did not sequential-scan")
+	if scanned.Load() {
+		t.Fatal("incremental round must not sequential-scan")
 	}
 }
 
@@ -358,5 +352,31 @@ func TestLoadPlaySources_ChunksLargeMids(t *testing.T) {
 	}
 	if len(plays[12]) != 1 || plays[12][0] != "src-chunk" {
 		t.Fatalf("expected play source for mid 12, got: %+v", plays[12])
+	}
+}
+
+func TestLoadPlaySources_EmptyMidsDoesNotScanTable(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	gdb.Create(&model.FilmSourcePlaylist{
+		Mid:      99,
+		SourceId: "src-full",
+		LineKind: "play",
+	})
+	plays, err := loadPlaySources([]int64{})
+	if err != nil {
+		t.Fatalf("loadPlaySources empty mids failed: %v", err)
+	}
+	if len(plays) != 0 {
+		t.Fatalf("empty mids should return empty map, but got %d entries", len(plays))
+	}
+}
+
+func TestLoadSearchMetaUpserts_EmptyMidsShortCircuits(t *testing.T) {
+	upsertMap, drop, err := loadSearchMetaUpserts([]int64{}, nil)
+	if err != nil {
+		t.Fatalf("loadSearchMetaUpserts failed: %v", err)
+	}
+	if len(upsertMap) != 0 || len(drop) != 0 {
+		t.Fatalf("expected empty results, got upsert=%d drop=%d", len(upsertMap), len(drop))
 	}
 }
