@@ -262,6 +262,13 @@ export default function PlayPageView({
     void runSourcePrefer({ force: true });
   }, [preferEnabled, isProbing, runSourcePrefer]);
 
+  const handleSkipPrefer = useCallback(() => {
+    manualSourceLockRef.current = true;
+    preferAbortRef.current?.abort();
+    setIsProbing(false);
+    setProbeReady(true);
+  }, []);
+
   const handlePlayStart = useCallback(() => {
     setPlayerError(false);
     if (!currentFilm || !playingSourceId) return;
@@ -499,9 +506,20 @@ export default function PlayPageView({
           >
             {holdPlayerForPrefer ? (
               <div className={styles.preferOverlay}>
-                <LoadingOutlined />
-                <span>正在测速优选最佳播放源...</span>
-                <span className={styles.preferOverlayHint}>可在右侧关闭「测速优选」立即播放</span>
+                <div className={styles.preferCard}>
+                  <div className={styles.preferBars} aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <div className={styles.preferTitle}>正在测速</div>
+                  <div className={styles.preferHint}>比较各线路速度，自动播放最快的一条</div>
+                  {preferBootstrapped ? (
+                    <button type="button" className={styles.preferSkip} onClick={handleSkipPrefer}>
+                      跳过，直接播放
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ) : (
               current?.link && (
