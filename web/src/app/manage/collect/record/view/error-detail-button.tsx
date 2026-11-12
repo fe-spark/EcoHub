@@ -16,6 +16,37 @@ export function collectErrorReason(text: string): string {
   return message;
 }
 
+const FETCH_ERROR = /^(GET|POST|PUT|DELETE|HEAD|PATCH)\s+"([^"]+)"\s*:\s*([\s\S]+)$/i;
+
+const REASON_LABELS: Array<[RegExp, string]> = [
+  [/context deadline exceeded|client\.timeout exceeded|i\/o timeout/i, "请求超时"],
+  [/context canceled/i, "请求已取消"],
+  [/connection refused/i, "连接被拒绝"],
+  [/no such host/i, "域名无法解析"],
+  [/tls handshake timeout/i, "TLS 握手超时"],
+  [/unexpected eof|^eof$/i, "连接中断"],
+  [/certificate/i, "证书校验失败"],
+  [/network is unreachable|no route to host/i, "网络不可达"],
+];
+
+export function parseCollectError(text: string): {
+  summary: string;
+  detail: string;
+  method: string;
+  url: string;
+} {
+  const message = collectErrorReason(text);
+  const matched = message.match(FETCH_ERROR);
+  const detail = (matched?.[3] ?? message).trim();
+  const summary = REASON_LABELS.find(([pattern]) => pattern.test(detail))?.[1] ?? "";
+  return {
+    summary,
+    detail,
+    method: matched ? matched[1].toUpperCase() : "",
+    url: matched?.[2] ?? "",
+  };
+}
+
 export function ErrorDetailModal({
   open,
   title = "异常原因",
@@ -29,7 +60,7 @@ export function ErrorDetailModal({
   pages?: number[];
   onClose: () => void;
 }) {
-  const message = collectErrorReason(text);
+  const parsed = parseCollectError(text);
   const failedPages = (pages ?? []).filter((page) => Number.isFinite(page));
   if (!open) return null;
 
@@ -42,7 +73,7 @@ export function ErrorDetailModal({
         </span>
       }
       open={open}
-      width={720}
+      width={560}
       zIndex={2000}
       centered
       destroyOnHidden
@@ -54,17 +85,34 @@ export function ErrorDetailModal({
       }
     >
       <div className={styles.errorModalBody}>
-        {failedPages.length > 0 ? (
-          <div className={styles.errorPages}>
-            <div className={styles.errorPagesLabel}>失败页 {failedPages.length} 个</div>
-            <div className={styles.errorPagesBody}>{failedPages.join("、")}</div>
+        {parsed.summary ? (
+          <div className={styles.errorReason}>
+            <div className={styles.errorReasonMain}>{parsed.summary}</div>
+            {parsed.detail ? <div className={styles.errorReasonRaw}>{parsed.detail}</div> : null}
           </div>
+        ) : parsed.detail ? (
+          <div className={styles.errorDetailPlain}>{parsed.detail}</div>
         ) : null}
-        {message ? (
-          <div>
-            <div className={styles.errorPagesLabel}>抓取原因</div>
-            <div className={styles.errorDetail}>{message}</div>
-          </div>
+        {parsed.url ? (
+          <section className={styles.errorSection}>
+            <div className={styles.errorSectionLabel}>请求地址</div>
+            <div className={styles.errorUrl}>
+              {parsed.method ? <span className={styles.errorMethod}>{parsed.method}</span> : null}
+              <span className={styles.errorUrlText}>{parsed.url}</span>
+            </div>
+          </section>
+        ) : null}
+        {failedPages.length > 0 ? (
+          <section className={styles.errorSection}>
+            <div className={styles.errorSectionLabel}>失败页 {failedPages.length}</div>
+            <div className={styles.errorPageList}>
+              {failedPages.map((page, index) => (
+                <span key={`${page}-${index}`} className={styles.errorPageChip}>
+                  {page}
+                </span>
+              ))}
+            </div>
+          </section>
         ) : null}
       </div>
     </Modal>
