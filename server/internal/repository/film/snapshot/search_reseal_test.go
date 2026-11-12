@@ -96,7 +96,11 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	if err := SetActiveSnapshotVersion("v-large-mids"); err != nil {
 		t.Fatal(err)
 	}
-	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-large-mids", []FilmSearchMeta{{Mid: 1}}))
+	items := make([]FilmSearchMeta, 3000)
+	for i := range items {
+		items[i] = FilmSearchMeta{Mid: int64(i + 1)}
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-large-mids", items))
 
 	var scanned atomic.Bool
 	prevScan := scanActiveFilmSearchIndex
@@ -130,25 +134,85 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	}
 }
 
-func TestResealSearchIndexMids_LargeBatchStaysIncremental(t *testing.T) {
+func TestResealMidsNeedScan_UsesFractionNotAbsoluteCount(t *testing.T) {
+	if resealMidsNeedScan(55000, 120000) {
+		t.Fatal("55000 of 120000 should stay a point query")
+	}
+	if resealMidsNeedScan(50000, 100000) {
+		t.Fatal("exactly half should stay a point query")
+	}
+	if !resealMidsNeedScan(50001, 100000) {
+		t.Fatal("more than half the index should sequential-scan")
+	}
+	if resealMidsNeedScan(0, 100) {
+		t.Fatal("empty mids are not a ratio scan")
+	}
+	if resealMidsNeedScan(1, 2) {
+		t.Fatal("one of two should stay a point query")
+	}
+}
+
+func TestResealSearchIndex_IncompleteSkipsPointQuery(t *testing.T) {
 	setupSnapshotRepoTestDB(t)
-	if err := SetActiveSnapshotVersion("v-large"); err != nil {
+	if err := SetActiveSnapshotVersion("v-incomplete"); err != nil {
 		t.Fatal(err)
 	}
-	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-large", []FilmSearchMeta{{Mid: 1}}))
+	items := make([]FilmSearchMeta, 8)
+	for i := range items {
+		items[i] = FilmSearchMeta{Mid: int64(i + 1)}
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-incomplete", items))
 
+	prevRead := readSearchMetaUpserts
+	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		t.Fatal("incomplete round must not point-query by mid")
+		return nil, nil, nil
+	}
 	var scanned atomic.Bool
 	stopRebuild := stubSearchRebuildScan(t, &scanned)
-	defer stopRebuild()
+	t.Cleanup(func() {
+		readSearchMetaUpserts = prevRead
+		stopRebuild()
+	})
 
-	hugeMids := make([]int64, 55000)
-	for i := range hugeMids {
-		hugeMids[i] = int64(i + 1)
+	if ResealSearchIndex([]int64{1, 2}, true) {
+		t.Fatal("incomplete round must not report a point-query seal")
 	}
-	ResealSearchIndexMids(hugeMids)
 	time.Sleep(40 * time.Millisecond)
-	if scanned.Load() {
-		t.Fatal("unexpected full-scan rebuild triggered for large batch without drops")
+	if !scanned.Load() {
+		t.Fatal("incomplete round did not sequential-scan")
+	}
+}
+
+func TestResealSearchIndex_MajorityScansBeforePointQuery(t *testing.T) {
+	setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-half"); err != nil {
+		t.Fatal(err)
+	}
+	items := make([]FilmSearchMeta, 4)
+	for i := range items {
+		items[i] = FilmSearchMeta{Mid: int64(i + 1)}
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-half", items))
+
+	prevRead := readSearchMetaUpserts
+	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		t.Fatal("more than half the index must not point-query by mid")
+		return nil, nil, nil
+	}
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	t.Cleanup(func() {
+		readSearchMetaUpserts = prevRead
+		stopRebuild()
+	})
+
+	if ResealSearchIndex([]int64{1, 2, 3}, false) {
+		t.Fatal("more than half the index must not report a point-query seal")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if !scanned.Load() {
+		t.Fatal("more than half the index did not sequential-scan")
 	}
 }
 
@@ -162,6 +226,8 @@ func TestResealRereadsWhenIndexPointerChanges(t *testing.T) {
 	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-stale", []FilmSearchMeta{
 		{Mid: 101, Item: utils.FilmSearchItem{Mid: 101, Name: "将被删除"}},
 		{Mid: 102, Item: utils.FilmSearchItem{Mid: 102, Name: "留下"}},
+		{Mid: 201, Item: utils.FilmSearchItem{Mid: 201, Name: "无关甲"}},
+		{Mid: 202, Item: utils.FilmSearchItem{Mid: 202, Name: "无关乙"}},
 	}))
 
 	var scanned atomic.Bool
@@ -228,7 +294,9 @@ func TestResealReadFailureRequestsRebuild(t *testing.T) {
 	if err := SetActiveSnapshotVersion("v-read-fail"); err != nil {
 		t.Fatal(err)
 	}
-	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-read-fail", []FilmSearchMeta{{Mid: 1}}))
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-read-fail", []FilmSearchMeta{
+		{Mid: 1}, {Mid: 2}, {Mid: 3},
+	}))
 
 	var scanned atomic.Bool
 	stopRebuild := stubSearchRebuildScan(t, &scanned)
