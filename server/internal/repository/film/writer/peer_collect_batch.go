@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
+	"server/internal/utils"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -65,6 +67,9 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err != nil {
 		return nil, nil, 0, err
 	}
+	if len(mapped) == 0 && !isPrimaryCollectSourceTx(tx, source) {
+		return writePeerPageCreateTx(tx, source, details, sources)
+	}
 	if err = bindMappedFilmsTx(tx, items, mapped); err != nil {
 		return nil, nil, 0, err
 	}
@@ -73,7 +78,8 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 		return nil, nil, 0, err
 	}
 	markUnmappedCreates(items)
-	if err = createPageFilmsTx(tx, source, items); err != nil {
+	stage := time.Now()
+	if err = createPageFilmsTx(tx, source, items, sources); err != nil {
 		return nil, nil, 0, err
 	}
 	if err = insertPageMatchKeysTx(tx, items); err != nil {
@@ -82,12 +88,15 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err = upsertPageMappingsTx(tx, source.Id, items, mapped); err != nil {
 		return nil, nil, 0, err
 	}
-	if err = savePagePlaylistsTx(tx, source.Id, items); err != nil {
-		return nil, nil, 0, err
-	}
 	if err = syncPageFilmsTx(tx, source, items); err != nil {
 		return nil, nil, 0, err
 	}
+	mapCost := time.Since(stage)
+	stage = time.Now()
+	if err = savePagePlaylistsTx(tx, source.Id, items); err != nil {
+		return nil, nil, 0, err
+	}
+	playlistCost := time.Since(stage)
 	newMids := make(map[int64]struct{}, len(items))
 	for i := range items {
 		if items[i].isNew && items[i].mid > 0 {
@@ -105,17 +114,105 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 		if items[i].isNew || items[i].playChanged {
 			notify = append(notify, items[i].mid)
 		}
-		if items[i].isNew || items[i].linesChanged {
+		// 新片的备注和播放摘要已经写在插入里，不再逐片更新。
+		if !items[i].isNew && items[i].linesChanged {
 			remarkMids = append(remarkMids, items[i].mid)
 		}
 		if _, isNew := newMids[items[i].mid]; !isNew && items[i].playChanged {
 			stampMids[items[i].mid] = struct{}{}
 		}
 	}
+	stage = time.Now()
 	if err = refreshRemarksAndPlaySummaryWithStampTx(tx, remarkMids, stampMids, sources); err != nil {
 		return nil, nil, 0, err
 	}
+	notePeerTiming(tx, "full", mapCost, playlistCost, time.Since(stage))
 	return affected, notify, countCategorySkips(items), nil
+}
+
+// writePeerPageCreateTx 非主站全新页只建自己的档案。四次批量写入，不逐片更新。
+func writePeerPageCreateTx(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, int, error) {
+	items := make([]peerPageItem, len(details))
+	for i, detail := range details {
+		items[i] = peerPageItem{detail: detail, create: true}
+	}
+	stage := time.Now()
+	if err := createPageFilmsTx(tx, source, items, sources); err != nil {
+		return nil, nil, 0, err
+	}
+	if err := insertPageMatchKeysTx(tx, items); err != nil {
+		return nil, nil, 0, err
+	}
+	if err := insertLightMappingsTx(tx, source.Id, items); err != nil {
+		return nil, nil, 0, err
+	}
+	mapCost := time.Since(stage)
+	stage = time.Now()
+	if err := insertNewPagePlaylistsTx(tx, source.Id, items); err != nil {
+		return nil, nil, 0, err
+	}
+	notePeerTiming(tx, "light", mapCost, time.Since(stage), 0)
+	affected := make([]int64, 0, len(items))
+	for i := range items {
+		if items[i].mid > 0 {
+			affected = append(affected, items[i].mid)
+		}
+	}
+	return affected, affected, countCategorySkips(items), nil
+}
+
+func isPrimaryCollectSourceTx(tx *gorm.DB, source *model.FilmSource) bool {
+	if source == nil || tx == nil {
+		return true
+	}
+	var primary model.FilmSource
+	err := tx.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").Limit(1).Find(&primary).Error
+	if err != nil || primary.Id == "" {
+		return true
+	}
+	return primary.Id == source.Id
+}
+
+func insertLightMappingsTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
+	mappings := make([]model.MovieSourceMapping, 0, len(items))
+	for i := range items {
+		if items[i].mid <= 0 {
+			continue
+		}
+		unix, err := utils.ParseCollectUpdateTime(items[i].detail.UpdateTime)
+		if err != nil {
+			unix = 0
+		}
+		mappings = append(mappings, model.MovieSourceMapping{
+			SourceId:      sourceID,
+			SourceMid:     items[i].detail.Id,
+			GlobalMid:     items[i].mid,
+			SourceVodUnix: unix,
+		})
+	}
+	if len(mappings) == 0 {
+		return nil
+	}
+	sort.Slice(mappings, func(i, j int) bool { return mappings[i].SourceMid < mappings[j].SourceMid })
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "source_id"}, {Name: "source_mid"}},
+		DoUpdates: clause.AssignmentColumns([]string{"global_mid", "updated_at"}),
+	}).Create(&mappings).Error
+}
+
+func insertNewPagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
+	lines := make([]model.FilmSourcePlaylist, 0, len(items))
+	for i := range items {
+		if items[i].mid <= 0 {
+			continue
+		}
+		lines = append(lines, buildPlaylistsFromDetail(items[i].mid, sourceID, items[i].detail)...)
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	sortPlaylists(lines)
+	return tx.Clauses(playlistUpsertClause()).CreateInBatches(&lines, peerPagePlaylistBatch).Error
 }
 
 func countCategorySkips(items []peerPageItem) int {
@@ -193,7 +290,7 @@ func dropForeignFilms(items []peerPageItem, sourceID string) {
 	}
 }
 
-func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem) error {
+func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem, sources []model.FilmSource) error {
 	categoryVersion := support.GetCategoryVersion()
 	ruleVersion := support.GetRuleVersion()
 	newFilms := make([]model.FilmIndex, 0)
@@ -213,6 +310,7 @@ func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageIt
 		}
 		fi.Mid = 0
 		fi.FirstSourceId = source.Id
+		stampNewFilmPlaySummary(&fi, source, items[i].detail, sources)
 		newFilms = append(newFilms, fi)
 		newIdx = append(newIdx, i)
 	}
