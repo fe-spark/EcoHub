@@ -22,14 +22,14 @@ type RawProbe = {
   quality: string;
 };
 
-const DEFAULT_TIMEOUT_MS = 8000;
-// 同时拉多条源会互相抢带宽，测出来的是抢带宽的速度，不是单播这条源的速度
-const DEFAULT_CONCURRENCY = 1;
-// 第一片还在 TCP 慢启动，不计入；后面连续两片的字节和时间一起算平均速度
+const DEFAULT_TIMEOUT_MS = 5000;
+// 两条一起测：比全串行快，又不会像一次测三条那样把带宽拆碎
+const DEFAULT_CONCURRENCY = 2;
+// 第一片还在 TCP 慢启动，不计入；下一片的传输时间作为速度
 const WARMUP_FRAGMENTS = 1;
-const SAMPLE_FRAGMENTS = 2;
+const SAMPLE_FRAGMENTS = 1;
 const PROGRESSIVE_WARMUP_BYTES = 64 * 1024;
-const PROGRESSIVE_MEASURE_BYTES = 512 * 1024;
+const PROGRESSIVE_MEASURE_BYTES = 256 * 1024;
 
 export function formatSpeedLabel(speedKBps: number): string {
   if (speedKBps >= 1024) {
@@ -231,8 +231,8 @@ async function probeM3u8WithHls(
       enableWorker: false,
       // 关掉 hls.js 自己那次带宽测试，避免多拉一片被我们误当成样本
       testBandwidth: false,
-      maxBufferLength: 40,
-      maxMaxBufferLength: 60,
+      maxBufferLength: 20,
+      maxMaxBufferLength: 30,
       startFragPrefetch: true,
     });
 
@@ -450,6 +450,8 @@ export async function probePlaySources(
     timeoutMs?: number;
     concurrency?: number;
     signal?: AbortSignal;
+    onStart?: (sourceId: string) => void;
+    onResult?: (result: SourceProbeResult) => void;
   },
 ): Promise<SourceProbeResult[]> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -465,31 +467,38 @@ export async function probePlaySources(
       }
       const url = String(target.url || "").trim();
       if (!url) {
-        return {
+        const skipped: SourceProbeResult = {
           sourceId: target.sourceId,
-          status: "skipped" as const,
+          status: "skipped",
           pingMs: 0,
           speedKBps: 0,
           quality: "未知",
           score: -1,
         };
+        options?.onResult?.(skipped);
+        return skipped;
       }
 
+      options?.onStart?.(target.sourceId);
       try {
         const raw = await probeOneUrl(url, timeoutMs, signal);
-        return {
+        const result: SourceProbeResult = {
           sourceId: target.sourceId,
-          status: "ok" as const,
+          status: "ok",
           pingMs: raw.pingMs,
           speedKBps: raw.speedKBps,
           quality: raw.quality,
           score: 0,
         };
+        options?.onResult?.(result);
+        return result;
       } catch (error) {
         if (signal?.aborted) {
           throw error;
         }
-        return toFailureResult(target.sourceId, error);
+        const failure = toFailureResult(target.sourceId, error);
+        options?.onResult?.(failure);
+        return failure;
       }
     },
     signal,
