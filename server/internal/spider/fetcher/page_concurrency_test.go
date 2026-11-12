@@ -11,6 +11,22 @@ import (
 	"server/internal/utils"
 )
 
+func TestFetchRetryDelay_SpacesTransientRetries(t *testing.T) {
+	old := fetchRetryBase
+	t.Cleanup(func() { fetchRetryBase = old })
+	fetchRetryBase = time.Second
+	if got := fetchRetryDelay(1); got != time.Second {
+		t.Fatalf("first retry delay=%s", got)
+	}
+	if got := fetchRetryDelay(2); got != 4*time.Second {
+		t.Fatalf("second retry delay=%s", got)
+	}
+	fetchRetryBase = 0
+	if got := fetchRetryDelay(2); got != 0 {
+		t.Fatalf("disabled delay=%s", got)
+	}
+}
+
 func TestFetchSlotBlocksWhenFull(t *testing.T) {
 	slots := make(chan struct{}, 1)
 	if err := acquireSlot(context.Background(), slots); err != nil {
@@ -55,7 +71,12 @@ func TestGetFilmDetailWithRetry_EmptyListDoesNotRetry(t *testing.T) {
 
 func TestGetFilmDetailWithRetry_RateLimitRetriesOnce(t *testing.T) {
 	old := deps
-	t.Cleanup(func() { deps = old })
+	oldDelay := fetchRetryBase
+	t.Cleanup(func() {
+		deps = old
+		fetchRetryBase = oldDelay
+	})
+	fetchRetryBase = 0
 
 	var calls int
 	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
@@ -80,7 +101,12 @@ func TestGetFilmDetailWithRetry_RateLimitRetriesOnce(t *testing.T) {
 
 func TestGetFilmDetailWithRetry_TimeoutRetriesAndSucceeds(t *testing.T) {
 	old := deps
-	t.Cleanup(func() { deps = old })
+	oldDelay := fetchRetryBase
+	t.Cleanup(func() {
+		deps = old
+		fetchRetryBase = oldDelay
+	})
+	fetchRetryBase = 0
 
 	var calls int
 	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {

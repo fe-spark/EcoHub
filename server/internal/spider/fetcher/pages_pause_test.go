@@ -34,11 +34,18 @@ func setupPauseTest(t *testing.T, streak int, pause time.Duration, maxTimes int,
 	oldDeps := deps
 	oldWorkers := config.CollectPageWorkers
 	oldStreak, oldPause, oldMax := sourcePauseFailStreak, sourcePauseDuration, sourcePauseMaxTimes
+	oldTransientRetries, oldTransientAfter := transientPageRetries, transientPauseAfter
+	oldTransientPause, oldTransientMax := transientRetryPause, maxTransientPauses
+	oldDelay := fetchRetryBase
 	t.Cleanup(func() {
 		deps = oldDeps
 		config.CollectPageWorkers = oldWorkers
 		sourcePauseFailStreak, sourcePauseDuration, sourcePauseMaxTimes = oldStreak, oldPause, oldMax
+		transientPageRetries, transientPauseAfter = oldTransientRetries, oldTransientAfter
+		transientRetryPause, maxTransientPauses = oldTransientPause, oldTransientMax
+		fetchRetryBase = oldDelay
 	})
+	fetchRetryBase = 0
 	config.CollectPageWorkers = 1
 	sourcePauseFailStreak, sourcePauseDuration, sourcePauseMaxTimes = streak, pause, maxTimes
 
@@ -186,5 +193,163 @@ func TestCollectPages_RecordsAllFailedPages(t *testing.T) {
 	_, succ, fail, _, err := CollectPages(context.Background(), 1201, failedPages, source, 24, nil)
 	if err != nil || succ != 1200 || fail != 0 || len(retryEnv.pages()) != 1200 {
 		t.Fatalf("retry succ=%d fail=%d requested=%d err=%v, want all 1200 pages", succ, fail, len(retryEnv.pages()), err)
+	}
+}
+
+// 已有成功页后，连续 EOF 先短暂停再补抓，补上的页不再记失败。
+func TestCollectPages_TransientBurstRetriesAfterShortPause(t *testing.T) {
+	oldDeps := deps
+	oldWorkers := config.CollectPageWorkers
+	oldAfter, oldPause := transientPauseAfter, transientRetryPause
+	oldRetries, oldMax := transientPageRetries, maxTransientPauses
+	oldDelay := fetchRetryBase
+	t.Cleanup(func() {
+		deps = oldDeps
+		config.CollectPageWorkers = oldWorkers
+		transientPauseAfter, transientRetryPause = oldAfter, oldPause
+		transientPageRetries, maxTransientPauses = oldRetries, oldMax
+		fetchRetryBase = oldDelay
+	})
+	config.CollectPageWorkers = 1
+	transientPauseAfter = 4
+	transientRetryPause = 80 * time.Millisecond
+	transientPageRetries = 2
+	maxTransientPauses = 3
+	fetchRetryBase = 0
+
+	type hit struct {
+		pg int
+		at time.Time
+	}
+	var mu sync.Mutex
+	calls := map[int]int{}
+	var hits []hit
+	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
+		return func(error) {}, nil
+	}
+	innerTries := maxPageFetchRetries + 1
+	deps.GetFilmDetail = func(_ *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
+		pg, _ := strconv.Atoi(r.Params.Get("pg"))
+		mu.Lock()
+		calls[pg]++
+		n := calls[pg]
+		hits = append(hits, hit{pg: pg, at: time.Now()})
+		mu.Unlock()
+		if pg >= 2 && pg <= 5 && n <= innerTries {
+			return nil, errors.New(`Get "http://cj.example/api.php?pg=2": EOF`)
+		}
+		return []model.MovieDetail{{Id: int64(pg), Name: "片"}}, nil
+	}
+	deps.SavePage = func(context.Context, *model.FilmSource, int, []model.MovieDetail) (scheduler.Mids, error) {
+		return scheduler.Mids{}, nil
+	}
+
+	source := &model.FilmSource{Id: "transient_burst", Name: "抖动站"}
+	_, succ, fail, failedPages, err := CollectPages(context.Background(), 8, nil, source, 24, nil)
+	if err != nil || succ != 8 || fail != 0 || len(failedPages) != 0 {
+		t.Fatalf("succ=%d fail=%d failed=%v err=%v, want the burst retried clean", succ, fail, failedPages, err)
+	}
+
+	var page5, page6 time.Time
+	mu.Lock()
+	for _, item := range hits {
+		if item.pg == 6 && page6.IsZero() {
+			page6 = item.at
+		}
+	}
+	for _, item := range hits {
+		if item.pg == 5 && (page6.IsZero() || item.at.Before(page6)) {
+			page5 = item.at
+		}
+	}
+	mu.Unlock()
+	if page5.IsZero() || page6.IsZero() {
+		t.Fatal("expected requests for page 5 and page 6")
+	}
+	// 第 5 页补抓成功发生在暂停之后，间隔只量触发暂停的那次失败到下一页新请求。
+	if gap := page6.Sub(page5); gap < 80*time.Millisecond {
+		t.Fatalf("page 6 started %v after the page 5 failure that armed the pause, want >= 80ms", gap)
+	}
+}
+
+// 补抓次数用完仍是超时，这页记失败，不再放回队列。
+func TestCollectPages_TransientRetriesThenRecordFailure(t *testing.T) {
+	oldDeps := deps
+	oldWorkers := config.CollectPageWorkers
+	oldRetries, oldAfter := transientPageRetries, transientPauseAfter
+	oldDelay := fetchRetryBase
+	t.Cleanup(func() {
+		deps = oldDeps
+		config.CollectPageWorkers = oldWorkers
+		transientPageRetries, transientPauseAfter = oldRetries, oldAfter
+		fetchRetryBase = oldDelay
+	})
+	config.CollectPageWorkers = 1
+	transientPageRetries = 1
+	transientPauseAfter = 100
+	fetchRetryBase = 0
+
+	var mu sync.Mutex
+	calls := 0
+	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
+		return func(error) {}, nil
+	}
+	deps.GetFilmDetail = func(_ *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
+		pg, _ := strconv.Atoi(r.Params.Get("pg"))
+		if pg == 1 {
+			return []model.MovieDetail{{Id: 1, Name: "片"}}, nil
+		}
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		return nil, errors.New(`Get "http://cj.example/api.php": context deadline exceeded`)
+	}
+	deps.SavePage = func(context.Context, *model.FilmSource, int, []model.MovieDetail) (scheduler.Mids, error) {
+		return scheduler.Mids{}, nil
+	}
+
+	source := &model.FilmSource{Id: "transient_giveup", Name: "仍超时"}
+	_, succ, fail, _, err := CollectPages(context.Background(), 2, nil, source, 24, nil)
+	if succ != 1 || fail != 1 || err == nil {
+		t.Fatalf("succ=%d fail=%d err=%v, want page 2 recorded failed", succ, fail, err)
+	}
+	wantCalls := (maxPageFetchRetries + 1) * (transientPageRetries + 1)
+	if calls != wantCalls {
+		t.Fatalf("page 2 fetches=%d, want %d", calls, wantCalls)
+	}
+}
+
+// 还没有成功页时不补抓，避免死站把临时错误重试放大。
+func TestCollectPages_UnprovenSourceDoesNotRequeueTransient(t *testing.T) {
+	oldDeps := deps
+	oldWorkers := config.CollectPageWorkers
+	oldDelay := fetchRetryBase
+	t.Cleanup(func() {
+		deps = oldDeps
+		config.CollectPageWorkers = oldWorkers
+		fetchRetryBase = oldDelay
+	})
+	config.CollectPageWorkers = 1
+	fetchRetryBase = 0
+
+	var calls int
+	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
+		return func(error) {}, nil
+	}
+	deps.GetFilmDetail = func(*model.FilmSource, utils.RequestInfo) ([]model.MovieDetail, error) {
+		calls++
+		return nil, errors.New(`Get "http://cj.example/api.php": EOF`)
+	}
+	deps.SavePage = func(context.Context, *model.FilmSource, int, []model.MovieDetail) (scheduler.Mids, error) {
+		return scheduler.Mids{}, nil
+	}
+
+	source := &model.FilmSource{Id: "transient_unproven", Name: "死站"}
+	_, succ, fail, _, err := CollectPages(context.Background(), 5, nil, source, 24, nil)
+	if succ != 0 || fail != 5 || err == nil {
+		t.Fatalf("succ=%d fail=%d err=%v", succ, fail, err)
+	}
+	if want := 5 * (maxPageFetchRetries + 1); calls != want {
+		t.Fatalf("fetches=%d, want %d without requeue", calls, want)
 	}
 }
