@@ -397,10 +397,13 @@ func BatchCollectPrepared(trigger string, h int, claim CollectClaim) {
 	if len(claim.Sources) == 0 {
 		return
 	}
-	if reason := collectPauseReason(); reason != "" {
-		log.Printf("[Spider] 批量采集跳过：%s", reason)
-		claim.abandon()
-		return
+	// 名额已经在 Prepare 里占下的批次直接开工。再查一次暂停会把已经告诉调用方的站丢掉。
+	if !claim.queueHeld {
+		if reason := collectPauseReason(); reason != "" {
+			log.Printf("[Spider] 批量采集跳过：%s", reason)
+			claim.abandon()
+			return
+		}
 	}
 	if trigger == "" {
 		trigger = model.CollectTriggerManual
@@ -418,9 +421,11 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 	if len(claim.Sources) == 0 {
 		return "", errors.New("没有可重试的站点")
 	}
-	if _, err := tryBeginCollectQueue(); err != nil {
-		claim.abandon()
-		return "", err
+	if !claim.queueHeld {
+		if _, err := tryBeginCollectQueue(); err != nil {
+			claim.abandon()
+			return "", err
+		}
 	}
 	sources := prioritizeCollectSources(claim.Sources)
 	startedAt := time.Now()

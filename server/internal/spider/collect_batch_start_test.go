@@ -52,6 +52,7 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	progress.Update("halt", func(p *model.CollectProgress) { p.Status = progress.StatusStopping })
 	progress.BroadcastCategoryStatus("sync", "syncing")
 	t.Cleanup(func() {
+		endCollectQueue()
 		progress.UnregisterTask("busy", "req-busy")
 		for _, id := range []string{"ready", "busy", "halt", "sync"} {
 			releaseCollectSourceIDs(id)
@@ -93,6 +94,53 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 		if got[id] != reason {
 			t.Fatalf("skip %s = %q, want %q", id, got[id], reason)
 		}
+	}
+}
+
+func TestPrepareBatchCollectStart_SealRejectsBeforeReportingStarted(t *testing.T) {
+	prev := db.Mdb
+	dsn := testutil.MemDSN(t)
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CategoryMapping{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() {
+		db.Mdb = prev
+		beforeCollectQueueAdmit = nil
+		resetSearchReseal()
+		releaseCollectSourceIDs("seal-race")
+	})
+
+	src := model.FilmSource{Id: "seal-race", Name: "封口竞态", Uri: "http://example.invalid/seal", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	beforeCollectQueueAdmit = func() {
+		searchReseal.mu.Lock()
+		searchReseal.running = true
+		searchReseal.mu.Unlock()
+	}
+
+	claim, result := PrepareBatchCollectStart([]string{src.Id})
+	if len(claim.Sources) != 0 || len(result.Started) != 0 {
+		t.Fatalf("started claim=%+v result=%+v", claim.Sources, result.Started)
+	}
+	if len(result.Skipped) != 1 || result.Skipped[0].Reason != errSearchSealPending.Error() {
+		t.Fatalf("skipped = %+v", result.Skipped)
+	}
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("rejected admit must release the occupy")
+	}
+	if collectQueueActive() {
+		t.Fatal("rejected admit must not hold a collect queue")
 	}
 }
 
