@@ -22,8 +22,14 @@ type RawProbe = {
   quality: string;
 };
 
-const DEFAULT_TIMEOUT_MS = 4000;
-const DEFAULT_CONCURRENCY = 3;
+const DEFAULT_TIMEOUT_MS = 8000;
+// 同时拉多条源会互相抢带宽，测出来的是抢带宽的速度，不是单播这条源的速度
+const DEFAULT_CONCURRENCY = 1;
+// 第一片还在 TCP 慢启动，不计入；后面连续两片的字节和时间一起算平均速度
+const WARMUP_FRAGMENTS = 1;
+const SAMPLE_FRAGMENTS = 2;
+const PROGRESSIVE_WARMUP_BYTES = 64 * 1024;
+const PROGRESSIVE_MEASURE_BYTES = 512 * 1024;
 
 export function formatSpeedLabel(speedKBps: number): string {
   if (speedKBps >= 1024) {
@@ -74,19 +80,54 @@ function withTimeout<T>(
   });
 }
 
-async function measurePing(url: string, signal?: AbortSignal): Promise<number> {
-  const start = performance.now();
-  try {
-    await fetch(url, {
-      method: "HEAD",
-      mode: "no-cors",
-      cache: "no-store",
-      signal,
-    });
-  } catch {
-    // no-cors / 网络失败都只记耗时，真正可达性由后续探测判定
-  }
-  return Math.max(1, Math.round(performance.now() - start));
+type TransferSample = {
+  bytes: number;
+  firstAt: number;
+  endAt: number;
+  ttfbMs: number;
+};
+
+function sampleFromLoad(
+  bytes: number,
+  start: number,
+  first: number,
+  end: number,
+): TransferSample | null {
+  if (bytes <= 0 || end <= 0) return null;
+  const firstAt = first > 0 ? first : start;
+  if (firstAt <= 0 || end <= firstAt) return null;
+  return {
+    bytes,
+    firstAt,
+    endAt: end,
+    ttfbMs: start > 0 && first > start ? first - start : 0,
+  };
+}
+
+function summarizeSamples(samples: TransferSample[]): { speedKBps: number; pingMs: number } {
+  const bytes = samples.reduce((sum, item) => sum + item.bytes, 0);
+  const firstAt = Math.min(...samples.map((item) => item.firstAt));
+  const endAt = Math.max(...samples.map((item) => item.endAt));
+  const transferMs = Math.max(endAt - firstAt, 1);
+  const ttfbs = samples
+    .map((item) => item.ttfbMs)
+    .filter((item) => item > 0)
+    .sort((a, b) => a - b);
+  const mid = ttfbs.length ? ttfbs[Math.floor(ttfbs.length / 2)] : 0;
+  return {
+    speedKBps: bytes / 1024 / (transferMs / 1000),
+    pingMs: mid > 0 ? Math.max(1, Math.round(mid)) : 0,
+  };
+}
+
+function qualityFromWidth(width: number): string {
+  if (width >= 3840) return "4K";
+  if (width >= 2560) return "2K";
+  if (width >= 1920) return "1080p";
+  if (width >= 1280) return "720p";
+  if (width >= 854) return "480p";
+  if (width > 0) return "SD";
+  return "未知";
 }
 
 async function probeProgressive(
@@ -94,18 +135,24 @@ async function probeProgressive(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<RawProbe> {
-  const pingMs = await measurePing(url, signal);
-  const start = performance.now();
-  const response = await withTimeout(
-    fetch(url, {
-      method: "GET",
-      headers: { Range: "bytes=0-65535" },
-      cache: "no-store",
-      signal,
-    }),
+  return withTimeout(
+    readProgressive(url, signal),
     timeoutMs,
     () => Object.assign(new Error("timeout"), { probeType: "timeout" }),
   );
+}
+
+async function readProgressive(url: string, signal?: AbortSignal): Promise<RawProbe> {
+  const start = performance.now();
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Range: `bytes=0-${PROGRESSIVE_WARMUP_BYTES + PROGRESSIVE_MEASURE_BYTES - 1}`,
+    },
+    cache: "no-store",
+    signal,
+  });
+  const headersAt = performance.now();
 
   if (!response.ok && response.status !== 206) {
     throw Object.assign(new Error(`http ${response.status}`), {
@@ -113,13 +160,54 @@ async function probeProgressive(
     });
   }
 
-  const buffer = await response.arrayBuffer();
-  const elapsed = Math.max(performance.now() - start, 1);
-  const speedKBps = buffer.byteLength / 1024 / (elapsed / 1000);
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const buffer = await response.arrayBuffer();
+    const elapsed = Math.max(performance.now() - start, 1);
+    return {
+      pingMs: Math.max(1, Math.round(headersAt - start)),
+      speedKBps: buffer.byteLength / 1024 / (elapsed / 1000),
+      quality: "未知",
+    };
+  }
+
+  let received = 0;
+  let measured = 0;
+  let measureStart = 0;
+  try {
+    const target = PROGRESSIVE_WARMUP_BYTES + PROGRESSIVE_MEASURE_BYTES;
+    while (received < target) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const next = received + value.byteLength;
+      if (measureStart === 0 && next >= PROGRESSIVE_WARMUP_BYTES) {
+        measureStart = performance.now();
+        measured = next - PROGRESSIVE_WARMUP_BYTES;
+      } else if (measureStart > 0) {
+        measured += value.byteLength;
+      }
+      received = next;
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // 已经读完或连接被关掉
+    }
+  }
+
+  const pingMs = Math.max(1, Math.round(headersAt - start));
+  const measureElapsed = measureStart > 0 ? performance.now() - measureStart : 0;
+  // 一次 read 就把预热和取样都吞掉时，分不出取样段的耗时，退回整段下载时间
+  const elapsed =
+    measured > 0 && measureElapsed >= 30
+      ? measureElapsed
+      : Math.max(performance.now() - start, 1);
+  const bytes = measured > 0 && measureElapsed >= 30 ? measured : received;
 
   return {
     pingMs,
-    speedKBps,
+    speedKBps: bytes > 0 ? bytes / 1024 / (elapsed / 1000) : 0,
     quality: "未知",
   };
 }
@@ -127,29 +215,36 @@ async function probeProgressive(
 async function probeM3u8WithHls(
   url: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<RawProbe> {
-  const pingPromise = measurePing(url);
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
 
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     video.muted = true;
-    video.preload = "metadata";
+    video.preload = "auto";
+    video.playsInline = true;
 
     const hls = new Hls({
       enableWorker: false,
-      maxBufferLength: 5,
-      maxMaxBufferLength: 10,
+      // 关掉 hls.js 自己那次带宽测试，避免多拉一片被我们误当成样本
+      testBandwidth: false,
+      maxBufferLength: 40,
+      maxMaxBufferLength: 60,
+      startFragPrefetch: true,
     });
 
-    let pingMs = 0;
-    let speedKBps = 0;
+    const samples: TransferSample[] = [];
+    let warmup: TransferSample | null = null;
+    let mediaSeen = 0;
     let quality = "未知";
-    let hasSpeed = false;
-    let hasMeta = false;
     let settled = false;
 
     const cleanup = () => {
       window.clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       try {
         hls.destroy();
       } catch {
@@ -158,13 +253,14 @@ async function probeM3u8WithHls(
       video.remove();
     };
 
-    const finishOk = () => {
+    const finishOk = (used: TransferSample[]) => {
       if (settled) return;
       settled = true;
       cleanup();
+      const summary = summarizeSamples(used);
       resolve({
-        pingMs: pingMs || 1,
-        speedKBps,
+        pingMs: summary.pingMs,
+        speedKBps: summary.speedKBps,
         quality,
       });
     };
@@ -176,38 +272,50 @@ async function probeM3u8WithHls(
       reject(Object.assign(new Error(message), { probeType: type }));
     };
 
-    const maybeFinish = () => {
-      if (hasMeta && hasSpeed) {
-        finishOk();
-      }
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
     };
 
     const timer = window.setTimeout(() => {
-      if (hasMeta || hasSpeed) {
-        finishOk();
+      if (samples.length > 0) {
+        finishOk(samples);
         return;
       }
-      finishErr("timeout", "Timeout loading video metadata");
+      if (warmup) {
+        finishOk([warmup]);
+        return;
+      }
+      finishErr("timeout", "Timeout loading video fragments");
     }, timeoutMs);
 
-    pingPromise.then((value) => {
-      pingMs = value;
-    });
-
-    let fragmentStart = 0;
-    hls.on(Hls.Events.FRAG_LOADING, () => {
-      fragmentStart = performance.now();
-    });
+    signal?.addEventListener("abort", onAbort);
 
     hls.on(Hls.Events.FRAG_LOADED, (_event, data) => {
-      if (hasSpeed || fragmentStart <= 0) return;
-      const payload = data?.payload;
-      const size = payload?.byteLength || 0;
-      const elapsed = Math.max(performance.now() - fragmentStart, 1);
-      if (size > 0) {
-        speedKBps = size / 1024 / (elapsed / 1000);
-        hasSpeed = true;
-        maybeFinish();
+      const frag = data?.frag;
+      if (!frag || data.part || frag.bitrateTest || frag.type !== "main") return;
+      if (frag.sn === "initSegment") return;
+
+      const stats = frag.stats;
+      const sample = sampleFromLoad(
+        data.payload?.byteLength || stats?.loaded || 0,
+        stats?.loading?.start || 0,
+        stats?.loading?.first || 0,
+        stats?.loading?.end || 0,
+      );
+      if (!sample) return;
+
+      mediaSeen += 1;
+      if (mediaSeen <= WARMUP_FRAGMENTS) {
+        warmup = sample;
+        return;
+      }
+
+      samples.push(sample);
+      if (samples.length >= SAMPLE_FRAGMENTS) {
+        finishOk(samples);
       }
     });
 
@@ -219,34 +327,11 @@ async function probeM3u8WithHls(
     });
 
     video.onerror = () => {
-      finishErr("unreachable", "Failed to load video metadata");
+      finishErr("unreachable", "Failed to load video");
     };
 
     video.onloadedmetadata = () => {
-      const width = video.videoWidth || 0;
-      quality =
-        width >= 3840
-          ? "4K"
-          : width >= 2560
-            ? "2K"
-            : width >= 1920
-              ? "1080p"
-              : width >= 1280
-                ? "720p"
-                : width >= 854
-                  ? "480p"
-                  : width > 0
-                    ? "SD"
-                    : "未知";
-      hasMeta = true;
-      maybeFinish();
-    };
-
-    hls.config.xhrSetup = (xhr, requestUrl) => {
-      const stamped = requestUrl.includes("?")
-        ? `${requestUrl}&_t=${Date.now()}`
-        : `${requestUrl}?_t=${Date.now()}`;
-      xhr.open("GET", stamped, true);
+      quality = qualityFromWidth(video.videoWidth || 0);
     };
 
     hls.loadSource(url);
@@ -263,10 +348,9 @@ async function probeOneUrl(
     return probeProgressive(url, timeoutMs, signal);
   }
   if (Hls.isSupported()) {
-    return probeM3u8WithHls(url, timeoutMs);
+    return probeM3u8WithHls(url, timeoutMs, signal);
   }
-  // 无 Hls.js 时退化为拉取 playlist 文本
-  const pingMs = await measurePing(url, signal);
+  // 没有 Hls.js 时只能确认播放列表通不通，列表体积不能当成视频速度
   const start = performance.now();
   const response = await withTimeout(
     fetch(url, { method: "GET", cache: "no-store", signal }),
@@ -278,11 +362,10 @@ async function probeOneUrl(
       probeType: "unreachable",
     });
   }
-  const text = await response.text();
-  const elapsed = Math.max(performance.now() - start, 1);
+  await response.arrayBuffer();
   return {
-    pingMs,
-    speedKBps: text.length / 1024 / (elapsed / 1000),
+    pingMs: Math.max(1, Math.round(performance.now() - start)),
+    speedKBps: 0,
     quality: "未知",
   };
 }
