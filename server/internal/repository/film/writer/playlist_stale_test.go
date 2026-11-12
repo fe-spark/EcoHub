@@ -6,6 +6,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/film/shared"
 )
 
 func TestOlderSourcePageDoesNotOverwriteNewerPlaylist(t *testing.T) {
@@ -17,6 +18,7 @@ func TestOlderSourcePageDoesNotOverwriteNewerPlaylist(t *testing.T) {
 	source := &model.FilmSource{Id: "src-sony", Name: "索尼", State: true}
 	newer := testPeerDetailWithLines(158664, "走马上任", []string{"snm3u8"}, []string{"第01集", "第02集", "第03集", "第04集", "第05集"})
 	newer.UpdateTime = "2026-11-02 13:45:05"
+	newer.Picture = "https://new/cover.jpg"
 	first, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{newer})
 	if err != nil {
 		t.Fatalf("newer page: %v", err)
@@ -25,8 +27,9 @@ func TestOlderSourcePageDoesNotOverwriteNewerPlaylist(t *testing.T) {
 		t.Fatalf("newer notify=%v", first.Notify)
 	}
 
-	older := testPeerDetailWithLines(158664, "走马上任", []string{"snm3u8"}, []string{"第01集", "第02集", "第03集", "第04集"})
+	older := testPeerDetailWithLines(158664, "走马上任旧档", []string{"snm3u8"}, []string{"第01集", "第02集", "第03集", "第04集"})
 	older.UpdateTime = "2026-11-02 12:10:06"
+	older.Picture = "https://old/cover.jpg"
 	second, err := SaveCollectedPeerDetails(context.Background(), source, 2, []model.MovieDetail{older})
 	if err != nil {
 		t.Fatalf("older page: %v", err)
@@ -34,6 +37,14 @@ func TestOlderSourcePageDoesNotOverwriteNewerPlaylist(t *testing.T) {
 	if len(second.Notify) != 0 || len(second.Affected) != 0 {
 		t.Fatalf("older page is not an update: notify=%v affected=%v", second.Notify, second.Affected)
 	}
+	var film model.FilmIndex
+	if err := gdb.Where("mid = ?", first.Notify[0]).First(&film).Error; err != nil {
+		t.Fatal(err)
+	}
+	if film.Name != "走马上任" || film.Picture != "https://new/cover.jpg" {
+		t.Fatalf("older page overwrote film: name=%s picture=%s", film.Name, film.Picture)
+	}
+	assertMatchKeys(t, gdb, film.Mid, shared.BuildMovieMatchKeysWithCategory(0, "走马上任", film.Pid))
 	var lines []model.FilmSourcePlaylist
 	if err := gdb.Where("source_id = ? AND line_kind = ?", source.Id, "play").Find(&lines).Error; err != nil {
 		t.Fatal(err)

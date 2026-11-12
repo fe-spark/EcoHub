@@ -14,17 +14,19 @@ func ResealSearchIndexMids(mids []int64) bool {
 }
 
 // ResealSearchIndex 全部采集队列结束后的唯一封口。
-// incomplete 表示本轮编号不是完整增量（含全量站）。这种轮次、内存索引不可用、
-// 或变动编号已经超过当前索引一半时，都在按编号点查之前整表顺序加载。
+// incomplete 表示这一轮采集队列里有全量采集。只有这时才整表顺序重建。
+// 内存索引不可用或还是空的，也整表重建，避免把残缺索引发布出去。
 // 点查失败同样改为顺序加载。成功打进内存索引时返回 true。
 func ResealSearchIndex(mids []int64, incomplete bool) bool {
 	startedAt := time.Now()
-	mids = NormalizeSnapshotMIDs(mids)
-	if !incomplete && (len(mids) == 0 || db.Mdb == nil) {
+	log.Printf("[ActiveReadModel] 检索索引封口进入 raw=%d incomplete=%t", len(mids), incomplete)
+	if incomplete {
+		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 raw=%d full=true", len(mids))
+		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}
-	if db.Mdb == nil {
-		RequestActiveFilmSearchIndexRebuild()
+	mids = NormalizeSnapshotMIDs(mids)
+	if len(mids) == 0 || db.Mdb == nil {
 		return false
 	}
 
@@ -34,8 +36,8 @@ func ResealSearchIndex(mids []int64, incomplete bool) bool {
 	if base != nil {
 		items = len(base.Items)
 	}
-	if incomplete || !searchIndexReady(base, version) || items == 0 || resealMidsNeedScan(len(mids), items) {
-		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 mids=%d items=%d incomplete=%t", len(mids), items, incomplete)
+	if incomplete || !searchIndexReady(base, version) || items == 0 {
+		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 mids=%d items=%d full=%t", len(mids), items, incomplete)
 		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}
@@ -97,14 +99,6 @@ func ResealSearchIndex(mids []int64, incomplete bool) bool {
 			return false
 		}
 	}
-}
-
-// resealMidsNeedScan 变动编号超过当前内存索引的一半时，点查不如顺序扫表。
-func resealMidsNeedScan(mids, items int) bool {
-	if mids <= 0 || items <= 0 {
-		return false
-	}
-	return int64(mids)*2 > int64(items)
 }
 
 func searchIndexReady(cur *filmSearchMetaIndex, version string) bool {

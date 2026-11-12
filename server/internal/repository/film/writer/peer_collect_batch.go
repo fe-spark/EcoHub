@@ -88,15 +88,16 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err = upsertPageMappingsTx(tx, source.Id, items, mapped); err != nil {
 		return nil, nil, 0, err
 	}
-	if err = syncPageFilmsTx(tx, source, items); err != nil {
-		return nil, nil, 0, err
-	}
 	mapCost := time.Since(stage)
 	stage = time.Now()
 	if err = savePagePlaylistsTx(tx, source.Id, items); err != nil {
 		return nil, nil, 0, err
 	}
 	playlistCost := time.Since(stage)
+	// 片单认领先标 stale。更旧的页不能再改档案和匹配键。
+	if err = syncPageFilmsTx(tx, source, items); err != nil {
+		return nil, nil, 0, err
+	}
 	newMids := make(map[int64]struct{}, len(items))
 	for i := range items {
 		if items[i].isNew && items[i].mid > 0 {
@@ -132,6 +133,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 
 // writePeerPageCreateTx 非主站全新页只建自己的档案。四次批量写入，不逐片更新。
 func writePeerPageCreateTx(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, int, error) {
+	details = lastPeerDetails(details)
 	items := make([]peerPageItem, len(details))
 	for i, detail := range details {
 		items[i] = peerPageItem{detail: detail, create: true}
@@ -146,6 +148,9 @@ func writePeerPageCreateTx(tx *gorm.DB, source *model.FilmSource, details []mode
 	if err := insertLightMappingsTx(tx, source.Id, items); err != nil {
 		return nil, nil, 0, err
 	}
+	if err := claimLightPageTx(tx, source.Id, items); err != nil {
+		return nil, nil, 0, err
+	}
 	mapCost := time.Since(stage)
 	stage = time.Now()
 	if err := insertNewPagePlaylistsTx(tx, source.Id, items); err != nil {
@@ -154,11 +159,55 @@ func writePeerPageCreateTx(tx *gorm.DB, source *model.FilmSource, details []mode
 	notePeerTiming(tx, "light", mapCost, time.Since(stage), 0)
 	affected := make([]int64, 0, len(items))
 	for i := range items {
-		if items[i].mid > 0 {
+		if items[i].mid > 0 && !items[i].stale {
 			affected = append(affected, items[i].mid)
 		}
 	}
 	return affected, affected, countCategorySkips(items), nil
+}
+
+// lastPeerDetails 同一 source_mid 只留页内最后一条。
+func lastPeerDetails(details []model.MovieDetail) []model.MovieDetail {
+	last := make(map[int64]int, len(details))
+	for i := range details {
+		if details[i].Id > 0 {
+			last[details[i].Id] = i
+		}
+	}
+	if len(last) == len(details) {
+		return details
+	}
+	out := make([]model.MovieDetail, 0, len(last))
+	for i := range details {
+		id := details[i].Id
+		if id > 0 && last[id] != i {
+			continue
+		}
+		out = append(out, details[i])
+	}
+	return out
+}
+
+func claimLightPageTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
+	claims := make([]vodTimeClaim, 0, len(items))
+	idxs := make([]int, 0, len(items))
+	for i := range items {
+		if items[i].mid <= 0 {
+			continue
+		}
+		idxs = append(idxs, i)
+		claims = append(claims, vodTimeClaim{sourceMid: items[i].detail.Id, updateTime: items[i].detail.UpdateTime})
+	}
+	won, err := claimPageVodTimesTx(tx, sourceID, claims)
+	if err != nil {
+		return err
+	}
+	for i, idx := range idxs {
+		if !won[i] {
+			items[idx].stale = true
+		}
+	}
+	return nil
 }
 
 func isPrimaryCollectSourceTx(tx *gorm.DB, source *model.FilmSource) bool {
@@ -194,6 +243,7 @@ func insertLightMappingsTx(tx *gorm.DB, sourceID string, items []peerPageItem) e
 		return nil
 	}
 	sort.Slice(mappings, func(i, j int) bool { return mappings[i].SourceMid < mappings[j].SourceMid })
+	// 冲突不覆盖已有 source_vod_unix，新旧由随后的 claim 决定。
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "source_id"}, {Name: "source_mid"}},
 		DoUpdates: clause.AssignmentColumns([]string{"global_mid", "updated_at"}),
@@ -203,7 +253,7 @@ func insertLightMappingsTx(tx *gorm.DB, sourceID string, items []peerPageItem) e
 func insertNewPagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
 	lines := make([]model.FilmSourcePlaylist, 0, len(items))
 	for i := range items {
-		if items[i].mid <= 0 {
+		if items[i].mid <= 0 || items[i].stale {
 			continue
 		}
 		lines = append(lines, buildPlaylistsFromDetail(items[i].mid, sourceID, items[i].detail)...)

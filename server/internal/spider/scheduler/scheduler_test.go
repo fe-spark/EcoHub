@@ -6,8 +6,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"golang.org/x/time/rate"
 )
 
 func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
@@ -413,14 +411,14 @@ func TestWriteLaneCancelSourceCompletesPending(t *testing.T) {
 	}
 }
 
-func TestWriteLaneLimiterWaitsBeforeWrite(t *testing.T) {
+func TestWriteLaneLimitHoldsSecondSource(t *testing.T) {
 	lane := newWriteLane("test-limit")
 	lane.workers = 2
-	lane.limiter = rate.NewLimiter(rate.Every(80*time.Millisecond), 1)
+	lane.writeLimit = 1
 	lane.start()
 
-	var mu sync.Mutex
-	var starts []time.Time
+	hold := make(chan struct{})
+	entered := make(chan struct{}, 2)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	for _, id := range []string{"A", "B"} {
@@ -430,9 +428,8 @@ func TestWriteLaneLimiterWaitsBeforeWrite(t *testing.T) {
 			SourceName: sourceID,
 			Page:       1,
 			Write: func() (Mids, error) {
-				mu.Lock()
-				starts = append(starts, time.Now())
-				mu.Unlock()
+				entered <- struct{}{}
+				<-hold
 				return Mids{}, nil
 			},
 			Complete: func(Completion) { wg.Done() },
@@ -440,20 +437,16 @@ func TestWriteLaneLimiterWaitsBeforeWrite(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("writes did not finish")
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first write did not start")
 	}
-	if len(starts) != 2 {
-		t.Fatalf("starts=%d", len(starts))
+	select {
+	case <-entered:
+		t.Fatal("second source started while write limit is 1")
+	case <-time.After(80 * time.Millisecond):
 	}
-	if gap := starts[1].Sub(starts[0]); gap < 50*time.Millisecond {
-		t.Fatalf("second write started after %s, limiter should hold it", gap)
-	}
+	close(hold)
+	wg.Wait()
 }

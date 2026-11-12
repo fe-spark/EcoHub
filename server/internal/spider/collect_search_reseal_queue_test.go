@@ -88,19 +88,19 @@ func TestSearchResealRun_WaitsThenSealsOnce(t *testing.T) {
 
 func TestSearchResealRun_FullCollectRebuildsAfterQueuesIdle(t *testing.T) {
 	prevSeal := sealSearchIndex
+	prevRebuild := requestSearchRebuild
 	t.Cleanup(func() {
 		sealSearchIndex = prevSeal
+		requestSearchRebuild = prevRebuild
 		resetSearchReseal()
 	})
 
-	sealed := make(chan bool, 1)
+	rebuilt := make(chan struct{}, 1)
 	sealSearchIndex = func(mids []int64, incomplete bool) bool {
-		if len(mids) != 2 || !incomplete {
-			t.Errorf("seal mids=%v incomplete=%t", mids, incomplete)
-		}
-		sealed <- incomplete
+		t.Errorf("full collect must not point-query mids=%v incomplete=%t", mids, incomplete)
 		return false
 	}
+	requestSearchRebuild = func() { rebuilt <- struct{}{} }
 
 	beginCollectQueue()
 	beginCollectQueue()
@@ -108,26 +108,23 @@ func TestSearchResealRun_FullCollectRebuildsAfterQueuesIdle(t *testing.T) {
 	scheduleSearchReseal([]int64{1, 2})
 
 	select {
-	case <-sealed:
-		t.Fatal("sealed while a collect queue is still running")
+	case <-rebuilt:
+		t.Fatal("rebuilt while a collect queue is still running")
 	case <-time.After(40 * time.Millisecond):
 	}
 
 	endCollectQueue()
 	select {
-	case <-sealed:
-		t.Fatal("sealed while another collect queue is still running")
+	case <-rebuilt:
+		t.Fatal("rebuilt while another collect queue is still running")
 	case <-time.After(40 * time.Millisecond):
 	}
 
 	endCollectQueue()
 	select {
-	case incomplete := <-sealed:
-		if !incomplete {
-			t.Fatal("full collect must be sealed as an incomplete mid list")
-		}
+	case <-rebuilt:
 	case <-time.After(time.Second):
-		t.Fatal("did not seal after every collect queue finished")
+		t.Fatal("did not rebuild after every collect queue finished")
 	}
 }
 

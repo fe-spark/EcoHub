@@ -1,13 +1,18 @@
 package spider
 
 import (
+	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
 )
+
+const sealWaitLogGap = 15 * time.Second
 
 // searchResealQueue 全局封口周期。
 // 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
@@ -31,8 +36,11 @@ var searchSealRunning atomic.Bool
 
 var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 
-// sealSearchIndex 全部队列结束后的唯一封口。第二个参数为真时编号不是完整增量，函数在点查前整表顺序加载。
+// sealSearchIndex 增量封口。全量不走这里。
 var sealSearchIndex = filmsnapshot.ResealSearchIndex
+
+// requestSearchRebuild 队列里有全量采集时直接整表重建。
+var requestSearchRebuild = filmsnapshot.RequestActiveFilmSearchIndexRebuild
 
 // collectQueueCount 正在跑的采集队列。封口要等每一条队列结束，不能只看当前没有站在抓页。
 // frozen 只在本轮已经没有队列、准备落地封口时置位。还有队列时新队列可以加入这一轮。
@@ -84,8 +92,10 @@ func endCollectQueue() {
 	if collectQueues.n > 0 {
 		collectQueues.n--
 	}
+	n := collectQueues.n
 	collectQueues.cond.Broadcast()
 	collectQueues.mu.Unlock()
+	log.Printf("[Spider] 采集队列结束 剩余队列=%d", n)
 }
 
 // freezeCollectQueuesIfIdle 本轮封口准备落地。还有队列时返回 false，调用方继续等。
@@ -120,6 +130,114 @@ func waitCollectQueues() {
 	collectQueues.mu.Unlock()
 }
 
+func waitCollectQueuesFor(d time.Duration) bool {
+	collectQueues.mu.Lock()
+	defer collectQueues.mu.Unlock()
+	if collectQueues.n == 0 {
+		return true
+	}
+	timer := time.AfterFunc(d, func() {
+		collectQueues.mu.Lock()
+		collectQueues.cond.Broadcast()
+		collectQueues.mu.Unlock()
+	})
+	defer timer.Stop()
+	deadline := time.Now().Add(d)
+	for collectQueues.n > 0 {
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		collectQueues.cond.Wait()
+	}
+	return true
+}
+
+func queueCount() (n int, frozen bool) {
+	collectQueues.mu.Lock()
+	defer collectQueues.mu.Unlock()
+	return collectQueues.n, collectQueues.frozen
+}
+
+func waitSealSourcesIdle() bool {
+	active, _, _ := collectLifecycle.activity()
+	if active == 0 {
+		return true
+	}
+	logSealSources("封口等待抓页结束")
+	done := make(chan struct{})
+	go func() {
+		waitCollectIdle()
+		close(done)
+	}()
+	ticker := time.NewTicker(sealWaitLogGap)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			log.Printf("[Spider] 封口抓页已结束")
+			return true
+		case <-ticker.C:
+			logSealSources("封口仍在等抓页")
+		}
+	}
+}
+
+func waitSealQueuesIdle() {
+	n, _ := queueCount()
+	if n == 0 {
+		return
+	}
+	logSealQueues("封口等待采集队列")
+	done := make(chan struct{})
+	go func() {
+		waitCollectQueues()
+		close(done)
+	}()
+	ticker := time.NewTicker(sealWaitLogGap)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			log.Printf("[Spider] 封口采集队列已空")
+			return
+		case <-ticker.C:
+			logSealQueues("封口仍在等采集队列")
+		}
+	}
+}
+
+func logSealSources(action string) {
+	active, publishing, sources := collectLifecycle.activity()
+	log.Printf("[Spider] %s active=%d publishing=%d sources=%d %s", action, active, publishing, len(sources), formatSealSources(sources))
+}
+
+func logSealQueues(action string) {
+	n, frozen := queueCount()
+	log.Printf("[Spider] %s 剩余队列=%d frozen=%t", action, n, frozen)
+}
+
+func formatSealSources(ids []string) string {
+	if len(ids) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		status := "?"
+		if snap, ok := progress.Snapshot(id); ok {
+			status = snap.Status
+		}
+		parts = append(parts, id+"="+status)
+		if len(parts) >= 8 {
+			break
+		}
+	}
+	text := strings.Join(parts, ",")
+	if len(ids) > len(parts) {
+		text += fmt.Sprintf(" +%d", len(ids)-len(parts))
+	}
+	return text
+}
+
 func isFullCollectHour(hour int) bool {
 	return hour < 0
 }
@@ -145,6 +263,12 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 }
 
 // noteSearchResealFullCollect 本轮编号不是完整增量（含全量站）。封口时在点查前整表顺序加载。
+func searchResealIsFull() bool {
+	searchReseal.mu.Lock()
+	defer searchReseal.mu.Unlock()
+	return searchReseal.fullCollect
+}
+
 func noteSearchResealFullCollect() {
 	q := searchReseal
 	q.mu.Lock()
@@ -205,12 +329,11 @@ func (q *searchResealQueue) run() {
 		}
 		q.mu.Unlock()
 
-		if collectLifecycle.collecting() {
-			waitCollectIdle()
+		if !waitSealSourcesIdle() {
 			continue
 		}
 		if !freezeCollectQueuesIfIdle() {
-			waitCollectQueues()
+			waitSealQueuesIdle()
 			continue
 		}
 		if q.sealFrozenRound() {
@@ -227,14 +350,30 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	if len(q.pending) == 0 && len(q.sealing) == 0 && !q.fullCollect {
 		q.running = false
 		q.mu.Unlock()
+		log.Printf("[Spider] 封口轮次为空，不重建检索索引")
 		return true
 	}
-	mids, full := q.takePendingLocked()
+	pendingN, sealingN, fullFlag := len(q.pending), len(q.sealing), q.fullCollect
+	var mids []int64
+	full := fullFlag
+	if fullFlag {
+		// 全量直接整表重建，不把上百万编号再拷一份。
+		q.pending = map[int64]struct{}{}
+		q.fullCollect = false
+	} else {
+		mids, full = q.takePendingLocked()
+	}
 	q.mu.Unlock()
+	log.Printf("[Spider] 开始封口检索索引 pending=%d sealing=%d full=%t", pendingN, sealingN, fullFlag)
 
-	if full || len(mids) > 0 {
+	if full {
+		log.Printf("[Spider] 本轮含全量采集，直接整表重建索引")
 		searchSealRunning.Store(true)
-		sealSearchIndex(mids, full)
+		requestSearchRebuild()
+		searchSealRunning.Store(false)
+	} else if len(mids) > 0 {
+		searchSealRunning.Store(true)
+		sealSearchIndex(mids, false)
 		searchSealRunning.Store(false)
 	}
 	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。

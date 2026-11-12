@@ -17,6 +17,9 @@ type jobMeta struct {
 func (l *writeLane) tryTakeOne() (Job, jobMeta, func(), bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.writeLimit > 0 && l.writingCountLocked() >= l.writeLimit {
+		return Job{}, jobMeta{}, nil, false
+	}
 	queue := l.selectQueueRoundRobinLocked()
 	if queue == nil {
 		return Job{}, jobMeta{}, nil, false
@@ -40,8 +43,12 @@ func (l *writeLane) maybeLogDepth() {
 	if waits > 0 {
 		avgWait = time.Duration(l.backpressureWaitNs.Load() / waits)
 	}
-	log.Printf("[Spider][WriteScheduler] %s 水位 global_pending=%d/%d sources=%d writing=%d bp_waits=%d bp_avg_wait=%s",
-		l.name, snap.PendingTotal, snap.MaxPendingGlobal, snap.PendingSources, snap.WritingSources, waits, avgWait.Round(time.Millisecond))
+	lastCost := "无"
+	if snap.LastCost > 0 {
+		lastCost = snap.LastCost.String()
+	}
+	log.Printf("[Spider][WriteScheduler] %s 水位 global_pending=%d/%d sources=%d writing=%d write_limit=%d last=%s bp_waits=%d bp_avg_wait=%s",
+		l.name, snap.PendingTotal, snap.MaxPendingGlobal, snap.PendingSources, snap.WritingSources, snap.MaxInflight, lastCost, waits, avgWait.Round(time.Millisecond))
 }
 
 func (l *writeLane) selectQueueRoundRobinLocked() *writeQueue {
@@ -122,7 +129,8 @@ func (l *writeLane) snapshot() writeSnapshot {
 		WritingSources:   writing,
 		MaxPendingSource: l.maxPerSource,
 		MaxPendingGlobal: l.maxGlobal,
-		MaxInflight:      l.workers,
+		MaxInflight:      l.currentWriteLimitLocked(),
+		LastCost:         l.lastCost,
 	}
 }
 
