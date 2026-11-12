@@ -232,12 +232,97 @@
   color: var(--ant-color-error);
 }
 
-.errorDetail {
+.errorModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.errorReason {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.errorReasonMain {
+  color: var(--ant-color-error);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.errorReasonRaw,
+.errorDetailPlain {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.errorDetailPlain {
+  max-height: 160px;
+  overflow: auto;
   color: var(--ant-color-text);
   font-size: 14px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
+}
+
+.errorSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.errorSectionLabel {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+}
+
+.errorUrl {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--ant-color-fill-quaternary);
+  color: var(--ant-color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.errorMethod {
+  flex-shrink: 0;
+  color: var(--ant-color-primary);
+  font-weight: 600;
+}
+
+.errorUrlText {
+  min-width: 0;
+  flex: 1;
+}
+
+.errorPageList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  overflow: auto;
+}
+
+.errorPageChip {
+  min-width: 48px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--ant-color-fill-tertiary);
+  color: var(--ant-color-text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 22px;
+  text-align: center;
 }
 
 .filmCount,
