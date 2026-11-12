@@ -141,7 +141,7 @@ type writeLane struct {
 	order        []string // sourceID 稳定顺序，用于 round-robin
 	rrCursor     int      // 下一次 RR 起始下标
 	workers      int
-	writeLimit   int // 0 表示不额外限制，由 workers 数决定。生产环境从 2 起步。
+	writeLimit   int // 0 表示不额外限制，由 workers 数决定。生产环境从硬顶起步。
 	adapt        bool
 	followConfig bool
 	pace         writePace

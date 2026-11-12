@@ -27,6 +27,20 @@ func TestApplyWriteSlots(t *testing.T) {
 	}
 }
 
+func TestLoadCollectRuntimeConfig_StartsAtFullSpeed(t *testing.T) {
+	prev := collectProfileSnapshot()
+	t.Cleanup(func() { restoreCollectProfile(prev) })
+
+	loadCollectRuntimeConfig()
+	got := collectProfileSnapshot()
+	if got.inflight != CollectWriteSlotMax || got.pages != CollectWriteSlotMax || got.fetch != 128 {
+		t.Fatalf("满速起步: %+v", got)
+	}
+	if got.perSrc != 256 || got.global != 4096 {
+		t.Fatalf("满速队列: %+v", got)
+	}
+}
+
 type collectProfileValues struct {
 	source   int
 	pages    int

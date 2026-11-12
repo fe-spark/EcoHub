@@ -16,14 +16,13 @@ const sealWaitLogGap = 15 * time.Second
 
 // searchResealQueue 全局封口周期。
 // 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
-// 全部采集队列都结束后再封一次。编号是否完整增量交给同一次封口判断。
+// 全部采集队列都结束后再封一次。按编号增量更新内存索引。
 type searchResealQueue struct {
-	mu          sync.Mutex
-	pending     map[int64]struct{}
-	sealing     map[string]struct{}
-	running     bool
-	fullCollect bool
-	// awaitDone 停等本轮触发的全量重建终态。只有这时才响应 done/idle。
+	mu      sync.Mutex
+	pending map[int64]struct{}
+	sealing map[string]struct{}
+	running bool
+	// awaitDone 停等本轮触发的整表重建终态。只有这时才响应 done/idle。
 	awaitDone bool
 }
 
@@ -36,11 +35,8 @@ var searchSealRunning atomic.Bool
 
 var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 
-// sealSearchIndex 增量封口。全量不走这里。
+// sealSearchIndex 按编号封口。仅在内存索引不可用时改走整表重建。
 var sealSearchIndex = filmsnapshot.ResealSearchIndex
-
-// requestSearchRebuild 队列里有全量采集时直接整表重建。
-var requestSearchRebuild = filmsnapshot.RequestActiveFilmSearchIndexRebuild
 
 // collectQueueCount 正在跑的采集队列。封口要等每一条队列结束，不能只看当前没有站在抓页。
 // frozen 只在本轮已经没有队列、准备落地封口时置位。还有队列时新队列可以加入这一轮。
@@ -238,10 +234,6 @@ func formatSealSources(ids []string) string {
 	return text
 }
 
-func isFullCollectHour(hour int) bool {
-	return hour < 0
-}
-
 // addSealing 采集跑完后挂进本次封口周期。空封口也要走完，保证每次都有待检索阶段。
 func (q *searchResealQueue) addSealing(sourceID string) {
 	sourceID = strings.TrimSpace(sourceID)
@@ -250,29 +242,6 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	}
 	q.mu.Lock()
 	q.sealing[sourceID] = struct{}{}
-	start := !q.running
-	if start {
-		q.running = true
-	}
-	q.mu.Unlock()
-
-	notifySealWaiting()
-	if start {
-		go q.run()
-	}
-}
-
-// noteSearchResealFullCollect 本轮编号不是完整增量（含全量站）。封口时在点查前整表顺序加载。
-func searchResealIsFull() bool {
-	searchReseal.mu.Lock()
-	defer searchReseal.mu.Unlock()
-	return searchReseal.fullCollect
-}
-
-func noteSearchResealFullCollect() {
-	q := searchReseal
-	q.mu.Lock()
-	q.fullCollect = true
 	start := !q.running
 	if start {
 		q.running = true
@@ -322,7 +291,7 @@ func (q *searchResealQueue) run() {
 	defer unfreezeCollectQueues()
 	for {
 		q.mu.Lock()
-		if len(q.pending) == 0 && len(q.sealing) == 0 && !q.fullCollect {
+		if len(q.pending) == 0 && len(q.sealing) == 0 {
 			q.running = false
 			q.mu.Unlock()
 			return
@@ -347,33 +316,20 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	defer unfreezeCollectQueues()
 
 	q.mu.Lock()
-	if len(q.pending) == 0 && len(q.sealing) == 0 && !q.fullCollect {
+	if len(q.pending) == 0 && len(q.sealing) == 0 {
 		q.running = false
 		q.mu.Unlock()
 		log.Printf("[Spider] 封口轮次为空，不重建检索索引")
 		return true
 	}
-	pendingN, sealingN, fullFlag := len(q.pending), len(q.sealing), q.fullCollect
-	var mids []int64
-	full := fullFlag
-	if fullFlag {
-		// 全量直接整表重建，不把上百万编号再拷一份。
-		q.pending = map[int64]struct{}{}
-		q.fullCollect = false
-	} else {
-		mids, full = q.takePendingLocked()
-	}
+	pendingN, sealingN := len(q.pending), len(q.sealing)
+	mids := q.takePendingLocked()
 	q.mu.Unlock()
-	log.Printf("[Spider] 开始封口检索索引 pending=%d sealing=%d full=%t", pendingN, sealingN, fullFlag)
+	log.Printf("[Spider] 开始封口检索索引 pending=%d sealing=%d", pendingN, sealingN)
 
-	if full {
-		log.Printf("[Spider] 本轮含全量采集，直接整表重建索引")
+	if len(mids) > 0 {
 		searchSealRunning.Store(true)
-		requestSearchRebuild()
-		searchSealRunning.Store(false)
-	} else if len(mids) > 0 {
-		searchSealRunning.Store(true)
-		sealSearchIndex(mids, false)
+		sealSearchIndex(mids)
 		searchSealRunning.Store(false)
 	}
 	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。
@@ -395,22 +351,20 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	}
 	// 按编号封口成功时 ResealSearchIndex 已发过 done；这里只收口 sealing，不再依赖全局监听。
 	q.complete()
-	if len(mids) == 0 && !full {
+	if len(mids) == 0 {
 		// 没有编号也要发一次终态，让前端把待检索收成完成。
 		filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
 	}
 	return false
 }
 
-func (q *searchResealQueue) takePendingLocked() ([]int64, bool) {
+func (q *searchResealQueue) takePendingLocked() []int64 {
 	mids := make([]int64, 0, len(q.pending))
 	for mid := range q.pending {
 		mids = append(mids, mid)
 	}
 	q.pending = map[int64]struct{}{}
-	full := q.fullCollect
-	q.fullCollect = false
-	return mids, full
+	return mids
 }
 
 // complete 把当前等检索的站点收成完成。已经重开的站点保持原状。

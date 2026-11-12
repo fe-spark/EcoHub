@@ -52,7 +52,7 @@ const (
 )
 
 // 采集并发初值。测试不跑 InitConfig，沿用这组数。
-// 进程启动后写并发从 CollectWriteSlotMin 起步，按真实写库耗时加减，硬顶 CollectWriteSlotMax。
+// 进程启动后写并发从 CollectWriteSlotMax 满速起步，变慢或锁错误再减，最低 CollectWriteSlotMin。
 var (
 	// CollectWriteMaxInflight 当前允许的同时写库事务数。
 	CollectWriteMaxInflight = 16
@@ -317,7 +317,7 @@ func InitConfig() {
 
 }
 func loadCollectRuntimeConfig() {
-	ApplyWriteSlots(CollectWriteSlotMin)
+	ApplyWriteSlots(CollectWriteSlotMax)
 	srcLimit := "不限制"
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)

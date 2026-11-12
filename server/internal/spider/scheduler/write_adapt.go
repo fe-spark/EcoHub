@@ -36,22 +36,17 @@ func (l *writeLane) noteWrite(cost time.Duration, err error) {
 	if changed {
 		l.writeLimit = next
 	}
-	follow := changed && l.followConfig
+	if changed && l.followConfig {
+		config.ApplyWriteSlots(l.writeLimit)
+		l.maxPerSource = config.CollectWriteMaxPendingPagesPerSource
+		l.maxGlobal = config.CollectWriteMaxPendingPagesGlobal
+	}
+	if changed {
+		l.cond.Broadcast()
+	}
 	l.mu.Unlock()
 	if !changed {
 		return
-	}
-	if follow {
-		config.ApplyWriteSlots(next)
-		l.mu.Lock()
-		l.maxPerSource = config.CollectWriteMaxPendingPagesPerSource
-		l.maxGlobal = config.CollectWriteMaxPendingPagesGlobal
-		l.cond.Broadcast()
-		l.mu.Unlock()
-	} else {
-		l.mu.Lock()
-		l.cond.Broadcast()
-		l.mu.Unlock()
 	}
 	log.Printf("[Spider][WriteScheduler] %s 写并发 %d→%d 最近耗时=%s 原因=%s",
 		l.name, prev, next, cost, reason)

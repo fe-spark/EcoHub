@@ -255,16 +255,6 @@ func pickPlaylistRemarks(playLines []model.FilmSourcePlaylist, sources []model.F
 	return bestLine.LastEpisode
 }
 
-// stampNewFilmPlaySummary 把新片的备注和播放摘要写进插入行。新片只有本站线路，和事后刷新的结果一样。
-func stampNewFilmPlaySummary(fi *model.FilmIndex, source *model.FilmSource, detail model.MovieDetail, sources []model.FilmSource) {
-	if fi == nil || source == nil {
-		return
-	}
-	lines := buildPlaylistsFromDetail(0, source.Id, detail)
-	fi.Remarks = pickPlaylistRemarks(lines, sources)
-	fi.PlayFromSummary = snapshot.BuildPlayFromSummaryFromPlaylists(lines, sources)
-}
-
 // refreshRemarksAndPlaySummaryWithStampTx 刷新备注与播放摘要；仅 stampMids 中的存量追更影片将 update_stamp 刷为当前采集时间，新片保留源站 vod_time。
 func refreshRemarksAndPlaySummaryWithStampTx(tx *gorm.DB, mids []int64, stampMids map[int64]struct{}, sources []model.FilmSource) error {
 	ordered := uniqueMIDs(mids)
