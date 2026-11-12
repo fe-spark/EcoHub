@@ -397,8 +397,8 @@ func BatchCollectPrepared(trigger string, h int, claim CollectClaim) {
 	if len(claim.Sources) == 0 {
 		return
 	}
-	if searchIndexBlocksCollect() {
-		log.Printf("[Spider] 批量采集跳过：%s", errSearchIndexUpdating.Error())
+	if reason := collectPauseReason(); reason != "" {
+		log.Printf("[Spider] 批量采集跳过：%s", reason)
 		claim.abandon()
 		return
 	}
@@ -418,8 +418,8 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 	if len(claim.Sources) == 0 {
 		return "", errors.New("没有可重试的站点")
 	}
-	if searchIndexBlocksCollect() {
-		return "", errSearchIndexUpdating
+	if _, err := tryBeginCollectQueue(); err != nil {
+		return "", err
 	}
 	sources := prioritizeCollectSources(claim.Sources)
 	startedAt := time.Now()
@@ -429,13 +429,14 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 		batchCtx = batchCtx.withTargetPages(sourceTargetPages[0])
 	}
 	if err := batchCtx.recordStart(); err != nil {
+		endCollectQueue()
 		for _, s := range sources {
 			abandonQueuedCollectSource(s, batchCtx)
 		}
 		batchCtx.close()
 		return "", err
 	}
-	goBackgroundCollect(func() { runPreparedBatch(batchCtx, hour, "失败重试") })
+	goBackgroundCollect(func() { runPreparedBatch(batchCtx, hour, "失败重试", true) })
 	return batchCtx.batchID, nil
 }
 

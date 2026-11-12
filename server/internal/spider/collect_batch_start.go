@@ -11,14 +11,14 @@ import (
 // PrepareBatchCollectStart 挑出这次能开的站并占用。跳过的站带原因返回，不占队列。
 // 手动批量采集与计划任务定时采集均复用此逻辑。
 func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchResult) {
-	if searchIndexBlocksCollect() {
+	if reason := collectPauseReason(); reason != "" {
 		skipped := make([]model.CollectBatchSkip, 0, len(ids))
 		for _, raw := range ids {
 			id := strings.TrimSpace(raw)
 			if id == "" {
 				continue
 			}
-			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: errSearchIndexUpdating.Error()})
+			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: reason})
 		}
 		return CollectClaim{}, model.CollectBatchResult{Skipped: skipped}
 	}
@@ -72,8 +72,8 @@ func batchCollectBlockReason(fs model.FilmSource) string {
 	if isMaintenanceRunning() {
 		return "维护任务执行中（" + maintenanceRunningDetail() + "），已跳过"
 	}
-	if searchIndexBlocksCollect() {
-		return "检索索引更新中，采集已暂停"
+	if reason := collectPauseReason(); reason != "" {
+		return reason
 	}
 	if progress.IsCategorySyncing(fs.Id) {
 		return "分类采集中"
