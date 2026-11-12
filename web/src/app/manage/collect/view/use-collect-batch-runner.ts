@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { ApiPost, type ApiResponse } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { COLLECT_BATCH_FAILED_EVENT } from "@/app/manage/components/manage-tour";
-import { collectBlockReason, formatSkipSummary } from "./collect-selection";
+import { collectBlockReason, collectIndexUpdatingReason, formatSkipSummary } from "./collect-selection";
 import type { BatchCollectRow } from "./batch-collect-drawer";
 import { type CollectBatchResult, type FilmSource } from "./types";
 import type { SearchIndexProgress } from "./use-collect-stream";
@@ -30,7 +30,7 @@ export function useCollectBatchRunner(
 
   const openBatchCollect = useCallback(() => {
     if (searchIndex?.status === "indexing") {
-      message.warning("检索索引更新中，采集已暂停");
+      message.warning(collectIndexUpdatingReason);
       return;
     }
     const selected = siteList.filter((item) => selectedSourceIds.includes(item.id));
@@ -51,7 +51,7 @@ export function useCollectBatchRunner(
 
   const startBatchCollect = useCallback(async () => {
     if (searchIndex?.status === "indexing") {
-      message.warning("检索索引更新中，采集已暂停");
+      message.warning(collectIndexUpdatingReason);
       return;
     }
     const ids = batchRows.filter((item) => !item.reason).map((item) => item.id);
