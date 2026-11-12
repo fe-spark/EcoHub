@@ -134,24 +134,6 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	}
 }
 
-func TestResealMidsNeedScan_UsesFractionNotAbsoluteCount(t *testing.T) {
-	if resealMidsNeedScan(55000, 120000) {
-		t.Fatal("55000 of 120000 should stay a point query")
-	}
-	if resealMidsNeedScan(50000, 100000) {
-		t.Fatal("exactly half should stay a point query")
-	}
-	if !resealMidsNeedScan(50001, 100000) {
-		t.Fatal("more than half the index should sequential-scan")
-	}
-	if resealMidsNeedScan(0, 100) {
-		t.Fatal("empty mids are not a ratio scan")
-	}
-	if resealMidsNeedScan(1, 2) {
-		t.Fatal("one of two should stay a point query")
-	}
-}
-
 func TestResealSearchIndex_IncompleteSkipsPointQuery(t *testing.T) {
 	setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-incomplete"); err != nil {
@@ -184,7 +166,7 @@ func TestResealSearchIndex_IncompleteSkipsPointQuery(t *testing.T) {
 	}
 }
 
-func TestResealSearchIndex_MajorityScansBeforePointQuery(t *testing.T) {
+func TestResealSearchIndex_OverHalfStillPointQueries(t *testing.T) {
 	setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-half"); err != nil {
 		t.Fatal(err)
@@ -196,9 +178,10 @@ func TestResealSearchIndex_MajorityScansBeforePointQuery(t *testing.T) {
 	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-half", items))
 
 	prevRead := readSearchMetaUpserts
-	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
-		t.Fatal("more than half the index must not point-query by mid")
-		return nil, nil, nil
+	queried := 0
+	readSearchMetaUpserts = func(mids []int64, _ func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		queried = len(mids)
+		return map[int64]FilmSearchMeta{}, map[int64]struct{}{}, nil
 	}
 	var scanned atomic.Bool
 	stopRebuild := stubSearchRebuildScan(t, &scanned)
@@ -207,12 +190,15 @@ func TestResealSearchIndex_MajorityScansBeforePointQuery(t *testing.T) {
 		stopRebuild()
 	})
 
-	if ResealSearchIndex([]int64{1, 2, 3}, false) {
-		t.Fatal("more than half the index must not report a point-query seal")
+	if !ResealSearchIndex([]int64{1, 2, 3}, false) {
+		t.Fatal("incremental round over half the index should still point-query")
+	}
+	if queried != 3 {
+		t.Fatalf("queried=%d", queried)
 	}
 	time.Sleep(40 * time.Millisecond)
-	if !scanned.Load() {
-		t.Fatal("more than half the index did not sequential-scan")
+	if scanned.Load() {
+		t.Fatal("incremental round must not sequential-scan")
 	}
 }
 

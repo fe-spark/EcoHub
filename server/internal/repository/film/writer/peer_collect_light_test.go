@@ -128,6 +128,57 @@ func TestNonPrimaryNewPageUsesLightCreate(t *testing.T) {
 	}
 }
 
+func TestLightCreateKeepsLastDuplicateSourceMid(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	primary := model.FilmSource{Id: "src-primary", Name: "主站", Uri: "http://primary.example/api", State: true, Sort: 1}
+	secondary := model.FilmSource{Id: "src-secondary", Name: "副站", Uri: "http://secondary.example/api", State: true, Sort: 2}
+	if err := gdb.Create(&[]model.FilmSource{primary, secondary}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	first := testPeerDetail(8803, "前一条", "第1集")
+	first.UpdateTime = "2026-11-01 08:00:00"
+	last := testPeerDetail(8803, "后一条", "第9集")
+	last.UpdateTime = "2026-11-02 09:00:00"
+	wantUnix, err := utils.ParseCollectUpdateTime(last.UpdateTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := SaveCollectedPeerDetails(context.Background(), &secondary, 1, []model.MovieDetail{first, last})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Affected) != 1 {
+		t.Fatalf("affected=%v", res.Affected)
+	}
+	var films []model.FilmIndex
+	if err := gdb.Find(&films).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(films) != 1 || films[0].Name != "后一条" || films[0].Remarks != "第9集" {
+		t.Fatalf("films=%+v", films)
+	}
+	var mapping model.MovieSourceMapping
+	if err := gdb.Where("source_id = ? AND source_mid = ?", secondary.Id, last.Id).First(&mapping).Error; err != nil {
+		t.Fatal(err)
+	}
+	if mapping.GlobalMid != films[0].Mid || mapping.SourceVodUnix != wantUnix {
+		t.Fatalf("mapping mid=%d unix=%d", mapping.GlobalMid, mapping.SourceVodUnix)
+	}
+	var playlists int64
+	if err := gdb.Model(&model.FilmSourcePlaylist{}).Where("mid = ? AND source_id = ?", films[0].Mid, secondary.Id).Count(&playlists).Error; err != nil {
+		t.Fatal(err)
+	}
+	if playlists != 1 {
+		t.Fatalf("playlists=%d", playlists)
+	}
+}
+
 func countSQL(counter *sqlCounter, verb, table string) int {
 	counter.mu.Lock()
 	defer counter.mu.Unlock()
