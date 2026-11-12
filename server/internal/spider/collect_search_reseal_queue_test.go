@@ -18,6 +18,7 @@ func resetSearchReseal() {
 	searchReseal.awaitDone = false
 	searchReseal.mu.Unlock()
 	searchSealRunning.Store(false)
+	unfreezeCollectQueues()
 	for collectQueueActive() {
 		endCollectQueue()
 	}
@@ -194,8 +195,69 @@ func TestBeginSource_RejectsWhileSealQueueWaiting(t *testing.T) {
 		t.Fatal("waiting seal queue should block collect")
 	}
 	err := collectLifecycle.beginSource("during-waiting")
-	if err != errSearchIndexUpdating {
+	if err != errSearchSealPending {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBeginSource_JoinsWhileSealRoundHasLiveQueue(t *testing.T) {
+	t.Cleanup(func() {
+		collectLifecycle.endSource("sibling-join")
+		resetSearchReseal()
+	})
+	beginCollectQueue()
+	searchReseal.mu.Lock()
+	searchReseal.running = true
+	searchReseal.sealing["live"] = struct{}{}
+	searchReseal.mu.Unlock()
+
+	if searchIndexBlocksCollect() {
+		t.Fatal("seal round with a live queue should still accept collects")
+	}
+	if err := collectLifecycle.beginSource("sibling-join"); err != nil {
+		t.Fatal(err)
+	}
+	ok, err := tryBeginCollectQueue()
+	if !ok || err != nil {
+		t.Fatalf("tryBegin = %v, %v", ok, err)
+	}
+	collectQueues.mu.Lock()
+	got := collectQueues.n
+	collectQueues.mu.Unlock()
+	if got != 2 {
+		t.Fatalf("queues = %d, want 2", got)
+	}
+}
+
+func TestTryBeginCollectQueue_FreezesIdleSealRound(t *testing.T) {
+	t.Cleanup(resetSearchReseal)
+	searchReseal.mu.Lock()
+	searchReseal.running = true
+	searchReseal.sealing["gap"] = struct{}{}
+	searchReseal.mu.Unlock()
+
+	ok, err := tryBeginCollectQueue()
+	if ok || err != errSearchSealPending {
+		t.Fatalf("tryBegin = %v, %v", ok, err)
+	}
+	collectQueues.mu.Lock()
+	frozen := collectQueues.frozen
+	n := collectQueues.n
+	collectQueues.mu.Unlock()
+	if !frozen || n != 0 {
+		t.Fatalf("frozen=%v n=%d, want frozen and no queue", frozen, n)
+	}
+	if !freezeCollectQueuesIfIdle() {
+		t.Fatal("idle frozen round should be ready to seal")
+	}
+	if ok, err := tryBeginCollectQueue(); ok || err != errSearchSealPending {
+		t.Fatalf("second tryBegin = %v, %v", ok, err)
+	}
+	collectQueues.mu.Lock()
+	n = collectQueues.n
+	collectQueues.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("frozen round accepted a queue, n=%d", n)
 	}
 }
 
