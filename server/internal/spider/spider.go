@@ -419,6 +419,7 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 		return "", errors.New("没有可重试的站点")
 	}
 	if _, err := tryBeginCollectQueue(); err != nil {
+		claim.abandon()
 		return "", err
 	}
 	sources := prioritizeCollectSources(claim.Sources)

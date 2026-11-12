@@ -330,6 +330,38 @@ func TestStartBatchCollectRetry_RollbackOccupyOnRecordStartError(t *testing.T) {
 	}
 }
 
+func TestStartBatchCollectRetry_ReleasesOccupyWhenQueueRejected(t *testing.T) {
+	t.Cleanup(func() {
+		collectLifecycle.endSource("retry-seal-s1")
+		resetSearchReseal()
+	})
+	searchReseal.mu.Lock()
+	searchReseal.running = true
+	searchReseal.sealing["retry-gap"] = struct{}{}
+	searchReseal.mu.Unlock()
+
+	src := model.FilmSource{Id: "retry-seal-s1", Name: "封口拒绝"}
+	claim, err := claimCollectSources([]model.FilmSource{src}, "q-test-retry-seal")
+	if err != nil || len(claim.Sources) != 1 {
+		t.Fatalf("occupy failed: %v", err)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should be occupied initially")
+	}
+
+	_, err = StartBatchCollectRetry("parent-seal", 24, claim)
+	if err != errSearchSealPending {
+		t.Fatalf("err = %v", err)
+	}
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should NOT be occupied after queue admission is rejected")
+	}
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusStopped {
+		t.Fatalf("expected progress status stopped, got ok=%v, status=%s", ok, snap.Status)
+	}
+}
+
 func TestSingleFilmBatch_RecordStartCreatesRunning(t *testing.T) {
 	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
