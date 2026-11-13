@@ -80,6 +80,7 @@ func init() {
 			return ResolveCollector(s.ResolveFormat()).GetFilmDetail(r)
 		},
 		WaitTurn:           waitSourceRequestTurn,
+		ClaimTurn:          claimSourceRequestTurn,
 		SavePage:           saveCollectedFilmForCollect,
 		SkipPublishOnError: shouldSkipCollectPublishOnError,
 		ResolveSpiderProxy: repository.ResolveSpiderProxy,

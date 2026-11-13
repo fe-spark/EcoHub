@@ -1,4 +1,4 @@
-// Package fetcher 采集取数：分页结果投递（页并发 / 写调度 / 零成功停站）与进度回报。
+// Package fetcher 采集取数：分页结果投递（页并发 / 写调度 / 连续抓取失败中断）与进度回报。
 //
 // 与 fetcher.go 同属一个「取数」模块：本文件负责单站分页的并发调度与收尾判定，
 // 外部能力（落库、通知、状态机）全部通过 Deps 注入，不反向依赖 spider 根包。
@@ -19,7 +19,6 @@ import (
 	"server/internal/model"
 	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
-	"server/internal/utils"
 )
 
 // Batch 采集批次上下文在抓取阶段需要的能力；调用方可传 nil（全部方法需 nil-safe）。
@@ -39,17 +38,17 @@ type Batch interface {
 }
 
 const (
-	// sourceStartupFailLimit 没有任何成功页时，取页失败达到该次数就停止。
-	sourceStartupFailLimit = 32
+	// consecutiveFetchFailLimit 连续这么多页抓取失败先暂停一次。
+	// 暂停结束后再连续这么多页失败，才中断本站这一轮。
+	consecutiveFetchFailLimit = 20
 	// progressLogPageStep 采集进度日志的页步长。
 	progressLogPageStep = 100
 	// failureLogStep 失败日志的步长。
 	failureLogStep = 10
 )
 
-func shouldStopUnprovenSource(fetchOK, fetchFails int) bool {
-	return fetchOK == 0 && fetchFails >= sourceStartupFailLimit
-}
+// fetchFailPause 连续失败后的限流暂停。只暂停一次，不再加长。测试可调短。
+var fetchFailPause = 2 * time.Minute
 
 type pageStats struct {
 	latestPage  int
@@ -67,44 +66,21 @@ func shouldLogFailure(failed int) bool {
 	return failed == 1 || failed%failureLogStep == 0
 }
 
-// 连续失败暂停：站点已有成功页后，连续 sourcePauseFailStreak 页取页失败（多半是被源站按 IP 限流），
-// 整站暂停 sourcePauseDuration 再从断点继续；失败的页照常记为失败，留给「重试失败页」。
-// 连续暂停 sourcePauseMaxTimes 次仍未恢复，再撞上一轮连续失败就结束本站这一轮。包级变量，测试可调小。
-//
-// EOF、连接重置和单页超时经常是同一小波并发一起失败。这种页先整站短暂停，再补抓，不立刻记失败。
-var (
-	sourcePauseFailStreak = 20
-	sourcePauseDuration   = 5 * time.Minute
-	sourcePauseMaxTimes   = 3
-	// transientPageRetries 短暂停之后，同一页最多再补几轮。
-	transientPageRetries = 2
-	// transientPauseAfter 连续这么多页临时失败就停手，避免并发把源站按死。
-	transientPauseAfter = 4
-	transientRetryPause = 15 * time.Second
-	// maxTransientPauses 短暂停次数。用完后不再补抓，改走上面的长暂停。
-	maxTransientPauses = 3
-)
-
-type pageFetch struct {
-	pg        int
-	transient int
-}
-
-// pageFetchQueue 待抓页。补抓放回队尾；全部落地或采集被取消后关闭。
+// pageFetchQueue 待抓页。全部落地或采集被取消后关闭。
 type pageFetchQueue struct {
 	mu     sync.Mutex
-	ch     chan pageFetch
+	ch     chan int
 	closed bool
 	left   int
 }
 
 func newPageFetchQueue(pages []int) *pageFetchQueue {
 	queue := &pageFetchQueue{
-		ch:   make(chan pageFetch, len(pages)),
+		ch:   make(chan int, len(pages)),
 		left: len(pages),
 	}
 	for _, pg := range pages {
-		queue.ch <- pageFetch{pg: pg}
+		queue.ch <- pg
 	}
 	return queue
 }
@@ -141,20 +117,6 @@ func (q *pageFetchQueue) done() {
 	}
 }
 
-func (q *pageFetchQueue) requeue(ctx context.Context, job pageFetch) bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.closed || ctx.Err() != nil {
-		return false
-	}
-	select {
-	case q.ch <- job:
-		return true
-	default:
-		return false
-	}
-}
-
 func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s *model.FilmSource, h int, batch Batch) (bool, int, int, []int, error) {
 	totalWork := pageCount
 	useTargetPages := len(targetPages) > 0
@@ -167,7 +129,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
-	maxWorkers := config.CollectWriteSlotMax
+	maxWorkers := config.PageWorkerLimit()
 	if totalWork < maxWorkers {
 		maxWorkers = totalWork
 	}
@@ -188,9 +150,8 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	writeCompletions := make(chan scheduler.Completion, 2048)
 
 	var writeWG sync.WaitGroup
-	var fetchMu sync.Mutex
-	fetchOK := 0
-	fetchFails := 0
+	streak, stopStreakWait := newFetchStreak(ctx, s.Name)
+	defer stopStreakWait()
 	var stopErr error
 	var stopOnce sync.Once
 	var statsMu sync.Mutex
@@ -229,140 +190,55 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		statsMu.Unlock()
 		return snapshot
 	}
-	// 连续失败暂停的状态，与 fetchOK/fetchFails 同受 fetchMu 保护。
-	failStreak := 0
-	transientStreak := 0
-	transientPauses := 0
-	pausesInRow := 0
-	var pausedUntil time.Time
-	noteFetchOK := func() {
-		fetchMu.Lock()
-		fetchOK++
-		failStreak = 0
-		transientStreak = 0
-		pausesInRow = 0
-		fetchMu.Unlock()
-	}
 	giveUp := func(reason string) {
 		stopOnce.Do(func() {
 			stopErr = errors.New(reason)
-			syslog.Errorf("[Spider] %s", reason)
+			log.Printf("[Spider] 站点 %s(%s) %s", s.Name, s.Id, reason)
+			syslog.Errorf("[Spider] 站点 %s(%s) %s", s.Name, s.Id, reason)
 			if batch != nil {
 				batch.RecordSourceError(s.Id, reason)
 			}
-			cancel()
-		})
-	}
-	// waitPause 暂停中则等到暂停结束；停止或终止时立刻返回 false。
-	waitPause := func() bool {
-		for {
-			fetchMu.Lock()
-			wait := time.Until(pausedUntil)
-			fetchMu.Unlock()
-			if wait <= 0 {
-				return ctx.Err() == nil
-			}
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return false
-			case <-timer.C:
-			}
-		}
-	}
-	// notePauseStreak 已有成功页的站连续失败到阈值时整站暂停；暂停次数用完则结束本轮。
-	// 暂停期间才返回的失败（暂停前已发出的请求）不计入下一轮连续失败。
-	notePauseStreak := func() {
-		fetchMu.Lock()
-		if fetchOK == 0 || time.Now().Before(pausedUntil) {
-			fetchMu.Unlock()
-			return
-		}
-		failStreak++
-		if failStreak < sourcePauseFailStreak {
-			fetchMu.Unlock()
-			return
-		}
-		failStreak = 0
-		if pausesInRow >= sourcePauseMaxTimes {
-			fetchMu.Unlock()
-			log.Printf("[Spider] 站点 %s 连续暂停 %d 次后仍连续失败 %d 页，结束本轮采集", s.Name, sourcePauseMaxTimes, sourcePauseFailStreak)
-			giveUp(fmt.Sprintf("站点 %s 连续暂停 %d 次后仍连续失败 %d 页，已结束本轮采集，失败页可稍后重试", s.Name, sourcePauseMaxTimes, sourcePauseFailStreak))
-			return
-		}
-		pausesInRow++
-		pausedUntil = time.Now().Add(sourcePauseDuration)
-		nth, until := pausesInRow, pausedUntil
-		fetchMu.Unlock()
-		log.Printf("[Spider] 站点 %s 连续失败 %d 页，暂停 %s（第 %d/%d 次）", s.Name, sourcePauseFailStreak, sourcePauseDuration, nth, sourcePauseMaxTimes)
-		go func() {
-			timer := time.NewTimer(time.Until(until))
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-			case <-timer.C:
-				log.Printf("[Spider] 站点 %s 暂停结束，从断点继续采集（第 %d/%d 次暂停）", s.Name, nth, sourcePauseMaxTimes)
-			}
-		}()
-	}
-	// noteTransientBurst 连续临时失败时把整站短暂停一次。这次已经停着，只把恢复时间往后推。
-	noteTransientBurst := func() {
-		fetchMu.Lock()
-		if fetchOK == 0 {
-			fetchMu.Unlock()
-			return
-		}
-		transientStreak++
-		if transientStreak < transientPauseAfter {
-			fetchMu.Unlock()
-			return
-		}
-		transientStreak = 0
-		now := time.Now()
-		until := now.Add(transientRetryPause)
-		if now.Before(pausedUntil) {
-			if pausedUntil.Before(until) {
-				pausedUntil = until
-			}
-			fetchMu.Unlock()
-			return
-		}
-		if transientPauses >= maxTransientPauses {
-			fetchMu.Unlock()
-			return
-		}
-		transientPauses++
-		pausedUntil = until
-		nth := transientPauses
-		fetchMu.Unlock()
-		utils.CloseIdleHTTPConnections()
-		log.Printf("[Spider] 站点 %s 连续 %d 页临时失败，暂停 %s 后重试这些页（第 %d/%d 次）",
-			s.Name, transientPauseAfter, transientRetryPause, nth, maxTransientPauses)
-	}
-	noteFetchFail := func(page int, err error) {
-		fetchMu.Lock()
-		fetchFails++
-		ok, fails := fetchOK, fetchFails
-		fetchMu.Unlock()
-		if !shouldStopUnprovenSource(ok, fails) {
-			notePauseStreak()
-			return
-		}
-		stopOnce.Do(func() {
-			stopErr = fmt.Errorf("站点 %s 已失败 %d 页且尚无成功页，已停止本次采集", s.Name, sourceStartupFailLimit)
-			syslog.Errorf("[Spider] 站点 %s 尚无成功页，停止采集 page=%d err=%v", s.Name, page, err)
-			if batch != nil {
-				batch.RecordSourceError(s.Id, stopErr.Error())
-			}
-			if deps.OnSourceFailed != nil {
-				deps.OnSourceFailed(s.Id, s.Name, stopErr.Error())
+			proven := streak.succeeded()
+			if !proven && deps.OnSourceFailed != nil {
+				deps.OnSourceFailed(s.Id, s.Name, reason)
 			}
 			cancel()
 		})
+	}
+	stopForStreak := func() {
+		giveUp(fmt.Sprintf("暂停后仍连续 %d 页抓取失败，已中断采集", consecutiveFetchFailLimit))
+	}
+	// pauseForStreak 连续失败后整站停 2 分钟再继续。只此一次，暂停期间不占页并发和取数名额。
+	pauseForStreak := func() bool {
+		log.Printf("[Spider] 站点 %s 连续 %d 页抓取失败，暂停 %s 后继续", s.Name, consecutiveFetchFailLimit, fetchFailPause)
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+			if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
+				return
+			}
+			cur.Status = progress.StatusPaused
+		})
+		timer := time.NewTimer(fetchFailPause)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+				if cur.Status == progress.StatusPaused {
+					cur.Status = progress.StatusRunning
+				}
+			})
+			return false
+		case <-timer.C:
+		}
+		log.Printf("[Spider] 站点 %s 暂停结束，继续采集", s.Name)
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+			if cur.Status == progress.StatusPaused {
+				cur.Status = progress.StatusRunning
+			}
+		})
+		return true
 	}
 	markStopped := func() {
-		// 零成功停站不写成用户「已停止」。
+		// 连续失败中断不写成用户「已停止」，否则采集记录会丢掉中断原因。
 		if stopErr != nil {
 			return
 		}
@@ -399,23 +275,6 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		}
 		logProgress(false)
 	}
-	// retryTransient 把 EOF、断连和单页超时放回队尾。还没有成功页的站不补，避免死站放大重试。
-	retryTransient := func(job pageFetch, err error) bool {
-		if !isTransientFetchErr(err) || job.transient >= transientPageRetries {
-			return false
-		}
-		fetchMu.Lock()
-		proven := fetchOK > 0
-		inPause := time.Now().Before(pausedUntil)
-		budgetLeft := transientPauses < maxTransientPauses
-		fetchMu.Unlock()
-		if !proven || (!budgetLeft && !inPause) {
-			return false
-		}
-		noteTransientBurst()
-		job.transient++
-		return pages.requeue(ctx, job)
-	}
 
 	var requestWG sync.WaitGroup
 	requestWG.Add(maxWorkers)
@@ -439,25 +298,35 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					}
 					continue
 				}
-				if !waitPause() {
-					markStopped()
+				if !streak.tryBegin() {
+					if ctx.Err() != nil {
+						markStopped()
+					}
 					return
 				}
 				select {
 				case <-ctx.Done():
+					if streak.abandon() {
+						stopForStreak()
+					}
 					markStopped()
 					return
-				case job, ok := <-pages.ch:
+				case pg, ok := <-pages.ch:
 					if !ok {
+						if streak.abandon() {
+							stopForStreak()
+						}
 						return
 					}
 					if ctx.Err() != nil {
+						if streak.abandon() {
+							stopForStreak()
+						}
 						markStopped()
 						return
 					}
-					pg := job.pg
 					progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
-						if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
+						if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping || cur.Status == progress.StatusPaused {
 							return
 						}
 						cur.Status = progress.StatusRunning
@@ -472,18 +341,33 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					}
 					if err != nil {
 						if ctx.Err() != nil {
+							streak.abandon()
 							markStopped()
 							return
 						}
-						if retryTransient(job, err) {
-							continue
-						}
 						recordPageFailure(pg, "fetch", err)
-						noteFetchFail(pg, err)
+						stop, pause := streak.finish(false)
+						if stop {
+							stopForStreak()
+						}
+						// 先入账再暂停。暂停的 2 分钟里点停止，这一页也已经从队列计数里去掉。
+						pages.done()
+						if pause && !pauseForStreak() {
+							markStopped()
+							return
+						}
+						continue
+					}
+					stop, pause := streak.finish(true)
+					if stop {
 						pages.done()
 						continue
 					}
-					noteFetchOK()
+					if pause && !pauseForStreak() {
+						pages.done()
+						markStopped()
+						return
+					}
 					pages.done()
 					page := pg
 					items := list
@@ -550,13 +434,16 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		sort.Ints(stats.failedPages)
 	}
 	if stopErr != nil {
-		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
-			if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
-				return
-			}
-			cur.Status = progress.StatusFailed
-			cur.QueueId = ""
-		})
+		// 还有成功页时保持运行中，调用方才能把已经抓到的影片送去封口。
+		if stats.success == 0 {
+			progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+				if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
+					return
+				}
+				cur.Status = progress.StatusFailed
+				cur.QueueId = ""
+			})
+		}
 		return stats.success > 0, stats.success, stats.failed, stats.failedPages, stopErr
 	}
 	if ctx.Err() != nil {

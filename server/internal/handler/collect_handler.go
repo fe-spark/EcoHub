@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -322,9 +323,22 @@ type filmSourceBody struct {
 }
 
 func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {
+	raw, err := c.GetRawData()
+	if err != nil {
+		return filmSourceBody{}, err
+	}
 	var body filmSourceBody
-	err := c.ShouldBindJSON(&body)
-	return body, err
+	if err := json.Unmarshal(raw, &body.FilmSource); err != nil {
+		return filmSourceBody{}, err
+	}
+	var extra struct {
+		UseProxy *bool `json:"useProxy"`
+	}
+	if err := json.Unmarshal(raw, &extra); err != nil {
+		return filmSourceBody{}, err
+	}
+	body.UseProxy = extra.UseProxy
+	return body, nil
 }
 
 func testFilmSourceAPI(s model.FilmSource, useProxy *bool) error {
@@ -333,5 +347,3 @@ func testFilmSourceAPI(s model.FilmSource, useProxy *bool) error {
 	}
 	return spider.CollectApiTest(s)
 }
-
-

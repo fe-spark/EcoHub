@@ -52,14 +52,15 @@ const (
 )
 
 // 采集并发初值。测试不跑 InitConfig，沿用这组数。
-// 进程启动后写并发从 CollectWriteSlotMax 满速起步，变慢或锁错误再减，最低 CollectWriteSlotMin。
+// 写槽从 WriteSlotMax 满速起步。只有锁错误才减，最低 CollectWriteSlotMin。连续 30 秒没有锁错误再加回上限。
+// 页并发、取数在途和队列是各自的数，不从写槽推出来。
 var (
-	// CollectWriteMaxInflight 当前允许的同时写库事务数。
+	// CollectWriteMaxInflight 当前允许的同时写库事务数。启动时设为 WriteSlotMax。
 	CollectWriteMaxInflight = 16
 	// CollectWriteMaxPendingPagesPerSource 单站写库队列上限。
-	CollectWriteMaxPendingPagesPerSource = 500
+	CollectWriteMaxPendingPagesPerSource = 256
 	// CollectWriteMaxPendingPagesGlobal 全局写库缓冲上限。
-	CollectWriteMaxPendingPagesGlobal = 5000
+	CollectWriteMaxPendingPagesGlobal = 4096
 	// CollectPageWorkers 单站分页请求并发数。
 	CollectPageWorkers = 16
 	// CollectSourceConcurrency 批量采集同时运行的站点数。0 表示不限制。
@@ -317,14 +318,14 @@ func InitConfig() {
 
 }
 func loadCollectRuntimeConfig() {
-	ApplyWriteSlots(CollectWriteSlotMax)
+	ApplyWriteSlots(WriteSlotMax())
 	srcLimit := "不限制"
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
 	fmt.Printf("[Config] 采集配置: 核数=%d 写并发=%d/%d 最近耗时=无 队列缓冲=%d/%d | 页并发=%d 站并发=%s 取数在途=%d | retain=%ds\n",
 		runtime.GOMAXPROCS(0),
-		CollectWriteMaxInflight, CollectWriteSlotMax,
+		CollectWriteMaxInflight, WriteSlotMax(),
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, srcLimit, CollectFetchInFlight,
 		CollectProgressRetainSec)

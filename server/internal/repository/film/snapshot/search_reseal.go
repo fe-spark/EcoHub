@@ -69,15 +69,31 @@ func ResealSearchIndex(mids []int64) bool {
 			RequestActiveFilmSearchIndexRebuild()
 			return false
 		}
-		if cur == base {
-			var idx *filmSearchMetaIndex
-			hasDrop := len(drop) > 0
-			log.Printf("[ActiveReadModel] 检索索引内存构建启动 mids=%d drop=%d seal=%t", len(mids), len(drop), hasDrop)
-			if hasDrop {
-				idx = sealSearchMetaIndex(cur.Version, patchSearchMetas(cur.Items, upsertMap, drop))
-			} else {
-				idx = updateSearchMetaIndexIncremental(cur, cur.Version, upsertMap)
+		if cur != base {
+			activeFilmSearchMetasMu.Unlock()
+			base = cur
+			upsertMap, drop, err = readSearchMetaUpserts(mids, nil)
+			if err != nil {
+				log.Printf("[ActiveReadModel] 检索索引封口重读失败 mids=%d err=%v", len(mids), err)
+				RequestActiveFilmSearchIndexRebuild()
+				return false
 			}
+			continue
+		}
+		activeFilmSearchMetasMu.Unlock()
+
+		hasDrop := len(drop) > 0
+		log.Printf("[ActiveReadModel] 检索索引内存构建启动 mids=%d drop=%d seal=%t", len(mids), len(drop), hasDrop)
+		var idx *filmSearchMetaIndex
+		if hasDrop {
+			idx = sealSearchMetaIndex(cur.Version, patchSearchMetas(cur.Items, upsertMap, drop))
+		} else {
+			idx = updateSearchMetaIndexIncremental(cur, cur.Version, upsertMap)
+		}
+
+		activeFilmSearchMetasMu.Lock()
+		now := activeFilmSearchMetas.Load()
+		if now == cur && searchIndexCurrent(now, version) {
 			activeFilmSearchMetas.Store(idx)
 			activeFilmSearchMetasMu.Unlock()
 			buildCost := time.Since(buildStart)
@@ -88,7 +104,12 @@ func ResealSearchIndex(mids []int64) bool {
 			return true
 		}
 		activeFilmSearchMetasMu.Unlock()
-		base = cur
+		if !searchIndexCurrent(now, version) {
+			log.Printf("[ActiveReadModel] 检索副本在封口前已失效，触发全量重建 mids=%d", len(mids))
+			RequestActiveFilmSearchIndexRebuild()
+			return false
+		}
+		base = now
 		upsertMap, drop, err = readSearchMetaUpserts(mids, nil)
 		if err != nil {
 			log.Printf("[ActiveReadModel] 检索索引封口重读失败 mids=%d err=%v", len(mids), err)

@@ -55,7 +55,7 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 		if err := tx.Where("source_id NOT IN ?", ids).Delete(&model.BannerSlot{}).Error; err != nil {
 			return err
 		}
-		return tx.Create(&list).Error
+		return insertFilmSources(tx, list)
 	})
 	if err != nil {
 		return err
@@ -327,7 +327,7 @@ func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 			return err
 		}
 	}
-	if err := tx.Create(&s).Error; err != nil {
+	if err := insertFilmSources(tx, []model.FilmSource{s}); err != nil {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)
@@ -385,7 +385,7 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 			}
 			normalizeCollectSourceDefaults(&list[i])
 		}
-		return tx.Create(&list).Error
+		return insertFilmSources(tx, list)
 	})
 	if err != nil {
 		return err
@@ -447,6 +447,26 @@ func DemoteExistingPosterSourceTx(tx *gorm.DB, exceptID string) error {
 		query = query.Where("id <> ?", exceptID)
 	}
 	return query.Update("is_poster_source", false).Error
+}
+
+// insertFilmSources 写入采集站。gorm 的 default:200 会把零值改成 200，显式填 0 时再写回 0。
+func insertFilmSources(tx *gorm.DB, list []model.FilmSource) error {
+	if len(list) == 0 {
+		return nil
+	}
+	zeroIDs := make([]string, 0)
+	for i := range list {
+		if list[i].CollectIntervalMs == 0 {
+			zeroIDs = append(zeroIDs, list[i].Id)
+		}
+	}
+	if err := tx.Create(&list).Error; err != nil {
+		return err
+	}
+	if len(zeroIDs) == 0 {
+		return nil
+	}
+	return tx.Model(&model.FilmSource{}).Where("id IN ?", zeroIDs).Update("collect_interval_ms", 0).Error
 }
 
 func normalizeCollectSourceDefaults(source *model.FilmSource) {

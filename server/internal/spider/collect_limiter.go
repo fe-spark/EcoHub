@@ -98,3 +98,27 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string)
 		}
 	}
 }
+
+// claimSourceRequestTurn 在即将发 HTTP 时占本站下一次许可。
+// false 表示等待取页名额期间许可已被别的请求占上，调用方应放开名额再等。
+func claimSourceRequestTurn(s *model.FilmSource) bool {
+	if s == nil {
+		return false
+	}
+	gate := getSourceRequestGate(s.Id)
+	interval := time.Duration(0)
+	if s.CollectIntervalMs > 0 {
+		interval = time.Duration(s.CollectIntervalMs) * time.Millisecond
+	}
+	gate.mu.Lock()
+	now := time.Now()
+	if !gate.nextAllowedAt.IsZero() && gate.nextAllowedAt.After(now) {
+		gate.mu.Unlock()
+		return false
+	}
+	if interval > 0 {
+		gate.nextAllowedAt = now.Add(interval)
+	}
+	gate.mu.Unlock()
+	return true
+}

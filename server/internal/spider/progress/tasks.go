@@ -59,12 +59,12 @@ func RequestStop(id string) {
 
 	if val, ok := tasks.Load(id); ok {
 		// 先标成停止中，再取消。避免正在退出的拉页把状态直接写成已停止。
-		setStatusIf(id, StatusStopping, StatusStarting, StatusRunning)
+		setStatusIf(id, StatusStopping, StatusStarting, StatusRunning, StatusPaused)
 		val.(task).cancel()
 		tasks.Delete(id)
 		return
 	}
-	setStatusIf(id, StatusStopped, StatusStarting, StatusRunning, StatusStopping)
+	setStatusIf(id, StatusStopped, StatusStarting, StatusRunning, StatusPaused, StatusStopping)
 }
 
 func setStatusIf(id, next string, from ...string) {

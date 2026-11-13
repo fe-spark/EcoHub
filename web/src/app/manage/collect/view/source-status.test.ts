@@ -21,6 +21,24 @@ test("采集中没有失败页时保持进行中色", () => {
   assert.deepEqual(status, { label: "采集中", tone: "running" });
 });
 
+test("限流中只显示状态名", () => {
+  const status = resolveSourceStatus(
+    source({
+      progress: {
+        id: "a",
+        name: "HD",
+        total: 5911,
+        current: 313,
+        success: 267,
+        failed: 46,
+        status: "paused",
+      },
+    }),
+    true,
+  );
+  assert.deepEqual(status, { label: "限流中", tone: "paused" });
+});
+
 test("采集中有失败页时换成失败色，文案仍是采集中", () => {
   const status = resolveSourceStatus(
     source({

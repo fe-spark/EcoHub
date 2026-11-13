@@ -7,6 +7,7 @@ import {
 export type StatusTone =
   | "running"
   | "runningFailed"
+  | "paused"
   | "sealing"
   | "stopped"
   | "failed"
@@ -27,6 +28,10 @@ export function resolveSourceStatus(
 
   if (phase === "sealing") {
     return { label: "待检索", tone: "sealing" };
+  }
+
+  if (phase === "paused") {
+    return { label: resolveCollectProgressStatusText(record.progress), tone: "paused" };
   }
 
   if (active) {

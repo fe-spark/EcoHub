@@ -7,23 +7,23 @@ func TestApplyWriteSlots(t *testing.T) {
 	t.Cleanup(func() { restoreCollectProfile(prev) })
 
 	ApplyWriteSlots(1)
-	if got := collectProfileSnapshot(); got.inflight != 2 || got.pages != 2 || got.fetch != 4 || got.perSrc != 32 || got.global != 64 {
+	if got := collectProfileSnapshot(); got.inflight != CollectWriteSlotMin || profileExceptInflight(got) != profileExceptInflight(prev) {
 		t.Fatalf("低于下限: %+v", got)
 	}
 
 	ApplyWriteSlots(8)
-	if got := collectProfileSnapshot(); got.inflight != 8 || got.pages != 8 || got.fetch != 64 || got.perSrc != 128 || got.global != 1024 {
+	if got := collectProfileSnapshot(); got.inflight != 8 || profileExceptInflight(got) != profileExceptInflight(prev) {
 		t.Fatalf("8 路: %+v", got)
 	}
 
-	ApplyWriteSlots(16)
-	if got := collectProfileSnapshot(); got.inflight != 16 || got.pages != 16 || got.fetch != 128 || got.perSrc != 256 || got.global != 4096 {
+	ApplyWriteSlots(WriteSlotMax())
+	if got := collectProfileSnapshot(); got.inflight != WriteSlotMax() || profileExceptInflight(got) != profileExceptInflight(prev) {
 		t.Fatalf("顶格: %+v", got)
 	}
 
-	ApplyWriteSlots(32)
-	if got := collectProfileSnapshot(); got.inflight != CollectWriteSlotMax || got.fetch != 128 {
-		t.Fatalf("超过硬顶: %+v", got)
+	ApplyWriteSlots(WriteSlotMax() + 100)
+	if got := collectProfileSnapshot(); got.inflight != WriteSlotMax() || profileExceptInflight(got) != profileExceptInflight(prev) {
+		t.Fatalf("超过连接池余量: %+v", got)
 	}
 }
 
@@ -33,12 +33,17 @@ func TestLoadCollectRuntimeConfig_StartsAtFullSpeed(t *testing.T) {
 
 	loadCollectRuntimeConfig()
 	got := collectProfileSnapshot()
-	if got.inflight != CollectWriteSlotMax || got.pages != CollectWriteSlotMax || got.fetch != 128 {
-		t.Fatalf("满速起步: %+v", got)
+	if got.inflight != WriteSlotMax() {
+		t.Fatalf("写槽=%d 上限=%d", got.inflight, WriteSlotMax())
 	}
-	if got.perSrc != 256 || got.global != 4096 {
-		t.Fatalf("满速队列: %+v", got)
+	if profileExceptInflight(got) != profileExceptInflight(prev) {
+		t.Fatalf("页并发或队列被写槽改掉: before=%+v after=%+v", prev, got)
 	}
+}
+
+func profileExceptInflight(v collectProfileValues) collectProfileValues {
+	v.inflight = 0
+	return v
 }
 
 type collectProfileValues struct {

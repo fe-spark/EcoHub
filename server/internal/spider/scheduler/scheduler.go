@@ -93,10 +93,9 @@ type writeScheduler struct {
 
 func newWriteScheduler() *writeScheduler {
 	lane := newWriteLane("采集")
-	lane.workers = config.CollectWriteSlotMax
+	lane.workers = config.WriteSlotMax()
 	lane.writeLimit = config.CollectWriteMaxInflight
 	lane.adapt = true
-	lane.followConfig = config.WriteSlotsApplied()
 	lane.start()
 	return &writeScheduler{lane: lane}
 }
@@ -134,18 +133,17 @@ func (s *writeScheduler) cancelAll() {
 }
 
 type writeLane struct {
-	name         string
-	mu           sync.Mutex
-	cond         *sync.Cond
-	queues       map[string]*writeQueue
-	order        []string // sourceID 稳定顺序，用于 round-robin
-	rrCursor     int      // 下一次 RR 起始下标
-	workers      int
-	writeLimit   int // 0 表示不额外限制，由 workers 数决定。生产环境从硬顶起步。
-	adapt        bool
-	followConfig bool
-	pace         writePace
-	lastCost     time.Duration
+	name       string
+	mu         sync.Mutex
+	cond       *sync.Cond
+	queues     map[string]*writeQueue
+	order      []string // sourceID 稳定顺序，用于 round-robin
+	rrCursor   int      // 下一次 RR 起始下标
+	workers    int
+	writeLimit int // 0 表示不额外限制，由 workers 数决定。生产环境从硬顶起步。
+	adapt      bool
+	pace       writePace
+	lastCost   time.Duration
 
 	// 有界水箱（构造时从 config 拷贝，测试可覆盖）。
 	maxPerSource int
@@ -388,7 +386,7 @@ func (l *writeLane) start() {
 		last = l.lastCost.String()
 	}
 	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d 写并发=%d/%d 最近耗时=%s pending_per_source=%d pending_global=%d",
-		l.name, l.workers, limit, config.CollectWriteSlotMax, last, l.maxPerSource, l.maxGlobal)
+		l.name, l.workers, limit, config.WriteSlotMax(), last, l.maxPerSource, l.maxGlobal)
 }
 
 func (l *writeLane) run(workerID int) {

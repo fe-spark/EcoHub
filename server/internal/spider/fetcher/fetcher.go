@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +22,8 @@ import (
 const (
 	// singlePageFetchTimeout 单页抓取最大超时，避免深分页慢查询长期占着取页名额。
 	singlePageFetchTimeout = 15 * time.Second
+	// pageFetchRetries 一页抓取失败后按采集间隔重试的次数。用完仍失败才记失败页。
+	pageFetchRetries = 2
 )
 
 // Deps 采集编排层注入的外部能力；全部为必需项，缺项会在调用处 panic。
@@ -31,8 +32,12 @@ type Deps struct {
 	GetPageCount func(s *model.FilmSource, r utils.RequestInfo) (int, error)
 	// GetFilmDetail 拉取单页影片明细。
 	GetFilmDetail func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error)
-	// WaitTurn 站点级请求闸门。先等间隔或冷却，再占取页名额。
+	// WaitTurn 等到本站可以发请求。不占下一次许可。
 	WaitTurn func(ctx context.Context, s *model.FilmSource, tag string) (func(error), error)
+	// ClaimTurn 拿到全局取页名额后占本站下一次许可。
+	// false 表示许可已被别的请求占上，调用方应放开名额再等。
+	// 为空表示 WaitTurn 已经占过许可。
+	ClaimTurn func(s *model.FilmSource) bool
 	// SavePage 单页落库（由写调度器串行化后调用）。
 	SavePage func(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (scheduler.Mids, error)
 	// SkipPublishOnError 该站该采集窗口出错时是否跳过发布。
@@ -41,7 +46,7 @@ type Deps struct {
 	ResolveSpiderProxy func() (bool, string, error)
 	// ResolveSourceProxy 查询站点是否启用代理。配置读取失败必须返回错误。
 	ResolveSourceProxy func(sourceID string) (bool, string, error)
-	// OnSourceFailed 站点尚无成功页而停止采集时的通知回调（可选）。
+	// OnSourceFailed 连续抓取失败且本轮还没有成功页时的通知。有成功页只写入采集记录。
 	OnSourceFailed func(sourceID, sourceName, reason string)
 }
 
@@ -125,108 +130,49 @@ func releaseSlot(slots *fetchGate) {
 	slots.release()
 }
 
-// withFetchSlot 先等站点间隔或冷却，再占用一个全局取页名额。HTTP 结束立即释放。
+// withFetchSlot 先等到本站许可到期，再占全局取页名额，马上发 HTTP 之前才占下一次许可。
+// 等名额期间不推进许可。占许可失败就放开名额，重新等间隔。HTTP 结束立即释放名额。
 func withFetchSlot(ctx context.Context, s *model.FilmSource, tag string, call func(context.Context) error) error {
 	if deps.WaitTurn == nil {
 		return errors.New("WaitTurn 未注入")
 	}
-	release, err := deps.WaitTurn(ctx, s, tag)
-	if err != nil {
-		return err
+	for {
+		release, err := deps.WaitTurn(ctx, s, tag)
+		if err != nil {
+			return err
+		}
+		if release == nil {
+			release = func(error) {}
+		}
+		if err := acquireSlot(ctx, globalFetchSlots()); err != nil {
+			return err
+		}
+		if deps.ClaimTurn != nil && !deps.ClaimTurn(s) {
+			releaseSlot(globalFetchSlots())
+			continue
+		}
+		callErr := func() error {
+			defer releaseSlot(globalFetchSlots())
+			err := callHeldFetch(ctx, call)
+			release(err)
+			return err
+		}()
+		return callErr
 	}
-	if release == nil {
-		release = func(error) {}
-	}
-	if err := acquireSlot(ctx, globalFetchSlots()); err != nil {
-		return err
-	}
-	defer releaseSlot(globalFetchSlots())
+}
 
+func callHeldFetch(ctx context.Context, call func(context.Context) error) error {
 	reqCtx, cancel := context.WithTimeout(ctx, singlePageFetchTimeout)
 	defer cancel()
-	callErr := call(reqCtx)
-	release(callErr)
-	return callErr
-}
-
-const (
-	// maxPageFetchRetries 单页就地重试次数。间隔逐次拉长，避开同一瞬间的断连。
-	maxPageFetchRetries = 2
-)
-
-// fetchRetryBase 第一次重试前的等待。之后按 4 倍增加，上限 8 秒。测试可置 0。
-var fetchRetryBase = time.Second
-
-func fetchRetryDelay(retry int) time.Duration {
-	if retry < 1 || fetchRetryBase <= 0 {
-		return 0
-	}
-	delay := fetchRetryBase
-	for i := 1; i < retry; i++ {
-		delay *= 4
-		if delay > 8*time.Second {
-			return 8 * time.Second
-		}
-	}
-	return delay
-}
-
-// isTransientFetchErr EOF、连接被重置、单页超时。这几类经常是同一小波并发一起失败。
-func isTransientFetchErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	msg := err.Error()
-	if strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "timeout") {
-		return true
-	}
-	if strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe") || strings.Contains(msg, "EOF") {
-		return true
-	}
-	return false
-}
-
-func isRetryableFetchErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if utils.IsRateLimitedErr(err) {
-		return true
-	}
-	msg := err.Error()
-	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "context deadline exceeded") || strings.Contains(msg, "timeout") {
-		return true
-	}
-	if strings.Contains(msg, "connection reset") || strings.Contains(msg, "broken pipe") || strings.Contains(msg, "EOF") {
-		return true
-	}
-	if strings.Contains(msg, "status=500") || strings.Contains(msg, "status=502") || strings.Contains(msg, "status=503") || strings.Contains(msg, "status=504") {
-		return true
-	}
-	return false
+	return call(reqCtx)
 }
 
 func GetPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
-	var pageCount int
-	var err error
-	for attempt := 0; attempt <= maxPageFetchRetries; attempt++ {
-		if ctx.Err() != nil {
-			return 0, ctx.Err()
-		}
-		if attempt > 0 {
-			if err := waitFetchRetry(ctx, attempt); err != nil {
-				return 0, err
-			}
-		}
-		pageCount, err = fetchPageCountOnce(ctx, s, r)
-		if err == nil || !isRetryableFetchErr(err) {
-			return pageCount, err
-		}
+	pageCount, err := fetchPageCountOnce(ctx, s, r)
+	if err == nil || ctx.Err() != nil {
+		return pageCount, err
 	}
-	return pageCount, err
+	return fetchPageCountOnce(ctx, s, r)
 }
 
 func fetchPageCountOnce(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
@@ -255,45 +201,15 @@ func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 	if s != nil {
 		srcName = s.Name
 	}
-	var list []model.MovieDetail
-	var err error
-	for attempt := 0; attempt <= maxPageFetchRetries; attempt++ {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if attempt > 0 {
-			log.Printf("[Spider] 站点 %s 第 %s 页抓取遇临时错误 (重试 %d/%d): %v", srcName, page, attempt, maxPageFetchRetries, err)
-			if err := waitFetchRetry(ctx, attempt); err != nil {
-				return nil, err
-			}
-		}
+	list, err := fetchFilmDetailOnce(ctx, s, r)
+	for attempt := 1; attempt <= pageFetchRetries && err != nil && ctx.Err() == nil; attempt++ {
+		log.Printf("[Spider] 站点 %s 第 %s 页抓取失败，按采集间隔重试 %d/%d: %v", srcName, page, attempt, pageFetchRetries, err)
 		list, err = fetchFilmDetailOnce(ctx, s, r)
 		if err == nil {
-			if attempt > 0 {
-				log.Printf("[Spider] 站点 %s 第 %s 页重试成功 (第 %d 次尝试)", srcName, page, attempt+1)
-			}
-			return list, nil
-		}
-		if !isRetryableFetchErr(err) {
-			return list, err
+			log.Printf("[Spider] 站点 %s 第 %s 页第 %d 次重试成功", srcName, page, attempt)
 		}
 	}
 	return list, err
-}
-
-func waitFetchRetry(ctx context.Context, attempt int) error {
-	delay := fetchRetryDelay(attempt)
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func fetchFilmDetailOnce(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {

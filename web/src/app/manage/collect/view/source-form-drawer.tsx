@@ -1,4 +1,4 @@
-import { Alert, Button, Drawer, Flex, Form, Input, Radio, Space, Switch } from "antd";
+import { Alert, Button, Drawer, Flex, Form, Input, InputNumber, Radio, Space, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import type { SourceFormValues } from "./types";
@@ -156,6 +156,21 @@ export default function SourceFormDrawer(props: SourceFormDrawerProps) {
             <Radio value="json">JSON 格式</Radio>
             <Radio value="xml">XML 格式</Radio>
           </Radio.Group>
+        </Form.Item>
+        <Form.Item
+          label="采集间隔"
+          name="collectIntervalMs"
+          tooltip="同一站相邻两次抓页至少隔这么久。0 为不等待。"
+          rules={[
+            {
+              type: "number",
+              min: 0,
+              max: 60000,
+              message: "须为 0 到 60000 的整数",
+            },
+          ]}
+        >
+          <InputNumber min={0} max={60000} precision={0} suffix="毫秒" style={{ width: 180 }} />
         </Form.Item>
         <Form.Item
           label="播放链接域名替换规则"
