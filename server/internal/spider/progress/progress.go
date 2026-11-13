@@ -236,6 +236,8 @@ func Snapshot(sourceID string) (model.CollectProgress, bool) {
 const (
 	StatusStarting = "starting"
 	StatusRunning  = "running"
+	// StatusPaused 连续抓取失败后的限流暂停。只暂停一次，到点继续。
+	StatusPaused  = "paused"
 	StatusStopping = "stopping"
 	StatusSealing  = "sealing"
 	StatusDone     = "done"
@@ -252,9 +254,9 @@ func isActiveStatus(status string) bool {
 	}
 }
 
-// isInFlightStatus 抓页、停止收尾、检索封口都算这次采集还没结束。
+// isInFlightStatus 抓页、限流暂停、停止收尾、检索封口都算这次采集还没结束。
 func isInFlightStatus(status string) bool {
-	return isActiveStatus(status) || status == StatusStopping || status == StatusSealing
+	return isActiveStatus(status) || status == StatusPaused || status == StatusStopping || status == StatusSealing
 }
 
 func IsTerminalStatus(status string) bool {
@@ -311,7 +313,7 @@ func IsAlreadyQueuedOrRunning(sourceID string) bool {
 		return true
 	}
 	// 停止中的收尾还没退出。这段时间和按钮上的 loading 对齐，退出后才能再开。
-	if snap, ok := Snapshot(sourceID); ok && (snap.Status == StatusStopping || snap.Status == StatusSealing) {
+	if snap, ok := Snapshot(sourceID); ok && (snap.Status == StatusStopping || snap.Status == StatusSealing || snap.Status == StatusPaused) {
 		return true
 	}
 	if refreshAndIsBlockingProgress(sourceID) {
@@ -391,7 +393,7 @@ func markSealing(ctx context.Context, sourceID, outcome string) bool {
 		return false
 	}
 	switch state.data.Status {
-	case StatusRunning, StatusStarting, StatusStopping:
+	case StatusRunning, StatusStarting, StatusStopping, StatusPaused:
 	default:
 		state.mu.Unlock()
 		return false
@@ -503,7 +505,7 @@ func markActiveIfEpoch(sourceID string, epoch uint64, status string) bool {
 		return false
 	}
 	changed := false
-	if state.data.Status == StatusStarting || state.data.Status == StatusRunning {
+	if state.data.Status == StatusStarting || state.data.Status == StatusRunning || state.data.Status == StatusPaused {
 		state.data.Status = status
 		state.updated = time.Now()
 		changed = true
@@ -517,7 +519,7 @@ func markActiveIfEpoch(sourceID string, epoch uint64, status string) bool {
 
 func MarkStopped(sourceID string) {
 	Update(sourceID, func(progress *model.CollectProgress) {
-		if progress.Status == StatusStarting || progress.Status == StatusRunning {
+		if progress.Status == StatusStarting || progress.Status == StatusRunning || progress.Status == StatusPaused {
 			progress.Status = StatusStopped
 		}
 	})

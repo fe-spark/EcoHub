@@ -71,6 +71,7 @@ export function useCollectSourceForm({
         format: (resp.data.format as "json" | "xml") || "json",
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
         proxyCollect: Boolean(resp.data.proxyCollect),
+        collectIntervalMs: Math.max(0, Number(resp.data.collectIntervalMs) || 0),
       });
       setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);

@@ -28,7 +28,6 @@ import { useCollectDeleteQueue } from "./use-collect-delete-queue";
 import { useCollectSort } from "./use-collect-sort";
 import { useCollectSourceForm } from "./use-collect-source-form";
 import { useCollectCardActions } from "./use-collect-card-actions";
-import { useCollectIncidents } from "./use-collect-incidents";
 import {
   isCollectBusyStatus,
   type CollectListItemResponse,
@@ -44,7 +43,6 @@ export default function CollectManagePageView() {
   const { canWrite, isAdmin } = useManagePermission();
   const canOperate = canWrite;
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
-  const { incidentMap, refreshIncidents } = useCollectIncidents();
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
   const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
@@ -161,7 +159,6 @@ export default function CollectManagePageView() {
     },
     onReconnect: () => {
       void getCollectList();
-      void refreshIncidents();
     },
   });
   const {
@@ -226,12 +223,11 @@ export default function CollectManagePageView() {
     mountedRef.current = true;
     void getCollectList();
     void fetchProxyStatus();
-    void refreshIncidents();
     return () => {
       mountedRef.current = false;
       cleanupSort();
     };
-  }, [cleanupSort, fetchProxyStatus, getCollectList, refreshIncidents]);
+  }, [cleanupSort, fetchProxyStatus, getCollectList]);
 
   const activeCollectIds = useMemo(
     () => siteList.filter((item) => isCollectBusyStatus(item.progress?.status)).map((item) => item.id),
@@ -417,7 +413,6 @@ export default function CollectManagePageView() {
               onSortList={handleSortList}
               onSyncCategory={handleSyncCategory}
               onUpdateSite={updateSiteListItem}
-              incidentMap={incidentMap}
               searchIndex={searchIndexProgress}
             />
           </div>

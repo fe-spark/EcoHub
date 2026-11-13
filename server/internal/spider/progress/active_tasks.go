@@ -45,7 +45,8 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		state.mu.Lock()
 		progress := state.data
 
-		if progress.Status == StatusStopping {
+		// 限流暂停和停止收尾都不在任务表里：暂停的 2 分钟内任务已被摘除，不能当成失联清成失败。
+		if progress.Status == StatusStopping || progress.Status == StatusPaused {
 			state.mu.Unlock()
 			list = append(list, progress)
 			return true

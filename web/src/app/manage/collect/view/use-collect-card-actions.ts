@@ -78,6 +78,10 @@ export function useCollectCardActions({
         message.warning("待检索");
         return;
       }
+      if (record.progress?.status === "paused") {
+        message.warning("限流中");
+        return;
+      }
       if (isActiveCollectStatus(record.progress?.status)) {
         message.warning("采集站已在采集中");
         return;

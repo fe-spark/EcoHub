@@ -143,12 +143,7 @@ func TestSuboRealScenario_EmptyPlayListHandledAsSuccess(t *testing.T) {
 // TestSuboRealScenario_MixedResultsWithRealError 验证包含正常页、空数据页、真实网络超时的混合场景
 func TestSuboRealScenario_MixedResultsWithRealError(t *testing.T) {
 	oldDeps := deps
-	oldDelay := fetchRetryBase
-	t.Cleanup(func() {
-		deps = oldDeps
-		fetchRetryBase = oldDelay
-	})
-	fetchRetryBase = 0
+	t.Cleanup(func() { deps = oldDeps })
 
 	deps.WaitTurn = func(ctx context.Context, _ *model.FilmSource, _ string) (func(error), error) {
 		return func(error) {}, nil
@@ -163,7 +158,7 @@ func TestSuboRealScenario_MixedResultsWithRealError(t *testing.T) {
 			// 过滤后无有效影片（空列表）
 			return []model.MovieDetail{}, nil
 		case "3":
-			// 连接被重置会先补抓，次数用完仍失败，这一页记失败。
+			// 失败后按采集间隔再请求一次，仍失败则这一页记失败。
 			return nil, errors.New("connection reset by peer")
 		default:
 			return nil, errors.New("unknown page")

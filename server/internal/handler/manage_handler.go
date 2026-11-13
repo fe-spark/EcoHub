@@ -496,5 +496,8 @@ func validFilmSource(fs model.FilmSource) error {
 	if fs.Format != "" && fs.Format != model.SourceFormatJSON && fs.Format != model.SourceFormatXML {
 		return errors.New("不支持的采集数据格式，仅支持 JSON 或 XML")
 	}
+	if fs.CollectIntervalMs < 0 || fs.CollectIntervalMs > model.CollectIntervalMsMax {
+		return errors.New("采集间隔须为 0 到 60000 毫秒")
+	}
 	return nil
 }

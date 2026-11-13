@@ -59,9 +59,9 @@ func InitMysql() (err error) {
 		return err
 	}
 
-	// 采集写库上限 16 个写事务，再留前台查询与管理接口的连接余量。
+	// 写槽上限 = MysqlMaxOpenConns - MysqlForegroundConns，这里不再另写一个数。
 	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(48)
+	sqlDB.SetMaxOpenConns(config.MysqlMaxOpenConns)
 	sqlDB.SetConnMaxLifetime(time.Minute * 30)
 	sqlDB.SetConnMaxIdleTime(time.Minute * 5)
 	if err := pingSQL(sqlDB); err != nil {

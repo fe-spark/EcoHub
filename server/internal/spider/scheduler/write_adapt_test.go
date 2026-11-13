@@ -8,70 +8,54 @@ import (
 	"server/internal/config"
 )
 
-func TestWritePaceFullSpeedBacksOffThenReturns(t *testing.T) {
-	var pace writePace
-	limit := config.CollectWriteSlotMax
+func TestWritePaceIgnoresCostAndReturnsAfterQuiet(t *testing.T) {
+	pace := &writePace{}
+	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	pace.now = func() time.Time { return now }
+	limit := config.WriteSlotMax()
 
-	for i := 0; i < writeAdaptWindow; i++ {
-		next, reason, changed := pace.observe(limit, 100*time.Millisecond, false)
+	for _, cost := range []time.Duration{time.Millisecond, 100 * time.Millisecond, 2 * time.Second} {
+		next, reason, changed := pace.observe(limit, false)
 		if changed || next != limit || reason != "" {
-			t.Fatalf("full speed should hold, next=%d reason=%s changed=%v", next, reason, changed)
+			t.Fatalf("cost %s moved slot next=%d reason=%s", cost, next, reason)
 		}
-	}
-	if pace.prev != 100*time.Millisecond {
-		t.Fatalf("baseline=%s", pace.prev)
 	}
 
-	for i := 0; i < writeAdaptWindow; i++ {
-		next, reason, changed := pace.observe(limit, 250*time.Millisecond, false)
-		if i < writeAdaptWindow-1 {
-			if changed {
-				t.Fatal("shrunk before the window closed")
-			}
-			continue
-		}
-		if !changed || next != limit-1 || reason != "变慢" {
-			t.Fatalf("slower window next=%d reason=%s changed=%v", next, reason, changed)
-		}
-		limit = next
-	}
-
-	next, reason, changed := pace.observe(limit, time.Millisecond, true)
+	next, reason, changed := pace.observe(limit, true)
 	if !changed || next != limit-1 || reason != "锁等待" {
-		t.Fatalf("lock shrink next=%d reason=%s changed=%v", next, reason, changed)
+		t.Fatalf("lock next=%d reason=%s changed=%v", next, reason, changed)
 	}
 	limit = next
 
-	for i := 0; i < writeAdaptWindow; i++ {
-		next, reason, changed = pace.observe(limit, 80*time.Millisecond, false)
-		if changed {
-			t.Fatalf("window after a lock should hold, next=%d reason=%s", next, reason)
-		}
+	next, reason, changed = pace.observe(limit, false)
+	if changed {
+		t.Fatalf("inside quiet next=%d reason=%s", next, reason)
 	}
 
-	for i := 0; i < writeAdaptWindow; i++ {
-		next, reason, changed = pace.observe(limit, 80*time.Millisecond, false)
-		if i < writeAdaptWindow-1 {
-			if changed {
-				t.Fatal("grew before the window closed")
-			}
-			continue
-		}
-		if !changed || next != limit+1 || reason != "上探" {
-			t.Fatalf("faster window next=%d reason=%s changed=%v", next, reason, changed)
-		}
-		limit = next
+	now = now.Add(writeAdaptHold)
+	next, reason, changed = pace.observe(limit, false)
+	if !changed || next != limit+1 || reason != "回升" {
+		t.Fatalf("after quiet next=%d reason=%s changed=%v", next, reason, changed)
 	}
-	if limit > config.CollectWriteSlotMax {
-		t.Fatalf("above cap %d", limit)
+	if next > config.WriteSlotMax() {
+		t.Fatalf("above cap %d", next)
+	}
+	limit = next
+
+	next, reason, changed = pace.observe(limit, true)
+	if !changed || next != limit-1 || reason != "锁等待" {
+		t.Fatalf("lock after raise next=%d reason=%s changed=%v", next, reason, changed)
 	}
 
-	next, reason, changed = pace.observe(config.CollectWriteSlotMin, time.Millisecond, true)
+	next, reason, changed = pace.observe(config.CollectWriteSlotMin, true)
 	if changed || next != config.CollectWriteSlotMin || reason != "" {
 		t.Fatalf("lock at floor next=%d reason=%s changed=%v", next, reason, changed)
 	}
 	if !isWriteLockErr(errors.New("Error 1213 (40001): Deadlock found when trying to get lock")) {
 		t.Fatal("1213 should count as lock pressure")
+	}
+	if !isWriteLockErr(errors.New("Error 1205 (HY000): Lock wait timeout exceeded")) {
+		t.Fatal("1205 should count as lock pressure")
 	}
 	if isWriteLockErr(errors.New("Error 1406 (22001): Data too long")) {
 		t.Fatal("1406 is not lock pressure")
@@ -94,21 +78,23 @@ func TestNoteWrite_FinalLockErrorAppliesLowerSlot(t *testing.T) {
 
 	lane := newWriteLane("full")
 	lane.adapt = true
-	lane.followConfig = true
-	lane.writeLimit = config.CollectWriteSlotMax
-	lane.noteWrite(time.Millisecond, nil)
-	if lane.writeLimit != config.CollectWriteSlotMax {
-		t.Fatalf("success moved writeLimit to %d", lane.writeLimit)
+	lane.writeLimit = config.WriteSlotMax()
+	lane.noteWrite(2*time.Second, nil)
+	if lane.writeLimit != config.WriteSlotMax() {
+		t.Fatalf("slow success moved writeLimit to %d", lane.writeLimit)
 	}
 
 	lane.noteWrite(time.Millisecond, errors.New("Error 1213 (40001): Deadlock found when trying to get lock"))
-	if lane.writeLimit != config.CollectWriteSlotMax-1 {
+	if lane.writeLimit != config.WriteSlotMax()-1 {
 		t.Fatalf("writeLimit=%d", lane.writeLimit)
 	}
-	if config.CollectPageWorkers != lane.writeLimit || config.CollectWriteMaxInflight != lane.writeLimit {
-		t.Fatalf("pages=%d inflight=%d limit=%d", config.CollectPageWorkers, config.CollectWriteMaxInflight, lane.writeLimit)
+	if config.CollectPageWorkers != prevPages || config.CollectWriteMaxInflight != prevInflight {
+		t.Fatalf("pages=%d inflight=%d", config.CollectPageWorkers, config.CollectWriteMaxInflight)
 	}
-	if lane.maxPerSource != config.CollectWriteMaxPendingPagesPerSource || lane.maxGlobal != config.CollectWriteMaxPendingPagesGlobal {
-		t.Fatalf("queue per=%d global=%d", lane.maxPerSource, lane.maxGlobal)
+	if config.CollectFetchInFlight != prevFetch || config.CollectWriteMaxPendingPagesPerSource != prevPer || config.CollectWriteMaxPendingPagesGlobal != prevGlobal {
+		t.Fatalf("fetch=%d per=%d global=%d", config.CollectFetchInFlight, config.CollectWriteMaxPendingPagesPerSource, config.CollectWriteMaxPendingPagesGlobal)
+	}
+	if lane.maxPerSource != prevPer || lane.maxGlobal != prevGlobal {
+		t.Fatalf("lane queue per=%d global=%d", lane.maxPerSource, lane.maxGlobal)
 	}
 }

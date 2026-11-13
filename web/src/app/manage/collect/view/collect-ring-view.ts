@@ -58,6 +58,15 @@ function collectTooltip(progress: CollectProgress): string {
 /** 封口等待环优先，其余按采集进度渲染。 */
 export function resolveRingView(progress?: CollectProgress | null): RingView | null {
   if (!progress) return null;
+  if (progress.status === "paused") {
+    return {
+      percent: collectPercent(progress),
+      tone: "warning",
+      solid: true,
+      center: "percent",
+      tooltip: collectTooltip(progress),
+    };
+  }
   if (progress.status === "sealing") {
     return {
       percent: 0,

@@ -314,6 +314,41 @@ func TestGetActiveTaskProgressMarksStaleRunningWithoutLive(t *testing.T) {
 	store.Delete(sourceID)
 }
 
+func TestGetActiveTaskProgressKeepsPausedWithoutTask(t *testing.T) {
+	const sourceID = "progress-paused-no-task"
+	store.Delete(sourceID)
+	tasks.Delete(sourceID)
+	t.Cleanup(func() {
+		store.Delete(sourceID)
+		tasks.Delete(sourceID)
+	})
+
+	state := ensure(sourceID, "限流站")
+	state.mu.Lock()
+	state.data.Status = StatusPaused
+	state.updated = time.Now()
+	state.mu.Unlock()
+
+	list := GetActiveTaskProgress()
+	found := false
+	for _, p := range list {
+		if p.Id != sourceID {
+			continue
+		}
+		found = true
+		if p.Status != StatusPaused {
+			t.Fatalf("paused without a task became %q", p.Status)
+		}
+	}
+	if !found {
+		t.Fatal("paused source disappeared from the live progress list")
+	}
+	snap, ok := Snapshot(sourceID)
+	if !ok || snap.Status != StatusPaused {
+		t.Fatalf("map status changed, ok=%v status=%q", ok, snap.Status)
+	}
+}
+
 func TestGetActiveTaskProgressDoesNotStaleQueuedStarting(t *testing.T) {
 	const sourceID = "progress-queued-starting"
 	const queueID = "q-batch-12"

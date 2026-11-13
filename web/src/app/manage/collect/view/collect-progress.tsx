@@ -31,6 +31,7 @@ export default function CollectProgressView({
   const done = Math.min(finished, total || finished);
   const isDone = progress?.status === "done";
   const sealing = progress?.status === "sealing";
+  const paused = progress?.status === "paused";
   const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
   const zeroPageFinished =
     total === 0 &&
@@ -61,14 +62,16 @@ export default function CollectProgressView({
   const isFullFail = progress?.status === "failed" && (progress.success ?? 0) === 0;
   const progressStatus = !progress
     ? "normal"
-    : progress.status === "running" || progress.status === "stopping" || sealing
-      ? "active"
-      : isFullFail
+    : paused
+      ? "normal"
+      : progress.status === "running" || progress.status === "stopping" || sealing
+        ? "active"
+        : isFullFail
         ? "exception"
         : isDone
           ? "success"
           : "normal";
-  const progressStrokeColor = failed > 0 && !isFullFail ? "#faad14" : undefined;
+  const progressStrokeColor = paused || (failed > 0 && !isFullFail) ? "#faad14" : undefined;
 
   const countLine = `${progressText}${failed > 0 ? ` · 失败 ${failed} 页` : ""}`;
   const metaLine = countLine;

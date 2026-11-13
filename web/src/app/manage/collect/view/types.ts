@@ -9,6 +9,8 @@ export interface FilmSource {
   cd?: number;
   format?: "json" | "xml";
   domainReplaceRules?: string;
+  /** 同一站相邻两次抓页的最小间隔，毫秒。0 为不等待。 */
+  collectIntervalMs?: number;
   lastRunTime?: string;
   lastRunPageCount?: number;
   sitePageTotal?: number;
@@ -49,9 +51,9 @@ export interface CollectProgress {
   sealed?: boolean;
 }
 
-/** 仍在拉页或排队。停止中的收尾不算，避免按钮提前变成开始采集。 */
+/** 仍在拉页、排队，或限流暂停中。停止中的收尾不算，避免按钮提前变成开始采集。 */
 export function isActiveCollectStatus(status?: string | null): boolean {
-  return status === "starting" || status === "running";
+  return status === "starting" || status === "running" || status === "paused";
 }
 
 /** 抓页结束、等检索索引封口。 */
@@ -79,6 +81,8 @@ export function resolveCollectStatusText(status?: string | null): string {
       return "等待中";
     case "running":
       return "采集中";
+    case "paused":
+      return "限流中";
     case "stopping":
       return "停止中";
     case "sealing":
@@ -97,6 +101,9 @@ export function resolveCollectStatusText(status?: string | null): string {
 export function resolveCollectProgressStatusText(progress?: CollectProgress | null): string {
   if (!progress) {
     return "暂无采集进度";
+  }
+  if (progress.status === "paused") {
+    return "限流中";
   }
   if (progress.status === "failed") {
     return progress.success > 0 ? "部分失败" : "采集失败";
@@ -155,7 +162,11 @@ export interface SourceFormValues {
   cd?: number;
   domainReplaceRules?: string;
   proxyCollect?: boolean;
+  collectIntervalMs?: number;
 }
+
+/** 新采集站的抓页间隔。0 仍表示不等待。 */
+export const COLLECT_INTERVAL_MS_DEFAULT = 200;
 
 export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   name: "",
@@ -166,6 +177,7 @@ export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   cd: 24,
   domainReplaceRules: "",
   proxyCollect: false,
+  collectIntervalMs: COLLECT_INTERVAL_MS_DEFAULT,
 };
 
 export const collectDuration = [
@@ -206,6 +218,7 @@ export function normalizeSource(item: CollectListItemResponse): FilmSource {
     sitePageTotal: item.sitePageTotal ? Number(item.sitePageTotal) : 0,
     progress: item.progress ?? null,
     proxyCollect: Boolean(item.proxyCollect),
+    collectIntervalMs: Math.max(0, Number(item.collectIntervalMs) || 0),
     categoryReady: item.categoryReady !== undefined ? Boolean(item.categoryReady) : true,
     categorySyncing: Boolean(item.categorySyncing),
     deleting: Boolean(item.deleting),

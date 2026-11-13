@@ -2,19 +2,17 @@ package scheduler
 
 import (
 	"log"
-	"sort"
 	"strings"
 	"time"
 
 	"server/internal/config"
 )
 
-const writeAdaptWindow = 4
+const writeAdaptHold = 30 * time.Second
 
 type writePace struct {
-	samples  []time.Duration
-	prev     time.Duration
-	lockSeen bool
+	quietUntil time.Time
+	now        func() time.Time
 }
 
 func (l *writeLane) currentWriteLimitLocked() int {
@@ -32,67 +30,42 @@ func (l *writeLane) noteWrite(cost time.Duration, err error) {
 		return
 	}
 	prev := l.writeLimit
-	next, reason, changed := l.pace.observe(prev, cost, isWriteLockErr(err))
+	next, reason, changed := l.pace.observe(prev, isWriteLockErr(err))
 	if changed {
 		l.writeLimit = next
-	}
-	if changed && l.followConfig {
-		config.ApplyWriteSlots(l.writeLimit)
-		l.maxPerSource = config.CollectWriteMaxPendingPagesPerSource
-		l.maxGlobal = config.CollectWriteMaxPendingPagesGlobal
-	}
-	if changed {
 		l.cond.Broadcast()
 	}
 	l.mu.Unlock()
 	if !changed {
 		return
 	}
-	log.Printf("[Spider][WriteScheduler] %s 写并发 %d→%d 最近耗时=%s 原因=%s",
-		l.name, prev, next, cost, reason)
+	log.Printf("[Spider][WriteScheduler] %s 写并发 %d→%d 原因=%s", l.name, prev, next, reason)
 }
 
-func (p *writePace) observe(limit int, cost time.Duration, lockErr bool) (int, string, bool) {
+// observe 只在锁错误时减 1。连续 30 秒没有锁错误再加 1，直到写槽上限。耗时不参与。
+func (p *writePace) observe(limit int, lockErr bool) (int, string, bool) {
 	if limit < config.CollectWriteSlotMin {
 		limit = config.CollectWriteSlotMin
 	}
 	if lockErr {
-		p.lockSeen = true
-		p.samples = nil
+		p.quietUntil = p.at().Add(writeAdaptHold)
 		if limit > config.CollectWriteSlotMin {
 			return limit - 1, "锁等待", true
 		}
 		return limit, "", false
 	}
-	if cost <= 0 {
-		return limit, "", false
-	}
-	p.samples = append(p.samples, cost)
-	if len(p.samples) < writeAdaptWindow {
-		return limit, "", false
-	}
-	med := medianDuration(p.samples)
-	prev := p.prev
-	locked := p.lockSeen
-	p.prev = med
-	p.lockSeen = false
-	p.samples = nil
-	if locked {
-		return limit, "", false
-	}
-	if prev > 0 && med > prev*2 && limit > config.CollectWriteSlotMin {
-		return limit - 1, "变慢", true
-	}
-	if limit < config.CollectWriteSlotMax {
-		return limit + 1, "上探", true
+	if !p.quietUntil.IsZero() && !p.at().Before(p.quietUntil) && limit < config.WriteSlotMax() {
+		p.quietUntil = p.at().Add(writeAdaptHold)
+		return limit + 1, "回升", true
 	}
 	return limit, "", false
 }
 
-func medianDuration(samples []time.Duration) time.Duration {
-	cp := append([]time.Duration(nil), samples...)
-	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
-	return cp[len(cp)/2]
+func (p *writePace) at() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now()
 }
 
 func isWriteLockErr(err error) bool {

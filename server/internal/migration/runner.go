@@ -40,6 +40,11 @@ var migrations = []Migration{
 		Name:    "轮播按站点存储，删除旧轮播表",
 		Run:     migrateBannerSlot,
 	},
+	{
+		Version: "20261113_collect_interval",
+		Name:    "采集站增加抓页间隔",
+		Run:     migrateCollectInterval,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

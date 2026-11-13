@@ -33,6 +33,9 @@ export function collectBlockReason(
   if (status === "sealing") {
     return "待检索";
   }
+  if (status === "paused") {
+    return "限流中";
+  }
   if (isActiveCollectStatus(status)) {
     return "采集中";
   }
