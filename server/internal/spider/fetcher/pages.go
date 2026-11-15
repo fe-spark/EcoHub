@@ -75,6 +75,8 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
+	fetches := newCollectFetch(ctx)
+	defer fetches.stopRequests()
 
 	maxWorkers := config.PageWorkerLimit()
 	if totalWork < maxWorkers {
@@ -155,7 +157,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	stopForStreak := func() {
 		giveUp(fmt.Sprintf("暂停后仍连续 %d 页抓取失败，已中断采集", consecutiveFetchFailLimit))
 	}
-	// clearPause 把限流暂停还原成采集中。调用方再决定是继续、失败还是停止。
+	// clearPause 把限流暂停还原成采集中。
 	clearPause := func() {
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			if cur.Status == progress.StatusPaused {
@@ -163,8 +165,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 			}
 		})
 	}
-	// pauseForStreak 连续失败后整站停 2 分钟再继续。只此一次。
-	// 暂停期间其他工人不能再拿页，因此不占页并发和取数名额。
+	// pauseForStreak 连续失败后取消本站在途请求，停 2 分钟，再从这些页继续。只暂停一次。
 	// 页已经取完，或采集被取消时，不等这 2 分钟。
 	pauseForStreak := func() bool {
 		if ctx.Err() != nil {
@@ -173,7 +174,8 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		if pages.finished() {
 			return true
 		}
-		log.Printf("[Spider] 站点 %s 连续 %d 页抓取失败，暂停 %s 后继续", s.Name, consecutiveFetchFailLimit, fetchFailPause)
+		fetches.stopRequests()
+		log.Printf("[Spider] 站点 %s 连续 %d 页抓取失败，中断在途请求，暂停 %s 后继续", s.Name, consecutiveFetchFailLimit, fetchFailPause)
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
 				return
@@ -192,11 +194,10 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 				return false
 			}
 			log.Printf("[Spider] 站点 %s 没有剩余页，结束暂停", s.Name)
-			clearPause()
-			return true
 		case <-timer.C:
+			log.Printf("[Spider] 站点 %s 暂停结束，继续采集", s.Name)
 		}
-		log.Printf("[Spider] 站点 %s 暂停结束，继续采集", s.Name)
+		fetches.resume(ctx)
 		clearPause()
 		return true
 	}
@@ -263,22 +264,16 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 				}
 				select {
 				case <-ctx.Done():
-					if streak.abandon() {
-						stopForStreak()
-					}
+					streak.abandon()
 					markStopped()
 					return
 				case pg, ok := <-pages.ch:
 					if !ok {
-						if streak.abandon() {
-							stopForStreak()
-						}
+						streak.abandon()
 						return
 					}
 					if ctx.Err() != nil {
-						if streak.abandon() {
-							stopForStreak()
-						}
+						streak.abandon()
 						markStopped()
 						return
 					}
@@ -291,16 +286,24 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					req, reqErr := buildPageRequest(s, h, pg)
 					var list []model.MovieDetail
 					var err error
+					var fetchCtx context.Context
 					if reqErr != nil {
 						err = reqErr
 					} else {
-						list, err = GetFilmDetailWithRetry(ctx, s, req)
+						fetchCtx = fetches.current()
+						list, err = GetFilmDetailWithRetry(fetchCtx, s, req)
 					}
 					if err != nil {
 						if ctx.Err() != nil {
 							streak.abandon()
 							markStopped()
 							return
+						}
+						// 限流取消的 HTTP 会被收成普通字符串，不能只认 context.Canceled。
+						if fetchCtx != nil && fetchCtx.Err() != nil {
+							pages.putBack(pg)
+							streak.abandon()
+							continue
 						}
 						recordPageFailure(pg, "fetch", err)
 						stop, pause := streak.finish(false)

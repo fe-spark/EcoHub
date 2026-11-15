@@ -44,6 +44,16 @@ func (q *pageFetchQueue) closeLocked() {
 	close(q.drained)
 }
 
+// putBack 把被限流取消的页放回队列。这一页还没完成，left 不变。
+func (q *pageFetchQueue) putBack(page int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return
+	}
+	q.ch <- page
+}
+
 func (q *pageFetchQueue) done() {
 	q.mu.Lock()
 	defer q.mu.Unlock()

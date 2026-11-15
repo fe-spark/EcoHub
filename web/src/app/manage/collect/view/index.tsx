@@ -116,14 +116,33 @@ export default function CollectManagePageView() {
   );
 
   const progressFromStreamRef = useRef(false);
+  const progressStatusRef = useRef(new Map<string, string>());
 
   const applyProgressSnapshot = useCollectProgressStream(setSiteList);
   const handleProgressStream = useCallback(
     (list: CollectProgress[]) => {
       progressFromStreamRef.current = true;
+      const live = new Set<string>();
+      let settled = false;
+      for (const item of list) {
+        const id = String(item.id);
+        live.add(id);
+        const prev = progressStatusRef.current.get(id);
+        if (
+          (item.status === "done" || item.status === "failed" || item.status === "stopped") &&
+          prev !== item.status
+        ) {
+          settled = true;
+        }
+        progressStatusRef.current.set(id, item.status);
+      }
+      for (const id of progressStatusRef.current.keys()) {
+        if (!live.has(id)) progressStatusRef.current.delete(id);
+      }
       applyProgressSnapshot(list);
+      if (settled) void getCollectList();
     },
-    [applyProgressSnapshot],
+    [applyProgressSnapshot, getCollectList],
   );
 
   const {

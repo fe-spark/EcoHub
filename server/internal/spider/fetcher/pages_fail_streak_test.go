@@ -403,18 +403,22 @@ func TestCollectPages_RecordsAllFailedPages(t *testing.T) {
 	}
 }
 
-func TestCollectPages_InFlightSuccessClearsStreak(t *testing.T) {
+func TestCollectPages_PauseAbortsInFlightAndRetries(t *testing.T) {
+	prev := fetchFailPause
+	fetchFailPause = 30 * time.Millisecond
+	t.Cleanup(func() { fetchFailPause = prev })
+
 	oldDeps := deps
 	oldWorkers := config.CollectPageWorkers
 	t.Cleanup(func() {
 		deps = oldDeps
 		config.CollectPageWorkers = oldWorkers
 	})
-	config.CollectPageWorkers = 8
+	config.CollectPageWorkers = 4
 
-	source := &model.FilmSource{Id: "inflight_ok", Name: "在途成功"}
-	progress.MarkSourcesCollectStarting([]model.FilmSource{*source}, "q-inflight")
-	var passed atomic.Bool
+	source := &model.FilmSource{Id: "inflight_abort", Name: "在途中断"}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{*source}, "q-inflight-abort")
+	var sawPause atomic.Bool
 	var pagesMu sync.Mutex
 	var got []int
 	deps = Deps{
@@ -426,22 +430,23 @@ func TestCollectPages_InFlightSuccessClearsStreak(t *testing.T) {
 			pagesMu.Lock()
 			got = append(got, pg)
 			pagesMu.Unlock()
-			if pg == 1 && !passed.Load() {
+			// 与 ApiGet 一样：取消后是普通字符串，不包装 context.Canceled。
+			if r.Ctx != nil && r.Ctx.Err() != nil {
+				sawPause.Store(true)
+				return nil, errors.New("context canceled, url=https://example/api")
+			}
+			if pg == 1 && !sawPause.Load() {
 				deadline := time.Now().Add(2 * time.Second)
 				for time.Now().Before(deadline) {
 					if r.Ctx != nil && r.Ctx.Err() != nil {
-						return nil, r.Ctx.Err()
-					}
-					snap, ok := progress.Snapshot(source.Id)
-					if ok && snap.Failed >= 20 {
-						passed.Store(true)
-						return []model.MovieDetail{{Id: 1, Name: "片"}}, nil
+						sawPause.Store(true)
+						return nil, errors.New("context canceled, url=https://example/api")
 					}
 					time.Sleep(5 * time.Millisecond)
 				}
 				return nil, errors.New("slow page timed out")
 			}
-			if !passed.Load() {
+			if !sawPause.Load() {
 				return nil, errors.New("down")
 			}
 			return []model.MovieDetail{{Id: int64(pg), Name: "片"}}, nil
@@ -451,16 +456,20 @@ func TestCollectPages_InFlightSuccessClearsStreak(t *testing.T) {
 		},
 	}
 
-	_, succ, _, _, err := CollectPages(context.Background(), 40, nil, source, 24, nil)
-	if err != nil && strings.Contains(err.Error(), "中断") {
-		t.Fatalf("in-flight success should clear the streak, err=%v", err)
+	_, succ, fail, _, err := CollectPages(context.Background(), 40, nil, source, 24, nil)
+	if err != nil && strings.Contains(err.Error(), "已中断采集") {
+		t.Fatalf("retry after pause was interrupted, err=%v", err)
 	}
-	if succ == 0 {
-		t.Fatal("slow page was cancelled")
+	if fail < 20 || succ != 40-fail {
+		t.Fatalf("succ=%d fail=%d, want the first failures kept and the rest saved", succ, fail)
 	}
 	pagesMu.Lock()
+	first := countPage(got, 1)
 	n := uniquePages(got)
 	pagesMu.Unlock()
+	if first < 2 {
+		t.Fatalf("page 1 requests=%d, want a retry after the abort", first)
+	}
 	if n != 40 {
 		t.Fatalf("requested %d pages, want 40", n)
 	}
