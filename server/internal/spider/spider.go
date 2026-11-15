@@ -223,8 +223,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 					errMsg = msg
 				}
 			}
-			status, errMsg = settleSourceStatus(status, errMsg, successPagesCount)
-
 			totalP := pageCount
 			if totalP <= 0 {
 				totalP = snap.Total
@@ -436,12 +434,7 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 		batchCtx = batchCtx.withTargetPages(sourceTargetPages[0])
 	}
 	if err := batchCtx.recordStart(); err != nil {
-		endCollectQueue()
-		for _, s := range sources {
-			abandonQueuedCollectSource(s, batchCtx)
-		}
-		batchCtx.close()
-		return "", err
+		log.Printf("[失败重试] 初始采集记录写入失败，采集继续 batchID=%s: %v", batchCtx.batchID, err)
 	}
 	goBackgroundCollect(func() { runPreparedBatch(batchCtx, hour, "失败重试", true) })
 	return batchCtx.batchID, nil

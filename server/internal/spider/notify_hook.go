@@ -115,7 +115,6 @@ func emitBatchNotify(b *collectBatchContext) {
 					status = progress.StatusDone
 				}
 			}
-			status, errMsg = settleSourceStatus(status, errMsg, snap.Success)
 			name := strings.TrimSpace(src.Name)
 			if name == "" {
 				name = strings.TrimSpace(snap.Name)
@@ -217,17 +216,10 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", b.batchID, err)
 		return
 	}
-	if missed := b.flushRecordSync(); len(missed) > 0 {
-		bySource := b.abandonUnstored(missed)
-		for i := range results {
-			if n, ok := bySource[results[i].SourceID]; ok {
-				results[i].FilmsTotal = n
-			}
-		}
-	}
 
 	b.recordMu.Lock()
 	defer b.recordMu.Unlock()
+	films := b.withoutDroppedFilms(b.collectRecordFilms())
 	if next, removed := b.withoutDroppedResults(results); removed {
 		results = next
 	}
@@ -243,7 +235,11 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	interruptedCount := 0
 
 	details := make([]model.CollectRecordSourceDetail, 0, len(results))
-	for _, r := range results {
+	for i := range results {
+		status, errMsg := settleSourceStatus(results[i].Status, results[i].Error, results[i].SuccessCnt)
+		results[i].Status = status
+		results[i].Error = errMsg
+		r := results[i]
 		totalPage += r.PageTotal
 		succPage += r.SuccessCnt
 		failPage += r.FailedCnt
@@ -304,9 +300,6 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		duration = 0
 	}
 
-	// 单片更新记录影片ID供重放；常规大批量采集不往 film_ids 塞海量字符串防超过字段长度限制
-	batchFilmIDs := formatReplayFilmIDs(b.replayFilmIDs)
-
 	comp := model.CollectRecordCompletion{
 		Status:         status,
 		Hour:           b.hour,
@@ -315,32 +308,29 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		FinishedAt:     now,
 		DurationMs:     duration,
 		FilmCount:      filmCount,
-		FilmIDs:        batchFilmIDs,
 		PageTotal:      totalPage,
 		PageSuccess:    succPage,
 		PageFailed:     failPage,
 		ErrorMsg:       errSummary.String(),
 		DetailJson:     string(detailBytes),
+		Ledger:         len(films) > 0,
 	}
 
 	log.Printf("[Spider] 结算采集记录 batchID=%s status=%s sources=%d done=%d partial=%d failed=%d stopped=%d interrupted=%d pageTotal=%d pageSuccess=%d pageFailed=%d filmRows=%d durationMs=%d err=%s",
 		b.batchID, status, len(results), doneCount, partialCount, failedCount, stoppedCount, interruptedCount, totalPage, succPage, failPage, filmCount, duration, errSummary.String())
+	if len(films) > 0 {
+		if err := repository.SaveCollectRecordFilmsChunked(b.batchID, films); err != nil {
+			log.Printf("[Spider] 采集清单写入未完成，记录保持进行中 batchID=%s err=%v", b.batchID, err)
+			if delErr := repository.DeleteCollectRecordFilms(b.batchID); delErr != nil {
+				log.Printf("[Spider] 清理半截清单失败 batchID=%s err=%v", b.batchID, delErr)
+			}
+			return
+		}
+	}
 	if err := repository.CompleteCollectRecord(b.batchID, comp); err != nil {
 		log.Printf("[Spider] 结算采集记录写入失败 batchID=%s status=%s err=%v", b.batchID, status, err)
+		if delErr := repository.DeleteCollectRecordFilms(b.batchID); delErr != nil {
+			log.Printf("[Spider] 清理未结算清单失败 batchID=%s err=%v", b.batchID, delErr)
+		}
 	}
-
-	BroadcastRecordCompletion(&model.CollectRecordProgressPayload{
-		BatchID:        b.batchID,
-		Status:         status,
-		FinishedAt:     &now,
-		DurationMs:     duration,
-		FilmCount:      filmCount,
-		PageTotal:      totalPage,
-		PageSuccess:    succPage,
-		PageFailed:     failPage,
-		SuccessSources: doneCount,
-		FailedSources:  failedCount + partialCount,
-		ErrorMsg:       errSummary.String(),
-		DetailJson:     string(detailBytes),
-	})
 }

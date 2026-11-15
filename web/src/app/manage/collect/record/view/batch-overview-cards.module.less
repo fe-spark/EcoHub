@@ -58,8 +58,7 @@
   }
 }
 
-.metricCell,
-.pageBoard {
+.metricCell {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -173,47 +172,10 @@
   }
 }
 
-.pageBoardGrid {
-  display: grid;
-  gap: 8px;
-
-  &[data-count="2"] {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  &[data-count="3"] {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  &[data-count="4"],
-  &[data-count="5"] {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-.pageCell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--ant-color-fill-quaternary);
-}
-
-.pageCellLabel {
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--ant-color-text-tertiary);
-}
-
 @media (max-width: 640px) {
   .drawerMetaStrip,
   .metricGrid[data-count="2"],
-  .metricGrid[data-count="3"],
-  .pageBoardGrid[data-count="3"],
-  .pageBoardGrid[data-count="4"],
-  .pageBoardGrid[data-count="5"] {
+  .metricGrid[data-count="3"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

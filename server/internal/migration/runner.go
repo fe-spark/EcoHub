@@ -45,6 +45,11 @@ var migrations = []Migration{
 		Name:    "采集站增加抓页间隔",
 		Run:     migrateCollectInterval,
 	},
+	{
+		Version: "20261114_collect_record_reset",
+		Name:    "采集记录改为账单，清空后按新表重建",
+		Run:     migrateCollectRecordReset,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

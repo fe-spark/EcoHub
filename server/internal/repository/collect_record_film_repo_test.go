@@ -56,6 +56,7 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 		BatchID:    batchID,
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
+		Ledger:     true,
 		FilmCount:  4,
 		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":2}]`,
 		StartedAt:  time.Now(),
@@ -71,7 +72,7 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 	q := model.CollectRecordFilmQuery{
 		BatchID:  batchID,
 		SourceID: "src_1",
-		Page:     1,
+		AfterID:  0,
 		PageSize: 10,
 	}
 	list, total, err := GetCollectRecordFilms(q)
@@ -86,7 +87,7 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 	}
 
 	// 关键字筛选
-	q.Keyword = "2"
+	q.Keyword = "黑客帝国2"
 	listFiltered, totalFiltered, err := GetCollectRecordFilms(q)
 	if err != nil {
 		t.Fatalf("filtered query failed: %v", err)
@@ -108,7 +109,7 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 	}
 
 	// 全部站点的总数是各站清单行数之和，和分页列表一致。
-	allQuery := model.CollectRecordFilmQuery{BatchID: batchID, Page: 1, PageSize: 10}
+	allQuery := model.CollectRecordFilmQuery{BatchID: batchID, PageSize: 10}
 	all, allTotal, err := GetCollectRecordFilms(allQuery)
 	if err != nil {
 		t.Fatalf("all-source query failed: %v", err)
@@ -117,10 +118,27 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 		t.Fatalf("expected total 4 and 4 rows, got total=%d list=%+v", allTotal, all)
 	}
 	named, namedTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, Keyword: "黑客", Page: 1, PageSize: 10,
+		BatchID: batchID, Keyword: "黑客", PageSize: 10,
 	})
 	if err != nil || namedTotal != 3 || len(named) != 3 {
 		t.Fatalf("expected 3 keyword rows, got total=%d list=%+v err=%v", namedTotal, named, err)
+	}
+	firstPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, Keyword: "黑客", PageSize: 1,
+	})
+	if err != nil || firstPage.Total != 3 || len(firstPage.List) != 1 || !firstPage.HasMore || firstPage.List[0].Name != "黑客帝国" {
+		t.Fatalf("first search page %+v err=%v", firstPage, err)
+	}
+	secondPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID:   batchID,
+		Keyword:   "黑客",
+		PageSize:  1,
+		AfterName: firstPage.NextAfterName,
+		AfterMid:  firstPage.NextAfterMid,
+		AfterID:   firstPage.NextAfterID,
+	})
+	if err != nil || secondPage.Total != 3 || len(secondPage.List) != 1 || secondPage.List[0].Name != "黑客帝国2" {
+		t.Fatalf("second search page %+v err=%v", secondPage, err)
 	}
 
 	// 清理
@@ -148,6 +166,7 @@ func TestGetCollectRecordFilms_NameLookupError(t *testing.T) {
 		BatchID:    "batch-names",
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
+		Ledger:     true,
 		FilmCount:  1,
 		DetailJson: `[{"sourceId":"src_1","filmsTotal":1}]`,
 		StartedAt:  time.Now(),
@@ -158,7 +177,7 @@ func TestGetCollectRecordFilms_NameLookupError(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: "batch-names", SourceID: "src_1", Page: 1, PageSize: 10,
+		BatchID: "batch-names", SourceID: "src_1", PageSize: 10,
 	})
 	if err == nil {
 		t.Fatal("expected name lookup error")
@@ -214,6 +233,7 @@ func TestGetCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
 		BatchID:    batchID,
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusRunning,
+		Ledger:     true,
 		FilmCount:  1,
 		DetailJson: "",
 		StartedAt:  time.Now(),
@@ -222,7 +242,7 @@ func TestGetCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
 	}
 
 	list, total, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, Page: 1, PageSize: 10,
+		BatchID: batchID, PageSize: 10,
 	})
 	if err != nil {
 		t.Fatalf("query failed: %v", err)
@@ -231,7 +251,7 @@ func TestGetCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
 		t.Fatalf("expected total 1 and mid 201, got total=%d list=%+v", total, list)
 	}
 	if _, totalSrc, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, SourceID: "src_run", Page: 1, PageSize: 10,
+		BatchID: batchID, SourceID: "src_run", PageSize: 10,
 	}); err != nil || totalSrc != 0 {
 		t.Fatalf("source without detail total=%d err=%v", totalSrc, err)
 	}
@@ -241,7 +261,7 @@ func TestGetCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
 		t.Fatal(err)
 	}
 	listSrc, totalSrc, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, SourceID: "src_run", Page: 1, PageSize: 10,
+		BatchID: batchID, SourceID: "src_run", PageSize: 10,
 	})
 	if err != nil {
 		t.Fatalf("query src failed: %v", err)
@@ -277,6 +297,7 @@ func TestGetCollectRecordFilms_AllSitesTotalCountsRowsNotFilmCount(t *testing.T)
 		BatchID:    batchID,
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusRunning,
+		Ledger:     true,
 		FilmCount:  3,
 		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":1}]`,
 		StartedAt:  time.Now(),
@@ -284,7 +305,7 @@ func TestGetCollectRecordFilms_AllSitesTotalCountsRowsNotFilmCount(t *testing.T)
 		t.Fatal(err)
 	}
 
-	all := model.CollectRecordFilmQuery{BatchID: batchID, Page: 1, PageSize: 10}
+	all := model.CollectRecordFilmQuery{BatchID: batchID, PageSize: 10}
 	list, total, err := GetCollectRecordFilms(all)
 	if err != nil {
 		t.Fatal(err)
@@ -293,12 +314,12 @@ func TestGetCollectRecordFilms_AllSitesTotalCountsRowsNotFilmCount(t *testing.T)
 		t.Fatalf("all total=%d list=%d", total, len(list))
 	}
 	if _, total, err = GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, SourceID: "src_1", Page: 1, PageSize: 10,
+		BatchID: batchID, SourceID: "src_1", PageSize: 10,
 	}); err != nil || total != 2 {
 		t.Fatalf("src_1 total=%d err=%v", total, err)
 	}
 	if _, total, err = GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, SourceID: "src_2", Page: 1, PageSize: 10,
+		BatchID: batchID, SourceID: "src_2", PageSize: 10,
 	}); err != nil || total != 1 {
 		t.Fatalf("src_2 total=%d err=%v", total, err)
 	}

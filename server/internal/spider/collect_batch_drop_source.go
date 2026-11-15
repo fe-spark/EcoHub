@@ -7,8 +7,8 @@ import (
 	"server/internal/model"
 )
 
-// PauseActiveBatchRecords 停住包含该站的进行中批次的检查点和结算，执行删站清库，成功后再标记摘除。
-// 先拿 recordMu 再拿批次锁，和 writeCheckpoint、结算同一顺序。
+// PauseActiveBatchRecords 停住包含该站的进行中批次的结算，执行删站清库，成功后再标记摘除。
+// 先拿 recordMu 再拿批次锁，和结算写清单同一顺序。
 func PauseActiveBatchRecords(sourceID string, fn func() error) error {
 	if fn == nil {
 		return nil
@@ -86,20 +86,6 @@ func (b *collectBatchContext) dropSourceLocked(sourceID string) {
 		b.droppedSources = map[string]struct{}{}
 	}
 	b.droppedSources[sourceID] = struct{}{}
-}
-
-func (b *collectBatchContext) listedFilmCountLocked() int {
-	if b == nil {
-		return 0
-	}
-	n := 0
-	for id, set := range b.sourceFilmMIDs {
-		if b.sourceDroppedLocked(id) {
-			continue
-		}
-		n += len(set)
-	}
-	return n
 }
 
 func (b *collectBatchContext) midListedLocked(mid int64) bool {

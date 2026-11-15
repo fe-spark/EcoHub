@@ -43,34 +43,6 @@ func removeRecordsAndFilms(tx *gorm.DB, rows []model.CollectRecord) error {
 		Delete(&model.CollectRecordFilmItem{}).Error
 }
 
-// FilmNamesByIDs 按全局影片编号读取片名。已删除的影片仍返回原名，供采集记录展示。
-func FilmNamesByIDs(ids []int64) (map[int64]string, error) {
-	out := make(map[int64]string)
-	if len(ids) == 0 {
-		return out, nil
-	}
-	if db.Mdb == nil {
-		return nil, errors.New("数据库未连接")
-	}
-	var rows []struct {
-		Mid  int64
-		Name string
-	}
-	if err := db.Mdb.Unscoped().Model(&model.FilmIndex{}).
-		Select("mid", "name").
-		Where("mid IN ?", ids).
-		Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		name := strings.TrimSpace(row.Name)
-		if row.Mid > 0 && name != "" {
-			out[row.Mid] = name
-		}
-	}
-	return out, nil
-}
-
 // CreateCollectRecord 创建采集运行记录（初始状态一般为 running）
 func CreateCollectRecord(rec *model.CollectRecord) error {
 	if db.Mdb == nil {
@@ -94,6 +66,10 @@ func CompleteCollectRecord(batchID string, c model.CollectRecordCompletion) erro
 	if batchID == "" {
 		return errors.New("批次号不能为空")
 	}
+	return completeCollectRecordDB(db.Mdb, batchID, c)
+}
+
+func completeCollectRecordDB(tx *gorm.DB, batchID string, c model.CollectRecordCompletion) error {
 
 	finishedAt := c.FinishedAt
 	if finishedAt.IsZero() {
@@ -113,13 +89,11 @@ func CompleteCollectRecord(batchID string, c model.CollectRecordCompletion) erro
 		"page_failed":     c.PageFailed,
 		"error_msg":       c.ErrorMsg,
 		"detail_json":     c.DetailJson,
-	}
-	if strings.TrimSpace(c.FilmIDs) != "" {
-		updates["film_ids"] = strings.TrimSpace(c.FilmIDs)
+		"ledger":          c.Ledger,
 	}
 
 	var rec model.CollectRecord
-	if err := db.Mdb.Select("id", "status").Where("batch_id = ?", batchID).First(&rec).Error; err != nil {
+	if err := tx.Select("id", "status").Where("batch_id = ?", batchID).First(&rec).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("采集记录不存在: %s", batchID)
 		}
@@ -128,7 +102,7 @@ func CompleteCollectRecord(batchID string, c model.CollectRecordCompletion) erro
 	if rec.Status != model.CollectRecordStatusRunning {
 		return nil
 	}
-	return db.Mdb.Model(&model.CollectRecord{}).
+	return tx.Model(&model.CollectRecord{}).
 		Where("batch_id = ? AND status = ?", batchID, model.CollectRecordStatusRunning).
 		Updates(updates).Error
 }
@@ -156,27 +130,31 @@ func GetCollectRecordList(q model.CollectRecordQuery) ([]model.CollectRecord, in
 	}
 
 	tx := db.Mdb.Model(&model.CollectRecord{})
-	if trig := strings.TrimSpace(q.Trigger); trig != "" {
-		tx = tx.Where("`trigger` = ?", trig)
-	}
-	if st := strings.TrimSpace(q.Status); st != "" {
-		tx = tx.Where("status = ?", st)
-	}
-	if !q.BeginTime.IsZero() {
-		tx = tx.Where("started_at >= ?", q.BeginTime)
-	}
-	if !q.EndTime.IsZero() {
-		tx = tx.Where("started_at <= ?", q.EndTime)
-	}
-	if q.UpdatedOnly {
-		tx = tx.Where("film_count > 0")
-	}
-	if q.FailedOnly {
-		tx = tx.Where("(status IN ? OR failed_sources > 0)", []string{
-			model.CollectRecordStatusFailed,
-			model.CollectRecordStatusPartial,
-			model.CollectRecordStatusInterrupted,
-		})
+	if batchID := strings.TrimSpace(q.BatchID); batchID != "" {
+		tx = tx.Where("batch_id = ?", batchID)
+	} else {
+		if trig := strings.TrimSpace(q.Trigger); trig != "" {
+			tx = tx.Where("`trigger` = ?", trig)
+		}
+		if st := strings.TrimSpace(q.Status); st != "" {
+			tx = tx.Where("status = ?", st)
+		}
+		if !q.BeginTime.IsZero() {
+			tx = tx.Where("started_at >= ?", q.BeginTime)
+		}
+		if !q.EndTime.IsZero() {
+			tx = tx.Where("started_at <= ?", q.EndTime)
+		}
+		if q.UpdatedOnly {
+			tx = tx.Where("film_count > 0")
+		}
+		if q.FailedOnly {
+			tx = tx.Where("(status IN ? OR failed_sources > 0)", []string{
+				model.CollectRecordStatusFailed,
+				model.CollectRecordStatusPartial,
+				model.CollectRecordStatusInterrupted,
+			})
+		}
 	}
 
 	var total int64
@@ -423,32 +401,6 @@ func sweepOrphanCollectFilms(session *gorm.DB, threshold time.Time) error {
 	}
 }
 
-// UpdateRunningCollectRecord 刷新仍在运行的批次页数、影片数和明细。不改终态。
-func UpdateRunningCollectRecord(batchID string, c model.CollectRecordCompletion) error {
-	if db.Mdb == nil {
-		return errors.New("数据库未连接")
-	}
-	batchID = strings.TrimSpace(batchID)
-	if batchID == "" {
-		return errors.New("批次号不能为空")
-	}
-	updates := map[string]any{
-		"success_sources": c.SuccessSources,
-		"failed_sources":  c.FailedSources,
-		"film_count":      c.FilmCount,
-		"page_total":      c.PageTotal,
-		"page_success":    c.PageSuccess,
-		"page_failed":     c.PageFailed,
-		"detail_json":     c.DetailJson,
-	}
-	if c.Hour != 0 {
-		updates["hour"] = c.Hour
-	}
-	return db.Mdb.Model(&model.CollectRecord{}).
-		Where("batch_id = ? AND status = ?", batchID, model.CollectRecordStatusRunning).
-		Updates(updates).Error
-}
-
 // MarkInterruptedCollectRecords 服务启动时兜底把残留 running 状态标记为 interrupted
 func MarkInterruptedCollectRecords() error {
 	if db.Mdb == nil {
@@ -474,6 +426,7 @@ func MarkInterruptedCollectRecords() error {
 			"duration_ms": duration,
 			"error_msg":   "服务重启，任务异常中断",
 			"film_count":  films,
+			"ledger":      films > 0,
 		}
 		detail, err := applyStoredFilmTotals(rec.DetailJson, bySource)
 		if err != nil {

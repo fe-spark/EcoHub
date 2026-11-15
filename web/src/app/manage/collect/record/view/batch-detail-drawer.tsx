@@ -10,8 +10,8 @@ import {
 import {
   CloudServerOutlined,
   ReloadOutlined,
+  SyncOutlined,
   VideoCameraOutlined,
-  FileTextOutlined,
   CloseCircleOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -20,15 +20,11 @@ import {
   CollectRecordSourceDetail,
   canRetryHistorySource,
 } from "./types";
+import { formatCollectFilms, formatSourceWindow } from "./record-format";
 import {
-  formatCollectFilms,
-  formatSourcePages,
-  formatSourceWindow,
-} from "./record-format";
-import {
-  MarkedFailureText,
   RecordStatusMark,
   resolveBatchStatus,
+  sourceActivityLabel,
 } from "./history-columns";
 import { BatchFilmsModal } from "./batch-films-modal";
 import { BatchOverviewCards } from "./batch-overview-cards";
@@ -88,12 +84,11 @@ export function BatchDetailDrawer({
         <div className={styles.drawerTitleRow}>
           <span className={styles.withIcon}>
             <CloudServerOutlined />
-            <span>批次采集成果明细</span>
+            <span>采集记录</span>
           </span>
           <RecordStatusMark
             status={resolveBatchStatus(record)}
             scope="batch"
-            hasPageFailed={(record.pageFailed ?? 0) > 0}
           />
         </div>
       }
@@ -112,31 +107,37 @@ export function BatchDetailDrawer({
         />
 
         <div className={styles.drawerSectionHeader}>
-          <div className={styles.tableTitle}>各采集源成果与影片详情</div>
+          <div className={styles.tableTitle}>各站结果</div>
           <Text type="secondary" style={{ fontSize: 13 }}>
             共 {sortedDetails.length || record.sourceCount} 个站点参与采集
           </Text>
         </div>
 
         {sortedDetails.length === 0 ? (
-          <div className={styles.detailEmpty}>
-            {record.status === "running" ? "正在初始化单站采集数据..." : "暂无单站采集明细快照"}
+          <div className={record.status === "running" ? styles.sourceCardCollecting : styles.detailEmpty}>
+            {record.status === "running" ? (
+              <>
+                <SyncOutlined spin />
+                <span>采集中</span>
+              </>
+            ) : (
+              "暂无单站采集明细"
+            )}
           </div>
         ) : (
           <div className={styles.sourceCardList}>
             {sortedDetails.map((item, index) => {
               const sourceKey = `${record.batchId}:${item.sourceId}`;
               const isRetrying = retryingSourceKeys.has(sourceKey);
-              const retry = (item.status === "failed" || item.status === "partial") && canRetryHistorySource(record);
               const isSourceInterrupted =
                 record.status === "interrupted" && (item.status === "running" || item.status === "starting");
               const shownStatus = isSourceInterrupted ? "interrupted" : item.status;
-              const isSourceOngoing =
-                shownStatus === "running" || shownStatus === "starting" || shownStatus === "waiting";
+              const activity = sourceActivityLabel(shownStatus);
+              const retry = (item.status === "failed" || item.status === "partial") && canRetryHistorySource(record);
+              const canOpenFilms = record.ledger === true;
               const windowLabel = formatSourceWindow(item.hour, record.hour);
               const refTime = record.finishedAt || record.startedAt;
               const isWithinHalfHour = refTime ? dayjs().diff(dayjs(refTime), "minute") < 30 : false;
-              const failedPages = Math.max(0, item.failedCnt ?? 0, item.failedPages?.length ?? 0);
               const canRetryPages = isWithinHalfHour && Array.isArray(item.failedPages) && item.failedPages.length > 0;
 
               return (
@@ -153,9 +154,8 @@ export function BatchDetailDrawer({
                       <RecordStatusMark
                         status={shownStatus}
                         scope="source"
-                        hasPageFailed={failedPages > 0}
                       />
-                      {retry && (
+                      {!activity && retry && (
                         <Popconfirm
                           title={filmRetry ? "重试影片" : canRetryPages ? "重试失败页" : "重试该站"}
                           onConfirm={() => onRetrySingleSource(record.batchId, item.sourceId)}
@@ -179,57 +179,59 @@ export function BatchDetailDrawer({
                     </div>
                   </div>
 
-                  <div className={styles.sourceCardStats}>
-                    <span className={styles.withIcon}>
-                      <FileTextOutlined />
-                      <span>
-                        页码：
-                        <MarkedFailureText
-                          text={`${formatSourcePages({ ...item, status: shownStatus })}${windowLabel ? ` · ${windowLabel}` : ""}`}
-                          failClassName={styles.metricFail}
-                        />
-                      </span>
-                    </span>
-                    <span className={styles.withIcon}>
-                      <VideoCameraOutlined />
-                      {item.filmsTotal > 0 ? (
-                        <>
-                          <span>更新：</span>
-                          <a
-                            className={styles.filmCountLink}
-                            onClick={() =>
-                              setModalSource({
-                                id: item.sourceId,
-                                name: item.sourceName || item.sourceId,
-                              })
-                            }
-                            title="查看影片清单"
-                          >
-                            +{item.filmsTotal.toLocaleString("zh-CN")} 部
-                          </a>
-                        </>
-                      ) : isSourceOngoing ? (
-                        <span className={styles.filmCountEmpty}>更新中</span>
-                      ) : (
-                        <span className={styles.filmCountEmpty}>{formatCollectFilms(0, { status: shownStatus })}</span>
-                      )}
-                    </span>
-                  </div>
+                  {activity ? (
+                    <div className={styles.sourceCardCollecting}>
+                      {shownStatus === "paused" || shownStatus === "sealing" ? null : <SyncOutlined spin />}
+                      <span>{activity}</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className={styles.sourceCardStats}>
+                        <span className={styles.withIcon}>
+                          <VideoCameraOutlined />
+                          {item.filmsTotal > 0 ? (
+                            <>
+                              <span>更新：</span>
+                              {canOpenFilms ? (
+                                <a
+                                  className={styles.filmCountLink}
+                                  onClick={() =>
+                                    setModalSource({
+                                      id: item.sourceId,
+                                      name: item.sourceName || item.sourceId,
+                                    })
+                                  }
+                                  title="查看影片清单"
+                                >
+                                  +{item.filmsTotal.toLocaleString("zh-CN")} 部
+                                </a>
+                              ) : (
+                                <span className={styles.filmCount}>+{item.filmsTotal.toLocaleString("zh-CN")} 部</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className={styles.filmCountEmpty}>{formatCollectFilms(0, { status: shownStatus })}</span>
+                          )}
+                          {windowLabel ? <span className={styles.filmCountEmpty}>{windowLabel}</span> : null}
+                        </span>
+                      </div>
 
-                  {(item.error?.trim() || (item.failedPages?.length ?? 0) > 0) && (
-                    <button
-                      type="button"
-                      className={styles.sourceCardError}
-                      onClick={() => setErrorSource(item)}
-                    >
-                      <span className={styles.sourceCardErrorIcon}>
-                        <CloseCircleOutlined />
-                      </span>
-                      <span className={styles.sourceCardErrorText}>
-                        {item.error?.trim() || `共 ${item.failedPages?.length ?? 0} 页失败`}
-                      </span>
-                      <span className={styles.sourceCardErrorAction}>查看</span>
-                    </button>
+                      {(item.error?.trim() || (item.failedPages?.length ?? 0) > 0) && (
+                        <button
+                          type="button"
+                          className={styles.sourceCardError}
+                          onClick={() => setErrorSource(item)}
+                        >
+                          <span className={styles.sourceCardErrorIcon}>
+                            <CloseCircleOutlined />
+                          </span>
+                          <span className={styles.sourceCardErrorText}>
+                            {item.error?.trim() || `共 ${item.failedPages?.length ?? 0} 页失败`}
+                          </span>
+                          <span className={styles.sourceCardErrorAction}>查看</span>
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               );

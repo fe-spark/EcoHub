@@ -32,8 +32,9 @@ func TestFetchSlotBlocksWhenFull(t *testing.T) {
 }
 
 func TestFetchSlotFollowsRaisedLimit(t *testing.T) {
-	limit := 1
-	slots := newFetchGate(func() int { return limit })
+	var limit atomic.Int32
+	limit.Store(1)
+	slots := newFetchGate(func() int { return int(limit.Load()) })
 	if err := acquireSlot(context.Background(), slots); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestFetchSlotFollowsRaisedLimit(t *testing.T) {
 		t.Fatal("limit 1 should block the second acquire")
 	case <-time.After(30 * time.Millisecond):
 	}
-	limit = 2
+	limit.Store(2)
 	select {
 	case err := <-got:
 		if err != nil {

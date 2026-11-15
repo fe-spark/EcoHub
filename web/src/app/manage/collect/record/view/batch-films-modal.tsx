@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
-import { Alert, Modal, Input, Button, Pagination, Spin, Space } from "antd";
+import { Alert, Modal, Input, Button, Spin, Space } from "antd";
 import {
   VideoCameraOutlined,
   SearchOutlined,
@@ -25,10 +25,19 @@ export interface BatchFilmsModalProps {
 }
 
 interface FilmItem {
+  id: number;
   mid: number;
   name: string;
   sourceId?: string;
 }
+
+interface FilmCursor {
+  id: number;
+  name: string;
+  mid: number;
+}
+
+const firstFilmCursor: FilmCursor = { id: 0, name: "", mid: 0 };
 
 export function BatchFilmsModal({
   open,
@@ -38,17 +47,19 @@ export function BatchFilmsModal({
   onClose,
 }: BatchFilmsModalProps) {
   const [keyword, setKeyword] = useState("");
-  const [current, setCurrent] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize] = useState(20);
   const [list, setList] = useState<FilmItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<FilmCursor>(firstFilmCursor);
+  const [cursorStack, setCursorStack] = useState<FilmCursor[]>([firstFilmCursor]);
   const [errorText, setErrorText] = useState("");
   const [loading, setLoading] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const appliedKeyword = useRef("");
 
   const fetchFilms = useCallback(
-    async (pCurrent: number, pPageSize: number, pKeyword: string) => {
+    async (cursor: FilmCursor, pKeyword: string) => {
       if (!batchId) {
         setHasLoaded(true);
         return;
@@ -59,20 +70,33 @@ export function BatchFilmsModal({
         const resp = await ApiGet<{
           list: FilmItem[];
           total: number;
-          current: number;
-          pageSize: number;
+          nextAfterId: number;
+          nextAfterName?: string;
+          nextAfterMid?: number;
+          hasMore: boolean;
         }>("/manage/collect/history/films", {
           batchId,
           sourceId,
-          current: pCurrent,
-          pageSize: pPageSize,
+          afterId: cursor.id,
+          afterName: cursor.name,
+          afterMid: cursor.mid,
+          pageSize,
           keyword: pKeyword.trim(),
         });
         if (resp.code === 0 && resp.data) {
-          setList(resp.data.list || []);
+          const rows = resp.data.list || [];
+          setList(rows);
           setTotal(resp.data.total || 0);
-          setCurrent(resp.data.current || pCurrent);
-          setPageSize(resp.data.pageSize || pPageSize);
+          setHasMore(Boolean(resp.data.hasMore));
+          setNextCursor(
+            resp.data.hasMore
+              ? {
+                  id: resp.data.nextAfterId || 0,
+                  name: resp.data.nextAfterName || "",
+                  mid: resp.data.nextAfterMid || 0,
+                }
+              : firstFilmCursor,
+          );
           return;
         }
         setList([]);
@@ -87,20 +111,22 @@ export function BatchFilmsModal({
         setHasLoaded(true);
       }
     },
-    [batchId, sourceId],
+    [batchId, sourceId, pageSize],
   );
 
   useEffect(() => {
     if (open) {
       appliedKeyword.current = "";
       setKeyword("");
-      setCurrent(1);
+      setCursorStack([firstFilmCursor]);
       setErrorText("");
       setHasLoaded(false);
-      void fetchFilms(1, 10, "");
+      void fetchFilms(firstFilmCursor, "");
     } else {
       setList([]);
       setTotal(0);
+      setHasMore(false);
+      setNextCursor(firstFilmCursor);
       setErrorText("");
       setHasLoaded(false);
     }
@@ -109,21 +135,31 @@ export function BatchFilmsModal({
   const handleExecuteSearch = () => {
     const next = keyword.trim();
     appliedKeyword.current = next;
-    setCurrent(1);
-    void fetchFilms(1, pageSize, next);
+    setCursorStack([firstFilmCursor]);
+    void fetchFilms(firstFilmCursor, next);
   };
 
   const handleResetSearch = () => {
     appliedKeyword.current = "";
     setKeyword("");
-    setCurrent(1);
-    void fetchFilms(1, pageSize, "");
+    setCursorStack([firstFilmCursor]);
+    void fetchFilms(firstFilmCursor, "");
   };
 
-  const handlePageChange = (newPage: number, newSize: number) => {
-    setCurrent(newPage);
-    setPageSize(newSize);
-    void fetchFilms(newPage, newSize, appliedKeyword.current);
+  const handleNext = () => {
+    if (!hasMore || nextCursor.id <= 0) return;
+    const cursor = nextCursor;
+    setCursorStack((stack) => [...stack, cursor]);
+    void fetchFilms(cursor, appliedKeyword.current);
+  };
+
+  const handlePrev = () => {
+    setCursorStack((stack) => {
+      if (stack.length <= 1) return stack;
+      const next = stack.slice(0, -1);
+      void fetchFilms(next[next.length - 1], appliedKeyword.current);
+      return next;
+    });
   };
 
   const sourceDesc = sourceName || sourceId ? `来源站点：${sourceName || sourceId}` : "涵盖全部站点";
@@ -167,7 +203,7 @@ export function BatchFilmsModal({
         <div className={styles.toolbar}>
           <Space size={8} className={styles.filterGroup}>
             <Input
-              placeholder={isBatchZeroUpdate ? "当前批次无更新影片" : "输入片名搜索..."}
+              placeholder={isBatchZeroUpdate ? "当前批次无更新影片" : "输入片名开头"}
               allowClear
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
@@ -215,7 +251,7 @@ export function BatchFilmsModal({
                   <Button
                     type="primary"
                     icon={<ReloadOutlined />}
-                    onClick={() => void fetchFilms(current, pageSize, appliedKeyword.current)}
+                    onClick={() => void fetchFilms(cursorStack[cursorStack.length - 1] ?? firstFilmCursor, appliedKeyword.current)}
                   >
                     重新加载
                   </Button>
@@ -232,7 +268,7 @@ export function BatchFilmsModal({
                 <div className={styles.emptyDesc}>
                   {appliedKeyword.current ? (
                     <>
-                      未搜索到包含「<strong>{appliedKeyword.current}</strong>」的影片
+                      未搜索到片名以「<strong>{appliedKeyword.current}</strong>」开头的影片
                     </>
                   ) : sourceName && sourceName !== "全部站点" ? (
                     `「${sourceName}」暂无入库影片`
@@ -272,7 +308,10 @@ export function BatchFilmsModal({
                       </Button>
                       <Button
                         icon={<ReloadOutlined />}
-                        onClick={() => void fetchFilms(1, pageSize, "")}
+                        onClick={() => {
+                          setCursorStack([firstFilmCursor]);
+                          void fetchFilms(firstFilmCursor, "");
+                        }}
                       >
                         刷新清单
                       </Button>
@@ -315,34 +354,21 @@ export function BatchFilmsModal({
           </Spin>
         </div>
 
-        {total > pageSize && (
+        {cursorStack.length > 1 || hasMore ? (
           <div className={styles.paginationWrapper}>
             <div className={styles.paginationTotal}>
               共 <span className={styles.totalHighlight}>{total.toLocaleString("zh-CN")}</span> 部影片
             </div>
-            <Pagination
-              current={current}
-              pageSize={pageSize}
-              total={total}
-              size="small"
-              showSizeChanger
-              showLessItems
-              pageSizeOptions={[10, 20, 50, 100]}
-              classNames={{
-                root: styles.paginationRoot,
-                item: styles.paginationItem,
-              }}
-              styles={{
-                item: {
-                  minWidth: 28,
-                  padding: "0 6px",
-                  whiteSpace: "nowrap",
-                },
-              }}
-              onChange={handlePageChange}
-            />
+            <Space>
+              <Button size="small" disabled={cursorStack.length <= 1 || loading} onClick={handlePrev}>
+                上一页
+              </Button>
+              <Button size="small" disabled={!hasMore || loading} onClick={handleNext}>
+                下一页
+              </Button>
+            </Space>
           </div>
-        )}
+        ) : null}
       </div>
     </Modal>
   );

@@ -65,20 +65,20 @@ export function resolveBatchStatus(record: {
   return record.status || "success";
 }
 
-export function canRetryHistoryRecord(record: Pick<CollectHistoryRecord, "status" | "failedSources" | "trigger" | "hour" | "filmIds"> & {
+export function canRetryHistoryRecord(record: Pick<CollectHistoryRecord, "status" | "failedSources" | "trigger" | "hour" | "ledger"> & {
   pageSuccess?: number;
   pageFailed?: number;
   successSources?: number;
 }) {
   if (record.status === "running") return false;
-  if (record.trigger === "single_update") return Boolean(record.filmIds?.trim());
+  if (record.trigger === "single_update") return record.ledger === true;
   const resolved = resolveBatchStatus(record);
   return record.hour !== 0 && (resolved === "failed" || resolved === "partial");
 }
 
-export function canRetryHistorySource(record: Pick<CollectHistoryRecord, "status" | "trigger" | "hour" | "filmIds">) {
+export function canRetryHistorySource(record: Pick<CollectHistoryRecord, "status" | "trigger" | "hour" | "ledger">) {
   if (record.status === "running") return false;
-  if (record.trigger === "single_update") return Boolean(record.filmIds?.trim());
+  if (record.trigger === "single_update") return record.ledger === true;
   return record.hour !== 0;
 }
 
@@ -94,7 +94,7 @@ export interface CollectHistoryRecord {
   successSources: number;
   failedSources: number;
   filmCount: number;
-  filmIds?: string;
+  ledger?: boolean;
   filmName?: string;
   films?: CollectRecordFilm[];
   pageTotal: number;

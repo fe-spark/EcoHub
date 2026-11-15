@@ -61,11 +61,14 @@ func TestRetryBatchFailedSources_ReplaysSingleFilm(t *testing.T) {
 		BatchID:    "film-1",
 		Trigger:    model.CollectTriggerSingleUpdate,
 		Hour:       0,
-		FilmIDs:    "42,42,7",
+		Ledger:     true,
 		Status:     model.CollectRecordStatusFailed,
 		StartedAt:  time.Now(),
 		DetailJson: `[{"sourceId":"s1","status":"failed"}]`,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.BatchSaveCollectRecordFilms("film-1", map[string][]int64{"s1": {42, 7}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -79,7 +82,7 @@ func TestRetryBatchFailedSources_ReplaysSingleFilm(t *testing.T) {
 	}
 	select {
 	case ids := <-called:
-		if len(ids) != 2 || ids[0] != 42 || ids[1] != 7 {
+		if len(ids) != 2 || ids[0] != 7 || ids[1] != 42 {
 			t.Fatalf("replay ids = %v", ids)
 		}
 	case <-time.After(time.Second):
@@ -118,7 +121,7 @@ func TestGetHistoryList_AttachesSingleFilmName(t *testing.T) {
 			BatchID:   "single-named",
 			Trigger:   model.CollectTriggerSingleUpdate,
 			Tag:       model.CollectTagSingleUpdate,
-			FilmIDs:   "42,7",
+			Ledger:    true,
 			Status:    model.CollectRecordStatusSuccess,
 			StartedAt: now,
 		},
@@ -126,7 +129,6 @@ func TestGetHistoryList_AttachesSingleFilmName(t *testing.T) {
 			BatchID:   "batch-plain",
 			Trigger:   model.CollectTriggerManual,
 			Tag:       model.CollectTagBatchCollect,
-			FilmIDs:   "42",
 			Status:    model.CollectRecordStatusSuccess,
 			StartedAt: now.Add(-time.Second),
 		},
@@ -134,6 +136,9 @@ func TestGetHistoryList_AttachesSingleFilmName(t *testing.T) {
 		if err := repository.CreateCollectRecord(&rec); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := repository.BatchSaveCollectRecordFilms("single-named", map[string][]int64{"s1": {42, 7}}); err != nil {
+		t.Fatal(err)
 	}
 
 	list, total, err := CollectRecordSvc.GetHistoryList(model.CollectRecordQuery{Page: 1, PageSize: 10})
@@ -145,10 +150,10 @@ func TestGetHistoryList_AttachesSingleFilmName(t *testing.T) {
 		byBatch[rec.BatchID] = rec
 	}
 	named := byBatch["single-named"]
-	if named.FilmName != "流浪地球、消失的她" {
+	if named.FilmName != "消失的她、流浪地球" {
 		t.Fatalf("single film name %q", named.FilmName)
 	}
-	if len(named.Films) != 2 || named.Films[0].Mid != 42 || named.Films[0].Name != "流浪地球" || named.Films[1].Mid != 7 || named.Films[1].Name != "消失的她" {
+	if len(named.Films) != 2 || named.Films[0].Mid != 7 || named.Films[0].Name != "消失的她" || named.Films[1].Mid != 42 || named.Films[1].Name != "流浪地球" {
 		t.Fatalf("films %+v", named.Films)
 	}
 	if byBatch["batch-plain"].FilmName != "" {
@@ -188,6 +193,7 @@ func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 		BatchID:    "batch-films-svc",
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
+		Ledger:     true,
 		FilmCount:  1,
 		DetailJson: `[{"sourceId":"s1","filmsTotal":1}]`,
 		StartedAt:  time.Now(),
@@ -196,22 +202,23 @@ func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 	q := model.CollectRecordFilmQuery{
 		BatchID:  "batch-films-svc",
 		SourceID: "s1",
-		Page:     1,
+		AfterID:  0,
 		PageSize: 10,
 	}
-	films, total, err := CollectRecordSvc.GetBatchFilms(q)
+	got, err := CollectRecordSvc.GetBatchFilms(q)
+	films, total := got.List, got.Total
 	if err != nil || total != 1 || len(films) != 1 || films[0].Name != "星际穿越" {
 		t.Fatalf("expected 星际穿越, got %+v total=%d err=%v", films, total, err)
 	}
 
-	missed, missedTotal, err := CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
+	missedPage, err := CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
 		BatchID:  "batch-films-svc",
 		SourceID: "s1",
 		Keyword:  "不存在的片名",
-		Page:     1,
+		AfterID:  0,
 		PageSize: 10,
 	})
-	if err != nil || missedTotal != 0 || len(missed) != 0 {
-		t.Fatalf("keyword miss got %+v total=%d err=%v", missed, missedTotal, err)
+	if err != nil || missedPage.Total != 0 || len(missedPage.List) != 0 {
+		t.Fatalf("keyword miss got %+v total=%d err=%v", missedPage.List, missedPage.Total, err)
 	}
 }

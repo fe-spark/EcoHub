@@ -67,15 +67,10 @@ type collectBatchContext struct {
 	sourceNotifyMIDs  map[string]map[int64]struct{}
 	filmMIDs          map[int64]struct{}
 	sourceFilmMIDs    map[string]map[int64]struct{}
-	pendingFilms      map[string][]int64
 	sourceHours       map[string]int
 	sourceErrors      map[string]string
 	sourceSkips       map[string]categorySkipCount
 	sourceTargetPages map[string][]int
-	progressDirty     bool
-	flushing          bool
-	lastFlush         time.Time
-	flushWG           sync.WaitGroup
 	finishedSources   map[string]model.FilmSource
 	sourceSnapshots   map[string]model.CollectRecordSourceDetail
 	occupyTokens      map[string]uint64
@@ -105,7 +100,6 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		sourceNotifyMIDs: make(map[string]map[int64]struct{}, len(sources)),
 		filmMIDs:         make(map[int64]struct{}),
 		sourceFilmMIDs:   make(map[string]map[int64]struct{}, len(sources)),
-		pendingFilms:     make(map[string][]int64),
 		sourceHours:      make(map[string]int),
 		sourceErrors:     make(map[string]string),
 		sourceSkips:      make(map[string]categorySkipCount),
@@ -170,7 +164,6 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, _ int, mids [
 	if err := enqueueStreamPublish(s.Id, kept); err != nil {
 		log.Printf("[Spider][StreamPublish] 流式刷窗失败 source=%s err=%v", s.Id, err)
 	}
-	b.maybeFlushRecord()
 }
 
 // IsStandalone 实现 fetcher.Batch：单站采集，不与其他站点合并发布。
@@ -384,10 +377,7 @@ func (b *collectBatchContext) recordSourceSnapshot(detail model.CollectRecordSou
 	}
 	b.mu.Lock()
 	b.sourceSnapshots[detail.SourceID] = detail
-	b.progressDirty = true
 	b.mu.Unlock()
-	// 不在站点退出时同步等检查点。封口要等 activeCount 归零，落库留给批次收尾。
-	b.maybeFlushRecord()
 }
 
 func (b *collectBatchContext) getSourceSnapshot(sourceID string) (model.CollectRecordSourceDetail, bool) {
@@ -503,7 +493,6 @@ func (b *collectBatchContext) close() {
 	if b == nil {
 		return
 	}
-	b.flushWG.Wait()
 	unregisterActiveBatch(b)
 	b.mu.Lock()
 	tokens := b.occupyTokens

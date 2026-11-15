@@ -1,17 +1,14 @@
 import React from "react";
 import Link from "next/link";
-import { Tag, Tooltip, Button, Popconfirm } from "antd";
+import { Button, Popconfirm, Space, Tag, Tooltip, Typography } from "antd";
 import {
   ApiOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
   CloudDownloadOutlined,
-  CloudServerOutlined,
   ExclamationCircleOutlined,
-  EyeOutlined,
   FieldTimeOutlined,
-  FileTextOutlined,
   PauseCircleOutlined,
   ReloadOutlined,
   ScheduleOutlined,
@@ -26,10 +23,8 @@ import { canRetryHistoryRecord, CollectHistoryRecord, CollectRecordSourceDetail,
 import {
   formatBatchSourceStat,
   formatCollectFilms,
-  formatCollectPages,
   formatDuration,
   formatStartedAt,
-  splitFailureMarks,
 } from "./record-format";
 import styles from "./index.module.less";
 
@@ -48,16 +43,13 @@ export const COLLECT_TAG_MAP: Record<string, { label: string; color: string; ico
   single_update: { label: "单片更新", color: "geekblue", icon: <VideoCameraOutlined /> },
 };
 
-function columnTitle(icon: React.ReactNode, label: string) {
-  return (
-    <span className={styles.columnTitle}>
-      {icon}
-      {label}
-    </span>
-  );
-}
-
 const tagStyle = { marginInlineEnd: 0 };
+
+export function triggerLabel(trigger: string, tag?: string) {
+  if (tag && COLLECT_TAG_MAP[tag]) return COLLECT_TAG_MAP[tag].label;
+  if (trigger && COLLECT_TRIGGER_MAP[trigger]) return COLLECT_TRIGGER_MAP[trigger].label;
+  return tag || trigger || "采集";
+}
 
 export function renderTriggerTag(trigger: string, tag?: string) {
   if (tag && COLLECT_TAG_MAP[tag]) {
@@ -139,29 +131,12 @@ export function renderHourTag(hour: number, record?: { trigger?: string; tag?: s
 
 export { resolveBatchStatus };
 
-export function MarkedFailureText({ text, failClassName }: { text: string; failClassName: string }) {
-  return (
-    <>
-      {splitFailureMarks(text).map((part, index) =>
-        part.fail ? (
-          <span key={index} className={failClassName}>{part.text}</span>
-        ) : (
-          part.text
-        ),
-      )}
-    </>
-  );
-}
-
 export function RecordStatusMark({
   status,
   scope,
-  hasPageFailed = false,
 }: {
   status: string;
   scope: "batch" | "source";
-  /** 仍在采集，但本轮已经有失败页。 */
-  hasPageFailed?: boolean;
 }) {
   const batch = scope === "batch";
   let icon = <ExclamationCircleOutlined />;
@@ -169,10 +144,6 @@ export function RecordStatusMark({
   let className = styles.detailMuted;
   switch (status) {
     case "success":
-      icon = <CheckCircleOutlined />;
-      label = batch ? "全部成功" : "成功";
-      className = styles.statusOk;
-      break;
     case "done":
       icon = <CheckCircleOutlined />;
       label = "成功";
@@ -185,23 +156,38 @@ export function RecordStatusMark({
       break;
     case "failed":
       icon = <CloseCircleOutlined />;
-      label = batch ? "采集失败" : "失败";
+      label = "失败";
       className = styles.detailFail;
       break;
     case "running":
       icon = <SyncOutlined spin />;
-      label = batch ? "执行中" : "采集中";
-      className = hasPageFailed ? styles.detailFail : styles.detailRun;
+      label = batch ? "进行中" : "采集中";
+      className = styles.detailRun;
       break;
     case "starting":
     case "waiting":
       icon = <ClockCircleOutlined />;
-      label = "排队中";
-      if (hasPageFailed) className = styles.detailFail;
+      label = "等待中";
+      className = styles.detailRun;
+      break;
+    case "paused":
+      icon = <PauseCircleOutlined />;
+      label = "限流中";
+      className = styles.detailWarn;
+      break;
+    case "stopping":
+      icon = <SyncOutlined spin />;
+      label = "停止中";
+      className = styles.detailWarn;
+      break;
+    case "sealing":
+      icon = <ClockCircleOutlined />;
+      label = "待检索";
+      className = styles.detailWarn;
       break;
     case "stopped":
       icon = <PauseCircleOutlined />;
-      label = batch ? "已终止" : "已停止";
+      label = "已停止";
       break;
     case "interrupted":
       icon = <WarningOutlined />;
@@ -217,6 +203,24 @@ export function RecordStatusMark({
       <span>{label}</span>
     </span>
   );
+}
+
+export function sourceActivityLabel(status: string): string | null {
+  switch (status) {
+    case "starting":
+    case "waiting":
+      return "等待中";
+    case "running":
+      return "采集中";
+    case "paused":
+      return "限流中";
+    case "stopping":
+      return "停止中";
+    case "sealing":
+      return "待检索";
+    default:
+      return null;
+  }
 }
 
 export function renderStatusBadge(status: string) {
@@ -235,52 +239,36 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
 
   return [
     {
-      title: columnTitle(<ClockCircleOutlined />, "时间"),
-      dataIndex: "startedAt",
-      key: "startedAt",
-      width: "max-content",
-      render: (val: string, record) => {
+      title: "采集时间",
+      key: "round",
+      render: (_, record) => {
         const effectiveMs =
           record.status === "running" && record.startedAt && record.durationMs <= 0
             ? Math.max(0, Date.now() - new Date(record.startedAt).getTime())
             : record.durationMs;
-        const started = formatStartedAt(val);
-        return (
-          <Tooltip title={started.full ? `开始时间：${started.full}` : undefined}>
-            <div className={styles.timeCell}>
-              <span className={styles.timePrimary}>{started.primary}</span>
-              <span className={styles.timeMeta}>耗时 {formatDuration(effectiveMs)}</span>
-            </div>
-          </Tooltip>
-        );
-      },
-    },
-    {
-      title: columnTitle(<CloudDownloadOutlined />, "采集方式"),
-      dataIndex: "trigger",
-      key: "trigger",
-      width: "max-content",
-      render: (trigger: string, record) => {
+        const started = formatStartedAt(record.startedAt);
         const films = singleFilmTargets(record);
         return (
-          <div className={`${styles.collectCell} ${films.length > 0 ? styles.collectStack : ""}`}>
-            <span className={styles.collectMain}>
-              {renderTriggerTag(trigger, record.tag)}
-            </span>
+          <Space orientation="vertical" size={0}>
+            <Tooltip title={started.full ? `开始于 ${started.full}` : undefined}>
+              <span>{started.primary}</span>
+            </Tooltip>
+            <Typography.Text type="secondary">
+              {triggerLabel(record.trigger, record.tag)}
+              {" · "}
+              {getHourLabel(record.hour, record)}
+              {" · "}
+              {formatDuration(effectiveMs)}
+            </Typography.Text>
             {films.length > 0 ? (
-              <span className={styles.filmTags}>
+              <Space size={4} wrap>
                 {films.map((film) => {
-                  const tag = (
-                    <Tag icon={<VideoCameraOutlined />} className={styles.filmTag} style={tagStyle}>
-                      {film.name}
-                    </Tag>
-                  );
+                  const tag = <Tag style={tagStyle}>{film.name}</Tag>;
                   if (film.mid <= 0) return <span key={film.name}>{tag}</span>;
                   return (
                     <Link
                       key={film.mid}
                       href={resolvePlayEntryPath(film.mid)}
-                      className={styles.filmTagLink}
                       title={film.name}
                       onClick={(event) => event.stopPropagation()}
                     >
@@ -288,35 +276,23 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
                     </Link>
                   );
                 })}
-              </span>
+              </Space>
             ) : null}
-          </div>
+          </Space>
         );
       },
     },
     {
-      title: columnTitle(<FieldTimeOutlined />, "采集跨度"),
-      key: "hour",
-      width: "max-content",
-      render: (_, record) => renderHourTag(record.hour, record),
+      title: "更新影片",
+      key: "films",
+      render: (_, record) => {
+        const count = Math.max(0, record.filmCount ?? 0);
+        return <span>{formatCollectFilms(count, record)}</span>;
+      },
     },
     {
-      title: columnTitle(<CheckCircleOutlined />, "状态"),
-      dataIndex: "status",
-      key: "status",
-      width: "max-content",
-      render: (_: string, record) => (
-        <RecordStatusMark
-          status={resolveBatchStatus(record)}
-          scope="batch"
-          hasPageFailed={(record.pageFailed ?? 0) > 0}
-        />
-      ),
-    },
-    {
-      title: columnTitle(<CloudServerOutlined />, "站点"),
-      key: "sources",
-      width: "max-content",
+      title: "结果",
+      key: "outcome",
       render: (_, record) => {
         let details: CollectRecordSourceDetail[] = [];
         if (record.detailJson) {
@@ -327,95 +303,44 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
           }
         }
         const stat = formatBatchSourceStat(record, details);
+        const status = resolveBatchStatus(record);
         const tone =
-          stat.tone === "ok" ? styles.statOk : stat.tone === "fail" ? styles.statFail : styles.statWarn;
-        const icon =
-          stat.tone === "ok" ? (
-            <CheckCircleOutlined />
-          ) : stat.tone === "fail" ? (
-            <CloseCircleOutlined />
-          ) : (
-            <ExclamationCircleOutlined />
-          );
+          status === "success" ? "success"
+          : status === "failed" || status === "interrupted" ? "error"
+          : status === "partial" ? "warning"
+          : status === "running" ? "processing"
+          : "default";
+        const label =
+          status === "success" ? "成功"
+          : status === "partial" ? "部分失败"
+          : status === "failed" ? "失败"
+          : status === "running" ? "进行中"
+          : status === "stopped" ? "已停止"
+          : status === "interrupted" ? "异常中断"
+          : status;
+        const siteLine = stat.secondary && stat.secondary !== label
+          ? `${stat.primary} · ${stat.secondary}`
+          : stat.primary;
         return (
-          <div className={styles.statCell}>
-            <span className={`${styles.statRow} ${tone}`}>
-              {icon}
-              {stat.primary}
-            </span>
-            {stat.secondary ? (
-              <span className={`${styles.statRow} ${styles.statTotal}`}>{stat.secondary}</span>
-            ) : null}
-          </div>
+          <Space orientation="vertical" size={0}>
+            <Tag color={tone} style={tagStyle}>{label}</Tag>
+            <Typography.Text type="secondary">{siteLine}</Typography.Text>
+          </Space>
         );
       },
     },
     {
-      title: columnTitle(<FileTextOutlined />, "拉取进度"),
-      key: "pages",
-      width: "max-content",
-      render: (_, record) => {
-        if (isSingleFilmRecord(record)) {
-          return (
-            <div className={styles.statCell}>
-              <span className={`${styles.statRow} ${styles.statTotal}`}>
-                <FileTextOutlined />
-                {record.status === "failed" ? "0/1 失败" : "1/1 完成"}
-              </span>
-            </div>
-          );
-        }
-
-        const pages = formatCollectPages(record);
-        return (
-          <div className={styles.statCell}>
-            <span className={`${styles.statRow} ${pages.alert ? styles.statFail : ""}`}>
-              {pages.alert ? <CloseCircleOutlined /> : <FileTextOutlined />}
-              {pages.primary}
-            </span>
-            {pages.secondary ? (
-              <span className={`${styles.statRow} ${styles.statTotal}`}>
-                <MarkedFailureText text={pages.secondary} failClassName={styles.metricFail} />
-              </span>
-            ) : null}
-          </div>
-        );
-      },
-    },
-    {
-      title: columnTitle(<VideoCameraOutlined />, "更新影片"),
-      dataIndex: "filmCount",
-      key: "filmCount",
-      width: "max-content",
-      render: (_, record) => {
-        const count = Math.max(0, record.filmCount ?? 0);
-        return (
-          <span className={`${styles.withIcon} ${count > 0 ? styles.filmCount : styles.filmCountEmpty}`}>
-            <VideoCameraOutlined />
-            {formatCollectFilms(count, record)}
-          </span>
-        );
-      },
-    },
-    {
-      title: columnTitle(<ReloadOutlined />, "操作"),
+      title: "操作",
       key: "action",
-      fixed: "right",
-      width: 112,
       render: (_, record) => {
         const isRetrying = retryingBatchIds.has(record.batchId);
         const canRetry = canRetryHistoryRecord(record);
         const filmRetry = record.trigger === "single_update";
         const retryLabel = filmRetry ? "重试该片" : "重试失败";
         return (
-          <span className={styles.detailActions}>
-            <Button
-              type="primary"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => onOpenDetail(record)}
-            >
-              详情
+          <Space size={0} onClick={(event) => event.stopPropagation()}>
+            <Button type="link" size="small" onClick={() => onOpenDetail(record)}>
+              查看
             </Button>
             {canRetry ? (
               <Popconfirm
@@ -423,18 +348,12 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
                 onConfirm={() => onRetryBatch(record)}
                 disabled={!canWrite || isRetrying}
               >
-                <Button
-                  danger
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  loading={isRetrying}
-                  disabled={!canWrite}
-                >
+                <Button type="link" size="small" danger loading={isRetrying} disabled={!canWrite}>
                   {retryLabel}
                 </Button>
               </Popconfirm>
             ) : null}
-          </span>
+          </Space>
         );
       },
     },

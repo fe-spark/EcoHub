@@ -112,7 +112,7 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 	}
 	status := model.CollectBatchStatus(done, partial, failed, stopped, interrupted, len(kept), pageSuccess, pageFailed)
 	errMsg := errSummary.String()
-	// 进行中的批次留给结算写终态。先改成终态后，检查点和结算都不再更新这条记录。
+	// 进行中的批次留给结算写终态。先改成终态后，结算不再更新这条记录。
 	if row.Status == model.CollectRecordStatusRunning {
 		status = row.Status
 		errMsg = row.ErrorMsg

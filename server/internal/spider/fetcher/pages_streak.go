@@ -95,10 +95,9 @@ func (s *fetchStreak) finish(ok bool) (stop bool, pause bool) {
 			s.stopping = true
 			stop = true
 		} else {
-			// 只暂停这一次。连续计数留给恢复后重新算。
+			// 只暂停这一次。暂停结束前继续停领，连续计数留给恢复后重新算。
 			s.paused = true
 			s.streak = 0
-			s.holdIntake = false
 			pause = true
 		}
 		s.cond.Broadcast()
@@ -108,6 +107,14 @@ func (s *fetchStreak) finish(ok bool) (stop bool, pause bool) {
 		log.Printf("[Spider] 站点 %s 连续 %d 页抓取失败，停止领新页，等待 %d 个在途请求", s.name, consecutiveFetchFailLimit, waiting)
 	}
 	return stop, pause
+}
+
+// resumeIntake 限流暂停已经结束，允许继续领页。
+func (s *fetchStreak) resumeIntake() {
+	s.mu.Lock()
+	s.holdIntake = false
+	s.cond.Broadcast()
+	s.mu.Unlock()
 }
 
 // abandon 这次请求被取消，不计入连续失败。返回 true 表示其余在途也已失败，应该中断。

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,18 +30,88 @@ func (s *CollectRecordService) GetHistoryList(q model.CollectRecordQuery) ([]mod
 	if err := attachSingleFilmNames(list); err != nil {
 		return nil, 0, err
 	}
+	attachLiveSourceStatus(list)
+	attachStoredLedgers(list)
 	return list, total, nil
 }
 
+// attachStoredLedgers 编号已经在表里、标记却还是关的，打开列表时补上，不再显示「清单写入中」。
+func attachStoredLedgers(list []model.CollectRecord) {
+	for i := range list {
+		if list[i].Ledger || list[i].FilmCount <= 0 || list[i].Status == model.CollectRecordStatusRunning {
+			continue
+		}
+		ready, err := repository.MarkCollectRecordLedgerIfPresent(list[i].BatchID)
+		if err != nil || !ready {
+			continue
+		}
+		list[i].Ledger = true
+	}
+}
+
+// attachLiveSourceStatus 进行中的记录用采集中心的实时状态盖住开跑时的「采集中」。
+// 只改这次响应，不写回数据库。结束后仍以账单明细为准。
+func attachLiveSourceStatus(list []model.CollectRecord) {
+	for i := range list {
+		if list[i].Status != model.CollectRecordStatusRunning || strings.TrimSpace(list[i].DetailJson) == "" {
+			continue
+		}
+		var details []model.CollectRecordSourceDetail
+		if err := json.Unmarshal([]byte(list[i].DetailJson), &details); err != nil {
+			continue
+		}
+		changed := false
+		for j := range details {
+			live, ok := spider.BatchSourceLiveDetail(list[i].BatchID, details[j].SourceID)
+			if !ok {
+				continue
+			}
+			if live.SourceName == "" {
+				live.SourceName = details[j].SourceName
+			}
+			if live.SourceID == "" {
+				live.SourceID = details[j].SourceID
+			}
+			if live.Hour == 0 {
+				live.Hour = details[j].Hour
+			}
+			details[j] = live
+			changed = true
+		}
+		if !changed {
+			continue
+		}
+		raw, err := json.Marshal(details)
+		if err != nil {
+			continue
+		}
+		list[i].DetailJson = string(raw)
+	}
+}
+
 func attachSingleFilmNames(list []model.CollectRecord) error {
-	ids := make([]int64, 0)
-	seen := make(map[int64]struct{})
-	parsed := make([][]int64, len(list))
+	batchIDs := make([]string, 0)
 	for i := range list {
 		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate {
 			continue
 		}
-		rowIDs := parseFilmIDs(list[i].FilmIDs)
+		batchIDs = append(batchIDs, list[i].BatchID)
+	}
+	midsByBatch, err := repository.ListCollectRecordMids(batchIDs)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	parsed := make([][]int64, len(list))
+	for i := range list {
+		rowIDs := midsByBatch[list[i].BatchID]
+		if len(rowIDs) == 0 {
+			continue
+		}
+		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate {
+			continue
+		}
 		parsed[i] = rowIDs
 		for _, id := range rowIDs {
 			if _, ok := seen[id]; ok {
@@ -84,21 +153,8 @@ func (s *CollectRecordService) ListOpenIncidents(now time.Time) ([]model.SourceI
 }
 
 // GetBatchFilms 分页获取某采集批次的影片清单。
-func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, error) {
-	q.Page, q.PageSize = normalizeFilmPage(q.Page, q.PageSize)
-	return repository.GetCollectRecordFilms(q)
-}
-
-func normalizeFilmPage(page, pageSize int) (int, int) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 20
-	} else if pageSize > 100 {
-		pageSize = 100
-	}
-	return page, pageSize
+func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) (model.CollectRecordFilmPage, error) {
+	return repository.QueryCollectRecordFilms(q)
 }
 
 // DeleteHistory 批量删除指定 ID 列表的历史记录
@@ -123,9 +179,13 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		return model.CollectBatchResult{}, errors.New("未找到对应采集记录")
 	}
 
-	// 单片更新没有时间窗口。按原影片重放，不能走小时采集。
+	// 单片更新没有时间窗口。按清单里的影片重放，不能走小时采集。
 	if rec.Trigger == model.CollectTriggerSingleUpdate {
-		ids := parseFilmIDs(rec.FilmIDs)
+		midsByBatch, err := repository.ListCollectRecordMids([]string{batchID})
+		if err != nil {
+			return model.CollectBatchResult{}, err
+		}
+		ids := midsByBatch[batchID]
 		if len(ids) == 0 {
 			return model.CollectBatchResult{}, errors.New("单片更新缺少影片编号，无法重试")
 		}
@@ -245,28 +305,6 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 	}
 	result.BatchID = firstID
 	return result, nil
-}
-
-func parseFilmIDs(raw string) []int64 {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]int64, 0, len(parts))
-	seen := make(map[int64]struct{}, len(parts))
-	for _, part := range parts {
-		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
-		if err != nil || id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
 }
 
 // parseRetryDetail 从批次明细取出失败站点、各站小时窗口和全部失败页（不截断，重试失败页要全部重采）。

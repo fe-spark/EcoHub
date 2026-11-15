@@ -99,7 +99,6 @@ type errBatch struct {
 func (b *errBatch) IsStandalone() bool                              { return false }
 func (b *errBatch) AddAffectedMIDs(*model.FilmSource, int, []int64) {}
 func (b *errBatch) AddNotifyMIDs(string, []int64)                   {}
-func (b *errBatch) TouchRecord()                                    {}
 func (b *errBatch) AddCategorySkip(string, int)                     {}
 func (b *errBatch) RecordSourceError(sourceID, reason string) {
 	b.mu.Lock()
@@ -268,6 +267,52 @@ func TestCollectPages_StopDuringPauseSettlesThePage(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("stopping during the pause never returned")
+	}
+}
+
+// 暂停的这段时间里，其他页工人不再领新页，结束后才会继续。
+func TestCollectPages_PauseBlocksOtherWorkers(t *testing.T) {
+	prev := fetchFailPause
+	fetchFailPause = 300 * time.Millisecond
+	t.Cleanup(func() { fetchFailPause = prev })
+
+	env := setupFetchTest(t, func(int) bool { return true })
+	config.CollectPageWorkers = 4
+	source := &model.FilmSource{Id: "pause_hold", Name: "暂停停领"}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{*source}, "q-pause-hold")
+
+	done := make(chan struct{})
+	go func() {
+		CollectPages(context.Background(), 100, nil, source, 24, nil)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snap, ok := progress.Snapshot(source.Id)
+		if ok && snap.Status == progress.StatusPaused {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("source did not reach the rate-limit pause")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	_, turnsAtPause := env.snapshot()
+	time.Sleep(150 * time.Millisecond)
+	_, turnsDuring := env.snapshot()
+	if turnsDuring != turnsAtPause {
+		t.Fatalf("requests continued during pause: %d -> %d", turnsAtPause, turnsDuring)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("collect did not resume after the pause")
+	}
+	_, turnsAfter := env.snapshot()
+	if turnsAfter <= turnsAtPause {
+		t.Fatalf("turns=%d, want new requests after the pause", turnsAfter)
 	}
 }
 

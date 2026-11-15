@@ -7,10 +7,12 @@ import {
   Space,
   Popconfirm,
   Pagination,
+  Segmented,
 } from "antd";
 import {
   DeleteOutlined,
   ClearOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -21,12 +23,13 @@ import { CollectHistoryRecord } from "./types";
 import { BatchDetailDrawer } from "./batch-detail-drawer";
 import { getHistoryColumns } from "./history-columns";
 import { RecordFilterBar, FilterParams } from "./record-filter-bar";
-import { useRecordStream } from "./use-record-stream";
 import styles from "./index.module.less";
 
 export default function CollectRecordPageView() {
   const [records, setRecords] = useState<CollectHistoryRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshSeconds, setRefreshSeconds] = useState(10);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [retryingBatchIds, setRetryingBatchIds] = useState<Set<string>>(() => new Set());
@@ -48,15 +51,26 @@ export default function CollectRecordPageView() {
 
   const pageRef = useRef(page);
   const paramsRef = useRef(params);
+  const requestSeq = useRef(0);
+  const activeRecordRef = useRef(activeRecord);
   pageRef.current = page;
   paramsRef.current = params;
+  activeRecordRef.current = activeRecord;
 
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
 
-  const getRecords = useCallback(async (p?: { current: number; pageSize: number }, overrideParams?: typeof params) => {
-    setSelectedRowKeys([]);
-    setLoading(true);
+  const getRecords = useCallback(async (
+    p?: { current: number; pageSize: number },
+    overrideParams?: typeof params,
+    options?: { silent?: boolean },
+  ) => {
+    const seq = ++requestSeq.current;
+    const silent = options?.silent === true;
+    if (!silent) {
+      setSelectedRowKeys([]);
+      setLoading(true);
+    }
     const pg = p || pageRef.current;
     const reqParams = overrideParams || paramsRef.current;
     try {
@@ -68,8 +82,30 @@ export default function CollectRecordPageView() {
           pageSize: pg.pageSize,
         },
       );
+      if (seq !== requestSeq.current) return;
       if (resp.code === 0 && resp.data) {
-        setRecords(resp.data.list || []);
+        const list = resp.data.list || [];
+        setRecords(list);
+        const openRecord = activeRecordRef.current;
+        const stillListed = openRecord ? list.some((item) => item.batchId === openRecord.batchId) : false;
+        setActiveRecord((current) => {
+          if (!current) return current;
+          return list.find((item) => item.batchId === current.batchId) ?? current;
+        });
+        if (openRecord && !stillListed) {
+          void ApiGet<{ list: CollectHistoryRecord[] }>("/manage/collect/history/list", {
+            batchId: openRecord.batchId,
+            current: 1,
+            pageSize: 1,
+          }).then((one) => {
+            if (seq !== requestSeq.current) return;
+            const row = one.code === 0 ? one.data?.list?.[0] : undefined;
+            setActiveRecord((current) => {
+              if (!current || current.batchId !== openRecord.batchId) return current;
+              return row ?? null;
+            });
+          });
+        }
         setPage((prev) => ({
           ...prev,
           current: resp.data.current || pg.current,
@@ -78,69 +114,40 @@ export default function CollectRecordPageView() {
         }));
       }
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
   }, []);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await getRecords(undefined, undefined, { silent: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [getRecords]);
 
   useEffect(() => {
     void getRecords();
   }, [getRecords]);
 
-  const currentBatchIds = useMemo(
-    () => records.map((r) => r.batchId).filter(Boolean),
-    [records],
-  );
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void getRecords(undefined, undefined, { silent: true });
+    }, refreshSeconds * 1000);
+    return () => window.clearInterval(timer);
+  }, [getRecords, refreshSeconds]);
 
-  useRecordStream(currentBatchIds, {
-    onProgress: (payload) => {
-      setRecords((prev) =>
-        prev.map((r) => {
-          if (r.batchId !== payload.batchId) return r;
-          const updated = {
-            ...r,
-            status: payload.status || r.status,
-            durationMs: payload.durationMs ?? r.durationMs,
-            filmCount: payload.filmCount ?? r.filmCount,
-            pageTotal: payload.pageTotal ?? r.pageTotal,
-            pageSuccess: payload.pageSuccess ?? r.pageSuccess,
-            pageFailed: payload.pageFailed ?? r.pageFailed,
-            successSources: payload.successSources ?? r.successSources,
-            failedSources: payload.failedSources ?? r.failedSources,
-            detailJson: payload.detailJson ?? r.detailJson,
-          };
-          if (activeRecord?.batchId === r.batchId) {
-            setActiveRecord(updated);
-          }
-          return updated;
-        }),
-      );
-    },
-    onFinished: (payload) => {
-      setRecords((prev) =>
-        prev.map((r) => {
-          if (r.batchId !== payload.batchId) return r;
-          const updated = {
-            ...r,
-            status: payload.status || r.status,
-            finishedAt: payload.finishedAt || r.finishedAt,
-            durationMs: payload.durationMs ?? r.durationMs,
-            filmCount: payload.filmCount ?? r.filmCount,
-            pageTotal: payload.pageTotal ?? r.pageTotal,
-            pageSuccess: payload.pageSuccess ?? r.pageSuccess,
-            pageFailed: payload.pageFailed ?? r.pageFailed,
-            successSources: payload.successSources ?? r.successSources,
-            failedSources: payload.failedSources ?? r.failedSources,
-            errorMsg: payload.errorMsg ?? r.errorMsg,
-            detailJson: payload.detailJson ?? r.detailJson,
-          };
-          if (activeRecord?.batchId === r.batchId) {
-            setActiveRecord(updated);
-          }
-          return updated;
-        }),
-      );
-    },
-  });
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void getRecords(undefined, undefined, { silent: true });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [getRecords]);
 
   const handleOpenDetail = useCallback((record: CollectHistoryRecord) => {
     setActiveRecord(record);
@@ -277,7 +284,7 @@ export default function CollectRecordPageView() {
     <div className={styles.pageBody}>
       <ManagePageHeader
         title="采集记录"
-        description="管理每次影视采集的批次运行状态与成果指标，查看各站点采集的影片更新明细。"
+        description="每次采集的账单。看这一轮更新了多少部、哪些站成功或失败，并打开影片清单。实时进度在采集中心。"
       />
 
       <RecordFilterBar
@@ -294,6 +301,15 @@ export default function CollectRecordPageView() {
           columns={columns}
           dataSource={records}
           rowKey="id"
+          rowClassName={(record) => (record.status === "running" ? styles.runningRow : "")}
+          onRow={(record) => ({
+            style: { cursor: "pointer" },
+            onClick: (event) => {
+              const target = event.target as HTMLElement | null;
+              if (target?.closest("a, button, input, .ant-popover, .ant-checkbox-wrapper")) return;
+              handleOpenDetail(record);
+            },
+          })}
           loading={loading}
           size="middle"
           pagination={false}
@@ -314,10 +330,23 @@ export default function CollectRecordPageView() {
               <div className={styles.tableTitle}>
                 采集记录列表
                 {selectedRowKeys.length > 0 && (
-                  <span className={styles.selectionCount}>（已选中 {selectedRowKeys.length} 项）</span>
+                  <span className={styles.selectionCount}>已选 {selectedRowKeys.length}</span>
                 )}
               </div>
-              <Space size={[8, 8]} wrap className={styles.tableActions}>
+              <Space wrap className={styles.tableActions}>
+                <Segmented
+                  value={refreshSeconds}
+                  onChange={(value) => setRefreshSeconds(Number(value))}
+                  options={[
+                    { label: "5 秒", value: 5 },
+                    { label: "10 秒", value: 10 },
+                    { label: "15 秒", value: 15 },
+                    { label: "30 秒", value: 30 },
+                  ]}
+                />
+                <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void handleRefresh()}>
+                  刷新
+                </Button>
                 {selectedRowKeys.length > 0 && (
                   <Popconfirm
                     title="删除选中记录？"

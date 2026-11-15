@@ -48,8 +48,8 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 		SourceID: srcB.Id, SourceName: srcB.Name, Status: progress.StatusRunning,
 		PageTotal: 4, SuccessCnt: 2, FilmsTotal: 1,
 	})
-	if missed := batch.flushRecordSync(); len(missed) > 0 {
-		t.Fatalf("flush missed %+v", missed)
+	if missed := batch.saveRecordFilms(batch.collectRecordFilms()); len(missed) > 0 {
+		t.Fatalf("save films missed %+v", missed)
 	}
 
 	err = PauseActiveBatchRecords(srcA.Id, func() error {
@@ -64,8 +64,8 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if missed := batch.writeCheckpoint(map[string][]int64{srcA.Id: {9}, srcB.Id: {2}}); len(missed) > 0 {
-		t.Fatalf("checkpoint missed %+v", missed)
+	if missed := batch.saveRecordFilms(map[string][]int64{srcA.Id: {9}, srcB.Id: {2}}); len(missed) > 0 {
+		t.Fatalf("save films missed %+v", missed)
 	}
 	running, err := repository.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
@@ -74,11 +74,11 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	if running.Status != model.CollectRecordStatusRunning || running.SourceCount != 1 {
 		t.Fatalf("running status=%s sources=%d", running.Status, running.SourceCount)
 	}
-	if strings.Contains(running.DetailJson, srcA.Id) || !strings.Contains(running.DetailJson, srcB.Id) {
-		t.Fatalf("checkpoint detail=%s", running.DetailJson)
+	if !strings.Contains(running.DetailJson, `"status":"running"`) || strings.Contains(running.DetailJson, `"filmsTotal":1`) {
+		t.Fatalf("running detail should stay the start roster, detail=%s", running.DetailJson)
 	}
 	if _, total, err := repository.GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batch.batchID, SourceID: srcA.Id, Page: 1, PageSize: 10,
+		BatchID: batch.batchID, SourceID: srcA.Id, PageSize: 10,
 	}); err != nil || total != 0 {
 		t.Fatalf("deleted source films total=%d err=%v", total, err)
 	}

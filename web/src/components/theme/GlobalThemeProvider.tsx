@@ -118,11 +118,18 @@ export default function GlobalThemeProvider({
   const providerTheme = useMemo(() => {
     // 禁止在 SSR/CSR 分支读 window/getComputedStyle，否则 token/hash 不一致会触发 hydration mismatch
     const algorithm = isDark ? theme.darkAlgorithm : theme.defaultAlgorithm;
+    // 悬停是中性浅底，选中是主色。两者不要共用同一种灰。
+    const itemHoverBg = isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(15, 23, 42, 0.05)";
+    const itemSelectedBg = isDark ? "rgba(250, 140, 22, 0.28)" : "#ffe7ba";
+    const itemSelectedHoverBg = isDark ? "rgba(250, 140, 22, 0.4)" : "#ffd591";
     const baseToken = isDark
       ? {
           colorPrimary: DEFAULT_PRIMARY_COLOR,
           colorBorderSecondary: "rgba(255, 255, 255, 0.16)",
           colorBorder: "rgba(255, 255, 255, 0.22)",
+          controlItemBgHover: itemHoverBg,
+          controlItemBgActive: itemSelectedBg,
+          controlItemBgActiveHover: itemSelectedHoverBg,
           fontFamily,
         }
       : {
@@ -140,6 +147,9 @@ export default function GlobalThemeProvider({
           colorText: "#0f172a",
           colorTextSecondary: "#475569",
           colorTextTertiary: "#94a3b8",
+          controlItemBgHover: itemHoverBg,
+          controlItemBgActive: itemSelectedBg,
+          controlItemBgActiveHover: itemSelectedHoverBg,
           borderRadius: 10,
           fontFamily,
         };
@@ -180,19 +190,25 @@ export default function GlobalThemeProvider({
           headerBg: isDark ? "#1b1d24" : "#f8fafc",
           colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.16)" : "#e2e8f0",
           borderColor: isDark ? "rgba(255, 255, 255, 0.22)" : "#cbd5e1",
-          rowHoverBg: solidOn(
-            designToken.colorBgContainer,
-            isDark ? "rgba(250, 140, 22, 0.1)" : "rgba(250, 140, 22, 0.05)",
-          ),
-          rowSelectedBg: solidOn(designToken.colorBgContainer, designToken.controlItemBgActive),
-          rowSelectedHoverBg: solidOn(designToken.colorBgContainer, designToken.controlItemBgActiveHover),
+          rowHoverBg: solidOn(designToken.colorBgContainer, itemHoverBg),
+          rowSelectedBg: solidOn(designToken.colorBgContainer, itemSelectedBg),
+          rowSelectedHoverBg: solidOn(designToken.colorBgContainer, itemSelectedHoverBg),
+        },
+        Segmented: {
+          trackBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#eef2f6",
+          itemColor: isDark ? "rgba(255, 255, 255, 0.65)" : "#475569",
+          itemHoverBg: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(15, 23, 42, 0.04)",
+          itemHoverColor: isDark ? "#ffffff" : "#0f172a",
+          itemSelectedBg: isDark ? "#2e3138" : "#ffffff",
+          itemSelectedColor: isDark ? "#ffa940" : "#d46b08",
+          itemActiveBg: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(15, 23, 42, 0.06)",
         },
         Menu: {
           itemBg: "transparent",
-          itemSelectedBg: isDark ? "rgba(250, 140, 22, 0.28)" : "#ffe7ba",
+          itemSelectedBg,
           itemSelectedColor: isDark ? "#ffa940" : "#d46b08",
-          itemHoverBg: isDark ? "rgba(250, 140, 22, 0.12)" : "rgba(250, 140, 22, 0.12)",
-          itemHoverColor: DEFAULT_PRIMARY_COLOR,
+          itemHoverBg,
+          itemHoverColor: designToken.colorText,
         },
       },
     };

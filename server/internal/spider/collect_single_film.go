@@ -152,8 +152,7 @@ func CollectSingleFilm(ids string) {
 	defer batchCtx.close()
 
 	if err := batchCtx.recordStart(); err != nil {
-		log.Printf("[CollectSingleFilm] 初始采集记录写入失败 batchID=%s: %v", batchCtx.batchID, err)
-		return
+		log.Printf("[CollectSingleFilm] 初始采集记录写入失败，采集继续 batchID=%s: %v", batchCtx.batchID, err)
 	}
 
 	var wg sync.WaitGroup

@@ -43,7 +43,29 @@ func UnstoredCollectFilms(err error) map[string][]int64 {
 	return nil
 }
 
-var collectFilmChunkSize = 1000
+var collectFilmChunkSize = 2000
+
+func collectRecordFilmRows(batchID string, itemsBySource map[string][]int64) []model.CollectRecordFilmItem {
+	now := time.Now()
+	var records []model.CollectRecordFilmItem
+	for sourceID, mids := range itemsBySource {
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID == "" {
+			continue
+		}
+		for _, mid := range mids {
+			if mid > 0 {
+				records = append(records, model.CollectRecordFilmItem{
+					BatchID:   batchID,
+					SourceID:  sourceID,
+					Mid:       mid,
+					CreatedAt: now,
+				})
+			}
+		}
+	}
+	return records
+}
 
 var insertCollectFilmChunk = func(chunk []model.CollectRecordFilmItem) error {
 	return db.Mdb.Clauses(clause.OnConflict{
@@ -71,24 +93,7 @@ func BatchSaveCollectRecordFilms(batchID string, itemsBySource map[string][]int6
 	if len(itemsBySource) == 0 {
 		return nil
 	}
-	now := time.Now()
-	var records []model.CollectRecordFilmItem
-	for sourceID, mids := range itemsBySource {
-		sourceID = strings.TrimSpace(sourceID)
-		if sourceID == "" {
-			continue
-		}
-		for _, mid := range mids {
-			if mid > 0 {
-				records = append(records, model.CollectRecordFilmItem{
-					BatchID:   batchID,
-					SourceID:  sourceID,
-					Mid:       mid,
-					CreatedAt: now,
-				})
-			}
-		}
-	}
+	records := collectRecordFilmRows(batchID, itemsBySource)
 	if len(records) == 0 {
 		return nil
 	}
@@ -118,36 +123,114 @@ func BatchSaveCollectRecordFilms(batchID string, itemsBySource map[string][]int6
 	return nil
 }
 
-func collectRecordFilmScope(batchID, sourceID, keyword string) *gorm.DB {
-	tx := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID)
-	if sourceID != "" {
-		tx = tx.Where("source_id = ?", sourceID)
+// SaveCollectRecordFilmsChunked 按几千行一批写入清单。每一批单独提交，任一批失败就停止。
+func SaveCollectRecordFilmsChunked(batchID string, itemsBySource map[string][]int64) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
 	}
-	if keyword != "" {
-		pattern := "%" + escapeLikePattern(keyword) + "%"
-		tx = tx.Where("mid IN (SELECT mid FROM "+model.TableFilmIndex+" WHERE name LIKE ?)", pattern)
+	records := collectRecordFilmRows(batchID, itemsBySource)
+	if len(records) == 0 {
+		return nil
 	}
-	return tx
+	batchSize := collectFilmChunkSize
+	if batchSize < 1 {
+		batchSize = 2000
+	}
+	for start := 0; start < len(records); start += batchSize {
+		end := start + batchSize
+		if end > len(records) {
+			end = len(records)
+		}
+		if err := insertCollectFilmChunk(records[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// GetCollectRecordFilms 分页查询某批次的影片列表并回填片名。
-// 无关键词时总数取采集记录上的清单行数：全部站点是各站 FilmsTotal 之和，单站用该站的 FilmsTotal。
-// 有关键词时才按片名过滤并统计过滤结果。列表按主键取当前页。
-func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, error) {
+// DeleteCollectRecordFilms 删掉这一批已经写入的清单。结算失败时用来清半截数据。
+func DeleteCollectRecordFilms(batchID string) error {
 	if db.Mdb == nil {
-		return nil, 0, errors.New("数据库未连接")
+		return errors.New("数据库未连接")
+	}
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return errors.New("批次号不能为空")
+	}
+	return db.Mdb.Where("batch_id = ?", batchID).Delete(&model.CollectRecordFilmItem{}).Error
+}
+
+// ListCollectRecordMids 按批次取出清单里的影片编号，编号升序且不重复。
+func ListCollectRecordMids(batchIDs []string) (map[string][]int64, error) {
+	out := make(map[string][]int64)
+	if db.Mdb == nil || len(batchIDs) == 0 {
+		return out, nil
+	}
+	ids := make([]string, 0, len(batchIDs))
+	seen := make(map[string]struct{}, len(batchIDs))
+	for _, id := range batchIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []model.CollectRecordFilmItem
+	if err := db.Mdb.Select("batch_id", "mid").
+		Where("batch_id IN ?", ids).
+		Order("mid ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	have := make(map[string]map[int64]struct{}, len(ids))
+	for _, row := range rows {
+		if row.Mid <= 0 {
+			continue
+		}
+		set := have[row.BatchID]
+		if set == nil {
+			set = map[int64]struct{}{}
+			have[row.BatchID] = set
+		}
+		if _, ok := set[row.Mid]; ok {
+			continue
+		}
+		set[row.Mid] = struct{}{}
+		out[row.BatchID] = append(out[row.BatchID], row.Mid)
+	}
+	return out, nil
+}
+
+// GetCollectRecordFilms 按游标取一页，并只给这一页补片名。
+// 没搜片名时，总数用记录上的部数，按清单编号翻页。
+// 搜片名时只在这一批里按名字开头匹配，总数是实际命中行数。
+func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecordFilm, int64, error) {
+	page, err := QueryCollectRecordFilms(q)
+	return page.List, page.Total, err
+}
+
+func QueryCollectRecordFilms(q model.CollectRecordFilmQuery) (model.CollectRecordFilmPage, error) {
+	page := model.CollectRecordFilmPage{List: []model.CollectRecordFilm{}}
+	if db.Mdb == nil {
+		return page, errors.New("数据库未连接")
 	}
 	batchID := strings.TrimSpace(q.BatchID)
 	sourceID := strings.TrimSpace(q.SourceID)
 	if batchID == "" {
-		return nil, 0, errors.New("批次号不能为空")
+		return page, errors.New("批次号不能为空")
+	}
+	ready, err := collectRecordHasLedger(batchID)
+	if err != nil || !ready {
+		return page, err
 	}
 	keyword := strings.TrimSpace(q.Keyword)
-
-	page := q.Page
-	if page < 1 {
-		page = 1
-	}
 	pageSize := q.PageSize
 	if pageSize < 1 {
 		pageSize = 20
@@ -155,25 +238,31 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 		pageSize = 100
 	}
 
-	var total int64
-	var err error
-	if keyword == "" {
-		total, err = collectRecordListedFilmTotal(batchID, sourceID)
+	var tx *gorm.DB
+	if keyword != "" {
+		return searchCollectRecordFilms(batchID, sourceID, keyword, q, pageSize)
 	} else {
-		err = collectRecordFilmScope(batchID, sourceID, keyword).Count(&total).Error
-	}
-	if err != nil {
-		return nil, 0, err
-	}
-	if total == 0 {
-		return []model.CollectRecordFilm{}, 0, nil
+		total, err := collectRecordListedFilmTotal(batchID, sourceID)
+		if err != nil || total == 0 {
+			return page, err
+		}
+		page.Total = total
+		tx = filmQuery(batchID, sourceID)
+		if q.AfterID > 0 {
+			tx = tx.Where("id > ?", q.AfterID)
+		}
 	}
 
 	var rows []model.CollectRecordFilmItem
-	if err := collectRecordFilmScope(batchID, sourceID, keyword).Order("id ASC").
-		Offset((page - 1) * pageSize).Limit(pageSize).
-		Find(&rows).Error; err != nil {
-		return nil, 0, err
+	if err := tx.Order("id ASC").Limit(pageSize + 1).Find(&rows).Error; err != nil {
+		return page, err
+	}
+	if len(rows) > pageSize {
+		page.HasMore = true
+		rows = rows[:pageSize]
+	}
+	if len(rows) > 0 {
+		page.NextAfterID = rows[len(rows)-1].ID
 	}
 	mids := make([]int64, 0, len(rows))
 	for _, row := range rows {
@@ -181,29 +270,138 @@ func GetCollectRecordFilms(q model.CollectRecordFilmQuery) ([]model.CollectRecor
 	}
 	names, err := FilmNamesByIDs(mids)
 	if err != nil {
-		return nil, 0, err
+		return page, err
 	}
-	out := make([]model.CollectRecordFilm, 0, len(rows))
+	page.List = make([]model.CollectRecordFilm, 0, len(rows))
 	for _, row := range rows {
 		name := names[row.Mid]
 		if name == "" {
 			name = fmt.Sprintf("影片 #%d", row.Mid)
 		}
-		out = append(out, model.CollectRecordFilm{Mid: row.Mid, Name: name, SourceID: row.SourceID})
+		page.List = append(page.List, model.CollectRecordFilm{
+			ID: row.ID, Mid: row.Mid, Name: name, SourceID: row.SourceID,
+		})
 	}
-	return out, total, nil
+	return page, nil
+}
+
+func searchCollectRecordFilms(batchID, sourceID, keyword string, q model.CollectRecordFilmQuery, pageSize int) (model.CollectRecordFilmPage, error) {
+	page := model.CollectRecordFilmPage{List: []model.CollectRecordFilm{}}
+	pattern := escapeLikePattern(keyword) + "%"
+	base := func() *gorm.DB {
+		tx := db.Mdb.Table(model.TableCollectRecordFilm+" AS f").
+			Joins("INNER JOIN "+model.TableFilmIndex+" AS i ON i.mid = f.mid").
+			Where("f.batch_id = ? AND i.name LIKE ? ESCAPE '\\'", batchID, pattern)
+		if sourceID != "" {
+			tx = tx.Where("f.source_id = ?", sourceID)
+		}
+		return tx
+	}
+	var total int64
+	if err := base().Count(&total).Error; err != nil {
+		return page, err
+	}
+	page.Total = total
+	if total == 0 {
+		return page, nil
+	}
+	listQ := base().Select("f.id AS id, f.mid AS mid, f.source_id AS source_id, i.name AS name")
+	if q.AfterName != "" || q.AfterMid > 0 || q.AfterID > 0 {
+		listQ = listQ.Where(
+			"i.name > ? OR (i.name = ? AND f.mid > ?) OR (i.name = ? AND f.mid = ? AND f.id > ?)",
+			q.AfterName, q.AfterName, q.AfterMid, q.AfterName, q.AfterMid, q.AfterID,
+		)
+	}
+	var rows []struct {
+		ID       uint
+		Mid      int64
+		SourceID string `gorm:"column:source_id"`
+		Name     string
+	}
+	if err := listQ.Order("i.name ASC, f.mid ASC, f.id ASC").Limit(pageSize + 1).Find(&rows).Error; err != nil {
+		return page, err
+	}
+	if len(rows) > pageSize {
+		page.HasMore = true
+		rows = rows[:pageSize]
+	}
+	if len(rows) > 0 {
+		last := rows[len(rows)-1]
+		page.NextAfterID = last.ID
+		page.NextAfterName = last.Name
+		page.NextAfterMid = last.Mid
+	}
+	page.List = make([]model.CollectRecordFilm, 0, len(rows))
+	for _, row := range rows {
+		name := strings.TrimSpace(row.Name)
+		if name == "" {
+			name = fmt.Sprintf("影片 #%d", row.Mid)
+		}
+		page.List = append(page.List, model.CollectRecordFilm{
+			ID: row.ID, Mid: row.Mid, Name: name, SourceID: row.SourceID,
+		})
+	}
+	return page, nil
+}
+
+func filmQuery(batchID, sourceID string) *gorm.DB {
+	tx := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID)
+	if sourceID != "" {
+		tx = tx.Where("source_id = ?", sourceID)
+	}
+	return tx
+}
+
+func collectRecordHasLedger(batchID string) (bool, error) {
+	var rec model.CollectRecord
+	err := db.Mdb.Select("ledger").Where("batch_id = ?", batchID).Take(&rec).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if rec.Ledger {
+		return true, nil
+	}
+	return MarkCollectRecordLedgerIfPresent(batchID)
+}
+
+// MarkCollectRecordLedgerIfPresent 终态已记下部数，但清单标记没写上。表里已经有编号就补上。
+func MarkCollectRecordLedgerIfPresent(batchID string) (bool, error) {
+	if db.Mdb == nil {
+		return false, nil
+	}
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return false, nil
+	}
+	var n int64
+	if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID).Limit(1).Count(&n).Error; err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if err := db.Mdb.Model(&model.CollectRecord{}).Where("batch_id = ? AND ledger = ?", batchID, false).Update("ledger", true).Error; err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // collectRecordListedFilmTotal 全部站点用记录上的清单行数，单站用明细里的行数。不扫清单表。
 // 记录不存在或该站不在明细里则总数为 0。明细损坏直接返回错误。
 func collectRecordListedFilmTotal(batchID, sourceID string) (int64, error) {
 	var rec model.CollectRecord
-	err := db.Mdb.Select("film_count", "detail_json").Where("batch_id = ?", batchID).Take(&rec).Error
+	err := db.Mdb.Select("ledger", "film_count", "detail_json").Where("batch_id = ?", batchID).Take(&rec).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
+	}
+	if !rec.Ledger {
+		return 0, nil
 	}
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
@@ -280,12 +478,4 @@ func applyStoredFilmTotals(raw string, bySource map[string]int) (string, error) 
 		return "", err
 	}
 	return string(out), nil
-}
-
-// escapeLikePattern 转义 LIKE 通配符，避免用户输入的 % 和 _ 被当成模式。
-func escapeLikePattern(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "%", "\\%")
-	s = strings.ReplaceAll(s, "_", "\\_")
-	return s
 }

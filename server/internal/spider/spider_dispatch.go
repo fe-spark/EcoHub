@@ -114,13 +114,7 @@ func runSourcesWithLimitCore(claim CollectClaim, h int, tag, trigger string) {
 	startedAt := time.Now()
 	batchCtx := newCollectBatchContext(trigger, tag, sources, startedAt).withClaim(claim).withHour(h)
 	if err := batchCtx.recordStart(); err != nil {
-		log.Printf("[%s] 初始采集记录写入失败 batchID=%s: %v", tag, batchCtx.batchID, err)
-		endCollectQueue()
-		for _, s := range sources {
-			abandonQueuedCollectSource(s, batchCtx)
-		}
-		batchCtx.close()
-		return
+		log.Printf("[%s] 初始采集记录写入失败，采集继续 batchID=%s: %v", tag, batchCtx.batchID, err)
 	}
 	runPreparedBatch(batchCtx, h, tag, true)
 }

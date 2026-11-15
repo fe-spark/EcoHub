@@ -6,14 +6,12 @@ import {
   CloudServerOutlined,
   VideoCameraOutlined,
   ClockCircleOutlined,
-  FileTextOutlined,
   FieldTimeOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { CollectHistoryRecord, CollectRecordSourceDetail } from "./types";
 import { formatDuration } from "./record-format";
 import {
-  isSingleFilmRecord,
   renderHourTag,
   renderTriggerTag,
   resolveBatchStatus,
@@ -38,18 +36,6 @@ interface OverviewMetric {
   hint?: React.ReactNode;
   tone?: MetricTone;
   onClick?: () => void;
-}
-
-interface PageCell {
-  key: string;
-  label: string;
-  value: string;
-  tone?: MetricTone;
-}
-
-interface PageBoard {
-  tag?: React.ReactNode;
-  cells: PageCell[];
 }
 
 function isBatchOngoing(status: string | undefined): boolean {
@@ -103,28 +89,6 @@ function MetricCell({ metric }: { metric: OverviewMetric }) {
   );
 }
 
-function PageBoardView({ board }: { board: PageBoard }) {
-  return (
-    <div className={styles.pageBoard}>
-      <div className={styles.metricLabel}>
-        <span className={styles.metricLabelMain}>
-          <FileTextOutlined className={styles.metricIcon} />
-          <span>拉取页码</span>
-        </span>
-        {board.tag}
-      </div>
-      <div className={styles.pageBoardGrid} data-count={board.cells.length}>
-        {board.cells.map((cell) => (
-          <div key={cell.key} className={styles.pageCell}>
-            <span className={styles.pageCellLabel}>{cell.label}</span>
-            <span className={`${styles.metricValue} ${toneClass(cell.tone)}`.trim()}>{cell.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function buildSiteMetric(
   record: CollectHistoryRecord,
   abnormalCount: number,
@@ -149,13 +113,13 @@ function buildSiteMetric(
   let hint = "";
 
   if (isOngoing) {
-    tag = statusTag((record.pageFailed ?? 0) > 0 ? "error" : "processing", "采集中");
+    tag = statusTag("processing", "进行中");
     hint = "尚未结算";
   } else if (isOk) {
-    tag = statusTag("success", "全部成功");
+    tag = statusTag("success", "成功");
     hint = "全部完成";
   } else if (isFailed) {
-    tag = statusTag("error", "采集失败");
+    tag = statusTag("error", "失败");
     hint = "未能完成采集";
   } else if (isInterrupted) {
     tag = statusTag("error", "异常中断");
@@ -182,126 +146,26 @@ function buildSiteMetric(
   };
 }
 
-function buildPageView(record: CollectHistoryRecord): { summary?: OverviewMetric; board?: PageBoard } {
-  if (isSingleFilmRecord(record)) {
-    return {
-      summary: {
-        key: "pages",
-        label: "拉取页码",
-        icon: <FileTextOutlined className={styles.metricIcon} />,
-        tag: statusTag("purple", "单片重放"),
-        value: "1",
-        unit: "部影片",
-        hint: "单条记录重试",
-      },
-    };
-  }
-
-  const succ = Math.max(0, record.pageSuccess ?? 0);
-  const total = Math.max(0, record.pageTotal ?? 0);
-  const fail = Math.max(0, record.pageFailed ?? 0);
-  const missed = total > 0 ? Math.max(0, total - succ - fail) : 0;
-  const isOngoing = isBatchOngoing(record.status);
-  const isStopped = record.status === "stopped";
-  const isInterrupted = record.status === "interrupted";
-  const isFailed = record.status === "failed";
-  const percent = total > 0 ? Math.min(100, Math.floor((succ / total) * 100)) : 0;
-
-  if (isOngoing && fail === 0) {
-    return {
-      summary: {
-        key: "pages",
-        label: "拉取页码",
-        icon: <FileTextOutlined className={styles.metricIcon} />,
-        tag: statusTag("processing", "拉取中"),
-        value: formatNum(succ),
-        unit: total > 0 ? `/ ${formatNum(total)} 页` : "页",
-        hint: total > 0 ? `进度 ${percent}%` : "正在探测页码",
-      },
-    };
-  }
-
-  if (isFailed && succ === 0 && fail === 0) {
-    return {
-      summary: {
-        key: "pages",
-        label: "拉取页码",
-        icon: <FileTextOutlined className={styles.metricIcon} />,
-        tag: statusTag("error", "拉取失败"),
-        value: "0",
-        unit: total > 0 ? `/ ${formatNum(total)} 页` : "页",
-        hint: total === 0 ? "探测失败" : undefined,
-        tone: "danger",
-      },
-    };
-  }
-
-  const needsBoard = isOngoing || isStopped || isInterrupted || fail > 0 || missed > 0;
-  if (!needsBoard) {
-    return {
-      summary: {
-        key: "pages",
-        label: "拉取页码",
-        icon: <FileTextOutlined className={styles.metricIcon} />,
-        tag: statusTag("success", "全部完成"),
-        value: formatNum(total > 0 ? total : succ),
-        unit: "页",
-        hint: "全部拉取成功",
-        tone: "success",
-      },
-    };
-  }
-
-  const cells: PageCell[] = [{ key: "succ", label: isOngoing ? "已拉" : "成功", value: formatNum(succ) }];
-  if (fail > 0) cells.push({ key: "fail", label: "失败", value: formatNum(fail), tone: "danger" });
-  if (!isOngoing && missed > 0) cells.push({ key: "miss", label: "未抓", value: formatNum(missed), tone: "warning" });
-  if (total > 0) cells.push({ key: "total", label: "共", value: formatNum(total) });
-  if (isOngoing && total > 0) cells.push({ key: "progress", label: "进度", value: `${percent}%` });
-
-  let tag: React.ReactNode = null;
-  if (isOngoing) tag = statusTag(fail > 0 ? "error" : "processing", "拉取中");
-  else if (isInterrupted) tag = statusTag("error", "异常中断");
-  else if (isStopped) tag = statusTag("default", "已停止");
-  else if (fail > 0) tag = statusTag("warning", "有失败");
-  else tag = statusTag("warning", "未抓完");
-
-  if (cells.length < 2) {
-    return {
-      summary: {
-        key: "pages",
-        label: "拉取页码",
-        icon: <FileTextOutlined className={styles.metricIcon} />,
-        tag,
-        value: cells[0]?.value ?? "0",
-        unit: "页",
-        tone: cells[0]?.tone,
-      },
-    };
-  }
-
-  return { board: { tag, cells } };
-}
-
 function buildFilmMetric(record: CollectHistoryRecord, onOpenModal: () => void): OverviewMetric {
   const count = Math.max(0, record.filmCount ?? 0);
   const isOngoing = isBatchOngoing(record.status);
-  const openHint = (
+  const canOpen = record.ledger === true;
+  const openHint = canOpen ? (
     <a className={styles.metricHintLink} onClick={onOpenModal}>
       查看清单
     </a>
-  );
+  ) : null;
 
   if (isOngoing) {
     return {
       key: "films",
       label: "更新影片",
       icon: <VideoCameraOutlined className={styles.metricIcon} />,
-      tag: statusTag("processing", count > 0 ? "有更新" : "采集中"),
+      tag: statusTag("processing", count > 0 ? "有更新" : "进行中"),
       value: count > 0 ? `+${formatNum(count)}` : "0",
       unit: "部",
-      hint: count > 0 ? openHint : "更新中",
+      hint: "更新中",
       tone: count > 0 ? undefined : "muted",
-      onClick: count > 0 ? onOpenModal : undefined,
     };
   }
 
@@ -314,18 +178,19 @@ function buildFilmMetric(record: CollectHistoryRecord, onOpenModal: () => void):
       value: `+${formatNum(count)}`,
       unit: "部",
       hint: openHint,
-      onClick: onOpenModal,
+      onClick: canOpen ? onOpenModal : undefined,
     };
   }
 
+  const unsettled = record.status === "interrupted";
   return {
     key: "films",
     label: "更新影片",
     icon: <VideoCameraOutlined className={styles.metricIcon} />,
-    tag: statusTag("default", "无更新"),
+    tag: statusTag("default", unsettled ? "未结算" : "无更新"),
     value: "0",
     unit: "部",
-    hint: "无影片更新",
+    hint: unsettled ? "未结算" : "无影片更新",
     tone: "muted",
   };
 }
@@ -338,12 +203,8 @@ export function BatchOverviewCards({ record, details, onOpenFilmsModal }: BatchO
   const doneSources = details.filter((d) => d.status === "done" || d.status === "success");
   const abnormalCount = failedSources.length + partialSources.length;
   const isOngoing = isBatchOngoing(record.status);
-  const page = buildPageView(record);
-  const metrics = [
-    buildSiteMetric(record, abnormalCount, stoppedSources, doneSources, interruptedSources.length),
-    page.summary,
-    buildFilmMetric(record, onOpenFilmsModal),
-  ].filter((metric): metric is OverviewMetric => metric != null);
+  const siteMetric = buildSiteMetric(record, abnormalCount, stoppedSources, doneSources, interruptedSources.length);
+  const metrics = isOngoing ? [siteMetric] : [buildFilmMetric(record, onOpenFilmsModal), siteMetric];
 
   const effectiveMs =
     record.durationMs > 0
@@ -390,7 +251,6 @@ export function BatchOverviewCards({ record, details, onOpenFilmsModal }: BatchO
           <MetricCell key={metric.key} metric={metric} />
         ))}
       </div>
-      {page.board ? <PageBoardView board={page.board} /> : null}
     </div>
   );
 }

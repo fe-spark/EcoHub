@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -9,8 +8,6 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
-	"server/internal/spider"
-	"server/internal/spider/progress"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,6 +28,7 @@ func (h *CollectRecordHandler) HistoryList(c *gin.Context) {
 		PageSize:    pageSize,
 		Trigger:     trigger,
 		Status:      status,
+		BatchID:     strings.TrimSpace(c.Query("batchId")),
 		UpdatedOnly: c.DefaultQuery("updated", "") == "1",
 		FailedOnly:  c.DefaultQuery("failed", "") == "1",
 	}
@@ -86,11 +84,10 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 		return
 	}
 	sourceID := strings.TrimSpace(c.Query("sourceId"))
-	page, _ := strconv.Atoi(c.DefaultQuery("current", c.DefaultQuery("page", "1")))
+	afterID, _ := strconv.ParseUint(c.Query("afterId"), 10, 64)
+	afterMid, _ := strconv.ParseInt(c.Query("afterMid"), 10, 64)
+	afterName := c.Query("afterName")
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-	if page < 1 {
-		page = 1
-	}
 	if pageSize < 1 {
 		pageSize = 20
 	} else if pageSize > 100 {
@@ -98,28 +95,32 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 	}
 	keyword := strings.TrimSpace(c.Query("keyword"))
 
-	q := model.CollectRecordFilmQuery{
-		BatchID:  batchID,
-		SourceID: sourceID,
-		Page:     page,
-		PageSize: pageSize,
-		Keyword:  keyword,
-	}
-
-	list, total, err := service.CollectRecordSvc.GetBatchFilms(q)
+	page, err := service.CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
+		BatchID:   batchID,
+		SourceID:  sourceID,
+		AfterID:   uint(afterID),
+		AfterName: afterName,
+		AfterMid:  afterMid,
+		PageSize:  pageSize,
+		Keyword:   keyword,
+	})
 	if err != nil {
 		dto.Failed("获取批次影片清单失败: "+err.Error(), c)
 		return
 	}
-	if list == nil {
-		list = []model.CollectRecordFilm{}
+	if page.List == nil {
+		page.List = []model.CollectRecordFilm{}
 	}
 
 	dto.Success(gin.H{
-		"list":     list,
-		"total":    total,
-		"current":  q.Page,
-		"pageSize": q.PageSize,
+		"list":          page.List,
+		"total":         page.Total,
+		"pageSize":      pageSize,
+		"afterId":       afterID,
+		"nextAfterId":   page.NextAfterID,
+		"nextAfterName": page.NextAfterName,
+		"nextAfterMid":  page.NextAfterMid,
+		"hasMore":       page.HasMore,
 	}, "获取批次影片清单成功", c)
 }
 
@@ -166,83 +167,4 @@ func (h *CollectRecordHandler) HistoryRetry(c *gin.Context) {
 		return
 	}
 	dto.Success(result, "重试任务已开启", c)
-}
-
-// HistoryStream 当前页采集任务实时进度与状态 SSE 长连接推送
-func (h *CollectRecordHandler) HistoryStream(c *gin.Context) {
-	rawBatchIDs := strings.TrimSpace(c.Query("batchIds"))
-	if rawBatchIDs == "" {
-		dto.Failed("缺少批次标识参数", c)
-		return
-	}
-	parts := strings.Split(rawBatchIDs, ",")
-	batchIDSet := make(map[string]struct{}, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			batchIDSet[p] = struct{}{}
-		}
-	}
-	if len(batchIDSet) == 0 {
-		dto.Failed("批次列表为空", c)
-		return
-	}
-
-	stream, ok := openSSE(c)
-	if !ok {
-		return
-	}
-
-	ctx := c.Request.Context()
-	progressCh := progress.Subscribe(ctx)
-	completionCh := spider.SubscribeRecordCompletion(ctx)
-
-	initialLive := spider.GetActiveBatchesLiveProgress(batchIDSet)
-	runningIDs := make([]string, 0, len(initialLive))
-	for _, l := range initialLive {
-		runningIDs = append(runningIDs, l.BatchID)
-	}
-	if err := stream.SendEvent("record_snapshot", gin.H{"batchIds": runningIDs}); err != nil && errors.Is(err, errSSEWrite) {
-		return
-	}
-	for _, l := range initialLive {
-		if err := stream.SendEvent("record_progress", l); err != nil && errors.Is(err, errSSEWrite) {
-			return
-		}
-	}
-
-	heartbeat := time.NewTicker(15 * time.Second)
-	defer heartbeat.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case _, ok := <-progressCh:
-			if !ok {
-				return
-			}
-			liveList := spider.GetActiveBatchesLiveProgress(batchIDSet)
-			for _, l := range liveList {
-				if err := stream.SendEvent("record_progress", l); err != nil && errors.Is(err, errSSEWrite) {
-					return
-				}
-			}
-		case comp, ok := <-completionCh:
-			if !ok {
-				return
-			}
-			if comp != nil {
-				if _, ok := batchIDSet[comp.BatchID]; ok {
-					if err := stream.SendEvent("record_finished", comp); err != nil && errors.Is(err, errSSEWrite) {
-						return
-					}
-				}
-			}
-		case <-heartbeat.C:
-			if err := stream.Comment("ping"); err != nil {
-				return
-			}
-		}
-	}
 }

@@ -31,8 +31,6 @@ type Batch interface {
 	AddNotifyMIDs(sourceID string, mids []int64)
 	// RecordSourceError 记录站点采集错误原因。
 	RecordSourceError(sourceID, reason string)
-	// TouchRecord 把已写入的影片和页数落到运行中的采集记录。
-	TouchRecord()
 	// AddCategorySkip 累计分类未映射而没有入库的部数。页请求仍算成功。
 	AddCategorySkip(sourceID string, unmapped int)
 }
@@ -64,57 +62,6 @@ func shouldLogProgress(done, total int) bool {
 
 func shouldLogFailure(failed int) bool {
 	return failed == 1 || failed%failureLogStep == 0
-}
-
-// pageFetchQueue 待抓页。全部落地或采集被取消后关闭。
-type pageFetchQueue struct {
-	mu     sync.Mutex
-	ch     chan int
-	closed bool
-	left   int
-}
-
-func newPageFetchQueue(pages []int) *pageFetchQueue {
-	queue := &pageFetchQueue{
-		ch:   make(chan int, len(pages)),
-		left: len(pages),
-	}
-	for _, pg := range pages {
-		queue.ch <- pg
-	}
-	return queue
-}
-
-func (q *pageFetchQueue) finished() bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.closed
-}
-
-func (q *pageFetchQueue) close() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.closeLocked()
-}
-
-func (q *pageFetchQueue) closeLocked() {
-	if q.closed {
-		return
-	}
-	q.closed = true
-	close(q.ch)
-}
-
-func (q *pageFetchQueue) done() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.closed {
-		return
-	}
-	q.left--
-	if q.left <= 0 {
-		q.closeLocked()
-	}
 }
 
 func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s *model.FilmSource, h int, batch Batch) (bool, int, int, []int, error) {
@@ -208,8 +155,24 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	stopForStreak := func() {
 		giveUp(fmt.Sprintf("暂停后仍连续 %d 页抓取失败，已中断采集", consecutiveFetchFailLimit))
 	}
-	// pauseForStreak 连续失败后整站停 2 分钟再继续。只此一次，暂停期间不占页并发和取数名额。
+	// clearPause 把限流暂停还原成采集中。调用方再决定是继续、失败还是停止。
+	clearPause := func() {
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+			if cur.Status == progress.StatusPaused {
+				cur.Status = progress.StatusRunning
+			}
+		})
+	}
+	// pauseForStreak 连续失败后整站停 2 分钟再继续。只此一次。
+	// 暂停期间其他工人不能再拿页，因此不占页并发和取数名额。
+	// 页已经取完，或采集被取消时，不等这 2 分钟。
 	pauseForStreak := func() bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		if pages.finished() {
+			return true
+		}
 		log.Printf("[Spider] 站点 %s 连续 %d 页抓取失败，暂停 %s 后继续", s.Name, consecutiveFetchFailLimit, fetchFailPause)
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping {
@@ -221,20 +184,20 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():
-			progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
-				if cur.Status == progress.StatusPaused {
-					cur.Status = progress.StatusRunning
-				}
-			})
+			clearPause()
 			return false
+		case <-pages.drained:
+			if ctx.Err() != nil {
+				clearPause()
+				return false
+			}
+			log.Printf("[Spider] 站点 %s 没有剩余页，结束暂停", s.Name)
+			clearPause()
+			return true
 		case <-timer.C:
 		}
 		log.Printf("[Spider] 站点 %s 暂停结束，继续采集", s.Name)
-		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
-			if cur.Status == progress.StatusPaused {
-				cur.Status = progress.StatusRunning
-			}
-		})
+		clearPause()
 		return true
 	}
 	markStopped := func() {
@@ -254,9 +217,6 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		if shouldLogFailure(snapshot.failed) {
 			syslog.Warnf("[Spider] 站点 %s 采集失败累计=%d，最近失败 page=%d stage=%s err=%v", s.Name, snapshot.failed, page, stage, err)
 		}
-		if batch != nil {
-			batch.TouchRecord()
-		}
 		logProgress(false)
 	}
 	recordPageSuccess := func(page int, notifyMIDs, affectedMIDs []int64) {
@@ -270,9 +230,6 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 			cur.Failed = snapshot.failed
 			cur.Current = snapshot.success + snapshot.failed
 		})
-		if batch != nil {
-			batch.TouchRecord()
-		}
 		logProgress(false)
 	}
 
@@ -356,6 +313,9 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 							markStopped()
 							return
 						}
+						if pause {
+							streak.resumeIntake()
+						}
 						continue
 					}
 					stop, pause := streak.finish(true)
@@ -367,6 +327,9 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 						pages.done()
 						markStopped()
 						return
+					}
+					if pause {
+						streak.resumeIntake()
 					}
 					pages.done()
 					page := pg
