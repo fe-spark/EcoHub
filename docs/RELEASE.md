@@ -1,10 +1,15 @@
-测试版 **v3.0.6-beta.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.3`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.5。v3.0.6-beta.2 的镜像没有构建成功，请使用本标签。
+测试版 **v3.0.6-beta.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.5。
 
 ### 升级说明
 
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.3`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
 - **本版启动时清空采集记录**：删除 `collect_records`、`collect_record_films` 后按新结构重建。旧的采集记录不会保留。影片库不在这两张表里，不受影响。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.0.6-beta.4 更新内容
+
+- **采集记录**：这一轮还在进行时，已经失败、完成或停止的站与采集中心一致。失败且没有成功页显示「采集失败」，有成功页显示「部分失败」。
+- **探总页**：单次请求单独计时。超时或失败后再试 2 次，间隔 2 秒。三次都失败才把该站记成采集失败。
 
 ### v3.0.6-beta.3 更新内容
 
