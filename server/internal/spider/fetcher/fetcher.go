@@ -22,8 +22,10 @@ import (
 const (
 	// singlePageFetchTimeout 单页抓取最大超时，避免深分页慢查询长期占着取页名额。
 	singlePageFetchTimeout = 15 * time.Second
-	// pageFetchRetries 一页抓取失败后按采集间隔重试的次数。用完仍失败才记失败页。
+	// pageFetchRetries 一页或总页探测失败后的重试次数。用完仍失败才记失败。
 	pageFetchRetries = 2
+	// pageCountRetryGap 总页探测两次尝试之间的间隔。紧挨着再请求，超时往往还会超时。
+	pageCountRetryGap = 2 * time.Second
 )
 
 // Deps 采集编排层注入的外部能力；全部为必需项，缺项会在调用处 panic。
@@ -168,11 +170,23 @@ func callHeldFetch(ctx context.Context, call func(context.Context) error) error 
 }
 
 func GetPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
-	pageCount, err := fetchPageCountOnce(ctx, s, r)
-	if err == nil || ctx.Err() != nil {
-		return pageCount, err
+	name := ""
+	if s != nil {
+		name = s.Name
 	}
-	return fetchPageCountOnce(ctx, s, r)
+	pageCount, err := fetchPageCountOnce(ctx, s, r)
+	for attempt := 1; attempt <= pageFetchRetries && err != nil && ctx.Err() == nil; attempt++ {
+		log.Printf("[Spider] 站点 %s 总页探测失败，重试 %d/%d: %v", name, attempt, pageFetchRetries, err)
+		timer := time.NewTimer(pageCountRetryGap)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return 0, ctx.Err()
+		case <-timer.C:
+		}
+		pageCount, err = fetchPageCountOnce(ctx, s, r)
+	}
+	return pageCount, err
 }
 
 func fetchPageCountOnce(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {

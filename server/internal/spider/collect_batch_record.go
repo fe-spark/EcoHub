@@ -14,7 +14,8 @@ import (
 )
 
 // BatchSourceLiveDetail 这一批里该站此刻要展示的明细。只认本批的进度代次。
-// 还在采集、限流、停止或待检索时，用实时进度的页数。已经结束则用本批记下的部数和错误。
+// 采集中、限流、停止、待检索，以及本批已经失败、完成或停止的站，都用实时进度。
+// 部数和已记下的错误留在本批快照里。别的一轮占用了这个站时，不再用它的进度。
 func BatchSourceLiveDetail(batchID, sourceID string) (model.CollectRecordSourceDetail, bool) {
 	batchID = strings.TrimSpace(batchID)
 	sourceID = strings.TrimSpace(sourceID)
@@ -35,28 +36,39 @@ func BatchSourceLiveDetail(batchID, sourceID string) (model.CollectRecordSourceD
 	}
 	batch.mu.Lock()
 	stored, hasStored := batch.sourceSnapshots[sourceID]
+	errMsg := batch.sourceErrors[sourceID]
 	batch.mu.Unlock()
 	if epoch, ok := batch.progressEpoch(sourceID); ok && progress.Epoch(sourceID) == epoch {
-		if snap, ok := progress.Snapshot(sourceID); ok && snap.Status != "" {
-			if isLiveActivityStatus(snap.Status) {
-				detail := stored
-				if !hasStored {
-					detail.SourceID = sourceID
-				}
-				detail.Status = snap.Status
-				detail.PageTotal = snap.Total
-				detail.PageCurrent = snap.Current
-				detail.SuccessCnt = snap.Success
-				detail.FailedCnt = snap.Failed
-				detail.FailedPages = append([]int(nil), snap.FailedPages...)
-				return detail, true
+		if snap, ok := progress.Snapshot(sourceID); ok && isLiveRecordStatus(snap.Status) {
+			detail := stored
+			if !hasStored {
+				detail.SourceID = sourceID
 			}
+			detail.Status = snap.Status
+			detail.PageTotal = snap.Total
+			detail.PageCurrent = snap.Current
+			detail.SuccessCnt = snap.Success
+			detail.FailedCnt = snap.Failed
+			if len(snap.FailedPages) > 0 {
+				detail.FailedPages = append([]int(nil), snap.FailedPages...)
+			}
+			if detail.Error == "" {
+				detail.Error = errMsg
+			}
+			return detail, true
 		}
 	}
 	if hasStored && stored.Status != "" {
+		if stored.Error == "" {
+			stored.Error = errMsg
+		}
 		return stored, true
 	}
 	return model.CollectRecordSourceDetail{}, false
+}
+
+func isLiveRecordStatus(status string) bool {
+	return isLiveActivityStatus(status) || progress.IsTerminalStatus(status)
 }
 
 func isLiveActivityStatus(status string) bool {

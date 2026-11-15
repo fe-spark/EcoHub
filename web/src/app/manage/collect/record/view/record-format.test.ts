@@ -4,7 +4,17 @@ import {
   formatBatchSourceStat,
   formatCollectFilms,
   formatSourceWindow,
+  liveSourceStatusLabel,
 } from "./record-format";
+
+test("进行中的站和采集中心用同一套终态", () => {
+  assert.equal(liveSourceStatusLabel("running"), "采集中");
+  assert.equal(liveSourceStatusLabel("failed", 0, 1), "采集失败");
+  assert.equal(liveSourceStatusLabel("failed", 2, 1), "部分失败");
+  assert.equal(liveSourceStatusLabel("done", 3, 1), "部分完成");
+  assert.equal(liveSourceStatusLabel("done", 3, 0), "采集完成");
+  assert.equal(liveSourceStatusLabel("stopped"), "已停止");
+});
 
 test("站点窗口和批次不同才单独显示", () => {
   assert.equal(formatSourceWindow(48, 24), "48 小时");

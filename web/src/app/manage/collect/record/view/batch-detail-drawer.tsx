@@ -20,7 +20,7 @@ import {
   CollectRecordSourceDetail,
   canRetryHistorySource,
 } from "./types";
-import { formatCollectFilms, formatSourceWindow } from "./record-format";
+import { formatCollectFilms, formatSourceWindow, liveSourceStatusLabel } from "./record-format";
 import {
   RecordStatusMark,
   resolveBatchStatus,
@@ -132,7 +132,11 @@ export function BatchDetailDrawer({
               const isSourceInterrupted =
                 record.status === "interrupted" && (item.status === "running" || item.status === "starting");
               const shownStatus = isSourceInterrupted ? "interrupted" : item.status;
+              const batchRunning = record.status === "running";
               const activity = sourceActivityLabel(shownStatus);
+              const liveLabel = batchRunning
+                ? liveSourceStatusLabel(shownStatus, item.successCnt, item.failedCnt)
+                : null;
               const retry = (item.status === "failed" || item.status === "partial") && canRetryHistorySource(record);
               const canOpenFilms = record.ledger === true;
               const windowLabel = formatSourceWindow(item.hour, record.hour);
@@ -154,6 +158,9 @@ export function BatchDetailDrawer({
                       <RecordStatusMark
                         status={shownStatus}
                         scope="source"
+                        live={batchRunning}
+                        successCnt={item.successCnt}
+                        failedCnt={item.failedCnt}
                       />
                       {!activity && retry && (
                         <Popconfirm
@@ -179,11 +186,28 @@ export function BatchDetailDrawer({
                     </div>
                   </div>
 
-                  {activity ? (
-                    <div className={styles.sourceCardCollecting}>
-                      {shownStatus === "paused" || shownStatus === "sealing" ? null : <SyncOutlined spin />}
-                      <span>{activity}</span>
-                    </div>
+                  {liveLabel || activity ? (
+                    <>
+                      <div className={styles.sourceCardCollecting}>
+                        {activity && shownStatus !== "paused" && shownStatus !== "sealing" ? <SyncOutlined spin /> : null}
+                        <span>{liveLabel || activity}</span>
+                      </div>
+                      {batchRunning && !activity && (item.error?.trim() || (item.failedPages?.length ?? 0) > 0) && (
+                        <button
+                          type="button"
+                          className={styles.sourceCardError}
+                          onClick={() => setErrorSource(item)}
+                        >
+                          <span className={styles.sourceCardErrorIcon}>
+                            <CloseCircleOutlined />
+                          </span>
+                          <span className={styles.sourceCardErrorText}>
+                            {item.error?.trim() || `共 ${item.failedPages?.length ?? 0} 页失败`}
+                          </span>
+                          <span className={styles.sourceCardErrorAction}>查看</span>
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <>
                       <div className={styles.sourceCardStats}>

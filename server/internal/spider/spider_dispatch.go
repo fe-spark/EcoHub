@@ -193,7 +193,7 @@ func probeSourcePageCount(s *model.FilmSource, h int, trigger string, batchCtx *
 	if resolved == 0 {
 		return errors.New("采集时长不能为 0")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stopCheck := time.NewTicker(200 * time.Millisecond)
 	defer stopCheck.Stop()
@@ -220,7 +220,6 @@ func probeSourcePageCount(s *model.FilmSource, h int, trigger string, batchCtx *
 		return nil
 	}
 	if err != nil {
-		batchCtx.markSourceFailed(s.Id)
 		return err
 	}
 	if !batchCtx.setSourcePageTotal(s.Id, pageCount) {
@@ -243,9 +242,7 @@ func ProbeSitePageTotal(s *model.FilmSource) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return fetcher.GetPageCountWithRetry(ctx, s, r)
+	return fetcher.GetPageCountWithRetry(context.Background(), s, r)
 }
 
 func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batchCtx *collectBatchContext) {

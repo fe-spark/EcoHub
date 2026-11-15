@@ -25,6 +25,7 @@ import {
   formatCollectFilms,
   formatDuration,
   formatStartedAt,
+  liveSourceStatusLabel,
 } from "./record-format";
 import styles from "./index.module.less";
 
@@ -134,9 +135,15 @@ export { resolveBatchStatus };
 export function RecordStatusMark({
   status,
   scope,
+  live = false,
+  successCnt = 0,
+  failedCnt = 0,
 }: {
   status: string;
   scope: "batch" | "source";
+  live?: boolean;
+  successCnt?: number;
+  failedCnt?: number;
 }) {
   const batch = scope === "batch";
   let icon = <ExclamationCircleOutlined />;
@@ -196,6 +203,15 @@ export function RecordStatusMark({
       break;
     default:
       break;
+  }
+  if (live && !batch) {
+    const liveLabel = liveSourceStatusLabel(status, successCnt, failedCnt);
+    if (liveLabel) {
+      label = liveLabel;
+      if (liveLabel === "部分失败" || liveLabel === "部分完成" || liveLabel === "采集失败") {
+        className = liveLabel === "采集失败" ? styles.detailFail : styles.detailWarn;
+      }
+    }
   }
   return (
     <span className={`${styles.withIcon} ${className}`}>

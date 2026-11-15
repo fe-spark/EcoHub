@@ -21,6 +21,34 @@ export function formatSourceWindow(hour: number | undefined, batchHour: number):
   return hour > 0 ? `${hour} 小时` : "";
 }
 
+// 进行中的采集记录，单站用词和采集中心一致。批次结束后仍用账单用词。
+export function liveSourceStatusLabel(status: string, success = 0, failed = 0): string | null {
+  switch (status) {
+    case "running":
+      return "采集中";
+    case "starting":
+    case "waiting":
+      return "等待中";
+    case "paused":
+      return "限流中";
+    case "stopping":
+      return "停止中";
+    case "sealing":
+      return "待检索";
+    case "failed":
+      return success > 0 ? "部分失败" : "采集失败";
+    case "partial":
+      return "部分失败";
+    case "done":
+    case "success":
+      return failed > 0 ? "部分完成" : "采集完成";
+    case "stopped":
+      return "已停止";
+    default:
+      return null;
+  }
+}
+
 export function formatCollectFilms(count: number, record?: { status?: string }) {
   if (count <= 0) {
     const status = record?.status ?? "";
