@@ -7,7 +7,10 @@ export type CollectRecordSourceStatus =
   | "running"
   | "partial"
   | "starting"
-  | "waiting";
+  | "waiting"
+  | "paused"
+  | "stopping"
+  | "sealing";
 
 export interface CollectRecordSourceDetail {
   sourceId: string;
