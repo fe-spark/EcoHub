@@ -1,4 +1,19 @@
-Test release **v3.0.6-beta.4**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.5 below.
+Test release **v3.0.6-beta.5**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.5 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- **The first upgrade from v3.0.5 onto this test line clears collect records on startup**: `collect_records` and `collect_record_films` are dropped and recreated. A database that already ran v3.0.6-beta.2 or later is not cleared again. The film catalog is not stored in these tables and is left unchanged.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.6-beta.5 changes
+
+- **Rate limit**: after 20 page fetches fail in a row, that source's in-flight requests are cancelled at once, it pauses for 2 minutes, then those cancelled pages are fetched again. Pages that already failed are not retried. Another 20 consecutive failures after the pause interrupts the round.
+- **Last collect pages**: the card shows only the last completed page count stored by the server. It no longer follows the current round's success count while a collect is running. After the round finishes, the page loads the latest count from the source list.
+
+### v3.0.6-beta.4
+
+Test release **v3.0.6-beta.4**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4`.
 
 ### Upgrade notes
 

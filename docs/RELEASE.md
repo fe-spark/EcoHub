@@ -1,4 +1,19 @@
-测试版 **v3.0.6-beta.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.5。
+测试版 **v3.0.6-beta.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.5。
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
+- **从 v3.0.5 第一次升到这条测试线时，启动会清空采集记录**：删除 `collect_records`、`collect_record_films` 后按新结构重建。已经跑过 v3.0.6-beta.2 及之后测试版的库不会再清一次。影片库不在这两张表里，不受影响。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.0.6-beta.5 更新内容
+
+- **限流**：同一站点连续 20 页抓取失败后，立刻取消该站正在进行的请求，暂停 2 分钟，再从这些被取消的页继续。已经失败的页不重抓。暂停后再连续失败 20 页，这一轮中断。
+- **上次采集页**：只显示服务端记下的上次采集页。采集进行中不再跟着本轮成功页变化。这一轮结束后再向列表要最新的上次采集页。
+
+### v3.0.6-beta.4
+
+测试版 **v3.0.6-beta.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4`。
 
 ### 升级说明
 
