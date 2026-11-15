@@ -1,3 +1,21 @@
+测试版 **v3.0.6-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.5。
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.2`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
+- **本版启动时清空采集记录**：删除 `collect_records`、`collect_record_films` 后按新结构重建。旧的采集记录不会保留。影片库不在这两张表里，不受影响。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.0.6-beta.2 更新内容
+
+- **连续失败暂停**：同一站点连续 20 页抓取失败时，整站暂停约 2 分钟，再继续还没抓完的页。暂停期间不再取新页。队列里已经没有页时，不等满 2 分钟。采集中心在这段时间显示限流中。
+- **采集记录不挡写库**：翻页和检索封口不再写采集记录。新建采集记录失败不会取消这次采集。
+- **结束后保存全部影片编号**：这一轮结束并写完影片后，把本轮更新过的影片编号全部写入采集记录，包含全量采集。每 2000 条写一批。某一批失败就删掉本轮已写入的编号，记录保持进行中。进程在写入中途重启时，按已经写入的行数补齐数量。
+- **采集记录页**：表头为采集时间、更新影片、结果、操作。可按 5、10、15、30 秒自动刷新，默认 10 秒，也可以手动刷新。页面不可见时暂停刷新，重新可见时立刻刷新。进行中的站点状态与采集中心一致。结束后以已保存的记录为准。
+- **更新影片**：只在本批次里按片名开头检索，上一页、下一页按游标翻页，并显示本批次里的匹配总数。
+
+---
+
 正式版 **v3.0.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

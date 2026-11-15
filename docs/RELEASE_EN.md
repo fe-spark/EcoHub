@@ -1,3 +1,21 @@
+Test release **v3.0.6-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.2`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.5 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.6-beta.2` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- **This release clears collect records on startup**: `collect_records` and `collect_record_films` are dropped and recreated. Previous collect records are not kept. The film catalog is not stored in these tables and is left unchanged.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.6-beta.2 changes
+
+- **Pause after consecutive failures**: when one source fails to fetch 20 pages in a row, that source pauses for about 2 minutes and then continues the pages that are still unfinished. It does not take new pages while paused. If the queue is already empty, it does not wait out the full 2 minutes. The collect center shows rate-limited during that pause.
+- **Collect records do not block writes**: page fetches and search-index sealing no longer write the collect record. A failure to open the record does not cancel the collect.
+- **Store every updated film id after the round ends**: after the round finishes writing films, every film id updated in that round is stored on the collect record, including a full collect. Rows are written 2000 at a time. If one batch fails, the ids already written for that round are deleted and the record stays running. If the process restarts mid-write, the stored row count is used.
+- **Collect record page**: columns are collect time, updated films, result, and actions. Auto-refresh can be 5, 10, 15, or 30 seconds, default 10, and a manual refresh is available. Refresh pauses while the page is hidden and runs immediately when it becomes visible again. While a record is running, each source status matches the collect center. After it finishes, the saved record is shown.
+- **Updated films**: search matches the start of the title inside this batch only. Previous and next pages use a cursor, and the total is the number of matches in this batch.
+
+---
+
 Release **v3.0.5**, image `ghcr.io/fe-spark/ecohub:v3.0.5` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
