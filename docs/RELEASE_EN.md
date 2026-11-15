@@ -1,10 +1,14 @@
-Test release **v3.0.6-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.2`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.5 below.
+Test release **v3.0.6-beta.3**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.3`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.5 below. The v3.0.6-beta.2 image did not build; use this tag.
 
 ### Upgrade notes
 
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.6-beta.2` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.6-beta.3` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
 - **This release clears collect records on startup**: `collect_records` and `collect_record_films` are dropped and recreated. Previous collect records are not kept. The film catalog is not stored in these tables and is left unchanged.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.6-beta.3 changes
+
+- **Collect record page**: source status now includes rate-limited, stopping, and waiting for search, so the frontend build completes.
 
 ### v3.0.6-beta.2 changes
 
