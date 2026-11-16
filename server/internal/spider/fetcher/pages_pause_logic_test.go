@@ -80,6 +80,45 @@ func TestFetchStreak_PauseThenSecondRoundStops(t *testing.T) {
 	}
 }
 
+// 暂停决定之后、恢复领页之前返回的失败要入账，但不能占恢复后的 20 次额度。
+func TestFetchStreak_ResumeClearsCountedFailures(t *testing.T) {
+	streak, stopWait := newFetchStreak(context.Background(), "额度站")
+	defer stopWait()
+	for i := 0; i < consecutiveFetchFailLimit-1; i++ {
+		stop, pause := failOne(t, streak)
+		if stop || pause {
+			t.Fatalf("failure %d: stop=%v pause=%v", i+1, stop, pause)
+		}
+	}
+	const early = 5
+	for i := 0; i < early; i++ {
+		if !streak.tryBegin() {
+			t.Fatal("could not start an in-flight request")
+		}
+	}
+	stop, pause := streak.finish(false)
+	if stop || !pause {
+		t.Fatalf("pause trigger: stop=%v pause=%v", stop, pause)
+	}
+	for i := 0; i < early; i++ {
+		stop, pause = streak.finish(false)
+		if stop || pause {
+			t.Fatalf("in-flight before resume: stop=%v pause=%v", stop, pause)
+		}
+	}
+	streak.resumeIntake()
+	for i := 0; i < consecutiveFetchFailLimit-1; i++ {
+		stop, pause = failOne(t, streak)
+		if stop || pause {
+			t.Fatalf("after resume %d: stop=%v pause=%v", i+1, stop, pause)
+		}
+	}
+	stop, pause = failOne(t, streak)
+	if !stop || pause {
+		t.Fatalf("20th after resume: stop=%v pause=%v", stop, pause)
+	}
+}
+
 // 第 20 页失败时，另一页还在途也立刻暂停。这一页随后成功，也不能在暂停期间重新领页。
 func TestFetchStreak_InFlightSuccessDoesNotReopenPause(t *testing.T) {
 	streak, stopWait := newFetchStreak(context.Background(), "限流站")

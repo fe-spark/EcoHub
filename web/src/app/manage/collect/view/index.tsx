@@ -45,6 +45,7 @@ export default function CollectManagePageView() {
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
+  const collectListRequestRef = useRef(0);
   const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
   const [searchIndexProgress, setSearchIndexProgress] = useState<SearchIndexProgress>();
 
@@ -60,10 +61,11 @@ export default function CollectManagePageView() {
 
   const getCollectList = useCallback(
     async (createdId?: string) => {
+      const requestId = ++collectListRequestRef.current;
       setLoading(true);
       try {
         const resp = await ApiGet("/manage/collect/list");
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || requestId !== collectListRequestRef.current) return;
         if (resp.code === 0) {
           const rawData = Array.isArray(resp.data) ? resp.data : [];
           setSiteList((current) => {
@@ -109,7 +111,7 @@ export default function CollectManagePageView() {
       } catch {
         // 拦截器已处理
       } finally {
-        if (mountedRef.current) setLoading(false);
+        if (mountedRef.current && requestId === collectListRequestRef.current) setLoading(false);
       }
     },
     [message, pendingCategoryStatusRef, pendingSortRef],

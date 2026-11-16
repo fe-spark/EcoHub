@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   Table,
   Button,
-  Space,
   Popconfirm,
   Pagination,
   Segmented,
@@ -313,7 +312,8 @@ export default function CollectRecordPageView() {
           loading={loading}
           size="middle"
           pagination={false}
-          scroll={{ x: "max-content" }}
+          tableLayout="fixed"
+          scroll={{ x: 1360 }}
           rowSelection={
             canWrite
               ? {
@@ -327,23 +327,26 @@ export default function CollectRecordPageView() {
           }
           title={() => (
             <div className={styles.tableHeader}>
-              <div className={styles.tableTitle}>
-                采集记录列表
-                {selectedRowKeys.length > 0 && (
+              {selectedRowKeys.length > 0 ? (
+                <div className={styles.tableTitle}>
                   <span className={styles.selectionCount}>已选 {selectedRowKeys.length}</span>
-                )}
-              </div>
-              <Space wrap className={styles.tableActions}>
-                <Segmented
-                  value={refreshSeconds}
-                  onChange={(value) => setRefreshSeconds(Number(value))}
-                  options={[
-                    { label: "5 秒", value: 5 },
-                    { label: "10 秒", value: 10 },
-                    { label: "15 秒", value: 15 },
-                    { label: "30 秒", value: 30 },
-                  ]}
-                />
+                </div>
+              ) : null}
+              <div className={styles.tableActions}>
+                <div className={styles.refreshGroup}>
+                  <span className={styles.autoRefresh}>自动刷新</span>
+                  <Segmented
+                    size="small"
+                    value={refreshSeconds}
+                    onChange={(value) => setRefreshSeconds(Number(value))}
+                    options={[
+                      { label: "5 秒", value: 5 },
+                      { label: "10 秒", value: 10 },
+                      { label: "15 秒", value: 15 },
+                      { label: "30 秒", value: 30 },
+                    ]}
+                  />
+                </div>
                 <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void handleRefresh()}>
                   刷新
                 </Button>
@@ -370,11 +373,11 @@ export default function CollectRecordPageView() {
                   onConfirm={handleClearAll}
                   disabled={!canWrite}
                 >
-                  <Button danger icon={<ClearOutlined />} disabled={!canWrite}>
+                  <Button icon={<ClearOutlined />} disabled={!canWrite}>
                     清空历史
                   </Button>
                 </Popconfirm>
-              </Space>
+              </div>
             </div>
           )}
           footer={() => (

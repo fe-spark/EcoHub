@@ -100,8 +100,10 @@ func (s *fetchStreak) finish(ok bool) (stop bool, pause bool) {
 }
 
 // resumeIntake 限流暂停已经结束，允许继续领页。
+// 暂停前已经返回的失败留在失败列表里，但不占恢复后的 20 次额度。
 func (s *fetchStreak) resumeIntake() {
 	s.mu.Lock()
+	s.streak = 0
 	s.pausing = false
 	s.holdIntake = false
 	s.cond.Broadcast()

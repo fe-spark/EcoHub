@@ -16,7 +16,7 @@
 .tableHeader {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 12px;
 }
@@ -32,18 +32,16 @@
 }
 
 .refreshGroup {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px 4px 12px;
-  border-radius: 8px;
-  background: var(--ant-color-fill-quaternary);
 }
 
 .autoRefresh {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
-  color: var(--ant-color-text-tertiary);
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
 }
 
 .runningRow > td {
@@ -63,13 +61,14 @@
   font-size: 13px;
   font-weight: normal;
   color: var(--ant-color-primary);
-  margin-left: 8px;
 }
 
 .tableActions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .filterSelect {

@@ -1,6 +1,6 @@
 import React from "react";
 import Link from "next/link";
-import { Button, Popconfirm, Space, Tag, Tooltip, Typography } from "antd";
+import { Button, Popconfirm, Space, Tag, Tooltip } from "antd";
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -250,104 +250,167 @@ export interface GetHistoryColumnsOptions {
   onOpenDetail: (record: CollectHistoryRecord) => void;
 }
 
+function parseSourceDetails(detailJson?: string): CollectRecordSourceDetail[] {
+  if (!detailJson) return [];
+  try {
+    return JSON.parse(detailJson) as CollectRecordSourceDetail[];
+  } catch {
+    return [];
+  }
+}
+
+function effectiveDurationMs(record: CollectHistoryRecord) {
+  if (record.status === "running" && record.startedAt && record.durationMs <= 0) {
+    return Math.max(0, Date.now() - new Date(record.startedAt).getTime());
+  }
+  return record.durationMs;
+}
+
+function batchStatusLabel(status: string) {
+  switch (status) {
+    case "success":
+    case "done":
+      return "成功";
+    case "partial":
+      return "部分失败";
+    case "failed":
+      return "失败";
+    case "running":
+      return "进行中";
+    case "stopped":
+      return "已停止";
+    case "interrupted":
+      return "异常中断";
+    default:
+      return status;
+  }
+}
+
 export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<CollectHistoryRecord> {
   const { canWrite, retryingBatchIds, onRetryBatch, onOpenDetail } = opts;
 
   return [
     {
       title: "采集时间",
-      key: "round",
+      key: "startedAt",
+      width: 188,
       render: (_, record) => {
-        const effectiveMs =
-          record.status === "running" && record.startedAt && record.durationMs <= 0
-            ? Math.max(0, Date.now() - new Date(record.startedAt).getTime())
-            : record.durationMs;
         const started = formatStartedAt(record.startedAt);
-        const films = singleFilmTargets(record);
         return (
-          <Space orientation="vertical" size={0}>
-            <Tooltip title={started.full ? `开始于 ${started.full}` : undefined}>
-              <span>{started.primary}</span>
-            </Tooltip>
-            <Typography.Text type="secondary">
-              {triggerLabel(record.trigger, record.tag)}
-              {" · "}
-              {getHourLabel(record.hour, record)}
-              {" · "}
-              {formatDuration(effectiveMs)}
-            </Typography.Text>
-            {films.length > 0 ? (
-              <Space size={4} wrap>
-                {films.map((film) => {
-                  const tag = <Tag style={tagStyle}>{film.name}</Tag>;
-                  if (film.mid <= 0) return <span key={film.name}>{tag}</span>;
-                  return (
-                    <Link
-                      key={film.mid}
-                      href={resolvePlayEntryPath(film.mid)}
-                      title={film.name}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {tag}
-                    </Link>
-                  );
-                })}
-              </Space>
-            ) : null}
-          </Space>
+          <Tooltip title={started.full ? `开始于 ${started.full}` : undefined}>
+            <span className={styles.timePrimary}>{started.primary}</span>
+          </Tooltip>
         );
       },
     },
     {
+      title: "方式",
+      key: "trigger",
+      width: 120,
+      render: (_, record) => renderTriggerTag(record.trigger, record.tag),
+    },
+    {
+      title: "范围",
+      key: "hour",
+      width: 128,
+      render: (_, record) => renderHourTag(record.hour, record),
+    },
+    {
+      title: "耗时",
+      key: "duration",
+      width: 108,
+      render: (_, record) => <span className={styles.metric}>{formatDuration(effectiveDurationMs(record))}</span>,
+    },
+    {
       title: "更新影片",
       key: "films",
+      width: 160,
       render: (_, record) => {
         const count = Math.max(0, record.filmCount ?? 0);
-        return <span>{formatCollectFilms(count, record)}</span>;
+        const films = singleFilmTargets(record);
+        const figure = count > 0 ? (
+          <span className={styles.filmNumber}>
+            +{count}
+            <span className={styles.filmUnit}>部</span>
+          </span>
+        ) : (
+          <span className={styles.filmNumberMuted}>{formatCollectFilms(count, record)}</span>
+        );
+        if (films.length === 0) return figure;
+        return (
+          <div className={styles.statCell}>
+            {figure}
+            <Space size={4} wrap>
+              {films.map((film) => {
+                const tag = <Tag style={tagStyle}>{film.name}</Tag>;
+                if (film.mid <= 0) return <span key={film.name}>{tag}</span>;
+                return (
+                  <Link
+                    key={film.mid}
+                    href={resolvePlayEntryPath(film.mid)}
+                    title={film.name}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {tag}
+                  </Link>
+                );
+              })}
+            </Space>
+          </div>
+        );
       },
     },
     {
-      title: "结果",
-      key: "outcome",
+      title: "页数",
+      key: "pages",
+      width: 156,
       render: (_, record) => {
-        let details: CollectRecordSourceDetail[] = [];
-        if (record.detailJson) {
-          try {
-            details = JSON.parse(record.detailJson) as CollectRecordSourceDetail[];
-          } catch {
-            details = [];
-          }
-        }
-        const stat = formatBatchSourceStat(record, details);
-        const status = resolveBatchStatus(record);
-        const tone =
-          status === "success" ? "success"
-          : status === "failed" || status === "interrupted" ? "error"
-          : status === "partial" ? "warning"
-          : status === "running" ? "processing"
-          : "default";
-        const label =
-          status === "success" ? "成功"
-          : status === "partial" ? "部分失败"
-          : status === "failed" ? "失败"
-          : status === "running" ? "进行中"
-          : status === "stopped" ? "已停止"
-          : status === "interrupted" ? "异常中断"
-          : status;
-        const siteLine = stat.secondary && stat.secondary !== label
-          ? `${stat.primary} · ${stat.secondary}`
-          : stat.primary;
+        const ok = Math.max(0, record.pageSuccess ?? 0);
+        const fail = Math.max(0, record.pageFailed ?? 0);
         return (
-          <Space orientation="vertical" size={0}>
-            <Tag color={tone} style={tagStyle}>{label}</Tag>
-            <Typography.Text type="secondary">{siteLine}</Typography.Text>
-          </Space>
+          <span className={styles.statRow}>
+            <span className={ok > 0 ? styles.statOk : styles.statTotal}>{ok} 成功</span>
+            <span className={styles.statTotal}>·</span>
+            <span className={fail > 0 ? styles.statFail : styles.statTotal}>{fail} 失败</span>
+          </span>
+        );
+      },
+    },
+    {
+      title: "状态",
+      key: "status",
+      width: 140,
+      render: (_, record) => <RecordStatusMark status={resolveBatchStatus(record)} scope="batch" />,
+    },
+    {
+      title: "站点",
+      key: "sites",
+      width: 140,
+      render: (_, record) => {
+        const details = parseSourceDetails(record.detailJson);
+        const stat = formatBatchSourceStat(record, details);
+        const label = batchStatusLabel(resolveBatchStatus(record));
+        const siteTotal = /^(\d+) 站$/.exec(stat.primary);
+        const siteBreakdown = stat.secondary && stat.secondary !== label ? stat.secondary : "";
+        if (!siteTotal) {
+          return <span className={styles.filmNumberMuted}>—</span>;
+        }
+        return (
+          <div className={styles.statCell}>
+            <span className={styles.filmNumber}>
+              {siteTotal[1]}
+              <span className={styles.filmUnit}>站</span>
+            </span>
+            {siteBreakdown ? <span className={styles.statTotal}>{siteBreakdown}</span> : null}
+          </div>
         );
       },
     },
     {
       title: "操作",
       key: "action",
+      width: 168,
+      align: "right",
       render: (_, record) => {
         const isRetrying = retryingBatchIds.has(record.batchId);
         const canRetry = canRetryHistoryRecord(record);
