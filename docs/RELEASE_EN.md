@@ -1,10 +1,21 @@
-Test release **v3.0.6-beta.5**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.5 below.
+Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first upgrade from v3.0.5 onto this test line clears collect records on startup**: `collect_records` and `collect_record_films` are dropped and recreated. A database that already ran v3.0.6-beta.2 or later is not cleared again. The film catalog is not stored in these tables and is left unchanged.
+- v3.0.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- **Upgrading from v3.0.5 clears collect records on startup**: `collect_records` and `collect_record_films` are dropped and recreated. A database that already ran v3.0.6-beta.2 or later is not cleared again. The film catalog is not stored in these tables and is left unchanged.
+- **v3.0.3 no longer reads `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY`**: the three variables have been removed from the compose files and `.env.example`, and values left in an existing `.env` no longer take effect. Deployments that relied on these variables to route danmaku or Telegram traffic through a proxy must, after upgrading, enable the global proxy in "网络代理" (Network proxy) in the admin panel and enable the "弹幕抓取" (Danmaku fetching) or "Telegram 机器人" (Telegram bot) module; otherwise these requests connect directly.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.6 changes
+
+- **Rate limit**: after 20 page fetches fail in a row, that source's in-flight requests are cancelled at once, it pauses for 2 minutes, then those cancelled pages are fetched again. Pages that already failed are not retried. The consecutive-failure count starts over when the pause ends, and another 20 failures interrupt the round.
+- **Last collect pages**: the card shows only the last completed page count stored by the server. It no longer follows the current round's success count while a collect is running. After the round finishes, the page loads the latest count from the source list, and an older list response cannot overwrite a newer one.
+- **Collect records**: columns are collect time, trigger, window, duration, updated films, pages, sources, status, and actions. Auto-refresh can be 5, 10, 15, or 30 seconds, default 10. While a record is running, each source status matches the collect center.
+- **Page-count probe**: each request has its own timeout. After a timeout or failure it retries twice, 2 seconds apart. The source is marked failed only after all three attempts fail.
+- **Store every updated film id after the round ends**: after the round finishes writing films, every film id updated in that round is stored on the collect record. A failure to open the record does not cancel the collect.
 
 ### v3.0.6-beta.5 changes
 

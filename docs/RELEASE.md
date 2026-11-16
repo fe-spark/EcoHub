@@ -1,10 +1,21 @@
-测试版 **v3.0.6-beta.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.5。
+正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
 
 ### 升级说明
 
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.6-beta.5`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **从 v3.0.5 第一次升到这条测试线时，启动会清空采集记录**：删除 `collect_records`、`collect_record_films` 后按新结构重建。已经跑过 v3.0.6-beta.2 及之后测试版的库不会再清一次。影片库不在这两张表里，不受影响。
+- v3.0.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- **从 v3.0.5 升级时，启动会清空采集记录**：删除 `collect_records`、`collect_record_films` 后按新结构重建。已经跑过 v3.0.6-beta.2 及之后测试版的库不会再清一次。影片库不在这两张表里，不受影响。
+- **v3.0.3 不再读取 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`**：编排文件和 `.env.example` 已移除这三个变量，旧 `.env` 中保留的值不再生效。此前依赖这些变量使弹幕或 Telegram 通过代理访问的，升级后须在后台「网络代理」开启全局代理，并开启「弹幕抓取」或「Telegram 机器人」模块，否则相关请求将直连。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.0.6 更新内容
+
+- **限流**：同一站点连续 20 页抓取失败后，立刻取消该站正在进行的请求，暂停 2 分钟，再从这些被取消的页继续。已经失败的页不重抓。暂停结束后重新计算连续失败，再连续失败 20 页才中断这一轮。
+- **上次采集页**：只显示服务端记下的上次采集页。采集进行中不再跟着本轮成功页变化。这一轮结束后再向列表要最新的上次采集页；后返回的旧列表不会盖住新结果。
+- **采集记录**：列表分为采集时间、方式、范围、耗时、更新影片、页数、站点、状态、操作。可按 5、10、15、30 秒自动刷新，默认 10 秒。进行中的站点状态与采集中心一致。
+- **探总页**：单次请求单独计时。超时或失败后再试 2 次，间隔 2 秒。三次都失败才把该站记成采集失败。
+- **结束后保存全部影片编号**：这一轮结束并写完影片后，把本轮更新过的影片编号全部写入采集记录。新建采集记录失败不会取消这次采集。
 
 ### v3.0.6-beta.5 更新内容
 
