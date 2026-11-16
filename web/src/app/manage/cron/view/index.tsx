@@ -275,7 +275,7 @@ export default function CronManagePageView() {
     <div className={styles.pageStack}>
       <ManagePageHeader
         title="计划任务"
-        description="管理系统后台定时调度任务。支持调整执行周期、启用/禁用自动调度，或随时手动触发单次执行。"
+        description="设置到点自动执行的任务，也可以立即执行一次。"
       />
 
       <Table

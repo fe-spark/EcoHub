@@ -316,7 +316,7 @@ export default function FilmListPageView() {
 
   return (
     <div className={styles.pageStack}>
-      <ManagePageHeader title="影片列表" />
+      <ManagePageHeader title="影片列表" description="查找和编辑片库中的影片。" />
 
       <FilmFilterBar
         params={params}

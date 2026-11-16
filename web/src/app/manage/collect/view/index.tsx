@@ -364,7 +364,7 @@ export default function CollectManagePageView() {
       <div className={styles.pageBody}>
       <ManagePageHeader
         title="采集中心"
-        description={<>统一管理采集站与采集任务<span className={styles.headerMeta}>· {siteList.length} 个</span></>}
+        description={<>管理采集站，开始或停止采集<span className={styles.headerMeta}>· {siteList.length} 个</span></>}
         actions={
           <Space size={8}>
             {isAdmin && (

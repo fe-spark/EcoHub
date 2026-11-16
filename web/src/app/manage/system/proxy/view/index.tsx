@@ -172,7 +172,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
       {embedded ? null : (
         <ManagePageHeader
           title="网络代理"
-          description="管理系统 HTTP/SOCKS5 网络代理出口及各功能模块（采集、刮削、通知、更新）生效范围。"
+          description="设置代理，并选择哪些功能通过代理访问。"
         />
       )}
 

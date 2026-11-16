@@ -152,7 +152,7 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
       {embedded ? null : (
         <ManagePageHeader
           title="刮削设置"
-          description="管理 The Movie Database (TMDB) 官方元数据接入、图片反代与精准刮削策略。"
+          description="用 TMDB 补全影片资料和图片。"
         />
       )}
 

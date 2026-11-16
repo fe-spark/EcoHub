@@ -116,7 +116,7 @@ function SystemSettingsBody() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="系统设置"
-        description="第三方服务集成（刮削、通知）与系统运行基础底座（网络代理、数据安全、日志）。"
+        description="配置刮削、通知、代理、数据安全和运行日志。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
         {TAB_GROUPS.map((group, groupIdx) => (

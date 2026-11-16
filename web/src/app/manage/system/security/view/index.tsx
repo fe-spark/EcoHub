@@ -254,7 +254,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
       {embedded ? null : (
         <ManagePageHeader
           title="数据安全"
-          description="管理站点配置备份导入与导出，数据分析积累数据清理，以及影视库存与采集派生数据重置。"
+          description="备份配置、清理访问统计，或重置片库。"
         />
       )}
 

@@ -126,7 +126,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
         <div className={styles.headerArea}>
           <ManagePageHeader
             title="系统日志"
-            description="级别由服务端写入时确定。实时推送，最多展示最近 1000 行。"
+            description="查看服务端最近的运行日志。"
           />
         </div>
       )}

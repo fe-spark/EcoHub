@@ -87,7 +87,7 @@ function SiteConfigBody({ embedded = false }: SiteConfigPageViewProps) {
         <ManagePageHeader
           className={styles.pageHeader}
           title="网站配置"
-          description="维护站点基本信息及运行访问策略"
+          description="设置站点名称、公告和访问方式。"
         />
       )}
 

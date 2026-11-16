@@ -283,7 +283,7 @@ export default function CollectRecordPageView() {
     <div className={styles.pageBody}>
       <ManagePageHeader
         title="采集记录"
-        description="每次采集的账单。看这一轮更新了多少部、哪些站成功或失败，并打开影片清单。实时进度在采集中心。"
+        description="查看每一轮采集的结果，以及更新了哪些影片。"
       />
 
       <RecordFilterBar

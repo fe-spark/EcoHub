@@ -250,7 +250,7 @@ export default function FileUploadPageView() {
     <div className={styles.galleryPanel}>
       <ManagePageHeader
         title="素材中心"
-        description="管理用户上传的海报与封面素材，可在影片/轮播编辑中选用覆盖封面。"
+        description="管理上传的海报和封面。"
       />
       <div className={styles.toolbar}>
         <Space size={[8, 8]} wrap className={styles.filterBar}>

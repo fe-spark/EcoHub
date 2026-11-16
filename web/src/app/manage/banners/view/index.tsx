@@ -212,7 +212,7 @@ export default function BannersPageView() {
 
   return (
     <div className={`${styles.pageStack} ${orderDirty ? styles.pageStackDirty : ""}`}>
-      <ManagePageHeader title="首页轮播" />
+      <ManagePageHeader title="首页轮播" description="安排首页轮播展示的影片。" />
 
       {/* 顶部操作工具栏 */}
       <div className={styles.toolbarCard}>

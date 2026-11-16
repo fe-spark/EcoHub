@@ -14,7 +14,7 @@ export default function CategoryRulePageView() {
 
   return (
     <div className={styles.pageBody}>
-      <ManagePageHeader title="分类规则" description="按采集站合并该站来源分类到前台展示名。" />
+      <ManagePageHeader title="分类规则" description="把采集站的分类对应到前台显示的名称。" />
 
       <RuleWorkspace ruleTotals={ruleTotals} onRuleTotalsChange={handleRuleTotalsChange} />
     </div>

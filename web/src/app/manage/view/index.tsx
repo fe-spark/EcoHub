@@ -79,7 +79,7 @@ export default function ManagePageView() {
     <div className={styles.dashboard}>
       <ManagePageHeader
         title="工作台"
-        description="采集运行概况、片库规模与常用入口。"
+        description="查看采集进度、片库规模和常用入口。"
         actions={
           <Button
             icon={<LinkOutlined />}

@@ -208,7 +208,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
       {embedded ? null : (
         <ManagePageHeader
           title="通知推送"
-          description="配置 Telegram 机器人采集汇总战报、分类片单翻页与系统异常告警。"
+          description="把采集结果和异常发到 Telegram。"
         />
       )}
 

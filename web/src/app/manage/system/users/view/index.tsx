@@ -309,7 +309,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
       {embedded ? null : (
         <ManagePageHeader
           title="账号管理"
-          description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
+          description="管理后台账号和权限。"
         />
       )}
 
