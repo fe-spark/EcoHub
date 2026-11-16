@@ -12,7 +12,7 @@ Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also point
 
 - **Rate limit**: after 20 page failures in a row, in-flight requests are cancelled and the source pauses for about 2 minutes, then continues the unfinished pages. Pages that already failed are not retried. The count starts over after the pause, and another 20 failures interrupt the round.
 - **Collect records**: columns are time, trigger, window, duration, updated films, pages, sources, and status, with auto-refresh. A running round matches the collect center. Film ids updated in the round are saved when it ends.
-- **Last collect pages**: only the last completed page count is shown.
+- **Last collect pages**: the count resets to 0 when a collect starts, then follows this round's successful pages, and stays at the finished count.
 - **Page-count probe**: a failure is retried twice. The source is marked failed only after all three attempts fail.
 
 ---

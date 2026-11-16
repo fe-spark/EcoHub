@@ -20,6 +20,7 @@ export interface CollectSourceCardMetaProps {
   deleting: boolean;
   hasProxy: boolean;
   globalSpiderProxyReady?: boolean;
+  displaySuccessPages?: number | null;
   onChangeCollectDuration: (id: string, cd: number) => void;
   onUpdateSite?: (id: string, updater: (prev: FilmSource) => FilmSource) => void;
 }
@@ -32,6 +33,7 @@ export default function CollectSourceCardMeta({
   deleting,
   hasProxy,
   globalSpiderProxyReady,
+  displaySuccessPages,
   onChangeCollectDuration,
   onUpdateSite,
 }: CollectSourceCardMetaProps) {
@@ -83,14 +85,12 @@ export default function CollectSourceCardMeta({
         <dt className={styles.metaLabel}>上次采集页：</dt>
         <dd
           className={`${styles.metaValue}${
-            record.lastRunPageCount && record.lastRunPageCount > 0
-              ? ""
-              : ` ${styles.metaValueMuted}`
+            displaySuccessPages == null ? ` ${styles.metaValueMuted}` : ""
           }`}
         >
-          {record.lastRunPageCount && record.lastRunPageCount > 0
-            ? `${record.lastRunPageCount.toLocaleString()} 页`
-            : "暂无"}
+          {displaySuccessPages == null
+            ? "暂无"
+            : `${displaySuccessPages.toLocaleString()} 页`}
         </dd>
       </div>
       <div className={styles.metaItem}>

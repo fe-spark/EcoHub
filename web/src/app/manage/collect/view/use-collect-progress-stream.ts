@@ -3,7 +3,8 @@ import { sameCollectProgress } from "./collect-queue";
 import type { CollectProgress, FilmSource } from "./types";
 
 /**
- * 服务端进度快照只覆盖进度。上次采集时间、上次采集页以采集站列表为准，这里不改。
+ * 服务端进度快照是采集状态的唯一数据源。
+ * 进行中的成功页直接显示为上次采集页；本轮完成时把这次的页数和时间留下。
  */
 export function useCollectProgressStream(
   setSiteList: Dispatch<SetStateAction<FilmSource[]>>,
@@ -20,9 +21,15 @@ export function useCollectProgressStream(
             return item;
           }
           changed = true;
+          const finished = incoming?.status === "done";
           return {
             ...item,
             progress: incoming,
+            lastRunTime: finished ? new Date().toISOString() : item.lastRunTime,
+            lastRunPageCount:
+              finished && (incoming?.success ?? 0) > 0
+                ? incoming.success
+                : item.lastRunPageCount,
           };
         });
         return changed ? next : current;

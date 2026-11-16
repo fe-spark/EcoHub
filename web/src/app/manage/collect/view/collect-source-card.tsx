@@ -115,6 +115,11 @@ export default function CollectSourceCard({
       : "编辑采集站";
 
   const hasProxy = Boolean(record.proxyCollect);
+  const displaySuccessPages = record.progress
+    ? Math.max(0, record.progress.success || 0)
+    : record.lastRunPageCount && record.lastRunPageCount > 0
+      ? record.lastRunPageCount
+      : null;
 
   const cardClassNames = [
     styles.sourceCard,
@@ -224,6 +229,7 @@ export default function CollectSourceCard({
           deleting={deleting}
           hasProxy={hasProxy}
           globalSpiderProxyReady={globalSpiderProxyReady}
+          displaySuccessPages={displaySuccessPages}
           onChangeCollectDuration={onChangeCollectDuration}
           onUpdateSite={onUpdateSite}
         />
