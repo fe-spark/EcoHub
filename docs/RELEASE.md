@@ -6,7 +6,6 @@
 
 - v3.0.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - **从 v3.0.5 升级时，启动会清空采集记录**：删除 `collect_records`、`collect_record_films` 后按新结构重建。已经跑过 v3.0.6-beta.2 及之后测试版的库不会再清一次。影片库不在这两张表里，不受影响。
-- **v3.0.3 不再读取 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`**：编排文件和 `.env.example` 已移除这三个变量，旧 `.env` 中保留的值不再生效。此前依赖这些变量使弹幕或 Telegram 通过代理访问的，升级后须在后台「网络代理」开启全局代理，并开启「弹幕抓取」或「Telegram 机器人」模块，否则相关请求将直连。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
 ### v3.0.6 更新内容

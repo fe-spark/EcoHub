@@ -94,15 +94,19 @@ jobs:
             extra_flags+=(--latest --prerelease=false)
           fi
 
+          # 发布说明只取当前版本。旧版本写在第一个 --- 之后，不进这条 Release。
+          notes="$(mktemp)"
+          awk '/^---$/ { exit } { print }' docs/RELEASE.md > "$notes"
+
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release edit "$VERSION" \
               --title "$VERSION" \
-              --notes-file docs/RELEASE.md \
+              --notes-file "$notes" \
               "${extra_flags[@]}"
           else
             gh release create "$VERSION" \
               --title "$VERSION" \
-              --notes-file docs/RELEASE.md \
+              --notes-file "$notes" \
               "${extra_flags[@]}"
           fi
 
