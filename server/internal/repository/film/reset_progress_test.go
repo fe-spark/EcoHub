@@ -26,8 +26,6 @@ func setupResetStatsDB(t *testing.T) *gorm.DB {
 		&model.FilmSource{},
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
-		&model.Category{},
-		&model.CategoryMapping{},
 		&model.CollectRecord{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -37,18 +35,18 @@ func setupResetStatsDB(t *testing.T) *gorm.DB {
 	return gdb
 }
 
-func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
+func TestGetLibraryInventory_PrimaryOnly(t *testing.T) {
 	gdb := setupResetStatsDB(t)
 
 	gdb.Create(&model.FilmSource{Id: "src_a", Name: "首选站A", Uri: "http://a.test", State: true, Sort: 0})
 	gdb.Create(&model.FilmSource{Id: "src_b", Name: "备用站B", Uri: "http://b.test", State: true, Sort: 1})
-	gdb.Create(&model.FilmSource{Id: "src_off", Name: "停用站", Uri: "http://off.test", State: false, Sort: 2})
 
 	for _, row := range []model.FilmIndex{
 		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "共享片"}},
 		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_b"}, FilmIndexContent: model.FilmIndexContent{Name: "共享片"}},
 		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "独播片"}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "单源片"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "单线路"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 6, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "共享片"}},
 		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 5, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "已删片"}},
 	} {
 		gdb.Create(&row)
@@ -64,17 +62,9 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	play(2, "src_b", 0)
 	play(3, "src_a", 0)
 	play(3, "src_b", 0)
+	play(6, "src_a", 0)
 	play(5, "src_a", 0)
 	play(99, "src_a", 0)
-
-	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", StableKey: "movie", Show: true, Sort: 1})
-	gdb.Create(&model.Category{Id: 2, Pid: 0, Name: "隐藏", StableKey: "hidden", Show: true, Sort: 2})
-	gdb.Model(&model.Category{}).Where("id = ?", int64(2)).Update("show", false)
-	gdb.Create(&model.Category{Id: 3, Pid: 0, Name: "未映射", StableKey: "loose", Show: true, Sort: 3})
-	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 1})
-	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 2, CategoryId: 2})
-	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 9, CategoryId: 999})
-	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 1, CategoryId: 1})
 
 	now := time.Now()
 	gdb.Create(&model.CollectRecord{
@@ -96,30 +86,11 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	})
 
 	filmsnapshot.ClearActiveFilmReadModel()
-	stats, err := GetInventoryStats()
+	stats, err := GetLibraryInventory()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 6 {
-		t.Fatalf("library = %+v", stats.Library)
-	}
-	if len(stats.Sources) != 3 {
-		t.Fatalf("expected 3 sources, got %+v", stats.Sources)
-	}
-	byID := map[string]SourceInventory{}
-	for _, item := range stats.Sources {
-		byID[item.Id] = item
-	}
-	primary := byID["src_a"]
-	if !primary.IsPrimary || !primary.Enabled || primary.Films != 3 || primary.MultiSource != 2 || primary.Categories != 2 || primary.Failures != 4 {
-		t.Fatalf("src_a = %+v", primary)
-	}
-	other := byID["src_b"]
-	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 2 {
-		t.Fatalf("src_b = %+v", other)
-	}
-	off := byID["src_off"]
-	if off.Enabled || off.IsPrimary || off.Films != 0 || off.Categories != 0 || off.Failures != 0 {
-		t.Fatalf("src_off = %+v", off)
+	if stats.Films != 4 || stats.MultiSource != 3 || stats.Failures != 4 {
+		t.Fatalf("library = %+v", stats)
 	}
 }

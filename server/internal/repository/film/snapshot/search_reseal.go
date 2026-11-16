@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -21,10 +22,17 @@ func ResealSearchIndexMids(mids []int64) bool {
 // 点查失败同样改为顺序加载。成功打进内存索引时返回 true。
 func ResealSearchIndex(mids []int64) bool {
 	startedAt := time.Now()
-	mids = NormalizeSnapshotMIDs(mids)
+	raw := NormalizeSnapshotMIDs(mids)
+	owned, err := PrimarySearchMIDs(raw)
+	if err != nil {
+		log.Printf("[ActiveReadModel] 检索索引封口所属站查询失败，改为按编号点查 raw=%d err=%v", len(raw), err)
+		mids = raw
+	} else {
+		mids = owned
+	}
 	log.Printf("[ActiveReadModel] 检索索引封口进入 raw=%d", len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
-		return false
+		return len(mids) == 0 && db.Mdb != nil
 	}
 
 	version := currentSearchIndexVersion()
@@ -82,11 +90,18 @@ func ResealSearchIndex(mids []int64) bool {
 		}
 		activeFilmSearchMetasMu.Unlock()
 
+		drop = retainIndexedDrops(cur, drop)
+		if len(upsertMap) == 0 && len(drop) == 0 {
+			log.Printf("[ActiveReadModel] 检索索引封口无需写入 mids=%d", len(mids))
+			NotifySearchIndexProgress(total, total, "done")
+			return true
+		}
 		hasDrop := len(drop) > 0
 		log.Printf("[ActiveReadModel] 检索索引内存构建启动 mids=%d drop=%d seal=%t", len(mids), len(drop), hasDrop)
 		var idx *filmSearchMetaIndex
 		if hasDrop {
 			idx = sealSearchMetaIndex(cur.Version, patchSearchMetas(cur.Items, upsertMap, drop))
+			idx.PrimaryID = cur.PrimaryID
 		} else {
 			idx = updateSearchMetaIndexIncremental(cur, cur.Version, upsertMap)
 		}
@@ -120,7 +135,13 @@ func ResealSearchIndex(mids []int64) bool {
 }
 
 func searchIndexReady(cur *filmSearchMetaIndex, version string) bool {
-	return cur != nil && cur.Version != "" && (version == "" || cur.Version == version)
+	if cur == nil || cur.Version == "" {
+		return false
+	}
+	if version != "" && cur.Version != version {
+		return false
+	}
+	return cur.PrimaryID == currentPrimarySourceID()
 }
 
 func searchIndexCurrent(cur *filmSearchMetaIndex, version string) bool {
@@ -209,14 +230,35 @@ func loadSearchMetaUpserts(mids []int64, onBatch func(n int)) (map[int64]FilmSea
 		return nil, nil, err
 	}
 	log.Printf("[ActiveReadModel] 检索索引元数据与播放线路读取完成 rows=%d mids=%d", len(allRows), len(mids))
+	primary := currentPrimarySourceID()
 	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
 	for _, r := range allRows {
 		meta := metaFromRow(r)
+		if strings.TrimSpace(meta.FirstSourceId) != primary {
+			continue
+		}
 		meta.PlaySources = plays[r.Mid]
 		upsertMap[r.Mid] = meta
 		delete(drop, r.Mid)
 	}
 	return upsertMap, drop, nil
+}
+
+// retainIndexedDrops 只保留已经在内存索引里的剔除编号。库里没有、索引里也没有的编号不触发整份重封。
+func retainIndexedDrops(cur *filmSearchMetaIndex, drop map[int64]struct{}) map[int64]struct{} {
+	if len(drop) == 0 || cur == nil {
+		return nil
+	}
+	kept := make(map[int64]struct{})
+	for id := range drop {
+		if searchIndexHasMid(cur, id) {
+			kept[id] = struct{}{}
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // patchSearchMetas 用变更覆盖旧条目，丢掉库里已经不存在的 mid，其余原样保留。

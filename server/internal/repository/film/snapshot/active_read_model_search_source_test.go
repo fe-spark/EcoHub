@@ -26,8 +26,14 @@ func setupSearchSourceTestDB(t *testing.T) *gorm.DB {
 	if err := gdb.AutoMigrate(
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
+		&model.FilmSource{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "uku", Name: "主站", Uri: "https://example.com/uku", State: true,
+	}).Error; err != nil {
+		t.Fatalf("create primary: %v", err)
 	}
 	db.Mdb = gdb
 	db.Rdb = nil
@@ -70,23 +76,22 @@ func TestSearchSnapshotsByKeywordSourceAndSort(t *testing.T) {
 		t.Fatalf("uku search expected Mid=1, got len=%d total=%d", len(res1), page1.Total)
 	}
 
-	// 2. 搜索 "斗破", 源 "hd" -> 应该命中 Mid 1 和 Mid 2
+	// 非主站不在内存索引里。
 	page2 := &dto.Page{Current: 1, PageSize: 10}
 	res2, err := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "hd", "斗破", "", page2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res2) != 2 || page2.Total != 2 {
-		t.Fatalf("hd search expected 2 (Mid 1, 2), got len=%d total=%d", len(res2), page2.Total)
+	if len(res2) != 1 || page2.Total != 1 || res2[0].Mid != 1 {
+		t.Fatalf("hd search expected primary film mid 1, got len=%d total=%d", len(res2), page2.Total)
 	}
 
-	// 3. 搜索 "斗", 源 "subo" -> 应该命中 Mid 3
 	page3 := &dto.Page{Current: 1, PageSize: 10}
 	res3, err := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "subo", "斗", "", page3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res3) != 1 || page3.Total != 1 || res3[0].Mid != 3 {
-		t.Fatalf("subo search expected Mid=3, got len=%d total=%d", len(res3), page3.Total)
+	if len(res3) != 0 || page3.Total != 0 {
+		t.Fatalf("subo search expected empty, got len=%d total=%d", len(res3), page3.Total)
 	}
 }

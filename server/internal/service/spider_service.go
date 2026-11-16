@@ -186,23 +186,9 @@ func (s *SpiderService) FollowSiteReset(ctx context.Context, onEvent func(any) e
 	}
 }
 
-// InventoryStats 返回工作台片库规模。scope=sources 只算各采集站，其余只算整库。
-func (s *SpiderService) InventoryStats(scope string) (filmrepo.InventoryStats, error) {
-	stats := filmrepo.InventoryStats{Sources: []filmrepo.SourceInventory{}}
-	if scope == "sources" {
-		sources, err := filmrepo.GetSourceInventories()
-		if err != nil {
-			return stats, err
-		}
-		stats.Sources = sources
-		return stats, nil
-	}
-	library, err := filmrepo.GetLibraryInventory()
-	if err != nil {
-		return stats, err
-	}
-	stats.Library = library
-	return stats, nil
+// InventoryStats 返回当前主站的片库规模。
+func (s *SpiderService) InventoryStats() (filmrepo.LibraryInventory, error) {
+	return filmrepo.GetLibraryInventory()
 }
 
 // CollectFilms 触发主站影片采集同步（兼容单个与批量）

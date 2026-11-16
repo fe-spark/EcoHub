@@ -22,7 +22,7 @@ const searchMetaParallelMin = 16384
 
 const filmMetaSelect = "mid, pid, cid, first_source_id, name, hits, score, year, update_stamp, area, language, class_tag, category_key, root_category_key"
 
-const filmMetaLoadSQL = "SELECT " + filmMetaSelect + " FROM " + model.TableFilmIndex + " WHERE deleted_at IS NULL"
+const filmMetaLoadSQL = "SELECT " + filmMetaSelect + " FROM " + model.TableFilmIndex + " WHERE deleted_at IS NULL AND first_source_id = ?"
 
 type dbMetaRow struct {
 	Mid             int64
@@ -51,41 +51,49 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	if version == "" || db.Mdb == nil {
 		return nil, ErrSearchIndexMissing
 	}
-	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
+	primary := currentPrimarySourceID()
+	if cur := activeFilmSearchMetas.Load(); indexMatches(cur, version, primary) {
 		return cur, nil
 	}
 	return buildAndStoreFilmSearchMetaIndex(version)
 }
 
-// buildAndStoreFilmSearchMetaIndex 重建检索索引，完成后一次换上。重建期间请求继续读旧索引。
+// buildAndStoreFilmSearchMetaIndex 只重建当前主站的检索索引。先丢掉旧索引再加载。
 func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	version = strings.TrimSpace(version)
 	if version == "" || db.Mdb == nil {
 		return nil, ErrSearchIndexMissing
 	}
-	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
+	primary := currentPrimarySourceID()
+	val, err, _ := searchMetaBuildSf.Do(version+"\x00"+primary, func() (any, error) {
 		searchRebuild.mu.Lock()
 		seen := searchRebuild.gen
 		searchRebuild.mu.Unlock()
 
 		activeFilmSearchMetasMu.Lock()
 		defer activeFilmSearchMetasMu.Unlock()
-		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
+		if cur := activeFilmSearchMetas.Load(); indexMatches(cur, version, primary) {
 			return cur, nil
 		}
+		activeFilmSearchMetas.Store(nil)
 		started := time.Now()
-		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s", version)
-		items, plays, err := loadSearchIndexParts(version)
+		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s primary=%s", version, primary)
+		items, plays, err := loadSearchIndexParts(version, primary)
 		if err != nil {
 			notifySearchIndexIfCurrent(seen, 0, 0, "idle")
 			return nil, err
 		}
-		log.Printf("[ActiveReadModel] 检索索引封口中 version=%s 影片=%d 播放线路=%d", version, len(items), len(plays))
+		if currentPrimarySourceID() != primary {
+			notifySearchIndexIfCurrent(seen, 0, 0, "idle")
+			return nil, errors.New("主站已变更")
+		}
+		log.Printf("[ActiveReadModel] 检索索引封口中 version=%s primary=%s 影片=%d 播放线路=%d", version, primary, len(items), len(plays))
 		attachPlaySources(items, plays)
 		plays = nil
 		idx := sealSearchMetaIndex(version, items)
+		idx.PrimaryID = primary
 		activeFilmSearchMetas.Store(idx)
-		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s count=%d cost=%s", version, len(items), time.Since(started).Round(time.Millisecond))
+		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s primary=%s count=%d cost=%s", version, primary, len(items), time.Since(started).Round(time.Millisecond))
 		notifySearchIndexIfCurrent(seen, int64(len(items)), int64(len(items)), "done")
 		return idx, nil
 	})
@@ -99,9 +107,14 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 	return idx, nil
 }
 
-func loadFilmSearchMetaItems(ctx context.Context, version string) ([]FilmSearchMeta, error) {
+func loadFilmSearchMetaItems(ctx context.Context, version, primary string) ([]FilmSearchMeta, error) {
+	primary = strings.TrimSpace(primary)
+	if primary == "" {
+		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 无主站", version)
+		return []FilmSearchMeta{}, nil
+	}
 	var total int64
-	if err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Count(&total).Error; err != nil {
+	if err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Where("first_source_id = ?", primary).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	if total == 0 {
@@ -110,7 +123,7 @@ func loadFilmSearchMetaItems(ctx context.Context, version string) ([]FilmSearchM
 	}
 	NotifySearchIndexProgress(total, 0, "indexing")
 	progress := newSearchLoadProgress(version, total)
-	spans, err := searchMetaSpans(ctx, total)
+	spans, err := searchMetaSpans(ctx, primary, total)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +151,7 @@ func loadFilmSearchMetaItems(ctx context.Context, version string) ([]FilmSearchM
 		scanWg.Add(1)
 		go func(span midSpan) {
 			defer scanWg.Done()
-			if err := streamMetaRows(ctx, span, batches); err != nil && ctx.Err() == nil {
+			if err := streamMetaRows(ctx, primary, span, batches); err != nil && ctx.Err() == nil {
 				fail(err)
 			}
 		}(span)
@@ -227,7 +240,7 @@ func (p *searchLoadProgress) add(n int) {
 	p.next = (p.loaded/step + 1) * step
 }
 
-func searchMetaSpans(ctx context.Context, total int64) ([]midSpan, error) {
+func searchMetaSpans(ctx context.Context, primary string, total int64) ([]midSpan, error) {
 	workers := 1
 	if total >= searchMetaParallelMin {
 		workers = runtime.GOMAXPROCS(0)
@@ -238,7 +251,7 @@ func searchMetaSpans(ctx context.Context, total int64) ([]midSpan, error) {
 	if workers == 1 {
 		return []midSpan{{}}, nil
 	}
-	row := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Select("MIN(mid), MAX(mid)").Row()
+	row := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Where("first_source_id = ?", primary).Select("MIN(mid), MAX(mid)").Row()
 	var lo, hi sql.NullInt64
 	if err := row.Scan(&lo, &hi); err != nil {
 		return nil, err
@@ -262,12 +275,12 @@ func searchMetaSpans(ctx context.Context, total int64) ([]midSpan, error) {
 	return out, nil
 }
 
-func streamMetaRows(ctx context.Context, span midSpan, batches chan<- []dbMetaRow) error {
+func streamMetaRows(ctx context.Context, primary string, span midSpan, batches chan<- []dbMetaRow) error {
 	q := filmMetaLoadSQL
-	var args []any
+	args := []any{primary}
 	if span.bounded {
 		q += " AND mid >= ? AND mid < ?"
-		args = []any{span.lo, span.hi}
+		args = append(args, span.lo, span.hi)
 	}
 	rows, err := db.Mdb.WithContext(ctx).Raw(q, args...).Rows()
 	if err != nil {

@@ -32,18 +32,17 @@ type FilmSearchMeta struct {
 }
 
 type filmSearchMetaIndex struct {
-	Version             string
-	Items               []*FilmSearchMeta
-	ByUpdate            []int
-	Pos                 map[int64]int
-	FilmsBySource       map[string]int64
-	MultiSourceBySource map[string]int64
-	HotPools            map[string][]int64
-	YearPools           map[string][]int64
-	RecentPools         map[string][]int64
-	SourceHot           map[string][]int64
-	ByCategory          map[string][]int
-	SearchPosts         *searchPostings
+	Version     string
+	PrimaryID   string
+	Items       []*FilmSearchMeta
+	ByUpdate    []int
+	Pos         map[int64]int
+	HotPools    map[string][]int64
+	YearPools   map[string][]int64
+	RecentPools map[string][]int64
+	SourceHot   map[string][]int64
+	ByCategory  map[string][]int
+	SearchPosts *searchPostings
 }
 
 var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
@@ -200,21 +199,6 @@ func pageMidsFromMetaHits(hits []scoredMetaHit, page *dto.Page) []int64 {
 	return mids
 }
 
-// InvalidateActiveFilmSearchIndex 增量发布后重载活跃读模型版本
-func InvalidateActiveFilmSearchIndex(version string) {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
-	}
-	if version != "" {
-		if err := LoadActiveFilmReadModel(version); err != nil {
-			log.Printf("[ActiveReadModel] 重载读模型失败 version=%s: %v", version, err)
-		}
-	} else {
-		ClearActiveFilmReadModel()
-	}
-}
-
 // RemoveMidsFromActiveFilmSearchIndex 增量从内存搜索元数据索引中剔除指定 mid，避免全量重建耗时
 func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 	version = strings.TrimSpace(version)
@@ -246,7 +230,13 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 		activeFilmSearchMetasMu.Lock()
 		cur = activeFilmSearchMetas.Load()
 	}
-	defer activeFilmSearchMetasMu.Unlock()
+	rebuild := false
+	defer func() {
+		activeFilmSearchMetasMu.Unlock()
+		if rebuild {
+			RequestActiveFilmSearchIndexRebuild()
+		}
+	}()
 
 	if cur == nil || cur.Version != version || len(cur.Items) == 0 {
 		return
@@ -261,10 +251,18 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 		}
 		newItems = append(newItems, *item)
 	}
-	if removed > 0 {
-		activeFilmSearchMetas.Store(sealSearchMetaIndex(version, newItems))
-		log.Printf("[ActiveReadModel] 内存索引增量剔除 mids=%d removed=%d remaining=%d", len(mids), removed, len(newItems))
+	if removed == 0 {
+		return
 	}
+	if cur.PrimaryID != currentPrimarySourceID() {
+		rebuild = true
+		log.Printf("[ActiveReadModel] 剔除时主站已变，放弃封口并重建 mids=%d primary=%s", len(mids), cur.PrimaryID)
+		return
+	}
+	idx := sealSearchMetaIndex(version, newItems)
+	idx.PrimaryID = cur.PrimaryID
+	activeFilmSearchMetas.Store(idx)
+	log.Printf("[ActiveReadModel] 内存索引增量剔除 mids=%d removed=%d remaining=%d", len(mids), removed, len(newItems))
 }
 
 // UpsertMidsToActiveFilmSearchIndex 增量更新或新增指定 mid 的搜索元数据索引，避免全量重建
@@ -302,7 +300,13 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		activeFilmSearchMetasMu.Lock()
 		cur = activeFilmSearchMetas.Load()
 	}
-	defer activeFilmSearchMetasMu.Unlock()
+	rebuild := false
+	defer func() {
+		activeFilmSearchMetasMu.Unlock()
+		if rebuild {
+			RequestActiveFilmSearchIndexRebuild()
+		}
+	}()
 
 	if cur == nil || cur.Version != version {
 		return
@@ -332,15 +336,39 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		log.Printf("[ActiveReadModel] 播放源加载失败: %v", err)
 		return
 	}
+	primary := currentPrimarySourceID()
 	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
 	for _, r := range allRows {
 		meta := metaFromRow(r)
+		if strings.TrimSpace(meta.FirstSourceId) != primary {
+			continue
+		}
 		meta.PlaySources = plays[r.Mid]
 		upsertMap[r.Mid] = meta
 	}
 
-	if len(cleanMids) > 0 && len(midSet) == len(upsertMap) && len(cur.Items) > 0 {
-		activeFilmSearchMetas.Store(updateSearchMetaIndexIncremental(cur, version, upsertMap))
+	needsRemoval := false
+	for _, id := range cleanMids {
+		if _, ok := upsertMap[id]; ok {
+			continue
+		}
+		if searchIndexHasMid(cur, id) {
+			needsRemoval = true
+			break
+		}
+	}
+	if len(upsertMap) == 0 && !needsRemoval {
+		return
+	}
+	if cur.PrimaryID != currentPrimarySourceID() {
+		rebuild = true
+		log.Printf("[ActiveReadModel] 增量写入时主站已变，放弃封口并重建 mids=%d primary=%s", len(cleanMids), cur.PrimaryID)
+		return
+	}
+	if !needsRemoval && len(cur.Items) > 0 && len(upsertMap) > 0 {
+		idx := updateSearchMetaIndexIncremental(cur, version, upsertMap)
+		idx.PrimaryID = cur.PrimaryID
+		activeFilmSearchMetas.Store(idx)
 		log.Printf("[ActiveReadModel] 内存索引快速增量更新 mids=%d snapshot_found=%d", len(cleanMids), len(upsertMap))
 		return
 	}
@@ -350,8 +378,8 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		if updated, exists := upsertMap[it.Mid]; exists {
 			newItems = append(newItems, updated)
 			seenMids[it.Mid] = struct{}{}
-		} else if _, isDeleted := midSet[it.Mid]; isDeleted {
-			// 在传入的 mids 中但快照中已不存在（已删除/失效），从内存索引中剔除，防止幽灵数据残留
+		} else if _, inRequest := midSet[it.Mid]; inRequest {
+			// 请求里的编号已删除，或不再属于主站。只剔除索引里已有的。
 			continue
 		} else {
 			newItems = append(newItems, *it)
@@ -363,6 +391,41 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		}
 	}
 
-	activeFilmSearchMetas.Store(sealSearchMetaIndex(version, newItems))
+	idx := sealSearchMetaIndex(version, newItems)
+	idx.PrimaryID = cur.PrimaryID
+	activeFilmSearchMetas.Store(idx)
 	log.Printf("[ActiveReadModel] 内存索引增量更新/剔除 mids=%d snapshot_found=%d total=%d", len(cleanMids), len(upsertMap), len(newItems))
+}
+
+func indexedMIDs(mids []int64) []int64 {
+	if len(mids) == 0 {
+		return nil
+	}
+	cur := activeFilmSearchMetas.Load()
+	out := make([]int64, 0)
+	for _, id := range mids {
+		if searchIndexHasMid(cur, id) {
+			out = append(out, id)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func searchIndexHasMid(cur *filmSearchMetaIndex, mid int64) bool {
+	if cur == nil || mid <= 0 {
+		return false
+	}
+	if cur.Pos != nil {
+		idx, ok := cur.Pos[mid]
+		return ok && idx >= 0 && idx < len(cur.Items) && cur.Items[idx] != nil && cur.Items[idx].Mid == mid
+	}
+	for _, it := range cur.Items {
+		if it != nil && it.Mid == mid {
+			return true
+		}
+	}
+	return false
 }

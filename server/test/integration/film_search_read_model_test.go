@@ -157,6 +157,11 @@ func TestFilmCRUD_FullLifecycle(t *testing.T) {
 	useRedis(t)
 
 	version := "v_it_crud_lifecycle"
+	if err := gdb.Create(&model.FilmSource{
+		Id: "src_primary", Name: "主站", Uri: "https://example.com/src_primary", State: true, Sort: 0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	activateVersion(t, version)
 	mid := int64(2026)
 
@@ -165,6 +170,7 @@ func TestFilmCRUD_FullLifecycle(t *testing.T) {
 
 	newFilmIndex := &model.FilmIndex{}
 	newFilmIndex.Mid = mid
+	newFilmIndex.FirstSourceId = "src_primary"
 	newFilmIndex.Pid = 1
 	newFilmIndex.Cid = 10
 	newFilmIndex.Name = "大话西游之月光宝盒"

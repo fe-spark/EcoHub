@@ -43,6 +43,7 @@ func TestApplyCategoryUpdateIndexHint_MySQLQuotedSeparately(t *testing.T) {
 
 func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
+	usePrimarySource(t, gdb, "src_new")
 	if err := gdb.AutoMigrate(&model.CategoryMapping{}, &model.SourceCategory{}); err != nil {
 		t.Fatalf("migrate mapping: %v", err)
 	}
@@ -113,6 +114,7 @@ func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 
 func TestCategoryRank_ThreeSortsShareBoard(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
+	usePrimarySource(t, gdb, "src")
 	films := []model.FilmIndex{
 		{
 			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src"},
@@ -233,6 +235,7 @@ func TestProbeBranchSQL_MySQLUsesCategoryKeyIndex(t *testing.T) {
 
 func TestCategoryList_KeepsOtherSourceCategoryOut(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
+	usePrimarySource(t, gdb, "src_new")
 	films := []model.FilmIndex{
 		{
 			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"},
@@ -269,6 +272,7 @@ func TestCategoryList_KeepsOtherSourceCategoryOut(t *testing.T) {
 
 func TestSourceMembership_UsesPrimaryKeyProbe(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
+	usePrimarySource(t, gdb, "src_new")
 	createTestFilm(t, gdb, 11, "有线路", 100, "")
 	indexOnly := model.FilmIndex{
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 12, FirstSourceId: "other"},
@@ -302,6 +306,7 @@ func TestSourceMembership_UsesPrimaryKeyProbe(t *testing.T) {
 
 func TestCategoryList_LeafRootStoredOnCategoryKey(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
+	usePrimarySource(t, gdb, "src_new")
 	if err := gdb.AutoMigrate(&model.SourceCategory{}); err != nil {
 		t.Fatalf("migrate source categories: %v", err)
 	}

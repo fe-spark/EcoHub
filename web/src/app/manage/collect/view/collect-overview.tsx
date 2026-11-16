@@ -138,7 +138,6 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
         message.error(resp.msg || "切换主站失败");
         return;
       }
-      window.dispatchEvent(new CustomEvent("ecohub:primary-source", { detail: chosen.id }));
       message.success(`主站：${chosen.name}`);
     } catch {
       if (mountedRef.current) {

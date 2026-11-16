@@ -206,14 +206,14 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			}
 		}()
 
-		// 150ms 防抖：如果连续快速拖拽切换主站，直接跳过旧代数，避免短时间内多次并发全库扫描
+		// 150ms 防抖：如果连续快速拖拽切换主站，直接跳过旧代数，避免短时间内多次扫描主站
 		time.Sleep(150 * time.Millisecond)
 		if primarySwitchEpoch.Load() != currentEpoch {
 			syslog.Infof("[Collect] 检测到更新的主站切换，跳过历史代数预热 epoch=%d targetSource=%s", currentEpoch, targetSourceID)
 			return
 		}
 
-		// 互斥排队串行化构建，杜绝多线程重叠全表扫描导致 DB 负载过高
+		// 互斥排队串行化构建，避免重叠扫描主站
 		primarySwitchMu.Lock()
 		defer primarySwitchMu.Unlock()
 		isPrimaryWarming.Store(true)
@@ -230,9 +230,9 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			return
 		}
 
-		syslog.Infof("[Collect] 开始预热主站首页缓存 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
-		if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
-			syslog.Errorf("[Collect] 切换主站后确认检索索引失败: %v", err)
+		syslog.Infof("[Collect] 开始重建主站检索索引 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
+		if err := filmsnapshot.RebuildPrimarySearchIndex(); err != nil {
+			syslog.Errorf("[Collect] 切换主站后重建检索索引失败: %v", err)
 			return
 		}
 

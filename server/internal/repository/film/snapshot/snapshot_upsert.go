@@ -1,7 +1,6 @@
 package snapshot
 
 import (
-	"log"
 	"strings"
 
 	"server/internal/infra/db"
@@ -77,23 +76,6 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 	RefreshAccessDataCaches()
 }
 
-func rebuildActiveFilterOptions(version string) {
-	if err := LoadActiveFilmReadModel(version); err != nil {
-		log.Printf("LoadActiveFilmReadModel Error: %v", err)
-	}
-}
-
-func RefreshActiveReadModelArtifacts() error {
-	version := GetActiveReadModelVersion()
-	if strings.TrimSpace(version) == "" {
-		return nil
-	}
-	if err := LoadActiveFilmReadModel(version); err != nil {
-		return err
-	}
-	return nil
-}
-
 func UpsertActiveSnapshotByMid(mid int64) error {
 	_, _, err := UpsertActiveSnapshotsByMids(mid)
 	return err
@@ -125,17 +107,36 @@ func upsertActiveSnapshots(mids []int64, refreshSearch bool) (string, int, error
 		return version, 0, nil
 	}
 
-	var existing []int64
-	if err := db.Mdb.Model(&model.FilmIndex{}).Where("mid IN ?", ids).Pluck("mid", &existing).Error; err != nil {
+	var rows []struct {
+		Mid           int64
+		FirstSourceId string
+	}
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("mid, first_source_id").
+		Where("mid IN ?", ids).
+		Find(&rows).Error; err != nil {
 		return "", 0, err
+	}
+	primary := currentPrimarySourceID()
+	existing := make([]int64, 0, len(rows))
+	primaryMids := make([]int64, 0, len(rows))
+	otherMids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		existing = append(existing, row.Mid)
+		if primary != "" && strings.TrimSpace(row.FirstSourceId) == primary {
+			primaryMids = append(primaryMids, row.Mid)
+			continue
+		}
+		otherMids = append(otherMids, row.Mid)
 	}
 	deletedMIDs := diffMIDs(ids, existing)
 	if refreshSearch {
-		if len(deletedMIDs) > 0 {
-			RemoveMidsFromActiveFilmSearchIndex(version, deletedMIDs)
+		remove := indexedMIDs(append(append([]int64{}, deletedMIDs...), otherMids...))
+		if len(remove) > 0 {
+			RemoveMidsFromActiveFilmSearchIndex(version, remove)
 		}
-		if len(existing) > 0 {
-			UpsertMidsToActiveFilmSearchIndex(version, existing)
+		if len(primaryMids) > 0 {
+			UpsertMidsToActiveFilmSearchIndex(version, primaryMids)
 		}
 	}
 	scheduleSnapshotCacheInvalidation(version, ids)

@@ -82,14 +82,6 @@ func clonePosMap(src map[int64]int, extra int) map[int64]int {
 	return out
 }
 
-func cloneFilmCounts(src map[string]int64) map[string]int64 {
-	out := make(map[string]int64, len(src)+1)
-	for k, v := range src {
-		out[k] = v
-	}
-	return out
-}
-
 func cloneCategoryLists(src map[string][]int) map[string][]int {
 	out := make(map[string][]int, len(src)+1)
 	for k, v := range src {
@@ -113,50 +105,26 @@ func searchMetaCategoryMoved(old *FilmSearchMeta, meta FilmSearchMeta) bool {
 	return strings.TrimSpace(old.CategoryKey) != strings.TrimSpace(meta.CategoryKey)
 }
 
-func searchMetaSourceMoved(old *FilmSearchMeta, meta FilmSearchMeta) bool {
-	if old == nil {
-		return false
-	}
-	return strings.TrimSpace(old.FirstSourceId) != strings.TrimSpace(meta.FirstSourceId)
-}
-
-// relocateSearchMeta 在已经复制的表上把已有影片从旧分类、旧来源挪到新键。
-func relocateSearchMeta(byCategory map[string][]int, films map[string]int64, moveCategory, moveSource bool, idx int, old *FilmSearchMeta, meta FilmSearchMeta) {
+// relocateSearchMeta 在已经复制的分类表上把已有影片从旧分类挪到新键。
+func relocateSearchMeta(byCategory map[string][]int, idx int, old *FilmSearchMeta, meta FilmSearchMeta) {
 	if old == nil {
 		return
 	}
-	if moveCategory {
-		oldCat := strings.TrimSpace(old.CategoryKey)
-		newCat := strings.TrimSpace(meta.CategoryKey)
-		if oldCat != newCat {
-			if oldCat != "" {
-				next := removeCategoryPos(byCategory[oldCat], idx)
-				if len(next) == 0 {
-					delete(byCategory, oldCat)
-				} else {
-					byCategory[oldCat] = next
-				}
-			}
-			if newCat != "" {
-				byCategory[newCat] = append(byCategory[newCat], idx)
-			}
+	oldCat := strings.TrimSpace(old.CategoryKey)
+	newCat := strings.TrimSpace(meta.CategoryKey)
+	if oldCat == newCat {
+		return
+	}
+	if oldCat != "" {
+		next := removeCategoryPos(byCategory[oldCat], idx)
+		if len(next) == 0 {
+			delete(byCategory, oldCat)
+		} else {
+			byCategory[oldCat] = next
 		}
 	}
-	if moveSource {
-		oldSrc := strings.TrimSpace(old.FirstSourceId)
-		newSrc := strings.TrimSpace(meta.FirstSourceId)
-		if oldSrc != newSrc {
-			if oldSrc != "" {
-				if films[oldSrc] > 1 {
-					films[oldSrc]--
-				} else {
-					delete(films, oldSrc)
-				}
-			}
-			if newSrc != "" {
-				films[newSrc]++
-			}
-		}
+	if newCat != "" {
+		byCategory[newCat] = append(byCategory[newCat], idx)
 	}
 }
 

@@ -92,7 +92,7 @@ func TestResealSearchIndexMidsDoesNotFullScan(t *testing.T) {
 }
 
 func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
-	setupSnapshotRepoTestDB(t)
+	gdb := setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-large-mids"); err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +127,7 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	for i := range manyMids {
 		manyMids[i] = int64(i + 1)
 	}
+	seedPrimaryOwned(t, gdb, manyMids)
 	ResealSearchIndexMids(manyMids)
 	time.Sleep(40 * time.Millisecond)
 	if scanned.Load() {
@@ -135,7 +136,7 @@ func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 }
 
 func TestResealSearchIndex_MidsCoveringIndexStillPointQueries(t *testing.T) {
-	setupSnapshotRepoTestDB(t)
+	gdb := setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-cover"); err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +163,7 @@ func TestResealSearchIndex_MidsCoveringIndexStillPointQueries(t *testing.T) {
 	for i := range mids {
 		mids[i] = int64(i + 1)
 	}
+	seedPrimaryOwned(t, gdb, mids)
 	if !ResealSearchIndex(mids) {
 		t.Fatal("covering round should report a point-query seal")
 	}
@@ -175,7 +177,7 @@ func TestResealSearchIndex_MidsCoveringIndexStillPointQueries(t *testing.T) {
 }
 
 func TestResealSearchIndex_OverHalfStillPointQueries(t *testing.T) {
-	setupSnapshotRepoTestDB(t)
+	gdb := setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-half"); err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +200,7 @@ func TestResealSearchIndex_OverHalfStillPointQueries(t *testing.T) {
 		stopRebuild()
 	})
 
+	seedPrimaryOwned(t, gdb, []int64{1, 2, 3})
 	if !ResealSearchIndex([]int64{1, 2, 3}) {
 		t.Fatal("incremental round over half the index should still point-query")
 	}
@@ -257,7 +260,7 @@ func TestResealRereadsWhenIndexPointerChanges(t *testing.T) {
 }
 
 func TestResealEmptyIndexRequestsFullScan(t *testing.T) {
-	setupSnapshotRepoTestDB(t)
+	gdb := setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-empty"); err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +277,7 @@ func TestResealEmptyIndexRequestsFullScan(t *testing.T) {
 	}
 	t.Cleanup(func() { readSearchMetaUpserts = prevRead })
 
+	seedPrimaryOwned(t, gdb, []int64{1, 2, 3})
 	if ResealSearchIndexMids([]int64{1, 2, 3}) {
 		t.Fatal("empty index should hand off to a sequential rebuild")
 	}
@@ -284,7 +288,7 @@ func TestResealEmptyIndexRequestsFullScan(t *testing.T) {
 }
 
 func TestResealReadFailureRequestsRebuild(t *testing.T) {
-	setupSnapshotRepoTestDB(t)
+	gdb := setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-read-fail"); err != nil {
 		t.Fatal(err)
 	}
@@ -302,6 +306,7 @@ func TestResealReadFailureRequestsRebuild(t *testing.T) {
 	}
 	t.Cleanup(func() { readSearchMetaUpserts = prevRead })
 
+	seedPrimaryOwned(t, gdb, []int64{1})
 	if ResealSearchIndexMids([]int64{1}) {
 		t.Fatal("read failure must not report applied")
 	}

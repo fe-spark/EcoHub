@@ -118,9 +118,9 @@ func (h *SpiderHandler) ResetProgressStream(c *gin.Context) {
 	_ = service.SpiderSvc.FollowSiteReset(c.Request.Context(), stream.SendData)
 }
 
-// InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
+// InventoryStats 返回当前主站的片库规模。
 func (h *SpiderHandler) InventoryStats(c *gin.Context) {
-	stats, err := service.SpiderSvc.InventoryStats(c.Query("scope"))
+	stats, err := service.SpiderSvc.InventoryStats()
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return

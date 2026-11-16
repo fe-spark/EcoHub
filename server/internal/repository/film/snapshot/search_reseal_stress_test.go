@@ -21,6 +21,11 @@ func TestResealSearchIndexMids_FullScaleSimulation(t *testing.T) {
 	}
 
 	gdb := setupSnapshotRepoTestDB(t)
+	if err := gdb.Create(&model.FilmSource{
+		Id: "src-batch", Name: "批次站", Uri: "https://example.com/src-batch", State: true, Sort: -1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	const existingCount = 100000
 	const newBatchCount = 30000
 

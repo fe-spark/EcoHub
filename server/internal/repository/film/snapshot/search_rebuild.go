@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"server/internal/infra/db"
-
-	"golang.org/x/sync/errgroup"
 )
 
 const defaultSearchRebuildDebounce = 500 * time.Millisecond
@@ -93,7 +91,7 @@ func NotifySearchIndexProgress(total, current int64, status string) {
 	}
 }
 
-// RequestActiveFilmSearchIndexRebuild 整表顺序加载检索索引。采集结束先走 ResealSearchIndex，由它决定要不要扫全表。
+// RequestActiveFilmSearchIndexRebuild 按当前主站顺序加载检索索引。采集结束先走 ResealSearchIndex，由它决定要不要扫描主站。
 func RequestActiveFilmSearchIndexRebuild() {
 	searchRebuild.mu.Lock()
 	searchRebuild.gen++
@@ -191,26 +189,32 @@ func notifySearchIndexIfCurrent(seen uint64, total, current int64, status string
 // errSearchRebuildSkipped 没有版本或没有数据库，不扫库，终态记 idle。
 var errSearchRebuildSkipped = errors.New("检索索引重建跳过：无版本或数据库")
 
-// scanAndStoreActiveFilmSearchIndex 全库扫描并换上新索引，返回影片数。终态由 runSearchRebuild 发。
+// scanAndStoreActiveFilmSearchIndex 只扫描当前主站并换上新索引，返回影片数。终态由 runSearchRebuild 发。
 func scanAndStoreActiveFilmSearchIndex() (int64, error) {
 	version := currentSearchIndexVersion()
 	if version == "" || db.Mdb == nil {
 		return 0, errSearchRebuildSkipped
 	}
+	primary := currentPrimarySourceID()
 	activeFilmSearchMetasMu.Lock()
 	defer activeFilmSearchMetasMu.Unlock()
+	activeFilmSearchMetas.Store(nil)
 
 	started := time.Now()
-	items, plays, err := loadSearchIndexParts(version)
+	items, plays, err := loadSearchIndexParts(version, primary)
 	if err != nil {
 		return 0, err
+	}
+	if currentPrimarySourceID() != primary {
+		return 0, errors.New("主站已变更")
 	}
 	attachPlaySources(items, plays)
 	plays = nil
 	idx := sealSearchMetaIndex(version, items)
+	idx.PrimaryID = primary
 	activeFilmSearchMetas.Store(idx)
 	cost := time.Since(started).Round(time.Millisecond)
-	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s count=%d cost=%s", version, len(items), cost)
+	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s primary=%s count=%d cost=%s", version, primary, len(items), cost)
 	return int64(len(items)), nil
 }
 
@@ -222,23 +226,17 @@ func currentSearchIndexVersion() string {
 	return version
 }
 
-func loadSearchIndexParts(version string) ([]FilmSearchMeta, map[int64][]string, error) {
-	g, gctx := errgroup.WithContext(context.Background())
-	var (
-		items []FilmSearchMeta
-		plays map[int64][]string
-	)
-	g.Go(func() error {
-		var err error
-		items, err = loadFilmSearchMetaItems(gctx, version)
-		return err
-	})
-	g.Go(func() error {
-		var err error
-		plays, err = loadPlaySources(nil)
-		return err
-	})
-	if err := g.Wait(); err != nil {
+func loadSearchIndexParts(version, primary string) ([]FilmSearchMeta, map[int64][]string, error) {
+	items, err := loadFilmSearchMetaItems(context.Background(), version, primary)
+	if err != nil {
+		return nil, nil, err
+	}
+	mids := make([]int64, len(items))
+	for i := range items {
+		mids[i] = items[i].Mid
+	}
+	plays, err := loadPlaySources(mids)
+	if err != nil {
 		return nil, nil, err
 	}
 	return items, plays, nil

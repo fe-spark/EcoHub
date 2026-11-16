@@ -109,11 +109,13 @@ func TestDailyUpdates_CacheBehavior(t *testing.T) {
 	now := time.Now()
 	version := "v_test_daily"
 	// 插入测试影片索引与快照
+	gdb.Create(&model.FilmSource{Id: "source_master", Name: "主站", Uri: "https://example.com/source_master", State: true})
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001, FirstSourceId: "source_master"},
 		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11},
 		FilmIndexContent:  model.FilmIndexContent{Name: "测试电影1", UpdateStamp: now.Unix()},
 	})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 1001, SourceId: "source_master", LineKind: model.LineKindPlay, GroupIndex: 0})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	gdb.Create(&model.Category{Id: 1, Name: "电影", Show: true})
 
@@ -192,8 +194,8 @@ func TestDailyUpdates_PrimarySourceCategoryIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("src_b query failed: %v", err)
 	}
-	if resB.Page.Total != 1 || len(resB.Categories) != 2 || resB.Categories[1].Pid != 20 {
-		t.Fatalf("src_b unexpected result: total=%d cats=%+v", resB.Page.Total, resB.Categories)
+	if resB.Page.Total != 0 {
+		t.Fatalf("src_b is not the primary source, total=%d", resB.Page.Total)
 	}
 }
 

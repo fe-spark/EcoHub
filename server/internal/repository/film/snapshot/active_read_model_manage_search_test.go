@@ -7,6 +7,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/utils"
 )
 
 func TestManageMetaCategory_SourceKey(t *testing.T) {
@@ -90,6 +91,98 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 // detachGlobalDB 让用例在"未连接数据库"的前提下运行，结束后还原。
 // 这些用例只测纯内存逻辑，但被测函数会读全局 db.Mdb；包内其他用例可能把 db.Mdb 留成已关闭/缺表的库，
 // -count>1 时第二轮起就会读到它而失败。
+func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
+	prev := db.Mdb
+	t.Cleanup(func() { db.Mdb = prev })
+	gdb := setupSearchSourceTestDB(t)
+	if err := gdb.AutoMigrate(&model.FilmTMDBScrape{}, &model.MovieSourceMapping{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "hd", Name: "其他站", Uri: "https://example.com/hd", State: true, Sort: 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	films := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "hd"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "修仙", Hits: 1},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "hd"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "凡人修仙传", Hits: 99999},
+		},
+	}
+	for _, row := range films {
+		if err := gdb.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, mid := range []int64{2, 3} {
+		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: mid, SourceId: "hd", LineKind: "play"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := gdb.Create(&model.FilmTMDBScrape{Mid: 3, TmdbID: 42, MediaType: "tv"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	page := &dto.Page{Current: 1, PageSize: 10}
+	scored, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "修仙", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scored) != 2 || scored[0].Mid != 2 || scored[1].Mid != 3 {
+		t.Fatalf("score order = %+v", scored)
+	}
+	if !scored[1].IsScraped || scored[1].TmdbID != 42 {
+		t.Fatalf("scrape flag = scraped:%v tmdb:%d", scored[1].IsScraped, scored[1].TmdbID)
+	}
+
+	skipped, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "凡人传", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skipped) != 1 || skipped[0].Mid != 3 || !skipped[0].IsScraped {
+		t.Fatalf("skip-char search = %+v", skipped)
+	}
+}
+
+func TestUpsertNonPrimaryDoesNotResealIndex(t *testing.T) {
+	prevDB := db.Mdb
+	prevIdx := activeFilmSearchMetas.Load()
+	t.Cleanup(func() {
+		db.Mdb = prevDB
+		activeFilmSearchMetas.Store(prevIdx)
+	})
+	gdb := setupSearchSourceTestDB(t)
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 9, FirstSourceId: "hd"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "其他站影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	item := FilmSearchMeta{Mid: 1, FirstSourceId: "uku", Item: utils.FilmSearchItem{Mid: 1, Name: "主站片"}}
+	idx := sealSearchMetaIndex("v-keep", []FilmSearchMeta{item})
+	idx.PrimaryID = "uku"
+	activeFilmSearchMetas.Store(idx)
+
+	UpsertMidsToActiveFilmSearchIndex("v-keep", []int64{9})
+	if got := activeFilmSearchMetas.Load(); got != idx {
+		t.Fatal("non-primary save resealed the resident index")
+	}
+
+	prevModel := activeFilmReadModel.Load()
+	activeFilmReadModel.Store(&FilmReadModel{Version: "v-keep"})
+	t.Cleanup(func() { activeFilmReadModel.Store(prevModel) })
+	if _, _, err := UpsertActiveSnapshotsByMids(9); err != nil {
+		t.Fatal(err)
+	}
+	if got := activeFilmSearchMetas.Load(); got != idx {
+		t.Fatal("non-primary snapshot save wrote the search index")
+	}
+}
+
 func detachGlobalDB(t *testing.T) {
 	t.Helper()
 	prev := db.Mdb

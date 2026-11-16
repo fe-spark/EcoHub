@@ -1,15 +1,12 @@
 package snapshot
 
 import (
-	"database/sql"
 	"errors"
-	"log"
 	"slices"
 	"strings"
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/utils"
 )
 
 // ErrSearchIndexMissing 检索索引还没建好，或数据库不可用。
@@ -43,9 +40,6 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 	if db.Mdb == nil {
 		return nil, ErrSearchIndexMissing
 	}
-	if mids == nil {
-		return streamPlaySources()
-	}
 	if len(mids) == 0 {
 		return make(map[int64][]string), nil
 	}
@@ -73,38 +67,6 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 	out := make(map[int64][]string)
 	for _, r := range rows {
 		addPlaySource(out, r.Mid, r.SourceId)
-	}
-	return out, nil
-}
-
-func streamPlaySources() (map[int64][]string, error) {
-	rows, err := db.Mdb.Raw(
-		"SELECT mid, source_id FROM "+model.TableFilmSourcePlaylist+" WHERE line_kind = ?",
-		"play",
-	).Rows()
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make(map[int64][]string)
-	n := 0
-	for rows.Next() {
-		var mid int64
-		var sourceID sql.NullString
-		if err := rows.Scan(&mid, &sourceID); err != nil {
-			return nil, err
-		}
-		addPlaySource(out, mid, sourceID.String)
-		n++
-		if n%200000 == 0 {
-			log.Printf("[ActiveReadModel] 检索索引加载中 播放线路 %d", n)
-		}
-	}
-	if n == 0 || n%200000 != 0 {
-		log.Printf("[ActiveReadModel] 检索索引加载中 播放线路 %d", n)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
@@ -183,22 +145,9 @@ func internPlaySources(srcs []string, keep func(string) string, single map[strin
 	return copied
 }
 
-func itemAggregateKey(item *FilmSearchMeta) string {
-	if item == nil {
-		return ""
-	}
-	clean := strings.TrimSpace(item.Item.CleanName)
-	if clean != "" {
-		return clean
-	}
-	return utils.NormalizeIdentityTitle(item.Item.Name)
-}
-
 func buildSearchMetaRanks(items []FilmSearchMeta) (
 	byUpdate []int,
 	pos map[int64]int,
-	films map[string]int64,
-	multiSource map[string]int64,
 	hotPools map[string][]int64,
 	yearPools map[string][]int64,
 	recentPools map[string][]int64,
@@ -207,7 +156,6 @@ func buildSearchMetaRanks(items []FilmSearchMeta) (
 ) {
 	byUpdate = make([]int, len(items))
 	pos = make(map[int64]int, len(items))
-	films = make(map[string]int64)
 	hits := make(map[string][]rankCand)
 	years := make(map[string][]rankCand)
 	recents := make(map[string][]rankCand)
@@ -217,9 +165,6 @@ func buildSearchMetaRanks(items []FilmSearchMeta) (
 		item := &items[i]
 		if item.Mid > 0 {
 			pos[item.Mid] = i
-		}
-		if src := strings.TrimSpace(item.FirstSourceId); src != "" {
-			films[src]++
 		}
 		for _, src := range item.PlaySources {
 			src = strings.TrimSpace(src)
@@ -234,7 +179,6 @@ func buildSearchMetaRanks(items []FilmSearchMeta) (
 		}
 	}
 
-	multiSource = countMultiSourceBySource(items)
 	slices.SortFunc(byUpdate, func(i, j int) int {
 		return compareSearchMetaUpdate(&items[i], &items[j])
 	})
@@ -246,25 +190,24 @@ func buildSearchMetaRanks(items []FilmSearchMeta) (
 		}
 		byCategory[key] = append(byCategory[key], p)
 	}
-	return byUpdate, pos, films, multiSource, finishRanks(hits, 1), finishRanks(years, 0), finishRanks(recents, 2), finishRanks(sourceHotMap, 1), byCategory
+	return byUpdate, pos, finishRanks(hits, 1), finishRanks(years, 0), finishRanks(recents, 2), finishRanks(sourceHotMap, 1), byCategory
 }
 
 func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMetaIndex {
 	internSearchMetas(items)
-	byUpdate, pos, films, multiSource, hotPools, yearPools, recentPools, sourceHot, byCategory := buildSearchMetaRanks(items)
+	byUpdate, pos, hotPools, yearPools, recentPools, sourceHot, byCategory := buildSearchMetaRanks(items)
 	return &filmSearchMetaIndex{
-		Version:             version,
-		Items:               pointSearchMetas(items),
-		ByUpdate:            byUpdate,
-		Pos:                 pos,
-		FilmsBySource:       films,
-		MultiSourceBySource: multiSource,
-		HotPools:            hotPools,
-		YearPools:           yearPools,
-		RecentPools:         recentPools,
-		SourceHot:           sourceHot,
-		ByCategory:          byCategory,
-		SearchPosts:         buildSearchPostings(items),
+		Version:     version,
+		PrimaryID:   currentPrimarySourceID(),
+		Items:       pointSearchMetas(items),
+		ByUpdate:    byUpdate,
+		Pos:         pos,
+		HotPools:    hotPools,
+		YearPools:   yearPools,
+		RecentPools: recentPools,
+		SourceHot:   sourceHot,
+		ByCategory:  byCategory,
+		SearchPosts: buildSearchPostings(items),
 	}
 }
 
@@ -326,23 +269,18 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 	newItems := make([]*FilmSearchMeta, len(cur.Items), len(cur.Items)+len(upsertMap))
 	copy(newItems, cur.Items)
 
-	// 分类和首选来源都没变时，Pos、分类列表、来源计数与上一版共用。变了才复制对应的表并搬走下标。
+	// 分类没变时，Pos 和分类列表与上一版共用。变了才复制并搬走下标。
 	newPos := cur.Pos
 	newByCategory := cur.ByCategory
-	newFilms := cur.FilmsBySource
 	updates := make([]keptSearchMeta, 0, len(upsertMap))
 	var added []FilmSearchMeta
 	var addedMids []int64
 	moveCategory := false
-	moveSource := false
 	for mid, meta := range upsertMap {
 		if idx, exists := newPos[mid]; exists && idx >= 0 && idx < len(newItems) {
 			old := newItems[idx]
 			if searchMetaCategoryMoved(old, meta) {
 				moveCategory = true
-			}
-			if searchMetaSourceMoved(old, meta) {
-				moveSource = true
 			}
 			updates = append(updates, keptSearchMeta{idx: idx, old: old, meta: meta})
 			continue
@@ -357,12 +295,9 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 	if len(added) > 0 || moveCategory {
 		newByCategory = cloneCategoryLists(cur.ByCategory)
 	}
-	if len(added) > 0 || moveSource {
-		newFilms = cloneFilmCounts(cur.FilmsBySource)
-	}
 	for _, u := range updates {
-		if moveCategory || moveSource {
-			relocateSearchMeta(newByCategory, newFilms, moveCategory, moveSource, u.idx, u.old, u.meta)
+		if moveCategory {
+			relocateSearchMeta(newByCategory, u.idx, u.old, u.meta)
 		}
 		newItems[u.idx] = detachMeta(u.meta)
 	}
@@ -372,9 +307,6 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 			newItems = append(newItems, &added[i])
 			newPos[addedMids[i]] = newIdx
 			meta := &added[i]
-			if src := strings.TrimSpace(meta.FirstSourceId); src != "" {
-				newFilms[src]++
-			}
 			if cKey := strings.TrimSpace(meta.CategoryKey); cKey != "" {
 				newByCategory[cKey] = append(newByCategory[cKey], newIdx)
 			}
@@ -428,19 +360,22 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 
 	posts := cloneAndPatchSearchPostings(cur, newItems, upsertMap, newPos)
 
+	primaryID := cur.PrimaryID
+	if primaryID == "" {
+		primaryID = currentPrimarySourceID()
+	}
 	return &filmSearchMetaIndex{
-		Version:             version,
-		Items:               newItems,
-		ByUpdate:            newByUpdate,
-		Pos:                 newPos,
-		FilmsBySource:       newFilms,
-		MultiSourceBySource: patchMultiSourceCounts(cur.MultiSourceBySource, cur.Items, upsertMap, newPos),
-		HotPools:            newHotPools,
-		YearPools:           newYearPools,
-		RecentPools:         newRecentPools,
-		SourceHot:           newSourceHot,
-		ByCategory:          newByCategory,
-		SearchPosts:         posts,
+		Version:     version,
+		PrimaryID:   primaryID,
+		Items:       newItems,
+		ByUpdate:    newByUpdate,
+		Pos:         newPos,
+		HotPools:    newHotPools,
+		YearPools:   newYearPools,
+		RecentPools: newRecentPools,
+		SourceHot:   newSourceHot,
+		ByCategory:  newByCategory,
+		SearchPosts: posts,
 	}
 }
 
@@ -486,12 +421,4 @@ func VisitSearchMetasByUpdate(visit func(*FilmSearchMeta) bool) error {
 		}
 	}
 	return nil
-}
-
-func SearchInventoryCounts() (films map[string]int64, multiSource map[string]int64, err error) {
-	idx, err := loadCurrentSearchIndex()
-	if err != nil {
-		return nil, nil, err
-	}
-	return idx.FilmsBySource, idx.MultiSourceBySource, nil
 }

@@ -74,25 +74,6 @@ func TestClearActiveFilmReadModelLeavesEmptyNonNilPointer(t *testing.T) {
 	}
 }
 
-func TestInvalidateActiveFilmSearchIndexPreservesReadModelVersion(t *testing.T) {
-	origRm := GetActiveFilmReadModel()
-	defer func() {
-		if origRm != nil {
-			activeFilmReadModel.Store(origRm)
-		}
-	}()
-
-	const testVer = "v-test-preserve-123"
-	_ = LoadActiveFilmReadModel(testVer)
-
-	InvalidateActiveFilmSearchIndex(testVer)
-
-	rm := GetActiveFilmReadModel()
-	if rm == nil || rm.Version != testVer {
-		t.Fatalf("InvalidateActiveFilmSearchIndex cleared version, got %+v, want version=%q", rm, testVer)
-	}
-}
-
 func TestResolveActiveReadModelVersion(t *testing.T) {
 	origRm := GetActiveFilmReadModel()
 	defer func() {

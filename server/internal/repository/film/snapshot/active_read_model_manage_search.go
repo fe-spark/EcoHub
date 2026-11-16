@@ -9,6 +9,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
@@ -20,10 +21,10 @@ import (
 func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	tokens := utils.ExtractSearchTokens(keyword)
 	if len(tokens) == 0 {
-		return query.Where("name LIKE ?", "%"+escapeLikePattern(keyword)+"%")
+		return query.Where("name LIKE ? ESCAPE '\\'", "%"+escapeLikePattern(keyword)+"%")
 	}
 	for _, tok := range tokens {
-		query = query.Where("name LIKE ?", "%"+escapeLikePattern(tok)+"%")
+		query = query.Where("name LIKE ? ESCAPE '\\'", "%"+escapeLikePattern(tok)+"%")
 	}
 	return query
 }
@@ -50,6 +51,16 @@ func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 	startedAt := time.Now()
 	page := shared.EnsurePage(s.Paging)
+	sourceID := strings.TrimSpace(s.SourceId)
+	primary := currentPrimarySourceID()
+	if sourceID != "" && sourceID != primary {
+		list, err := searchManageFilmsFromDB(s, page)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("[ManageFilmSearch] 数据库检索完成 name=%q source=%s total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), sourceID, page.Total, page.Current, len(list), time.Since(startedAt))
+		return list, nil
+	}
 	idx, err := loadCurrentSearchIndex()
 	if err != nil {
 		return nil, err
@@ -83,6 +94,213 @@ func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 	}
 	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q source=%s pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), strings.TrimSpace(s.SourceId), s.Pid, s.Cid, page.Total, page.Current, len(list), time.Since(startedAt))
 	return list, nil
+}
+
+// searchManageFilmsFromDB 非主站影片列表直接查库，不装进常驻索引。
+func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmIndex, error) {
+	if db.Mdb == nil {
+		return nil, ErrSearchIndexMissing
+	}
+	filterCtx, ok := newManageFilterContext(s)
+	if !ok {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmIndex{}, nil
+	}
+	q := db.Mdb.Model(&model.FilmIndex{})
+	if filterCtx.sourceID != "" {
+		q = q.Where("mid IN (?)", db.Mdb.Model(&model.FilmSourcePlaylist{}).
+			Select("mid").
+			Where("line_kind = ? AND source_id = ?", "play", filterCtx.sourceID))
+	}
+	switch filterCtx.categoryCheckMode {
+	case 1:
+		q = q.Where("cid = ?", filterCtx.cid)
+	case 2:
+		q = q.Where("pid = ?", filterCtx.pid)
+	case 3:
+		keys := make([]string, 0, len(filterCtx.validCategoryKeys))
+		for key := range filterCtx.validCategoryKeys {
+			keys = append(keys, key)
+		}
+		if len(keys) == 0 {
+			page.Total = 0
+			page.PageCount = 1
+			return []model.FilmIndex{}, nil
+		}
+		q = q.Where("category_key IN ?", keys)
+	}
+	if filterCtx.year > 0 {
+		q = q.Where("year = ?", filterCtx.year)
+	}
+	if filterCtx.beginTime > 0 {
+		q = q.Where("update_stamp >= ?", filterCtx.beginTime)
+	}
+	if filterCtx.endTime > 0 {
+		q = q.Where("update_stamp <= ?", filterCtx.endTime)
+	}
+	if filterCtx.area != "" {
+		q = q.Where("area = ?", filterCtx.area)
+	}
+	if filterCtx.language != "" {
+		q = q.Where("language = ?", filterCtx.language)
+	}
+	if filterCtx.plot != "" {
+		q = q.Where("class_tag LIKE ? ESCAPE '\\'", "%"+escapeLikePattern(filterCtx.plot)+"%")
+	}
+	name := strings.TrimSpace(s.Name)
+	if name != "" {
+		return pageScoredManageFilms(q, page, name, filterCtx.sourceID)
+	}
+	list, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC")
+	if err != nil {
+		return nil, err
+	}
+	if err := fillFilmSourceMids(filterCtx.sourceID, list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// pageOrderedManageFilms 无关键词时按更新时间分页，并补上不落库的刮削标记。
+func pageOrderedManageFilms(q *gorm.DB, page *dto.Page, order string) ([]model.FilmIndex, error) {
+	var total int64
+	if err := q.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, err
+	}
+	page.Total = int(total)
+	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+	if page.PageCount <= 0 {
+		page.PageCount = 1
+	}
+	offset := shared.PageOffset(page)
+	if offset >= page.Total {
+		return []model.FilmIndex{}, nil
+	}
+	var list []model.FilmIndex
+	if err := q.Session(&gorm.Session{}).Order(order).Offset(offset).Limit(page.PageSize).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	attachFilmScrapes(list)
+	return list, nil
+}
+
+// pageScoredManageFilms 非主站关键词与主站内存列表同一套打分和排序。
+func pageScoredManageFilms(q *gorm.DB, page *dto.Page, name, sourceID string) ([]model.FilmIndex, error) {
+	type scoreRow struct {
+		Mid         int64
+		Name        string
+		Hits        int64
+		Year        int64
+		UpdateStamp int64
+	}
+	var rows []scoreRow
+	if err := q.Session(&gorm.Session{}).Select("mid, name, hits, year, update_stamp").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	query := utils.BuildQueryContext(name)
+	type hit struct {
+		scoreRow
+		score int
+	}
+	hits := make([]hit, 0)
+	for _, row := range rows {
+		item := utils.FilmSearchItem{
+			Mid:         row.Mid,
+			Name:        row.Name,
+			Hits:        row.Hits,
+			Year:        row.Year,
+			UpdateStamp: row.UpdateStamp,
+		}
+		utils.FillSearchDerivedFields(&item)
+		score := utils.ScoreFilmMatch(item, query)
+		if score <= 0 {
+			continue
+		}
+		hits = append(hits, hit{scoreRow: row, score: score})
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		a, b := hits[i], hits[j]
+		if a.score != b.score {
+			return a.score > b.score
+		}
+		if a.Hits != b.Hits {
+			return a.Hits > b.Hits
+		}
+		if a.Year != b.Year {
+			return a.Year > b.Year
+		}
+		if a.UpdateStamp != b.UpdateStamp {
+			return a.UpdateStamp > b.UpdateStamp
+		}
+		return a.Mid > b.Mid
+	})
+	page.Total = len(hits)
+	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+	if page.PageCount <= 0 {
+		page.PageCount = 1
+	}
+	offset := shared.PageOffset(page)
+	if offset >= page.Total {
+		return []model.FilmIndex{}, nil
+	}
+	end := offset + page.PageSize
+	if end > len(hits) {
+		end = len(hits)
+	}
+	mids := make([]int64, 0, end-offset)
+	for _, item := range hits[offset:end] {
+		if item.Mid > 0 {
+			mids = append(mids, item.Mid)
+		}
+	}
+	if len(mids) == 0 {
+		return []model.FilmIndex{}, nil
+	}
+	var list []model.FilmIndex
+	if err := db.Mdb.Where("mid IN ?", mids).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	ordered := orderFilmsByMids(mids, list)
+	attachFilmScrapes(ordered)
+	if err := fillFilmSourceMids(sourceID, ordered); err != nil {
+		return nil, err
+	}
+	return ordered, nil
+}
+
+func orderFilmsByMids(mids []int64, list []model.FilmIndex) []model.FilmIndex {
+	byMid := make(map[int64]model.FilmIndex, len(list))
+	for _, row := range list {
+		byMid[row.Mid] = row
+	}
+	out := make([]model.FilmIndex, 0, len(mids))
+	for _, mid := range mids {
+		row, ok := byMid[mid]
+		if !ok {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func attachFilmScrapes(list []model.FilmIndex) {
+	if len(list) == 0 {
+		return
+	}
+	mids := make([]int64, 0, len(list))
+	for i := range list {
+		if list[i].Mid > 0 {
+			mids = append(mids, list[i].Mid)
+		}
+	}
+	scrapes := LoadActiveScrapesByMids(mids)
+	for i := range list {
+		if sc, ok := scrapes[list[i].Mid]; ok {
+			ApplyTMDBScrapeToFilmIndex(&list[i], &sc)
+		}
+	}
 }
 
 // fillFilmSourceMids 把当前来源的源站编号写到列表上。库内 mid 是入库序号，不给后台当 ID 展示。
