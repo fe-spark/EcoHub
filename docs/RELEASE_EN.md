@@ -11,43 +11,10 @@ Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also point
 
 ### v3.0.6 changes
 
-- **Rate limit**: after 20 page fetches fail in a row, that source's in-flight requests are cancelled at once, it pauses for 2 minutes, then those cancelled pages are fetched again. Pages that already failed are not retried. The consecutive-failure count starts over when the pause ends, and another 20 failures interrupt the round.
-- **Last collect pages**: the card shows only the last completed page count stored by the server. It no longer follows the current round's success count while a collect is running. After the round finishes, the page loads the latest count from the source list, and an older list response cannot overwrite a newer one.
-- **Collect records**: columns are collect time, trigger, window, duration, updated films, pages, sources, status, and actions. Auto-refresh can be 5, 10, 15, or 30 seconds, default 10. While a record is running, each source status matches the collect center.
-- **Page-count probe**: each request has its own timeout. After a timeout or failure it retries twice, 2 seconds apart. The source is marked failed only after all three attempts fail.
-- **Store every updated film id after the round ends**: after the round finishes writing films, every film id updated in that round is stored on the collect record. A failure to open the record does not cancel the collect.
-
-### v3.0.6-beta.5 changes
-
-- **Rate limit**: after 20 page fetches fail in a row, that source's in-flight requests are cancelled at once, it pauses for 2 minutes, then those cancelled pages are fetched again. Pages that already failed are not retried. Another 20 consecutive failures after the pause interrupts the round.
-- **Last collect pages**: the card shows only the last completed page count stored by the server. It no longer follows the current round's success count while a collect is running. After the round finishes, the page loads the latest count from the source list.
-
-### v3.0.6-beta.4
-
-Test release **v3.0.6-beta.4**, image `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4`.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.6-beta.4` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **This release clears collect records on startup**: `collect_records` and `collect_record_films` are dropped and recreated. Previous collect records are not kept. The film catalog is not stored in these tables and is left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.6-beta.4 changes
-
-- **Collect records**: while a round is still running, a source that has already failed, finished, or stopped matches the collect center. A failure with no successful pages shows "采集失败"; a failure with successful pages shows "部分失败".
-- **Page-count probe**: each request has its own timeout. After a timeout or failure it retries twice, 2 seconds apart. The source is marked failed only after all three attempts fail.
-
-### v3.0.6-beta.3 changes
-
-- **Collect record page**: source status now includes rate-limited, stopping, and waiting for search, so the frontend build completes.
-
-### v3.0.6-beta.2 changes
-
-- **Pause after consecutive failures**: when one source fails to fetch 20 pages in a row, that source pauses for about 2 minutes and then continues the pages that are still unfinished. It does not take new pages while paused. If the queue is already empty, it does not wait out the full 2 minutes. The collect center shows rate-limited during that pause.
-- **Collect records do not block writes**: page fetches and search-index sealing no longer write the collect record. A failure to open the record does not cancel the collect.
-- **Store every updated film id after the round ends**: after the round finishes writing films, every film id updated in that round is stored on the collect record, including a full collect. Rows are written 2000 at a time. If one batch fails, the ids already written for that round are deleted and the record stays running. If the process restarts mid-write, the stored row count is used.
-- **Collect record page**: columns are collect time, updated films, result, and actions. Auto-refresh can be 5, 10, 15, or 30 seconds, default 10, and a manual refresh is available. Refresh pauses while the page is hidden and runs immediately when it becomes visible again. While a record is running, each source status matches the collect center. After it finishes, the saved record is shown.
-- **Updated films**: search matches the start of the title inside this batch only. Previous and next pages use a cursor, and the total is the number of matches in this batch.
+- **Rate limit**: after 20 page failures in a row, in-flight requests are cancelled and the source pauses for about 2 minutes, then continues the unfinished pages. Pages that already failed are not retried. The count starts over after the pause, and another 20 failures interrupt the round.
+- **Collect records**: columns are time, trigger, window, duration, updated films, pages, sources, and status, with auto-refresh. A running round matches the collect center. Film ids updated in the round are saved when it ends.
+- **Last collect pages**: only the last completed page count is shown.
+- **Page-count probe**: a failure is retried twice. The source is marked failed only after all three attempts fail.
 
 ---
 
