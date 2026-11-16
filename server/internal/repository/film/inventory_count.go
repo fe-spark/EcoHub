@@ -12,32 +12,13 @@ func countFilms(primary string) (int64, error) {
 	return n, err
 }
 
-// countPrimaryMulti 当前主站里有多个播放源的影片数。
-// 同一编号挂了两个及以上播放源，或片名在另一个采集站也有，计一次。只在库里计数，不把片名拉进内存清洗。
-func countPrimaryMulti(primary string) (int64, error) {
-	film := model.TableFilmIndex
-	play := model.TableFilmSourcePlaylist
+// countPrimaryCategories 当前主站已映射、且展示分类还在的分类数。
+func countPrimaryCategories(primary string) (int64, error) {
 	var n int64
-	err := db.Mdb.Raw(`
-		SELECT COUNT(*) FROM (
-			SELECT f.mid
-			FROM `+film+` f
-			JOIN `+play+` p ON p.mid = f.mid AND p.line_kind = ?
-			WHERE f.deleted_at IS NULL AND f.first_source_id = ?
-			GROUP BY f.mid
-			HAVING COUNT(DISTINCT p.source_id) >= 2
-			UNION
-			SELECT f.mid
-			FROM `+film+` f
-			JOIN (
-				SELECT name
-				FROM `+film+`
-				WHERE deleted_at IS NULL AND name <> '' AND first_source_id <> ''
-				GROUP BY name
-				HAVING COUNT(DISTINCT first_source_id) > 1
-			) shared ON shared.name = f.name
-			WHERE f.deleted_at IS NULL AND f.first_source_id = ?
-		) multi
-	`, model.LineKindPlay, primary, primary).Scan(&n).Error
+	err := db.Mdb.Model(&model.CategoryMapping{}).
+		Where("source_id = ? AND category_id > 0", primary).
+		Where("category_id IN (?)", db.Mdb.Model(&model.Category{}).Select("id")).
+		Distinct("category_id").
+		Count(&n).Error
 	return n, err
 }

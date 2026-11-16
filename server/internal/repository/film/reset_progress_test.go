@@ -26,6 +26,8 @@ func setupResetStatsDB(t *testing.T) *gorm.DB {
 		&model.FilmSource{},
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
+		&model.Category{},
+		&model.CategoryMapping{},
 		&model.CollectRecord{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -66,6 +68,13 @@ func TestGetLibraryInventory_PrimaryOnly(t *testing.T) {
 	play(5, "src_a", 0)
 	play(99, "src_a", 0)
 
+	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", StableKey: "movie", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 2, Pid: 0, Name: "隐藏", StableKey: "hidden", Show: false, Sort: 2})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 1})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 2, CategoryId: 2})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 9, CategoryId: 999})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 1, CategoryId: 1})
+
 	now := time.Now()
 	gdb.Create(&model.CollectRecord{
 		BatchID:    "yesterday",
@@ -90,7 +99,7 @@ func TestGetLibraryInventory_PrimaryOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Films != 4 || stats.MultiSource != 3 || stats.Failures != 4 {
+	if stats.Films != 4 || stats.Categories != 2 || stats.Failures != 4 {
 		t.Fatalf("library = %+v", stats)
 	}
 }

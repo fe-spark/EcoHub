@@ -145,7 +145,7 @@ func (MovieMatchKey) TableName() string {
 // FilmIndexIdentity 索引标识层：只负责来源与主键归属。
 type FilmIndexIdentity struct {
 	Mid           int64  `json:"mid" gorm:"primaryKey;autoIncrement;index:idx_root_key_upd_stamp,priority:3;index:idx_root_key_hits_val,priority:3;index:idx_cat_key_upd_stamp,priority:3;index:idx_cat_key_hits_val,priority:3"` // 系统内全局唯一影片 ID
-	FirstSourceId string `json:"firstSourceId" gorm:"size:32;index;index:idx_film_name_source,priority:2"`                                                                                                                        // 首次录入该片的站点 ID
+	FirstSourceId string `json:"firstSourceId" gorm:"size:32;index"`                                                                                                                                                              // 首次录入该片的站点 ID
 	DbId          int64  `json:"dbId" gorm:"index"`                                                                                                                                                                               // 豆瓣 ID (用于精准去重)
 }
 
@@ -162,7 +162,7 @@ type FilmIndexCategory struct {
 // FilmIndexContent 展示内容层：列表与详情入口直接消费的字段。
 type FilmIndexContent struct {
 	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`                                                                                                                                                                                                                                     // 系列标识，用于相关推荐召回与排序
-	Name               string  `json:"name" gorm:"size:255;index:idx_film_index_name;index:idx_film_name_source,priority:1"`                                                                                                                                                                                // 片名
+	Name               string  `json:"name" gorm:"size:255;index:idx_film_index_name"`                                                                                                                                                                                                                      // 片名
 	SubTitle           string  `json:"subTitle" gorm:"type:text"`                                                                                                                                                                                                                                           // 影片子标题
 	ClassTag           string  `json:"classTag" gorm:"type:text"`                                                                                                                                                                                                                                           // 类型标签
 	Area               string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                                                                                                              // 地区
@@ -246,9 +246,9 @@ const (
 type FilmSourcePlaylist struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-	Mid          int64  `gorm:"primaryKey;autoIncrement:false;index:idx_playlist_source_mid,priority:2;index:idx_playlist_kind_mid,priority:2;index:idx_playlist_kind_mid_source,priority:2"`
-	SourceId     string `gorm:"primaryKey;size:32;index:idx_playlist_source_mid,priority:1;index:idx_playlist_kind_mid_source,priority:3"`
-	LineKind     string `gorm:"primaryKey;size:16;index:idx_playlist_kind_mid,priority:1;index:idx_playlist_kind_mid_source,priority:1"` // LineKindPlay 或 LineKindDownload
+	Mid          int64  `gorm:"primaryKey;autoIncrement:false;index:idx_playlist_source_mid,priority:2;index:idx_playlist_kind_mid,priority:2"`
+	SourceId     string `gorm:"primaryKey;size:32;index:idx_playlist_source_mid,priority:1"`
+	LineKind     string `gorm:"primaryKey;size:16;index:idx_playlist_kind_mid,priority:1"` // LineKindPlay 或 LineKindDownload
 	GroupIndex   int    `gorm:"primaryKey;autoIncrement:false"`
 	GroupName    string `gorm:"type:varchar(255)"`
 	EpisodeCount int    `gorm:"default:0"`

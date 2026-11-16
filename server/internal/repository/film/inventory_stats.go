@@ -10,14 +10,14 @@ import (
 )
 
 // LibraryInventory 工作台片库规模，只含当前主站。
-// 失败数是该站北京时间当天的采集失败页。失败请求没有影片列表，不能按部数统计。
+// 分类是该站已映射且展示分类还在的节点。失败数是该站北京时间当天的采集失败页。
 type LibraryInventory struct {
-	Films       int64 `json:"films"`
-	MultiSource int64 `json:"multiSource"`
-	Failures    int64 `json:"failures"`
+	Films      int64 `json:"films"`
+	Categories int64 `json:"categories"`
+	Failures   int64 `json:"failures"`
 }
 
-// GetLibraryInventory 统计当前主站的档案、多源聚合，以及当天采集失败页。
+// GetLibraryInventory 统计当前主站的档案、分类和当天采集失败页。
 func GetLibraryInventory() (LibraryInventory, error) {
 	var library LibraryInventory
 	if db.Mdb == nil {
@@ -31,14 +31,12 @@ func GetLibraryInventory() (LibraryInventory, error) {
 	if err != nil {
 		return library, err
 	}
-	library.Films = films
-	if films > 0 {
-		multi, err := countPrimaryMulti(primary)
-		if err != nil {
-			return library, err
-		}
-		library.MultiSource = multi
+	categories, err := countPrimaryCategories(primary)
+	if err != nil {
+		return library, err
 	}
+	library.Films = films
+	library.Categories = categories
 	if _, bySource, err := repository.CountTodayCollectFailures(time.Now()); err == nil {
 		library.Failures = bySource[primary]
 	}
