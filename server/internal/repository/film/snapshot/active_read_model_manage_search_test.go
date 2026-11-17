@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -235,6 +236,44 @@ func TestUpsertNonPrimaryDoesNotResealIndex(t *testing.T) {
 	}
 	if got := activeFilmSearchMetas.Load(); got != idx {
 		t.Fatal("non-primary snapshot save wrote the search index")
+	}
+}
+
+type sqlPrintfWriter struct {
+	lines []string
+}
+
+func (w *sqlPrintfWriter) Printf(format string, args ...any) {
+	w.lines = append(w.lines, fmt.Sprintf(format, args...))
+}
+
+func TestPageOrderedManageFilmsUsesSourceUpdateIndex(t *testing.T) {
+	writer := &sqlPrintfWriter{}
+	gdb, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DryRun:               true,
+		DisableAutomaticPing: true,
+		Logger: logger.New(writer, logger.Config{
+			LogLevel: logger.Info,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("open mysql dry-run: %v", err)
+	}
+	page := &dto.Page{Current: 1, PageSize: 10}
+	q := gdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", "hd")
+	if _, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC", 100, "hd"); err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.Join(writer.lines, "\n")
+	want := "USE INDEX (`" + repository.SourceFilmListIndex + "`)"
+	if !strings.Contains(sql, want) {
+		t.Fatalf("sql=%s", sql)
+	}
+	if strings.Contains(sql, "`film_index USE INDEX") {
+		t.Fatalf("sql=%s", sql)
 	}
 }
 

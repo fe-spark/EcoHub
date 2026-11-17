@@ -15,10 +15,11 @@ import (
 
 // pageOrderedManageFilms 无关键词时按更新时间分页，并补上不落库的刮削标记。
 // knownTotal 小于 0 时再数一遍；否则用调用方已经知道的总数。
-func pageOrderedManageFilms(q *gorm.DB, page *dto.Page, order string, knownTotal int64) ([]model.FilmIndex, error) {
+// sourceID 非空时强制走所属站更新索引，避免整站 filesort 把读超时打满。
+func pageOrderedManageFilms(q *gorm.DB, page *dto.Page, order string, knownTotal int64, sourceID string) ([]model.FilmIndex, error) {
 	total := knownTotal
 	if total < 0 {
-		if err := q.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		if err := applyManageScoreIndexHint(q.Session(&gorm.Session{}), sourceID).Count(&total).Error; err != nil {
 			return nil, err
 		}
 	}
@@ -32,7 +33,7 @@ func pageOrderedManageFilms(q *gorm.DB, page *dto.Page, order string, knownTotal
 		return []model.FilmIndex{}, nil
 	}
 	var list []model.FilmIndex
-	if err := q.Session(&gorm.Session{}).Order(order).Offset(offset).Limit(page.PageSize).Find(&list).Error; err != nil {
+	if err := applyManageScoreIndexHint(q.Session(&gorm.Session{}), sourceID).Order(order).Offset(offset).Limit(page.PageSize).Find(&list).Error; err != nil {
 		return nil, err
 	}
 	attachFilmScrapes(list)

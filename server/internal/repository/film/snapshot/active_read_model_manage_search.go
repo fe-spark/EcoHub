@@ -190,7 +190,7 @@ func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmInde
 			knownTotal = n
 		}
 	}
-	list, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC", knownTotal)
+	list, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC", knownTotal, filterCtx.sourceID)
 	if err != nil {
 		return nil, err
 	}
