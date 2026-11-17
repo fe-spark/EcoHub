@@ -10,9 +10,11 @@ import (
 
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
+	t.Cleanup(func() { support.SetCategoryShowForTest(map[int64]bool{}) })
 	gdb, _ := setupProvideTestDB(t)
 	const version = "v_tvbox_scope"
 
@@ -23,6 +25,7 @@ func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
 		t.Fatalf("sources: %v", err)
 	}
 	if err := gdb.Create(&[]model.Category{
+		{Id: 1, Pid: 0, Name: "停用撞号", Show: true, Sort: 0, StableKey: "hidden-1"},
 		{Id: 11, Pid: 0, Name: "电影", Show: true, Sort: 1, StableKey: "source:src_a:1"},
 		{Id: 21, Pid: 0, Name: "电影", Show: true, Sort: 1, StableKey: "source:src_b:1"},
 	}).Error; err != nil {
@@ -42,8 +45,9 @@ func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
 	}
 
 	snaps := []model.FilmListSnapshot{
-		{SnapshotVersion: version, Mid: 1, Pid: 11, Name: "甲片", CategoryKey: "source:src_a:1", RootCategoryKey: "source:src_a:1", UpdateStamp: 10},
-		{SnapshotVersion: version, Mid: 2, Pid: 21, Name: "乙片", CategoryKey: "source:src_b:1", RootCategoryKey: "source:src_b:1", UpdateStamp: 20},
+		{SnapshotVersion: version, Mid: 1, Pid: 11, Name: "甲片", SourceId: "src_a", CategoryKey: "source:src_a:1", RootCategoryKey: "source:src_a:1", UpdateStamp: 10},
+		{SnapshotVersion: version, Mid: 2, Pid: 21, Name: "乙片", SourceId: "src_b", CategoryKey: "source:src_b:1", RootCategoryKey: "source:src_b:1", UpdateStamp: 20},
+		{SnapshotVersion: version, Mid: 3, Pid: 1, Name: "撞号片", SourceId: "src_a", CategoryKey: "source:src_a:1", RootCategoryKey: "source:src_a:1", UpdateStamp: 5},
 	}
 	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(snaps); err != nil {
 		t.Fatalf("films: %v", err)
@@ -51,6 +55,7 @@ func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
 	for _, row := range []model.FilmSourcePlaylist{
 		{Mid: 1, SourceId: "src_a", LineKind: "play", GroupIndex: 0},
 		{Mid: 2, SourceId: "src_b", LineKind: "play", GroupIndex: 0},
+		{Mid: 3, SourceId: "src_a", LineKind: "play", GroupIndex: 0},
 	} {
 		if err := gdb.Create(&row).Error; err != nil {
 			t.Fatalf("playlist: %v", err)
@@ -59,6 +64,10 @@ func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
 	if err := filmsnapshot.SetActiveSnapshotVersion(version); err != nil {
 		t.Fatalf("version: %v", err)
 	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 1).Update("show", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	support.RefreshCategoryCache()
 
 	gin.SetMode(gin.TestMode)
 
@@ -84,6 +93,15 @@ func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
 	local := provideJSON(t, "/api/provide/vod?ac=list&t=21")
 	if len(provideVodIDs(t, local)) != 0 {
 		t.Fatalf("主站不认本地分类 id, got %+v", local["list"])
+	}
+
+	typed := provideJSON(t, "/api/provide/vod?ac=list&t=1")
+	typedIDs := provideVodIDs(t, typed)
+	if !typedIDs[1] || typedIDs[3] || typedIDs[2] {
+		t.Fatalf("请求 t=1 仍应返回主站电影，本地分类 1 停用的片子不占名额, got %+v", typedIDs)
+	}
+	if int(typed["total"].(float64)) != len(typed["list"].([]any)) {
+		t.Fatalf("total 与当页条数不一致 total=%v list=%v", typed["total"], typed["list"])
 	}
 }
 

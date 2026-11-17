@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -17,7 +18,6 @@ import (
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 	"server/internal/utils"
-	"golang.org/x/sync/singleflight"
 )
 
 var provideSnapshotsSf singleflight.Group
@@ -42,17 +42,33 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		return []model.FilmListSnapshot{}, nil
 	}
 
-	if st.Cid > 0 && !support.IsCategoryVisible(st.Cid, st.Pid) {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}, nil
+	// 带了采集站时，pid/cid 是该站的 type_id，不能拿 film_category.id 的可见性去挡。
+	if st.SourceId == "" {
+		if st.Cid > 0 && !support.IsCategoryVisible(st.Cid, st.Pid) {
+			page.Total = 0
+			page.PageCount = 1
+			return []model.FilmListSnapshot{}, nil
+		}
+		if st.Pid > 0 && !support.IsCategoryVisible(0, st.Pid) {
+			page.Total = 0
+			page.PageCount = 1
+			return []model.FilmListSnapshot{}, nil
+		}
 	}
-	if st.Pid > 0 && !support.IsCategoryVisible(0, st.Pid) {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}, nil
+	// 主站列表、分类筛选与关键字检索统一走内存索引翻页，避免采集站 type_id 与本地分类撞号或绕过停用分类检查。
+	if st.SourceId != "" && st.SourceId == currentPrimarySourceID() {
+		item, err := tagPageFromIndex(version, st, page, keyword, recentHours)
+		if err != nil {
+			return nil, err
+		}
+		page.Total = item.Total
+		page.PageCount = item.PageCount
+		log.Printf("[ProvideVod] 内存列表 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
+			st.Pid, st.Cid, keyword, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt))
+		return item.Snapshots, nil
 	}
-	keywordOnly := keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == ""
+
+	keywordOnly := st.SourceId == "" && keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == ""
 	if keywordOnly {
 		snaps, err := memoryKeywordSnapshots(version, st.SourceId, keyword, st.Sort, st.Pid, st.Cid, page)
 		if err != nil {

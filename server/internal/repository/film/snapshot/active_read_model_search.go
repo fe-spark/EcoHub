@@ -77,7 +77,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		}
 
 		listGen := GetSearchCacheVersion()
-		item, err := tagPageFromIndex(version, st, page)
+		item, err := tagPageFromIndex(version, st, page, "", 0)
 		if err != nil {
 			return nil, err
 		}

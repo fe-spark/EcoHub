@@ -5,6 +5,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository/support"
 )
 
 func TestListProvideSnapshots_TagFilter(t *testing.T) {
@@ -40,6 +41,44 @@ func TestListProvideSnapshots_TagFilter(t *testing.T) {
 	res3 := mustProvide(t, version, model.SearchTagsVO{Pid: targetPid, Area: "美国"}, "动作片", 0, page3)
 	if len(res3) != 1 || page3.Total != 1 || res3[0].Mid != 2 {
 		t.Fatalf("keyword+Area: expected only Mid=2, got %+v total=%d", res3, page3.Total)
+	}
+}
+
+func TestListProvideSnapshots_PrimaryKeywordKeepsArea(t *testing.T) {
+	gdb := setupOthersFilterTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.CategoryMapping{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.SourceCategory{
+		SourceId: "source_master", SourceTypeId: 1, RawName: "电影", Sort: 1, Depth: 0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	const version = "v-provide-keyword-area"
+	snaps := []model.FilmListSnapshot{
+		{SnapshotVersion: version, Mid: 1, Name: "美国动作片", SourceId: "source_master", Area: "美国", CategoryKey: "source:source_master:1", UpdateStamp: 30},
+		{SnapshotVersion: version, Mid: 2, Name: "美国喜剧片", SourceId: "source_master", Area: "美国", CategoryKey: "source:source_master:1", UpdateStamp: 20},
+		{SnapshotVersion: version, Mid: 3, Name: "大陆动作片", SourceId: "source_master", Area: "中国大陆", CategoryKey: "source:source_master:1", UpdateStamp: 10},
+	}
+	if err := WriteLiveFilmsFromSnapshots(snaps); err != nil {
+		t.Fatal(err)
+	}
+	for _, mid := range []int64{1, 2, 3} {
+		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: mid, SourceId: "source_master", LineKind: "play", GroupIndex: 0}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetActiveSnapshotVersion(version); err != nil {
+		t.Fatal(err)
+	}
+	prev := activeFilmSearchMetas.Load()
+	activeFilmSearchMetas.Store(nil)
+	t.Cleanup(func() { activeFilmSearchMetas.Store(prev) })
+
+	page := &dto.Page{Current: 1, PageSize: 10}
+	res := mustProvide(t, version, model.SearchTagsVO{SourceId: "source_master", Area: "美国"}, "动作片", 0, page)
+	if page.Total != 1 || len(res) != 1 || res[0].Mid != 1 {
+		t.Fatalf("主站关键字加地区应只留美国动作片, total=%d list=%v", page.Total, res)
 	}
 }
 
@@ -181,5 +220,77 @@ func TestListProvideSnapshots_YearSortTieBreakByUpdateStamp(t *testing.T) {
 		if !tagRankBefore("year", a, b) {
 			t.Fatalf("TVBox order disagrees with tagRankBefore at mid %d -> %d", a.Mid, b.Mid)
 		}
+	}
+}
+
+func TestListProvideSnapshots_PrimaryKeywordOnlyRespectsVisibilityAndSourceType(t *testing.T) {
+	gdb := setupOthersFilterTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.CategoryMapping{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&[]model.Category{
+		{Id: 90, Pid: 0, Name: "连续剧", Show: true, StableKey: "source:source_master:2"},
+		{Id: 99, Pid: 0, Name: "停用分类", Show: true, StableKey: "source:source_master:99"},
+		{Id: 2, Pid: 0, Name: "撞号电影", Show: true, StableKey: "source:source_master:5"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 99).Update("show", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	support.RefreshCategoryCache()
+	t.Cleanup(support.RefreshCategoryCache)
+
+	if err := gdb.Create(&[]model.SourceCategory{
+		{SourceId: "source_master", SourceTypeId: 2, RawName: "连续剧", Sort: 1, Depth: 0},
+		{SourceId: "source_master", SourceTypeId: 5, RawName: "电影", Sort: 2, Depth: 0},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&[]model.CategoryMapping{
+		{SourceId: "source_master", SourceTypeId: 2, CategoryId: 90},
+		{SourceId: "source_master", SourceTypeId: 5, CategoryId: 2},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	const version = "v-provide-keyword-only-visibility"
+	snaps := []model.FilmListSnapshot{
+		{SnapshotVersion: version, Mid: 1, Pid: 90, Name: "星际测试", SourceId: "source_master", CategoryKey: "source:source_master:2", RootCategoryKey: "source:source_master:2", UpdateStamp: 30},
+		{SnapshotVersion: version, Mid: 2, Pid: 99, Name: "星际停用", SourceId: "source_master", CategoryKey: "source:source_master:2", RootCategoryKey: "source:source_master:2", UpdateStamp: 20},
+		{SnapshotVersion: version, Mid: 3, Pid: 2, Name: "星际撞号", SourceId: "source_master", CategoryKey: "source:source_master:5", RootCategoryKey: "source:source_master:5", UpdateStamp: 10},
+	}
+	if err := WriteLiveFilmsFromSnapshots(snaps); err != nil {
+		t.Fatal(err)
+	}
+	for _, mid := range []int64{1, 2, 3} {
+		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: mid, SourceId: "source_master", LineKind: "play", GroupIndex: 0}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetActiveSnapshotVersion(version); err != nil {
+		t.Fatal(err)
+	}
+	prev := activeFilmSearchMetas.Load()
+	activeFilmSearchMetas.Store(nil)
+	t.Cleanup(func() { activeFilmSearchMetas.Store(prev) })
+
+	// 纯关键字检索不得泄漏本地已停用分类下的影片
+	pageAll := &dto.Page{Current: 1, PageSize: 10}
+	resAll := mustProvide(t, version, model.SearchTagsVO{SourceId: "source_master"}, "星际", 0, pageAll)
+	if pageAll.Total != 2 || len(resAll) != 2 {
+		t.Fatalf("主站纯关键字检索应过滤停用分类, total=%d list=%+v", pageAll.Total, resAll)
+	}
+	for _, item := range resAll {
+		if item.Mid == 2 {
+			t.Fatalf("停用分类影片 mid=2 不应泄漏")
+		}
+	}
+
+	// 带采集站 type_id 的纯关键字检索应按映射分类键匹配，不与本地 pid=2 撞号
+	pageType := &dto.Page{Current: 1, PageSize: 10}
+	resType := mustProvide(t, version, model.SearchTagsVO{SourceId: "source_master", Pid: 2}, "星际", 0, pageType)
+	if pageType.Total != 1 || len(resType) != 1 || resType[0].Mid != 1 {
+		t.Fatalf("主站分类关键字检索应只匹配映射源分类且过滤停用分类, total=%d list=%+v", pageType.Total, resType)
 	}
 }

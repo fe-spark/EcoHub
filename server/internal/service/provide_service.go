@@ -22,7 +22,6 @@ import (
 	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/repository/support"
 )
 
 type ProvideService struct{}
@@ -225,13 +224,6 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
 
-	pid := int64(t)
-	if pid > 0 && !support.IsCategoryVisible(0, pid) {
-		return 1, 1, 0, []model.FilmList{}, nil
-	}
-	if cid > 0 && !support.IsCategoryVisible(cid, pid) {
-		return 1, 1, 0, []model.FilmList{}, nil
-	}
 	version := filmsnapshot.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
 	categoryVersion := repository.GetCategoryVersion()
@@ -294,9 +286,6 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 
 		var vodList []model.FilmList
 		for _, s := range sl {
-			if !support.IsCategoryVisible(s.Cid, s.Pid) {
-				continue
-			}
 			typeID, typeName, err := resolveProvideListedType(s, sourceId)
 			if err != nil {
 				return tvboxListResult{}, err
@@ -407,6 +396,9 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 			"searchable":  1,
 			"quickSearch": 1,
 			"filterable":  1,
+			"header": map[string]string{
+				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+			},
 		})
 	}
 

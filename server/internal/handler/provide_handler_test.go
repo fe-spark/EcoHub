@@ -534,6 +534,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	// 验证分类停用全链路拦截：当根分类 1 或子分类 10 停用时，详情与列表均应阻断
 	t.Run("ProvideVodCategoryVisibilityInterception", func(t *testing.T) {
 		support.SetCategoryShowForTest(map[int64]bool{1: false, 10: true})
+		support.TouchCategoryVersion()
 		defer support.SetCategoryShowForTest(map[int64]bool{})
 
 		// 验证 ids 详情拉取被拦截（返回空列表）
