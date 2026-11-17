@@ -33,7 +33,13 @@ var (
 		running bool
 		timer   *time.Timer
 	}{}
+	// primaryAdmitMu 把「开始重建」和「改主站」做成同一段互斥。
+	// 检查和写入都在锁里，重建开始前不能把主站换掉。
+	primaryAdmitMu sync.Mutex
 )
+
+// ErrSearchIndexBusy 检索索引正在重建或已排队，此时不能切换主站。
+var ErrSearchIndexBusy = errors.New("检索索引正在构建中，暂不可切换主站，请稍候")
 
 // AddSearchIndexProgressListener 注册检索索引重建进度监听回调
 func AddSearchIndexProgressListener(fn func(SearchIndexProgress)) {
@@ -98,6 +104,8 @@ func NotifySearchIndexProgress(total, current int64, status string) {
 
 // RequestActiveFilmSearchIndexRebuild 按当前主站顺序加载检索索引。采集结束先走 ResealSearchIndex，由它决定要不要扫描主站。
 func RequestActiveFilmSearchIndexRebuild() {
+	primaryAdmitMu.Lock()
+	defer primaryAdmitMu.Unlock()
 	searchRebuild.mu.Lock()
 	searchRebuild.gen++
 	NotifySearchIndexProgress(0, 0, "indexing")
@@ -110,6 +118,20 @@ func RequestActiveFilmSearchIndexRebuild() {
 	}
 	searchRebuild.timer = time.AfterFunc(searchRebuildDebounce, startSearchRebuild)
 	searchRebuild.mu.Unlock()
+}
+
+// WithPrimaryAdmitted 重建已开始或已排队时直接拒绝。通过后在同一把锁里改主站。
+// fn 里不能再调用 RequestActiveFilmSearchIndexRebuild，否则死锁。
+func WithPrimaryAdmitted(fn func() error) error {
+	if fn == nil {
+		return nil
+	}
+	primaryAdmitMu.Lock()
+	defer primaryAdmitMu.Unlock()
+	if IsSearchIndexBuilding() || SearchRebuildScheduled() {
+		return ErrSearchIndexBusy
+	}
+	return fn()
 }
 
 // IsSearchIndexRebuilding 检索索引是否正在全量重建中。

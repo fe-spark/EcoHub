@@ -274,24 +274,27 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if IsPrimarySiteSwitching() {
-		return errors.New("检索索引正在构建中，暂不可切换主站，请稍候")
-	}
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	if err := repository.SortCollectSources(ids); err != nil {
-		return err
-	}
-	filmsnapshot.ClearDynamicPlayCaches()
-	clearProvideNetworkConfigCache()
-	newPrimary := repository.PickPrimarySourceForCategory()
-	if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
-		enabled, err := repository.GetEnabledCollectSourceList()
-		if err != nil {
+	// 和重建开始共用一把锁：检查通过后才写排序，重建途中不能切主站。
+	return filmsnapshot.WithPrimaryAdmitted(func() error {
+		if isPrimaryWarming.Load() {
+			return filmsnapshot.ErrSearchIndexBusy
+		}
+		oldPrimary := repository.PickPrimarySourceForCategory()
+		if err := repository.SortCollectSources(ids); err != nil {
 			return err
 		}
-		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
-	}
-	return nil
+		filmsnapshot.ClearDynamicPlayCaches()
+		clearProvideNetworkConfigCache()
+		newPrimary := repository.PickPrimarySourceForCategory()
+		if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
+			enabled, err := repository.GetEnabledCollectSourceList()
+			if err != nil {
+				return err
+			}
+			NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
+		}
+		return nil
+	})
 }
 
 func getRunStatsBySource(sources []model.FilmSource) map[string]repository.CollectSourceRunStat {
