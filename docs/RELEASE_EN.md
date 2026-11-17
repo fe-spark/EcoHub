@@ -1,4 +1,22 @@
-Test release **v3.0.7-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+Test release **v3.0.7-beta.3**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- **The first startup builds the film-list index** `idx_film_index_source_updated` and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.7-beta.3 changes
+
+- **Film list**: a non-primary source is paged by owner and update time, instead of looking up every play-line id. On local catalogs of about 70k to 170k films, the first page returns in tens of milliseconds.
+- **Title search**: a Chinese query on a non-primary source filters by each character, then scores, and keeps the 200 best hits. A pinyin query still reads that source's titles.
+- **Primary switch**: if warmup sees that the primary already changed, or the rebuild fails, the current primary index is built before the switch is marked finished.
+
+---
+
+### v3.0.7-beta.2
+
+Test release **v3.0.7-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`.
 
 ### Upgrade notes
 

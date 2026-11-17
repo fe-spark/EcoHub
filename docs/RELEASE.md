@@ -1,4 +1,22 @@
-测试版 **v3.0.7-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
+测试版 **v3.0.7-beta.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
+- **第一次启动会建立影片列表索引** `idx_film_index_source_updated`，并按采集站重算片库影片数。片库很大时这两步会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.0.7-beta.3 更新内容
+
+- **影片列表**：非主站按所属站和更新时间取一页，不再用播放线路编号回表。本地约 7 万到 17 万部的站，第一页在几十毫秒。
+- **片名搜索**：非主站中文搜索先按搜索词里的每个字筛选，再打分，只保留得分最高的 200 条。拼音搜索仍读取这一站的片名。
+- **切换主站**：预热中途发现主站已变，或重建失败时，按当前主站补建检索索引。
+
+---
+
+### v3.0.7-beta.2
+
+测试版 **v3.0.7-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`。
 
 ### 升级说明
 
