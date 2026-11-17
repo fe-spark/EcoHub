@@ -1,4 +1,22 @@
-测试版 **v3.0.7-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
+测试版 **v3.0.7-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
+- **第一次启动会按采集站重算片库影片数**。片库很大时这一步会久一些。影片数据不改，不删采集记录。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.0.7-beta.2 更新内容
+
+- **启动**：不再给 `film_index` 建 `(first_source_id, deleted_at)` 复合索引。beta.1 在百万级片库上建这个索引会超过 MySQL 30 秒读超时，进程退出；索引实际已建成时，下一次启动又会因重名失败。影片数仍记在采集站上。
+
+---
+
+### v3.0.7-beta.1
+
+测试版 **v3.0.7-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`。
+
+### v3.0.7-beta.1 更新内容
 
 ### 升级说明
 

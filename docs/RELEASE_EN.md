@@ -1,4 +1,22 @@
-Test release **v3.0.7-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+Test release **v3.0.7-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- **The first startup recounts each source's film total.** A large catalog can make this step slow. Film rows and collect records are left unchanged.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.7-beta.2 changes
+
+- **Startup**: `film_index` no longer gains a `(first_source_id, deleted_at)` index during migration. On a catalog of about a million rows, beta.1 spent longer than MySQL's 30-second read timeout building that index and the process exited. The next start then failed because the index name already existed. Film totals still live on the collect source.
+
+---
+
+### v3.0.7-beta.1
+
+Test release **v3.0.7-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`.
+
+### v3.0.7-beta.1 changes
 
 ### Upgrade notes
 
