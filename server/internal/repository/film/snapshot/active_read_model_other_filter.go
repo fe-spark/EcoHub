@@ -105,14 +105,14 @@ func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO)
 				cond := db.Mdb.Where("class_tag = '' OR class_tag IS NULL")
 				allNotLike := db.Mdb
 				for _, vp := range visiblePlots {
-					allNotLike = allNotLike.Where("class_tag NOT LIKE ?", "%"+escapeLikePattern(vp)+"%")
+					allNotLike = allNotLike.Where("class_tag NOT LIKE ? ESCAPE '!'", likeNeedle(vp))
 				}
 				query = query.Where(cond.Or(allNotLike))
 			} else {
 				return nil, missingVisibleTags("剧情")
 			}
 		} else {
-			query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(st.Plot)+"%")
+			query = query.Where("class_tag LIKE ? ESCAPE '!'", likeNeedle(st.Plot))
 		}
 	}
 

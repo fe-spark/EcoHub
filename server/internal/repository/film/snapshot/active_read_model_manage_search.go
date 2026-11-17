@@ -474,10 +474,3 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 	}
 	return result
 }
-
-func escapeLikePattern(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "%", "\\%")
-	s = strings.ReplaceAll(s, "_", "\\_")
-	return s
-}
