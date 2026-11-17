@@ -1,3 +1,21 @@
+Test release **v3.0.7-beta.4**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.4`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.4` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.7-beta.4 changes
+
+- **Banners**: each category takes its top rows from the matching index, then the rows are merged. The whole source is no longer sorted at once. Films with no play line are skipped while those top rows are chosen.
+- **Title search**: a non-primary search reads 2000 rows at a time, ordered by update time, and scores them. A broad keyword no longer scans the whole source in one statement.
+- **Collect reseal**: when the ownership query fails, the film ids stay on the queue and are sealed again after about 2 seconds.
+- **Film list**: a stored source total of 0 is counted again, so that source is not shown as empty.
+- This image also includes the unpublished beta.3 changes: non-primary lists page by owner and update time, Chinese search filters by character before scoring, and a failed primary switch rebuilds the current primary index.
+
+---
+
 Test release **v3.0.7-beta.3**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
 
 ### Upgrade notes
