@@ -1,3 +1,18 @@
+Test release **v3.0.7-beta.6**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.6`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.6` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.7-beta.6 changes
+
+- **Collect-record film list**: searching by title no longer fails because of a bad LIKE escape. Searching「偏爱」no longer raises MySQL 1064.
+- **Film list**: after switching to a non-primary source, a page with no keyword uses the source update index and no longer sorts the whole source until the request times out.
+
+---
+
 Test release **v3.0.7-beta.5**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.5`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
 
 ### Upgrade notes
