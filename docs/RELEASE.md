@@ -1,129 +1,22 @@
-测试版 **v3.0.7-beta.8**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.8`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
+正式版 **v3.0.7**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
 
 ### 升级说明
 
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.8`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
+- v3.0.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
-### v3.0.7-beta.8 更新内容
+### v3.0.7 更新内容
 
-- **切主站**：检索索引正在构建或已排队时，不能改采集站排序。检查和写入共用一把锁，避免重建开始后仍切走主站。
-
----
-
-测试版 **v3.0.7-beta.7**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.7`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.7`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.0.7-beta.7 更新内容
-
-- **剧情筛选**：采集输出按剧情标签筛选时，`%` 和 `_` 按字面量匹配，转义与片名搜索一致。
-
----
-
-测试版 **v3.0.7-beta.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.6`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.6`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.0.7-beta.6 更新内容
-
-- **更新影片清单**：按片名搜索不再因为 LIKE 转义符写错而失败。搜「偏爱」不会再报 MySQL 1064。
-- **影片列表**：切换到非主站后，无关键词分页走所属站更新索引取当前页，不再对整站排序把请求拖超时。
-
----
-
-测试版 **v3.0.7-beta.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.5`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.5`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.0.7-beta.5 更新内容
-
-- **片名搜索**：带分类、地区、年份或最近更新的筛选，以及非主站剧情筛选，在 MySQL 上不再因为转义符写错而失败。
-- **非主站搜索**：简体关键词能命中繁体片名，半角数字能命中全角数字。搜「庆余年2」可以找到「慶餘年２」。
-- **采集封口**：入队前查所属站失败时，编号留在队列稍后重试，不再跳过这一轮。
-
----
-
-测试版 **v3.0.7-beta.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.4`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.4`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.0.7-beta.4 更新内容
-
-- **排片**：每个分类按对应索引只取前几部再合并，不再对整站排序。没有播放线路的影片在取前几部时就被跳过。
-- **片名搜索**：非主站搜索按更新时间每批 2000 条读取再打分。宽关键词不再一条语句读完整站。
-- **采集封口**：所属站查询失败时，编号留在队列，约 2 秒后再封。
-- **影片列表**：采集站上记的影片数还是 0 时会再数一遍，不会把这一站显示成空的。
-- 镜像里同时包含尚未单独发布的 beta.3：非主站列表按所属站和更新时间取页，中文搜索先按字筛选再打分，切换主站失败时按当前主站补建检索索引。
-
----
-
-测试版 **v3.0.7-beta.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **第一次启动会建立影片列表索引** `idx_film_index_source_updated`，并按采集站重算片库影片数。片库很大时这两步会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.0.7-beta.3 更新内容
-
-- **影片列表**：非主站按所属站和更新时间取一页，不再用播放线路编号回表。本地约 7 万到 17 万部的站，第一页在几十毫秒。
-- **片名搜索**：非主站中文搜索先按搜索词里的每个字筛选，再打分，只保留得分最高的 200 条。拼音搜索仍读取这一站的片名。
-- **切换主站**：预热中途发现主站已变，或重建失败时，按当前主站补建检索索引。
-
----
-
-### v3.0.7-beta.2
-
-测试版 **v3.0.7-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`。
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **第一次启动会按采集站重算片库影片数**。片库很大时这一步会久一些。影片数据不改，不删采集记录。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.0.7-beta.2 更新内容
-
-- **启动**：不再给 `film_index` 建 `(first_source_id, deleted_at)` 复合索引。beta.1 在百万级片库上建这个索引会超过 MySQL 30 秒读超时，进程退出；索引实际已建成时，下一次启动又会因重名失败。影片数仍记在采集站上。
-
----
-
-### v3.0.7-beta.1
-
-测试版 **v3.0.7-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`。
-
-### v3.0.7-beta.1 更新内容
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
-- **第一次启动会按采集站重算片库影片数**。片库很大时这一步会久一些。影片数据不改，不删采集记录。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.0.7-beta.1 更新内容
-
-- **检索索引**：内存里只常驻当前主站。切换主站后立刻丢掉上一站索引，重建完成前不能再切主站或改站点。所属站查询失败时放弃这一次封口，不把未过滤编号写进索引，也不因此整表重建（#98）。
-- **工作台**：顶部是当前主站的片库影片、分类、当天失败页。展开后看各采集站的这三项。影片数记在采集站上，展开不再扫描影片表。切换主站后等排序完成再刷新，不必手动刷新页面。
-- **开放接口与 TVBox**：分类、列表和订阅只提供当前主站。订阅名称用网站设置。播放详情仍带上其他站的线路。
+- **检索索引**：内存只常驻当前主站。切主站立刻丢掉旧索引；构建或已排队时不能改站序。所属站查询失败时编号留队重试，不写未过滤编号，也不整表重建（#98）。
+- **工作台**：顶部是当前主站的片库影片、分类、当天失败页。展开看各站。影片数记在采集站上。
+- **开放接口与 TVBox**：分类、列表和订阅只提供当前主站。订阅名称用网站设置。播放详情仍带其他站线路。
+- **影片列表**：非主站按所属站和更新时间取页。记为 0 的站会再数一遍。
+- **搜索与筛选**：非主站中文先按字筛选再打分，只留前 200。简体命中繁体，半角命中全角。片名、剧情、筛选里的 `%` `_` 按字面量匹配。
+- **排片**：每类按对应索引取前几部再合并，没有播放线路的跳过。
+- **启动**：不再给 `film_index` 建 `(first_source_id, deleted_at)` 复合索引。
 
 ---
 

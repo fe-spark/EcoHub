@@ -1,129 +1,22 @@
-Test release **v3.0.7-beta.8**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.8`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+Release **v3.0.7**, image `ghcr.io/fe-spark/ecohub:v3.0.7` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.8` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- v3.0.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
 - **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.0.7-beta.8 changes
+### v3.0.7 changes
 
-- **Primary switch**: while the search index is building or queued, source order cannot change. The check and write share one lock so the primary site cannot move after rebuild starts.
-
----
-
-Test release **v3.0.7-beta.7**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.7`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.7` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.7-beta.7 changes
-
-- **Plot filter**: when the provide API filters by plot tag, `%` and `_` match literally. The escape matches title search.
-
----
-
-Test release **v3.0.7-beta.6**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.6`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.6` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.7-beta.6 changes
-
-- **Collect-record film list**: searching by title no longer fails because of a bad LIKE escape. Searching「偏爱」no longer raises MySQL 1064.
-- **Film list**: after switching to a non-primary source, a page with no keyword uses the source update index and no longer sorts the whole source until the request times out.
-
----
-
-Test release **v3.0.7-beta.5**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.5`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.5` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.7-beta.5 changes
-
-- **Title search**: filters that also set category, area, year, or a recent-update window, and non-primary plot filters, no longer fail on MySQL because of a bad LIKE escape.
-- **Non-primary search**: a simplified keyword matches a traditional title, and a halfwidth digit matches a fullwidth digit. Searching「庆余年2」finds「慶餘年２」.
-- **Collect reseal**: when the ownership query fails before enqueue, the film ids stay on the queue and are retried. That round is no longer skipped.
-
----
-
-Test release **v3.0.7-beta.4**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.4`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.4` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.7-beta.4 changes
-
-- **Banners**: each category takes its top rows from the matching index, then the rows are merged. The whole source is no longer sorted at once. Films with no play line are skipped while those top rows are chosen.
-- **Title search**: a non-primary search reads 2000 rows at a time, ordered by update time, and scores them. A broad keyword no longer scans the whole source in one statement.
-- **Collect reseal**: when the ownership query fails, the film ids stay on the queue and are sealed again after about 2 seconds.
-- **Film list**: a stored source total of 0 is counted again, so that source is not shown as empty.
-- This image also includes the unpublished beta.3 changes: non-primary lists page by owner and update time, Chinese search filters by character before scoring, and a failed primary switch rebuilds the current primary index.
-
----
-
-Test release **v3.0.7-beta.3**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.3` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first startup builds the film-list index** `idx_film_index_source_updated` and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.7-beta.3 changes
-
-- **Film list**: a non-primary source is paged by owner and update time, instead of looking up every play-line id. On local catalogs of about 70k to 170k films, the first page returns in tens of milliseconds.
-- **Title search**: a Chinese query on a non-primary source filters by each character, then scores, and keeps the 200 best hits. A pinyin query still reads that source's titles.
-- **Primary switch**: if warmup sees that the primary already changed, or the rebuild fails, the current primary index is built before the switch is marked finished.
-
----
-
-### v3.0.7-beta.2
-
-Test release **v3.0.7-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2`.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.2` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first startup recounts each source's film total.** A large catalog can make this step slow. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.7-beta.2 changes
-
-- **Startup**: `film_index` no longer gains a `(first_source_id, deleted_at)` index during migration. On a catalog of about a million rows, beta.1 spent longer than MySQL's 30-second read timeout building that index and the process exited. The next start then failed because the index name already existed. Film totals still live on the collect source.
-
----
-
-### v3.0.7-beta.1
-
-Test release **v3.0.7-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`.
-
-### v3.0.7-beta.1 changes
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
-- **The first startup recounts each source's film total.** A large catalog can make this step slow. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.0.7-beta.1 changes
-
-- **Search index**: memory keeps only the current primary source. Switching the primary drops the previous index immediately, and another switch or source edit is rejected until the rebuild finishes. If the ownership query fails, that reseal is skipped: unfiltered ids are not written into the index, and the failure does not trigger a full rebuild (#98).
-- **Workbench**: the top card shows the current primary source's films, categories, and today's failed pages. Expand it to see the same three numbers for every source. Film totals live on the source row, so the expand request does not scan the film table. After a primary switch, the card waits for the sort request before refreshing.
+- **Search index**: memory keeps only the current primary source. Switching drops the previous index immediately; source order cannot change while a rebuild is running or queued. If the ownership query fails, the ids stay on the queue and are retried; unfiltered ids are not written, and the failure does not trigger a full rebuild (#98).
+- **Workbench**: the top card shows the current primary source's films, categories, and today's failed pages. Expand it to see the same three numbers for every source. Film totals live on the source row.
 - **Provide API and TVBox**: categories, lists, and the subscription expose only the current primary source. The subscription name is the site name. Playback detail still includes lines from the other sources.
+- **Film list**: a non-primary source is paged by owner and update time. A stored total of 0 is counted again.
+- **Search and filters**: a Chinese query on a non-primary source filters by character, then scores, and keeps the 200 best hits. A simplified keyword matches a traditional title, and a halfwidth digit matches a fullwidth digit. `%` and `_` in title, plot, and filter queries match literally.
+- **Banners**: each category takes its top rows from the matching index, then the rows are merged. Films with no play line are skipped.
+- **Startup**: `film_index` no longer gains a `(first_source_id, deleted_at)` index during migration.
 
 ---
 
