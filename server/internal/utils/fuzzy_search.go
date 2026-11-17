@@ -254,6 +254,29 @@ type QueryContext struct {
 	IsAsciiOnly bool
 }
 
+// NameLikeNeedles 把中文搜索收成片名里必须出现的字。每组内部是或，组与组之间是与。
+// 子序列和包含匹配都满足这些字；纯字母数字要靠拼音，收不成 LIKE。
+func NameLikeNeedles(q QueryContext) [][]string {
+	if q.IsAsciiOnly || q.CleanKey == "" {
+		return nil
+	}
+	groups := make([][]string, 0, len([]rune(q.CleanKey)))
+	seen := make(map[string]struct{})
+	for _, r := range q.CleanKey {
+		needle := string(r)
+		if _, ok := seen[needle]; ok {
+			continue
+		}
+		seen[needle] = struct{}{}
+		if aliases, ok := numberAliases[needle]; ok {
+			groups = append(groups, aliases)
+			continue
+		}
+		groups = append(groups, []string{needle})
+	}
+	return groups
+}
+
 // BuildQueryContext 预解析搜索词上下文，避免在循环匹配中重复计算
 func BuildQueryContext(keyword string) QueryContext {
 	raw := strings.TrimSpace(keyword)

@@ -148,6 +148,40 @@ func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
 	}
 }
 
+func TestManageNonPrimaryListReadsOwnedFilmsByUpdate(t *testing.T) {
+	gdb := setupSearchSourceTestDB(t)
+	if err := gdb.AutoMigrate(&model.MovieSourceMapping{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "hd", Name: "其他站", Uri: "https://example.com/hd", State: true, Sort: 1, FilmCount: 2,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	films := []model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "旧片", UpdateStamp: 100}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "新片", UpdateStamp: 300}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "uku"}, FilmIndexContent: model.FilmIndexContent{Name: "主站片", UpdateStamp: 999}},
+	}
+	for _, row := range films {
+		if err := gdb.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: row.Mid, SourceId: "hd", LineKind: "play"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page := &dto.Page{Current: 1, PageSize: 10}
+	list, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || len(list) != 2 || list[0].Mid != 3 || list[1].Mid != 2 {
+		t.Fatalf("list=%+v total=%d", list, page.Total)
+	}
+}
+
 func TestUpsertNonPrimaryDoesNotResealIndex(t *testing.T) {
 	prevDB := db.Mdb
 	prevIdx := activeFilmSearchMetas.Load()

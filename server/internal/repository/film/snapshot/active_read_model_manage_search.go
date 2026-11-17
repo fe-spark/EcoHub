@@ -18,6 +18,34 @@ import (
 	"server/internal/utils"
 )
 
+// likeNeedle 用 ! 转义通配符。连接串开了 interpolateParams，ESCAPE '\' 会被 MySQL 把引号吃掉。
+func likeNeedle(s string) string {
+	s = strings.ReplaceAll(s, "!", "!!")
+	s = strings.ReplaceAll(s, "%", "!%")
+	s = strings.ReplaceAll(s, "_", "!_")
+	return "%" + s + "%"
+}
+
+func applyNameNeedles(query *gorm.DB, groups [][]string) *gorm.DB {
+	for _, group := range groups {
+		if len(group) == 0 {
+			continue
+		}
+		if len(group) == 1 {
+			query = query.Where("name LIKE ? ESCAPE '!'", likeNeedle(group[0]))
+			continue
+		}
+		parts := make([]string, len(group))
+		args := make([]any, len(group))
+		for i, needle := range group {
+			parts[i] = "name LIKE ? ESCAPE '!'"
+			args[i] = likeNeedle(needle)
+		}
+		query = query.Where("("+strings.Join(parts, " OR ")+")", args...)
+	}
+	return query
+}
+
 func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	tokens := utils.ExtractSearchTokens(keyword)
 	if len(tokens) == 0 {
@@ -108,10 +136,9 @@ func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmInde
 		return []model.FilmIndex{}, nil
 	}
 	q := db.Mdb.Model(&model.FilmIndex{})
+	// 列表是这一站自己的档案。按所属站走索引取一页，不再用播放线路编号回表。
 	if filterCtx.sourceID != "" {
-		q = q.Where("mid IN (?)", db.Mdb.Model(&model.FilmSourcePlaylist{}).
-			Select("mid").
-			Where("line_kind = ? AND source_id = ?", "play", filterCtx.sourceID))
+		q = q.Where("first_source_id = ?", filterCtx.sourceID)
 	}
 	switch filterCtx.categoryCheckMode {
 	case 1:
@@ -152,7 +179,15 @@ func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmInde
 	if name != "" {
 		return pageScoredManageFilms(q, page, name, filterCtx.sourceID)
 	}
-	list, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC")
+	knownTotal := int64(-1)
+	if plainSourceList(filterCtx) {
+		n, err := sourceFilmCount(filterCtx.sourceID)
+		if err != nil {
+			return nil, err
+		}
+		knownTotal = n
+	}
+	list, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC", knownTotal)
 	if err != nil {
 		return nil, err
 	}
@@ -162,11 +197,27 @@ func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmInde
 	return list, nil
 }
 
+// plainSourceList 只有所属站、没有分类和筛选。总数直接用采集站上的影片数。
+func plainSourceList(f *manageFilterContext) bool {
+	return f != nil && f.sourceID != "" && f.categoryCheckMode == 0 &&
+		f.year == 0 && f.beginTime == 0 && f.endTime == 0 &&
+		f.area == "" && f.language == "" && f.plot == ""
+}
+
+func sourceFilmCount(id string) (int64, error) {
+	var n int64
+	err := db.Mdb.Model(&model.FilmSource{}).Where("id = ?", id).Pluck("film_count", &n).Error
+	return n, err
+}
+
 // pageOrderedManageFilms 无关键词时按更新时间分页，并补上不落库的刮削标记。
-func pageOrderedManageFilms(q *gorm.DB, page *dto.Page, order string) ([]model.FilmIndex, error) {
-	var total int64
-	if err := q.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return nil, err
+// knownTotal 小于 0 时再数一遍；否则用调用方已经知道的总数。
+func pageOrderedManageFilms(q *gorm.DB, page *dto.Page, order string, knownTotal int64) ([]model.FilmIndex, error) {
+	total := knownTotal
+	if total < 0 {
+		if err := q.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+			return nil, err
+		}
 	}
 	page.Total = int(total)
 	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
@@ -185,26 +236,70 @@ func pageOrderedManageFilms(q *gorm.DB, page *dto.Page, order string) ([]model.F
 	return list, nil
 }
 
-// pageScoredManageFilms 非主站关键词与主站内存列表同一套打分和排序。
-func pageScoredManageFilms(q *gorm.DB, page *dto.Page, name, sourceID string) ([]model.FilmIndex, error) {
-	type scoreRow struct {
-		Mid         int64
-		Name        string
-		Hits        int64
-		Year        int64
-		UpdateStamp int64
+// manageScoreKeepCap 非主站关键词只保留得分最高的这些条，避免把整站命中载入内存。
+const manageScoreKeepCap = 200
+
+type manageScoreRow struct {
+	Mid         int64
+	Name        string
+	Hits        int64
+	Year        int64
+	UpdateStamp int64
+}
+
+type manageScoreHit struct {
+	manageScoreRow
+	score int
+}
+
+func betterManageHit(a, b manageScoreHit) bool {
+	if a.score != b.score {
+		return a.score > b.score
 	}
-	var rows []scoreRow
-	if err := q.Session(&gorm.Session{}).Select("mid, name, hits, year, update_stamp").Find(&rows).Error; err != nil {
+	if a.Hits != b.Hits {
+		return a.Hits > b.Hits
+	}
+	if a.Year != b.Year {
+		return a.Year > b.Year
+	}
+	if a.UpdateStamp != b.UpdateStamp {
+		return a.UpdateStamp > b.UpdateStamp
+	}
+	return a.Mid > b.Mid
+}
+
+func keepManageHit(best []manageScoreHit, item manageScoreHit) []manageScoreHit {
+	if len(best) < manageScoreKeepCap {
+		return append(best, item)
+	}
+	worst := 0
+	for i := 1; i < len(best); i++ {
+		if betterManageHit(best[worst], best[i]) {
+			worst = i
+		}
+	}
+	if betterManageHit(item, best[worst]) {
+		best[worst] = item
+	}
+	return best
+}
+
+// pageScoredManageFilms 非主站关键词与主站内存列表同一套打分和排序。
+// 逐行打分，只留下得分最高的 manageScoreKeepCap 条。
+func pageScoredManageFilms(q *gorm.DB, page *dto.Page, name, sourceID string) ([]model.FilmIndex, error) {
+	query := utils.BuildQueryContext(name)
+	q = applyNameNeedles(q, utils.NameLikeNeedles(query))
+	rows, err := q.Session(&gorm.Session{}).Select("mid, name, hits, year, update_stamp").Rows()
+	if err != nil {
 		return nil, err
 	}
-	query := utils.BuildQueryContext(name)
-	type hit struct {
-		scoreRow
-		score int
-	}
-	hits := make([]hit, 0)
-	for _, row := range rows {
+	defer rows.Close()
+	hits := make([]manageScoreHit, 0)
+	for rows.Next() {
+		var row manageScoreRow
+		if err := rows.Scan(&row.Mid, &row.Name, &row.Hits, &row.Year, &row.UpdateStamp); err != nil {
+			return nil, err
+		}
 		item := utils.FilmSearchItem{
 			Mid:         row.Mid,
 			Name:        row.Name,
@@ -212,28 +307,20 @@ func pageScoredManageFilms(q *gorm.DB, page *dto.Page, name, sourceID string) ([
 			Year:        row.Year,
 			UpdateStamp: row.UpdateStamp,
 		}
-		utils.FillSearchDerivedFields(&item)
+		if query.IsAsciiOnly {
+			utils.FillSearchDerivedFields(&item)
+		}
 		score := utils.ScoreFilmMatch(item, query)
 		if score <= 0 {
 			continue
 		}
-		hits = append(hits, hit{scoreRow: row, score: score})
+		hits = keepManageHit(hits, manageScoreHit{manageScoreRow: row, score: score})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
-		a, b := hits[i], hits[j]
-		if a.score != b.score {
-			return a.score > b.score
-		}
-		if a.Hits != b.Hits {
-			return a.Hits > b.Hits
-		}
-		if a.Year != b.Year {
-			return a.Year > b.Year
-		}
-		if a.UpdateStamp != b.UpdateStamp {
-			return a.UpdateStamp > b.UpdateStamp
-		}
-		return a.Mid > b.Mid
+		return betterManageHit(hits[i], hits[j])
 	})
 	page.Total = len(hits)
 	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize

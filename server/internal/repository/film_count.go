@@ -61,12 +61,10 @@ func SubtractFilmCountsByMidsTx(tx *gorm.DB, mids []int64) error {
 }
 
 // RefreshFilmCounts 按未删除档案重写各站影片数。启动时对齐一次，平时增删走加减。
+// 先算完再在一个事务里写回。统计失败时原计数不动。
 func RefreshFilmCounts() error {
 	if db.Mdb == nil {
 		return nil
-	}
-	if err := ZeroFilmCounts(db.Mdb); err != nil {
-		return err
 	}
 	var rows []filmCountRow
 	if err := db.Mdb.Model(&model.FilmIndex{}).
@@ -76,12 +74,26 @@ func RefreshFilmCounts() error {
 		Scan(&rows).Error; err != nil {
 		return err
 	}
+	counted := make(map[string]int64, len(rows))
 	for _, row := range rows {
-		if err := SetFilmCountTx(db.Mdb, row.SourceID, row.N); err != nil {
+		id := strings.TrimSpace(row.SourceID)
+		if id == "" {
+			continue
+		}
+		counted[id] = row.N
+	}
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var ids []string
+		if err := tx.Model(&model.FilmSource{}).Pluck("id", &ids).Error; err != nil {
 			return err
 		}
-	}
-	return nil
+		for _, id := range ids {
+			if err := SetFilmCountTx(tx, id, counted[id]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 type filmCountRow struct {

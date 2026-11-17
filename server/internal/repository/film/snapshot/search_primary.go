@@ -28,6 +28,14 @@ func DropPrimarySearchIndex() {
 	activeFilmSearchMetasMu.Unlock()
 }
 
+// EnsurePrimarySearchIndex 索引被丢掉又没有装上新主站时补建。已经有索引则不动。
+func EnsurePrimarySearchIndex() error {
+	if activeFilmSearchMetas.Load() != nil || currentPrimarySourceID() == "" || db.Mdb == nil {
+		return nil
+	}
+	return RebuildPrimarySearchIndex()
+}
+
 // RebuildPrimarySearchIndex 丢掉当前索引，只装当前主站。
 func RebuildPrimarySearchIndex() error {
 	version := currentSearchIndexVersion()

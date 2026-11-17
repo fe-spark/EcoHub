@@ -240,3 +240,13 @@ func TestScoreFilmMatchAndRanking(t *testing.T) {
 		t.Errorf("expected 'xian' NOT to match '想你了' (xiang != xian), got score %d", ScoreFilmMatch(filmXiangNi, qXian))
 	}
 }
+
+func TestNameLikeNeedlesKeepsSubsequenceAndSkipsPinyin(t *testing.T) {
+	sub := NameLikeNeedles(BuildQueryContext("凡人传"))
+	if len(sub) != 3 || sub[0][0] != "凡" || sub[1][0] != "人" || sub[2][0] != "传" {
+		t.Fatalf("needles = %#v", sub)
+	}
+	if NameLikeNeedles(BuildQueryContext("fanren")) != nil {
+		t.Fatal("pinyin search must not become a name LIKE")
+	}
+}

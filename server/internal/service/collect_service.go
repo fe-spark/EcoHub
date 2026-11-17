@@ -238,13 +238,19 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 		}
 		latestPrimary := repository.PickPrimarySourceForCategory()
 		if latestPrimary == nil || latestPrimary.Id != targetSourceID {
-			syslog.Infof("[Collect] 实际主站已非目标站，跳过预热 targetSource=%s", targetSourceID)
+			syslog.Infof("[Collect] 实际主站已非目标站，改为补建当前主站索引 targetSource=%s", targetSourceID)
+			if err := filmsnapshot.EnsurePrimarySearchIndex(); err != nil {
+				syslog.Errorf("[Collect] 补建当前主站索引失败: %v", err)
+			}
 			return
 		}
 
 		syslog.Infof("[Collect] 开始重建主站检索索引 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
 		if err := filmsnapshot.RebuildPrimarySearchIndex(); err != nil {
 			syslog.Errorf("[Collect] 切换主站后重建检索索引失败: %v", err)
+			if err := filmsnapshot.EnsurePrimarySearchIndex(); err != nil {
+				syslog.Errorf("[Collect] 补建当前主站索引失败: %v", err)
+			}
 			return
 		}
 
