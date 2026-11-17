@@ -258,11 +258,12 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 }
 
 // schedulePrimarySearchReseal 只把当前主站的编号放进封口队列。
-// 所属站查询失败时不塞未过滤编号，避免数据库已经失败时再排一大批非主站影片。
+// 所属站查询失败时编号先入队，封口时再查。查失败会把编号放回队列重试。
 func schedulePrimarySearchReseal(mids []int64) {
 	owned, err := filmsnapshot.PrimarySearchMIDs(mids)
 	if err != nil {
-		log.Printf("[Spider] 所属站查询失败，跳过本次封口 mids=%d err=%v", len(mids), err)
+		log.Printf("[Spider] 所属站查询失败，编号留在封口队列稍后重试 mids=%d err=%v", len(mids), err)
+		scheduleSearchReseal(mids)
 		return
 	}
 	scheduleSearchReseal(owned)

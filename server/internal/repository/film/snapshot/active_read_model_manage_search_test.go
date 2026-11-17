@@ -121,13 +121,17 @@ func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
 			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "hd"},
 			FilmIndexContent:  model.FilmIndexContent{Name: "凡人修仙传", Hits: 99999},
 		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "hd"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "慶餘年２", Hits: 10},
+		},
 	}
 	for _, row := range films {
 		if err := gdb.Create(&row).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, mid := range []int64{2, 3} {
+	for _, mid := range []int64{2, 3, 4} {
 		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: mid, SourceId: "hd", LineKind: "play"}).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -154,6 +158,14 @@ func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
 	}
 	if len(skipped) != 1 || skipped[0].Mid != 3 || !skipped[0].IsScraped {
 		t.Fatalf("skip-char search = %+v", skipped)
+	}
+
+	trad, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "庆余年2", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trad) != 1 || trad[0].Mid != 4 {
+		t.Fatalf("traditional search = %+v", trad)
 	}
 }
 

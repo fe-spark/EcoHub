@@ -268,13 +268,52 @@ func NameLikeNeedles(q QueryContext) [][]string {
 			continue
 		}
 		seen[needle] = struct{}{}
+		base := []string{needle}
 		if aliases, ok := numberAliases[needle]; ok {
-			groups = append(groups, aliases)
-			continue
+			base = aliases
 		}
-		groups = append(groups, []string{needle})
+		groups = append(groups, nameLikeForms(base))
 	}
 	return groups
+}
+
+// nameLikeForms 给每个针补上繁体和全角数字。片名库里两种写法都能进打分。
+func nameLikeForms(needles []string) []string {
+	seen := make(map[string]struct{}, len(needles))
+	out := make([]string, 0, len(needles))
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, n := range needles {
+		add(n)
+		add(SimplifiedToTraditional(n))
+		add(fullwidthDigits(n))
+	}
+	return out
+}
+
+func fullwidthDigits(s string) string {
+	var b strings.Builder
+	changed := false
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r + 0xFEE0)
+			changed = true
+			continue
+		}
+		b.WriteRune(r)
+	}
+	if !changed {
+		return ""
+	}
+	return b.String()
 }
 
 // BuildQueryContext 预解析搜索词上下文，避免在循环匹配中重复计算

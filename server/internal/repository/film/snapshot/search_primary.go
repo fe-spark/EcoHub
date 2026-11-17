@@ -52,7 +52,7 @@ func RebuildPrimarySearchIndex() error {
 // PrimarySearchMIDs 只留下查到且属于当前主站的影片编号。
 // 没有主站、或库里没有这行、或所属站不是主站时都不留下。
 // 数据库未连接时无法判断所属站，原样返回，避免测试里的封口队列被清空。
-// 查询失败返回 error。调用方不要把未过滤编号放进封口队列，也不得因此全表重建。
+// 查询失败返回 error。写入检索索引前必须再用这次结果过滤；失败则放弃写入，不点查未过滤编号，也不因此全表重建。
 func PrimarySearchMIDs(mids []int64) ([]int64, error) {
 	if len(mids) == 0 {
 		return nil, nil

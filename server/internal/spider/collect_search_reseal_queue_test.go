@@ -30,9 +30,13 @@ func resetSearchReseal() {
 	filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
 }
 
-func TestSchedulePrimarySearchReseal_SkipsUnfilteredOnQueryError(t *testing.T) {
+func TestSchedulePrimarySearchReseal_RetriesMidsOnQueryError(t *testing.T) {
 	resetSearchReseal()
-	t.Cleanup(resetSearchReseal)
+	prevSeal := sealSearchIndex
+	t.Cleanup(func() {
+		sealSearchIndex = prevSeal
+		resetSearchReseal()
+	})
 
 	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -52,12 +56,27 @@ func TestSchedulePrimarySearchReseal_SkipsUnfilteredOnQueryError(t *testing.T) {
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
 
+	sealed := make(chan []int64, 1)
+	sealSearchIndex = func(mids []int64) bool {
+		sealed <- append([]int64(nil), mids...)
+		return true
+	}
+
 	schedulePrimarySearchReseal([]int64{1, 2, 3})
 
-	searchReseal.mu.Lock()
-	defer searchReseal.mu.Unlock()
-	if len(searchReseal.pending) != 0 || searchReseal.running {
-		t.Fatalf("pending=%d running=%v", len(searchReseal.pending), searchReseal.running)
+	select {
+	case got := <-sealed:
+		seen := make(map[int64]struct{}, len(got))
+		for _, mid := range got {
+			seen[mid] = struct{}{}
+		}
+		for _, mid := range []int64{1, 2, 3} {
+			if _, ok := seen[mid]; !ok {
+				t.Fatalf("sealed %v, missing %d", got, mid)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("query error dropped mids")
 	}
 }
 

@@ -49,10 +49,10 @@ func applyNameNeedles(query *gorm.DB, groups [][]string) *gorm.DB {
 func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	tokens := utils.ExtractSearchTokens(keyword)
 	if len(tokens) == 0 {
-		return query.Where("name LIKE ? ESCAPE '\\'", "%"+escapeLikePattern(keyword)+"%")
+		return query.Where("name LIKE ? ESCAPE '!'", likeNeedle(keyword))
 	}
 	for _, tok := range tokens {
-		query = query.Where("name LIKE ? ESCAPE '\\'", "%"+escapeLikePattern(tok)+"%")
+		query = query.Where("name LIKE ? ESCAPE '!'", likeNeedle(tok))
 	}
 	return query
 }
@@ -173,7 +173,7 @@ func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmInde
 		q = q.Where("language = ?", filterCtx.language)
 	}
 	if filterCtx.plot != "" {
-		q = q.Where("class_tag LIKE ? ESCAPE '\\'", "%"+escapeLikePattern(filterCtx.plot)+"%")
+		q = q.Where("class_tag LIKE ? ESCAPE '!'", likeNeedle(filterCtx.plot))
 	}
 	name := strings.TrimSpace(s.Name)
 	if name != "" {
