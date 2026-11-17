@@ -38,6 +38,9 @@ var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 // sealSearchIndex 按编号封口。仅在内存索引不可用时改走整表重建。
 var sealSearchIndex = filmsnapshot.ResealSearchIndex
 
+// sealRetryWait 所属站查询失败时，编号放回队列后隔一会儿再封。
+var sealRetryWait = 2 * time.Second
+
 // collectQueueCount 正在跑的采集队列。封口要等每一条队列结束，不能只看当前没有站在抓页。
 // frozen 只在本轮已经没有队列、准备落地封口时置位。还有队列时新队列可以加入这一轮。
 type collectQueueCount struct {
@@ -338,9 +341,11 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	q.mu.Unlock()
 	log.Printf("[Spider] 开始封口检索索引 pending=%d sealing=%d", pendingN, sealingN)
 
+	sealed := true
+	progressBefore := filmsnapshot.SearchIndexProgressToken()
 	if len(mids) > 0 {
 		searchSealRunning.Store(true)
-		sealSearchIndex(mids)
+		sealed = sealSearchIndex(mids)
 		searchSealRunning.Store(false)
 	}
 	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。
@@ -360,6 +365,20 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		})
 		return parked
 	}
+	if !sealed {
+		// 进度变过：重建已经接过或刚结束，编号不再放回。没变过才是所属站查询失败。
+		if filmsnapshot.SearchIndexProgressToken() != progressBefore {
+			log.Printf("[Spider] 封口未写入检索索引，进度已变化，编号交给重建 mids=%d", len(mids))
+			return false
+		}
+		q.restorePending(mids)
+		log.Printf("[Spider] 封口未写入检索索引，编号留在队列稍后重试 mids=%d", len(mids))
+		unfreezeCollectQueues()
+		if sealRetryWait > 0 {
+			time.Sleep(sealRetryWait)
+		}
+		return false
+	}
 	// 按编号封口成功时 ResealSearchIndex 已发过 done；这里只收口 sealing，不再依赖全局监听。
 	q.complete()
 	if len(mids) == 0 {
@@ -367,6 +386,16 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
 	}
 	return false
+}
+
+func (q *searchResealQueue) restorePending(mids []int64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, mid := range mids {
+		if mid > 0 {
+			q.pending[mid] = struct{}{}
+		}
+	}
 }
 
 func (q *searchResealQueue) takePendingLocked() []int64 {

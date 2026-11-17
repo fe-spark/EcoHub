@@ -66,6 +66,49 @@ func TestGetSnapshotBannerCandidates_TopNExcludeAndScoreFill(t *testing.T) {
 	}
 }
 
+func TestGetSnapshotBannerCandidates_SourceUsesCategoryKeyAndPlayLine(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	const sourceID = "banner_src"
+	key := "source:banner_src:1"
+	other := "source:banner_src:2"
+	rows := []model.FilmIndex{
+		bannerCandidateFilm(1, 1, 10, 9.0, 100, "高分有线路"),
+		bannerCandidateFilm(2, 1, 80, 4.0, 200, "最热无线路"),
+		bannerCandidateFilm(3, 1, 40, 4.0, 300, "次热有线路"),
+		bannerCandidateFilm(4, 2, 100, 9.5, 400, "他类更热"),
+	}
+	rows[0].CategoryKey = key
+	rows[1].CategoryKey = key
+	rows[2].CategoryKey = key
+	rows[3].CategoryKey = other
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	lines := []model.FilmSourcePlaylist{
+		{Mid: 1, SourceId: sourceID, LineKind: model.LineKindPlay},
+		{Mid: 3, SourceId: sourceID, LineKind: model.LineKindPlay},
+		{Mid: 4, SourceId: sourceID, LineKind: model.LineKindPlay},
+	}
+	if err := gdb.Create(&lines).Error; err != nil {
+		t.Fatalf("seed playlist: %v", err)
+	}
+
+	hot, err := GetSnapshotBannerCandidates(context.Background(), "live", "hot_random", sourceID, []int64{1}, 2, nil)
+	if err != nil {
+		t.Fatalf("hot: %v", err)
+	}
+	if got := bannerCandidateMids(hot); len(got) != 2 || got[0] != 3 || got[1] != 1 {
+		t.Fatalf("hot got %v", got)
+	}
+	score, err := GetSnapshotBannerCandidates(context.Background(), "live", "score_random", sourceID, []int64{1}, 2, nil)
+	if err != nil {
+		t.Fatalf("score: %v", err)
+	}
+	if got := bannerCandidateMids(score); len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("score got %v", got)
+	}
+}
+
 func TestGetSnapshotBannerCandidates_CanceledContext(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	if err := gdb.Create(&[]model.FilmIndex{bannerCandidateFilm(1, 1, 10, 9.0, 100, "影片")}).Error; err != nil {

@@ -114,6 +114,9 @@ func (s *InitService) TableInit() error {
 	if err := repository.EnsureSourceFilmListIndex(); err != nil {
 		return fmt.Errorf("影片列表索引失败: %w", err)
 	}
+	if err := repository.EnsureFilmCategoryScoreIndex(); err != nil {
+		return fmt.Errorf("排片评分索引失败: %w", err)
+	}
 	if err := repository.RefreshFilmCounts(); err != nil {
 		return fmt.Errorf("统计采集站影片数失败: %w", err)
 	}

@@ -1,13 +1,19 @@
 package snapshot
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/utils"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestManageMetaCategory_SourceKey(t *testing.T) {
@@ -92,6 +98,9 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 // 这些用例只测纯内存逻辑，但被测函数会读全局 db.Mdb；包内其他用例可能把 db.Mdb 留成已关闭/缺表的库，
 // -count>1 时第二轮起就会读到它而失败。
 func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
+	prevBatch := manageScoreScanBatch
+	manageScoreScanBatch = 1
+	t.Cleanup(func() { manageScoreScanBatch = prevBatch })
 	prev := db.Mdb
 	t.Cleanup(func() { db.Mdb = prev })
 	gdb := setupSearchSourceTestDB(t)
@@ -214,6 +223,32 @@ func TestUpsertNonPrimaryDoesNotResealIndex(t *testing.T) {
 	}
 	if got := activeFilmSearchMetas.Load(); got != idx {
 		t.Fatal("non-primary snapshot save wrote the search index")
+	}
+}
+
+func TestApplyManageScoreIndexHint_MySQLUsesSourceUpdateIndex(t *testing.T) {
+	gdb, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DryRun:               true,
+		DisableAutomaticPing: true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open mysql dry-run: %v", err)
+	}
+	sql := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		var rows []model.FilmIndex
+		q := applyManageScoreIndexHint(tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", "hd"), "hd")
+		return q.Order("update_stamp DESC, mid DESC").Limit(14).Find(&rows)
+	})
+	want := "USE INDEX (`" + repository.SourceFilmListIndex + "`)"
+	if !strings.Contains(sql, want) {
+		t.Fatalf("sql=%s", sql)
+	}
+	if strings.Contains(sql, "`film_index USE INDEX") {
+		t.Fatalf("sql=%s", sql)
 	}
 }
 

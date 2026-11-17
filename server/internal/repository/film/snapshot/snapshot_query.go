@@ -182,6 +182,9 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if strings.TrimSpace(sourceID) != "" {
+		return bannerCandidatesForSource(ctx, strategy, strings.TrimSpace(sourceID), categoryPids, limit, exclude)
+	}
 
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
 		switch strategy {

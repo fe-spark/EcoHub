@@ -45,6 +45,11 @@ func AddSearchIndexProgressListener(fn func(SearchIndexProgress)) {
 	searchIndexProgressListeners = append(searchIndexProgressListeners, fn)
 }
 
+// SearchIndexProgressToken 当前进度对象。封口期间变了，说明这一轮已经发过进度。
+func SearchIndexProgressToken() *SearchIndexProgress {
+	return latestSearchIndexProgress.Load()
+}
+
 // GetLatestSearchIndexProgress 获取最新检索索引进度快照
 func GetLatestSearchIndexProgress() *SearchIndexProgress {
 	p := latestSearchIndexProgress.Load()
