@@ -76,21 +76,9 @@ func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
 	}
 
 	scoped := provideJSON(t, "/api/provide/vod?ac=list&source=src_b&t=1")
-	sourceClass := provideClassNames(t, scoped)
-	if len(sourceClass) != 1 || sourceClass[1] != "电影" {
-		t.Fatalf("订阅源分类 = %+v", sourceClass)
-	}
 	scopedIDs := provideVodIDs(t, scoped)
-	if scopedIDs[1] || !scopedIDs[2] {
-		t.Fatalf("订阅源 type 1 = %+v", scopedIDs)
-	}
-	if provideFirstTypeID(t, scoped) != 1 {
-		t.Fatalf("订阅源返回的 type_id = %v", provideFirstTypeID(t, scoped))
-	}
-
-	miss := provideJSON(t, "/api/provide/vod?ac=list&source=src_b&t=21")
-	if len(provideVodIDs(t, miss)) != 0 {
-		t.Fatalf("订阅源不认本地分类 id, got %+v", miss["list"])
+	if !scopedIDs[1] || scopedIDs[2] {
+		t.Fatalf("source 参数应被忽略，仍只列出主站影片, got %+v", scopedIDs)
 	}
 
 	local := provideJSON(t, "/api/provide/vod?ac=list&t=21")

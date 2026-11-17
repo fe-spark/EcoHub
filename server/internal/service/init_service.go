@@ -111,6 +111,9 @@ func (s *InitService) TableInit() error {
 	if err := repository.AlignUserAutoIncrement(); err != nil {
 		return fmt.Errorf("用户表自增对齐失败: %w", err)
 	}
+	if err := repository.RefreshFilmCounts(); err != nil {
+		return fmt.Errorf("统计采集站影片数失败: %w", err)
+	}
 	return nil
 }
 

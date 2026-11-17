@@ -323,7 +323,7 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 
 	// 请求批量详情：包含命中的 201、未命中的 202 和 203、哨兵 9999、完全不存在的 8888
 	ids := []string{"201", "202", "203", "9999", "8888"}
-	details, err := ProvideSvc.GetVodDetail(ids, "")
+	details, err := ProvideSvc.GetVodDetail(ids)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,7 +657,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		manyIDs[i] = fmt.Sprintf("%d", 601+i)
 	}
-	res, err := ProvideSvc.GetVodDetail(manyIDs, "")
+	res, err := ProvideSvc.GetVodDetail(manyIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +670,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	db.Rdb = nil
 	defer func() { db.Rdb = origRdb }()
 
-	resNilRedis, err := ProvideSvc.GetVodDetail([]string{"601"}, "")
+	resNilRedis, err := ProvideSvc.GetVodDetail([]string{"601"})
 	if err != nil {
 		t.Fatal(err)
 	}

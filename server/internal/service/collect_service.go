@@ -25,6 +25,7 @@ var CollectSvc = new(CollectService)
 var (
 	primarySwitchEpoch atomic.Uint64
 	primarySwitchMu    sync.Mutex
+	primaryWarmMu      sync.Mutex
 	isPrimaryWarming   atomic.Bool
 	// primaryWarmups 记录切换主站后异步预热的协程，测试用来等它们结束。
 	primaryWarmups sync.WaitGroup
@@ -197,6 +198,12 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	} else {
 		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
 	}
+	// 先占住切换状态再丢掉上一站索引。防抖只推迟扫描，不让旧索引继续常驻，也不让这段时间再切一次。
+	// 标志的置位和清除共用一把锁，避免上一轮结束时把新一轮刚置上的状态清掉。
+	primaryWarmMu.Lock()
+	isPrimaryWarming.Store(true)
+	primaryWarmMu.Unlock()
+	filmsnapshot.DropPrimarySearchIndex()
 	primaryWarmups.Add(1)
 	go func(targetSourceID string, currentEpoch uint64) {
 		defer primaryWarmups.Done()
@@ -204,6 +211,13 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			if r := recover(); r != nil {
 				syslog.Errorf("[Collect] 切换主站后异步预热索引发生异常: %v", r)
 			}
+		}()
+		defer func() {
+			primaryWarmMu.Lock()
+			if primarySwitchEpoch.Load() == currentEpoch {
+				isPrimaryWarming.Store(false)
+			}
+			primaryWarmMu.Unlock()
 		}()
 
 		// 150ms 防抖：如果连续快速拖拽切换主站，直接跳过旧代数，避免短时间内多次扫描主站
@@ -216,8 +230,6 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 		// 互斥排队串行化构建，避免重叠扫描主站
 		primarySwitchMu.Lock()
 		defer primarySwitchMu.Unlock()
-		isPrimaryWarming.Store(true)
-		defer isPrimaryWarming.Store(false)
 
 		// 获取锁后再次检查代数与当前最新主站：如果中途有更新切换，立即退出
 		if primarySwitchEpoch.Load() != currentEpoch {

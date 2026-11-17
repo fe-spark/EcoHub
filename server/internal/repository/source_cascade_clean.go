@@ -49,6 +49,9 @@ func cascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
 		return nil, err
 	}
+	if err := SetFilmCountTx(tx, id, 0); err != nil {
+		return nil, err
+	}
 	return owned, nil
 }
 

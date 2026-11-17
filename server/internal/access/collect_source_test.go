@@ -2,7 +2,6 @@ package access
 
 import (
 	"context"
-	"net/url"
 	"testing"
 	"time"
 
@@ -14,28 +13,15 @@ import (
 )
 
 func TestProvideCollectSource(t *testing.T) {
-	vod := "/api/provide/vod"
-	if got := provideCollectSource("/api/provide/tvbox", url.Values{}); got != "" {
+	prevActive := lookupActiveCollectSourceID
+	lookupActiveCollectSourceID = func() string { return "primary01" }
+	t.Cleanup(func() { lookupActiveCollectSourceID = prevActive })
+
+	if got := provideCollectSource("/api/provide/tvbox"); got != "" {
 		t.Fatalf("config must not count, got %q", got)
 	}
-	if got := provideCollectSource(vod, url.Values{"source": {"  srcA  "}}); got != "srcA" {
-		t.Fatalf("explicit source = %q", got)
-	}
-	if got := provideCollectSource(vod, url.Values{"source": {"bad id"}}); got != "" {
-		t.Fatalf("invalid explicit source must not fall back, got %q", got)
-	}
-	longID := stringsRepeat("a", 33)
-	if got := provideCollectSource(vod, url.Values{"source": {longID}}); got != "" {
-		t.Fatalf("overlong source must not count, got %q", got)
-	}
-	if got := provideCollectSource(vod, url.Values{"ac": {"list"}}); got != "" {
-		t.Fatalf("list without source must be empty, got %q", got)
-	}
-	if got := provideCollectSource(vod, url.Values{"ac": {"detail"}, "ids": {"9"}}); got != "" {
-		t.Fatalf("detail without source must be empty, got %q", got)
-	}
-	if got := provideCollectSource(vod, url.Values{"ac": {"videolist"}, "ids": {"9"}, "source": {"srcB"}}); got != "srcB" {
-		t.Fatalf("detail with source = %q", got)
+	if got := provideCollectSource("/api/provide/vod"); got != "primary01" {
+		t.Fatalf("vod counts as primary, got %q", got)
 	}
 }
 
@@ -130,12 +116,4 @@ func TestQuerySourceCallsOrdersKnownThenUnknown(t *testing.T) {
 	if rows[2].Id != "srcA" || rows[2].Count != 1 || !rows[2].IsPrimary {
 		t.Fatalf("third row = %+v", rows[2])
 	}
-}
-
-func stringsRepeat(s string, n int) string {
-	out := make([]byte, 0, len(s)*n)
-	for i := 0; i < n; i++ {
-		out = append(out, s...)
-	}
-	return string(out)
 }

@@ -57,7 +57,7 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 // waitSearchWorkIdle 等后台的检索重建（含防抖定时器）和主站预热结束，避免用例之间互相影响。
 func waitSearchWorkIdle(t *testing.T) {
 	t.Helper()
-	// 先等切主站的预热协程（它会先睡 150ms 才置 isPrimaryWarming，光看标志会漏掉）。
+	// 先等切主站的预热协程。切换一开始就会占住 isPrimaryWarming，结束时才放开。
 	if !WaitAsyncWork(15 * time.Second) {
 		t.Fatal("primary warmup / category sync did not finish")
 	}
@@ -198,6 +198,7 @@ func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 	if !progress.IsTaskRunning("src_1") {
 		t.Fatal("the running collect should stay running")
 	}
+	waitSearchWorkIdle(t)
 	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
 		t.Fatalf("reordering without changing primary should pass: %v", err)
 	}

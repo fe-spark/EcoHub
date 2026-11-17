@@ -195,6 +195,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	snap201 := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             201,
+		SourceId:        "src_default",
 		Name:            "流浪地球",
 		Pid:             1,
 		Cid:             10,
@@ -249,6 +250,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	snap202 := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             202,
+		SourceId:        "src_default",
 		Name:            "星际穿越",
 		Pid:             1,
 		Cid:             10,
@@ -329,7 +331,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected primary site key, got %v", firstSite["key"])
 		}
 		api, _ := firstSite["api"].(string)
-		if !strings.Contains(api, "source=src_default") {
+		if !strings.Contains(api, "/api/provide/vod") || strings.Contains(api, "source=") {
 			t.Fatalf("primary api = %v", api)
 		}
 		for _, item := range sites {

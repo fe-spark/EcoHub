@@ -301,13 +301,7 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	if takeMIDs != nil {
 		mids = takeMIDs()
 	}
-	owned, err := filmsnapshot.PrimarySearchMIDs(mids)
-	if err != nil {
-		log.Printf("[Spider][StreamPublish] 所属站查询失败，改为按编号点查 mids=%d err=%v", len(mids), err)
-		scheduleSearchReseal(mids)
-	} else {
-		scheduleSearchReseal(owned)
-	}
+	schedulePrimarySearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {

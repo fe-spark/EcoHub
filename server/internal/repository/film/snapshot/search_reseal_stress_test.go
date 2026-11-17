@@ -21,22 +21,18 @@ func TestResealSearchIndexMids_FullScaleSimulation(t *testing.T) {
 	}
 
 	gdb := setupSnapshotRepoTestDB(t)
-	if err := gdb.Create(&model.FilmSource{
-		Id: "src-batch", Name: "批次站", Uri: "https://example.com/src-batch", State: true, Sort: -1,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
+	const primary = "source_master"
 	const existingCount = 100000
 	const newBatchCount = 30000
 
-	// 1. 模拟存量 100,000 部影片的已有内存索引
+	// 1. 模拟当前主站已有 100,000 部影片的内存索引。中途不换主站。
 	baseItems := make([]FilmSearchMeta, existingCount)
 	for i := 0; i < existingCount; i++ {
 		mid := int64(i + 1)
 		baseItems[i] = FilmSearchMeta{
 			Mid:           mid,
-			FirstSourceId: "src-base",
-			PlaySources:   []string{"src-base"},
+			FirstSourceId: primary,
+			PlaySources:   []string{primary},
 			CategoryKey:   "base-cat",
 			Item: utils.FilmSearchItem{
 				Mid:         mid,
@@ -67,7 +63,7 @@ func TestResealSearchIndexMids_FullScaleSimulation(t *testing.T) {
 			films = append(films, model.FilmIndex{
 				FilmIndexIdentity: model.FilmIndexIdentity{
 					Mid:           mid,
-					FirstSourceId: "src-batch",
+					FirstSourceId: primary,
 				},
 				FilmIndexCategory: model.FilmIndexCategory{
 					CategoryKey: "batch-cat",
@@ -82,7 +78,7 @@ func TestResealSearchIndexMids_FullScaleSimulation(t *testing.T) {
 			})
 			playlists = append(playlists, model.FilmSourcePlaylist{
 				Mid:        mid,
-				SourceId:   "src-batch",
+				SourceId:   primary,
 				LineKind:   model.LineKindPlay,
 				GroupIndex: 0,
 			})
@@ -148,7 +144,7 @@ func TestResealSearchIndexMids_FullScaleSimulation(t *testing.T) {
 	}
 
 	// 7. 验证最新榜单是否包含最新的新片
-	key := hotPoolMapKey("src-batch", "batch-cat")
+	key := hotPoolMapKey(primary, "batch-cat")
 	recents := idx.RecentPools[key]
 	if len(recents) == 0 {
 		t.Fatalf("RecentPools[%s] is empty", key)

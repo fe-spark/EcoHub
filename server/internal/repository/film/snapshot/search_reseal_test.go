@@ -6,8 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/testutil"
 	"server/internal/utils"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestPatchSearchMetasKeepsUntouchedAndDropsMissing(t *testing.T) {
@@ -259,7 +265,7 @@ func TestResealRereadsWhenIndexPointerChanges(t *testing.T) {
 	}
 }
 
-func TestResealEmptyIndexRequestsFullScan(t *testing.T) {
+func TestResealEmptyReadyIndexPointQueries(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	if err := SetActiveSnapshotVersion("v-empty"); err != nil {
 		t.Fatal(err)
@@ -270,20 +276,71 @@ func TestResealEmptyIndexRequestsFullScan(t *testing.T) {
 	stopRebuild := stubSearchRebuildScan(t, &scanned)
 	defer stopRebuild()
 
-	prevRead := readSearchMetaUpserts
-	readSearchMetaUpserts = func([]int64, func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
-		t.Error("empty index must not point-query films by mid")
-		return nil, nil, errors.New("should not read by mid")
-	}
-	t.Cleanup(func() { readSearchMetaUpserts = prevRead })
-
 	seedPrimaryOwned(t, gdb, []int64{1, 2, 3})
-	if ResealSearchIndexMids([]int64{1, 2, 3}) {
-		t.Fatal("empty index should hand off to a sequential rebuild")
+	if !ResealSearchIndexMids([]int64{1, 2, 3}) {
+		t.Fatal("empty ready index should point-query")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if scanned.Load() {
+		t.Fatal("empty ready index must not full-scan")
+	}
+	idx := activeFilmSearchMetas.Load()
+	if idx == nil || len(idx.Items) != 3 {
+		t.Fatalf("items = %v", idx)
+	}
+}
+
+func TestResealUnreadyIndexRequestsFullScan(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-live"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-stale", []FilmSearchMeta{{Mid: 9}}))
+
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	defer stopRebuild()
+
+	seedPrimaryOwned(t, gdb, []int64{1})
+	if ResealSearchIndexMids([]int64{1}) {
+		t.Fatal("version mismatch must not report applied")
 	}
 	time.Sleep(40 * time.Millisecond)
 	if !scanned.Load() {
-		t.Fatal("empty index did not request a sequential rebuild")
+		t.Fatal("unready index did not request a sequential rebuild")
+	}
+}
+
+func TestResealSearchIndex_SkipsUnfilteredOnQueryError(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "uku", Name: "主站", Uri: "https://example.com/uku", State: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-stale", []FilmSearchMeta{{Mid: 9}}))
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	defer stopRebuild()
+
+	if ResealSearchIndex([]int64{1, 2, 3}) {
+		t.Fatal("ownership query error must not apply unfiltered mids")
+	}
+	time.Sleep(40 * time.Millisecond)
+	if scanned.Load() {
+		t.Fatal("ownership query error must not request a full rebuild")
 	}
 }
 

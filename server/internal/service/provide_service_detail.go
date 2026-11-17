@@ -19,7 +19,7 @@ import (
 const maxProvideVodDetailBatch = 100
 
 // GetVodDetail 获取视频详情（带播放列表）
-func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.FilmDetail, error) {
+func (p *ProvideService) GetVodDetail(ids []string) ([]model.FilmDetail, error) {
 	if len(ids) == 0 {
 		return []model.FilmDetail{}, nil
 	}
@@ -34,7 +34,7 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.Fi
 	if len(mids) == 0 {
 		return []model.FilmDetail{}, nil
 	}
-	sourceId = resolveProvideSourceID(sourceId)
+	sourceId := primaryProvideSourceID()
 	all := make([]model.FilmDetail, 0, len(mids))
 	for start := 0; start < len(mids); start += maxProvideVodDetailBatch {
 		end := start + maxProvideVodDetailBatch

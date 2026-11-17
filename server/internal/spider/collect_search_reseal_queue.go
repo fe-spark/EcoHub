@@ -254,6 +254,17 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	}
 }
 
+// schedulePrimarySearchReseal 只把当前主站的编号放进封口队列。
+// 所属站查询失败时不塞未过滤编号，避免数据库已经失败时再排一大批非主站影片。
+func schedulePrimarySearchReseal(mids []int64) {
+	owned, err := filmsnapshot.PrimarySearchMIDs(mids)
+	if err != nil {
+		log.Printf("[Spider] 所属站查询失败，跳过本次封口 mids=%d err=%v", len(mids), err)
+		return
+	}
+	scheduleSearchReseal(owned)
+}
+
 func scheduleSearchReseal(mids []int64) {
 	q := searchReseal
 	q.mu.Lock()

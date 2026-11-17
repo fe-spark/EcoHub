@@ -39,6 +39,7 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 		&model.MovieSourceMapping{},
 		&model.FilmIndex{},
 		&model.BannerSlot{},
+		&model.SiteConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

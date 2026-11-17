@@ -6,6 +6,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/testutil"
 
@@ -95,11 +96,30 @@ func TestGetLibraryInventory_PrimaryOnly(t *testing.T) {
 	})
 
 	filmsnapshot.ClearActiveFilmReadModel()
+	if err := repository.RefreshFilmCounts(); err != nil {
+		t.Fatal(err)
+	}
 	stats, err := GetLibraryInventory()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stats.Films != 4 || stats.Categories != 2 || stats.Failures != 4 {
 		t.Fatalf("library = %+v", stats)
+	}
+
+	sources, err := GetSourceInventories()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("sources = %+v", sources)
+	}
+	primary := sources[0]
+	if primary.Id != "src_a" || !primary.IsPrimary || !primary.Enabled || primary.Films != 4 || primary.Categories != 2 || primary.Failures != 4 {
+		t.Fatalf("primary source = %+v", primary)
+	}
+	other := sources[1]
+	if other.Id != "src_b" || other.IsPrimary || other.Films != 1 || other.Categories != 1 || other.Failures != 2 {
+		t.Fatalf("other source = %+v", other)
 	}
 }

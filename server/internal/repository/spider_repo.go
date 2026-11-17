@@ -203,6 +203,9 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
 		return nil, err
 	}
+	if err := SetFilmCountTx(tx, id, 0); err != nil {
+		return nil, err
+	}
 	return owned, nil
 }
 
@@ -416,7 +419,8 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 			return err
 		}
 	}
-	if err := tx.Save(&s).Error; err != nil {
+	// 影片数只由入库和删除维护。整行保存不能把请求里缺省的 0 写回去。
+	if err := tx.Omit("FilmCount").Save(&s).Error; err != nil {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)

@@ -74,6 +74,7 @@ const quickEntries: QuickEntryItem[] = [
 export default function ManagePageView() {
   const [subscribeModalOpen, setSubscribeModalOpen] = useState(false);
   const [primarySource, setPrimarySource] = useState<FilmSource | null>(null);
+  const [primarySwitching, setPrimarySwitching] = useState(false);
 
   return (
     <div className={styles.dashboard}>
@@ -90,9 +91,11 @@ export default function ManagePageView() {
         }
       />
 
-      <CollectOverview onPrimaryChange={setPrimarySource} />
+      <CollectOverview onPrimaryChange={setPrimarySource} onSwitchingChange={setPrimarySwitching} />
 
-      {Boolean(primarySource) && <InventoryStats primaryId={primarySource?.id} />}
+      {primarySource?.id ? (
+        <InventoryStats key={primarySource.id} primaryId={primarySource.id} pending={primarySwitching} />
+      ) : null}
 
       <Card
         className={styles.panelCard}

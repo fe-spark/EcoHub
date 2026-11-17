@@ -4,9 +4,15 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func resetSearchReseal() {
@@ -22,6 +28,37 @@ func resetSearchReseal() {
 		endCollectQueue()
 	}
 	filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
+}
+
+func TestSchedulePrimarySearchReseal_SkipsUnfilteredOnQueryError(t *testing.T) {
+	resetSearchReseal()
+	t.Cleanup(resetSearchReseal)
+
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "uku", Name: "主站", Uri: "https://example.com/uku", State: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	schedulePrimarySearchReseal([]int64{1, 2, 3})
+
+	searchReseal.mu.Lock()
+	defer searchReseal.mu.Unlock()
+	if len(searchReseal.pending) != 0 || searchReseal.running {
+		t.Fatalf("pending=%d running=%v", len(searchReseal.pending), searchReseal.running)
+	}
 }
 
 func TestSearchResealRun_WaitsThenSealsOnce(t *testing.T) {

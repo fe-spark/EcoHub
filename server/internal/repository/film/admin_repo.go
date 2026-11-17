@@ -46,6 +46,9 @@ func DelFilmSearchBatch(ids []int64) error {
 		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
+		if err := repository.SubtractFilmCountsByMidsTx(tx, cleanIds); err != nil {
+			return err
+		}
 		if err := tx.Unscoped().Where("mid IN ?", cleanIds).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
@@ -125,6 +128,9 @@ func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
 			log.Printf("[Collect] 源重置清表较慢 table=%s cost=%s", table, cost)
 		}
 	}
+	if err := repository.ZeroFilmCounts(conn); err != nil {
+		return err
+	}
 	return repository.DeleteCollectSourceStatsTx(conn, sourceIDs...)
 }
 
@@ -180,6 +186,9 @@ func FilmZero() error {
 	}
 	if err := utils.ClearGalleryDir(); err != nil {
 		return fmt.Errorf("clear gallery dir failed: %w", err)
+	}
+	if err := repository.ZeroFilmCounts(db.Mdb); err != nil {
+		return fmt.Errorf("zero film counts failed: %w", err)
 	}
 
 	// 关键节点：清理缓存（清空内存快照版本、动态缓存、检索索引及 Redis 页面缓存）
@@ -409,6 +418,9 @@ func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
 	}
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
+			return err
+		}
+		if err := repository.SubtractFilmCountsByMidsTx(tx, mids); err != nil {
 			return err
 		}
 		if err := tx.Unscoped().Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {

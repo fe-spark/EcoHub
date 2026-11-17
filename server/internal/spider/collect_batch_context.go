@@ -442,15 +442,8 @@ func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error 
 	mids := b.takeSourceMIDs(source.Id)
 	if !isPreferredCollectSource(source.Id) {
 		mids = nil
-	} else if len(mids) > 0 {
-		owned, err := filmsnapshot.PrimarySearchMIDs(mids)
-		if err != nil {
-			log.Printf("[Spider] 主站封口所属站查询失败，改为按编号点查 source=%s mids=%d err=%v", source.Id, len(mids), err)
-		} else {
-			mids = owned
-		}
 	}
-	scheduleSearchReseal(mids)
+	schedulePrimarySearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
 	b.warmPrimaryHome(source.Id)
 	return nil

@@ -145,7 +145,7 @@ func (MovieMatchKey) TableName() string {
 // FilmIndexIdentity 索引标识层：只负责来源与主键归属。
 type FilmIndexIdentity struct {
 	Mid           int64  `json:"mid" gorm:"primaryKey;autoIncrement;index:idx_root_key_upd_stamp,priority:3;index:idx_root_key_hits_val,priority:3;index:idx_cat_key_upd_stamp,priority:3;index:idx_cat_key_hits_val,priority:3"` // 系统内全局唯一影片 ID
-	FirstSourceId string `json:"firstSourceId" gorm:"size:32;index"`                                                                                                                                                              // 首次录入该片的站点 ID
+	FirstSourceId string `json:"firstSourceId" gorm:"size:32;index:idx_film_index_source_live,priority:1"`                                                                                                                        // 首次录入该片的站点 ID
 	DbId          int64  `json:"dbId" gorm:"index"`                                                                                                                                                                               // 豆瓣 ID (用于精准去重)
 }
 
@@ -219,7 +219,7 @@ type FilmIndexDerived struct {
 type FilmIndex struct {
 	CreatedAt         time.Time      `json:"createdAt"`
 	UpdatedAt         time.Time      `json:"updatedAt"`
-	DeletedAt         gorm.DeletedAt `json:"deletedAt" gorm:"index"`
+	DeletedAt         gorm.DeletedAt `json:"deletedAt" gorm:"index;index:idx_film_index_source_live,priority:2"`
 	FilmIndexIdentity `gorm:"embedded"`
 	FilmIndexCategory `gorm:"embedded"`
 	FilmIndexContent  `gorm:"embedded"`

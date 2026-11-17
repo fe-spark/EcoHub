@@ -61,7 +61,7 @@ func TestPlaylistParse_SkipsBadLineAndDropsFilmWhenAllFail(t *testing.T) {
 		t.Fatal("全部解析失败的影片不应出现在批量结果里")
 	}
 
-	details, err := ProvideSvc.GetVodDetail([]string{"401", "402", "403"}, "")
+	details, err := ProvideSvc.GetVodDetail([]string{"401", "402", "403"})
 	if err != nil {
 		t.Fatal(err)
 	}

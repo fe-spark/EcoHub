@@ -38,9 +38,10 @@ function orderBySort(list: FilmSource[]) {
 
 interface CollectOverviewProps {
   onPrimaryChange?: (primary: FilmSource | null) => void;
+  onSwitchingChange?: (switching: boolean) => void;
 }
 
-export default function CollectOverview({ onPrimaryChange }: CollectOverviewProps = {}) {
+export default function CollectOverview({ onPrimaryChange, onSwitchingChange }: CollectOverviewProps = {}) {
   const { message, modal } = useAppMessage();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,10 +90,16 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
   );
 
   useEffect(() => {
-    if (!loading) {
+    onSwitchingChange?.(switching);
+  }, [switching, onSwitchingChange]);
+
+  // 排序接口返回前，服务端主站还是旧的。提前通知会让片库规模读到上一站的分类数，之后不再请求。
+  useEffect(() => {
+    if (!loading && !switching) {
       onPrimaryChange?.(topSite);
     }
-  }, [topSite, loading, onPrimaryChange]);
+  }, [topSite, loading, switching, onPrimaryChange]);
+
   const switchCandidates = useMemo(
     () => orderBySort(siteList).filter((item) => item.state && item.id !== topSite?.id),
     [siteList, topSite?.id],

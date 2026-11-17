@@ -75,7 +75,6 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	wd := c.Query("wd")
 	h_param, _ := strconv.Atoi(c.DefaultQuery("h", "0"))
 	ids := c.Query("ids")
-	sourceId := c.Query("source")
 
 	tid, err := strconv.Atoi(c.Query("tid"))
 	if err == nil && tid > 0 {
@@ -92,7 +91,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	plot := c.Query("plot")
 	sort := c.Query("sort")
 
-	classList, filters, classErr := service.ProvideSvc.GetClassList(sourceId)
+	classList, filters, classErr := service.ProvideSvc.GetClassList()
 	if classErr != nil {
 		c.JSON(200, gin.H{"code": 0, "msg": classErr.Error()})
 		return
@@ -128,7 +127,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	switch ac {
 	case "videolist", "detail":
 		if ids != "" {
-			vodList, err := service.ProvideSvc.GetVodDetail(strings.Split(ids, ","), sourceId)
+			vodList, err := service.ProvideSvc.GetVodDetail(strings.Split(ids, ","))
 			if err != nil {
 				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 				return
@@ -136,7 +135,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			writeProvide(1, 1, len(vodList), prefixDetailPics(vodList, baseURL), false)
 			return
 		}
-		page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
@@ -145,14 +144,14 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		for _, v := range vodListSimple {
 			idList = append(idList, strconv.FormatInt(v.VodID, 10))
 		}
-		detailList, err := service.ProvideSvc.GetVodDetail(idList, sourceId)
+		detailList, err := service.ProvideSvc.GetVodDetail(idList)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
 		writeProvide(page, pagecount, total, prefixDetailPics(detailList, baseURL), true)
 	default:
-		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return

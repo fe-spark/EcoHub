@@ -18,18 +18,18 @@ func ResealSearchIndexMids(mids []int64) bool {
 }
 
 // ResealSearchIndex 全部采集队列结束后的唯一封口。
-// 内存索引不可用或还是空的，整表顺序重建。
-// 点查失败同样改为顺序加载。成功打进内存索引时返回 true。
+// 内存索引不可用时整表顺序重建。索引已就绪但还是空的，按编号点查。
+// 点查失败改为顺序加载。所属站查询失败时直接放弃，不拿未过滤编号点查，也不因此整表重建。
+// 成功打进内存索引时返回 true。
 func ResealSearchIndex(mids []int64) bool {
 	startedAt := time.Now()
 	raw := NormalizeSnapshotMIDs(mids)
 	owned, err := PrimarySearchMIDs(raw)
 	if err != nil {
-		log.Printf("[ActiveReadModel] 检索索引封口所属站查询失败，改为按编号点查 raw=%d err=%v", len(raw), err)
-		mids = raw
-	} else {
-		mids = owned
+		log.Printf("[ActiveReadModel] 检索索引封口所属站查询失败，放弃本次封口 raw=%d err=%v", len(raw), err)
+		return false
 	}
+	mids = owned
 	log.Printf("[ActiveReadModel] 检索索引封口进入 raw=%d", len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return len(mids) == 0 && db.Mdb != nil
@@ -41,7 +41,7 @@ func ResealSearchIndex(mids []int64) bool {
 	if base != nil {
 		items = len(base.Items)
 	}
-	if !searchIndexReady(base, version) || items == 0 {
+	if !searchIndexReady(base, version) {
 		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 mids=%d items=%d", len(mids), items)
 		RequestActiveFilmSearchIndexRebuild()
 		return false
