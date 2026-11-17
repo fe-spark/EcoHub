@@ -1,3 +1,19 @@
+测试版 **v3.0.7-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`，然后执行 `docker compose pull && docker compose up -d`。`ecohub update` 只拉取 `.env` 里已有的镜像，不会自动改到这个测试标签。
+- **第一次启动会按采集站重算片库影片数**。片库很大时这一步会久一些。影片数据不改，不删采集记录。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.0.7-beta.1 更新内容
+
+- **检索索引**：内存里只常驻当前主站。切换主站后立刻丢掉上一站索引，重建完成前不能再切主站或改站点。所属站查询失败时放弃这一次封口，不把未过滤编号写进索引，也不因此整表重建（#98）。
+- **工作台**：顶部是当前主站的片库影片、分类、当天失败页。展开后看各采集站的这三项。影片数记在采集站上，展开不再扫描影片表。切换主站后等排序完成再刷新，不必手动刷新页面。
+- **开放接口与 TVBox**：分类、列表和订阅只提供当前主站。订阅名称用网站设置。播放详情仍带上其他站的线路。
+
+---
+
 正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

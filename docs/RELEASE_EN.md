@@ -1,3 +1,19 @@
+Test release **v3.0.7-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.0.7-beta.1` in the install directory, then run `docker compose pull && docker compose up -d`. `ecohub update` pulls the image already set in `.env` and does not switch to this test tag on its own.
+- **The first startup recounts each source's film total.** A large catalog can make this step slow. Film rows and collect records are left unchanged.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.0.7-beta.1 changes
+
+- **Search index**: memory keeps only the current primary source. Switching the primary drops the previous index immediately, and another switch or source edit is rejected until the rebuild finishes. If the ownership query fails, that reseal is skipped: unfiltered ids are not written into the index, and the failure does not trigger a full rebuild (#98).
+- **Workbench**: the top card shows the current primary source's films, categories, and today's failed pages. Expand it to see the same three numbers for every source. Film totals live on the source row, so the expand request does not scan the film table. After a primary switch, the card waits for the sort request before refreshing.
+- **Provide API and TVBox**: categories, lists, and the subscription expose only the current primary source. The subscription name is the site name. Playback detail still includes lines from the other sources.
+
+---
+
 Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
