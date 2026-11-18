@@ -22,6 +22,7 @@ func setupCategoryChangeTestDB(t *testing.T) *gorm.DB {
 		&model.SourceCategory{},
 		&model.Category{},
 		&model.CategoryMapping{},
+		&model.FilmSource{},
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
 		&model.MovieMatchKey{},

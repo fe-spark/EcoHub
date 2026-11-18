@@ -5,11 +5,13 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/model"
 )
 
 // SourceFilmListIndex 后台按所属站、更新时间取一页，非主站搜索也按它分批往后扫。
@@ -21,16 +23,19 @@ const FilmCategoryScoreIndex = "idx_film_index_cat_score"
 // FilmSourceDeletedIndex 启动统计各采集站未删除影片数走覆盖索引，避免全表回表超时。
 const FilmSourceDeletedIndex = "idx_film_index_source_del"
 
+// CollectRecordFilmSourceIndex 让删站清理历史采集影片清单按 source_id 走索引，避免全表扫删。
+const CollectRecordFilmSourceIndex = "idx_crf_source_id"
+
 // EnsureSourceFilmListIndex 让后台按所属站、更新时间取一页。
 // 业务连接的读超时是 30 秒，百万行上建索引会超过它。这条语句单独用更长的读超时，已存在则跳过。
 func EnsureSourceFilmListIndex() error {
-	return ensureFilmIndex(SourceFilmListIndex, "first_source_id, update_stamp, mid")
+	return ensureTableIndex(model.TableFilmIndex, SourceFilmListIndex, "first_source_id, update_stamp, mid")
 }
 
 // EnsureFilmCategoryScoreIndex 让一键排片按分类键和评分取前几部。
 // 不写进模型标签，避免启动时用 30 秒读超时去建这个索引。
 func EnsureFilmCategoryScoreIndex() error {
-	return ensureFilmIndex(FilmCategoryScoreIndex, "category_key, score, hits, mid")
+	return ensureTableIndex(model.TableFilmIndex, FilmCategoryScoreIndex, "category_key, score, hits, mid")
 }
 
 // EnsureFilmSourceDeletedIndex 让 RefreshFilmCounts 的 GROUP BY first_source_id 走覆盖索引。
@@ -55,10 +60,16 @@ func EnsureFilmSourceDeletedIndex() error {
 	if n > 0 {
 		return nil
 	}
-	return ensureFilmIndex(FilmSourceDeletedIndex, "first_source_id, deleted_at")
+	return ensureTableIndex(model.TableFilmIndex, FilmSourceDeletedIndex, "first_source_id, deleted_at")
 }
 
-func ensureFilmIndex(name, columns string) error {
+// EnsureCollectRecordFilmSourceIndex 为 collect_record_film_items 补建 source_id 索引。
+// 不写进模型标签，避免启动 AutoMigrate 时用 30 秒读超时在大表上建索引超时。
+func EnsureCollectRecordFilmSourceIndex() error {
+	return ensureTableIndex(model.TableCollectRecordFilm, CollectRecordFilmSourceIndex, "source_id")
+}
+
+func ensureTableIndex(tableName, name, columns string) error {
 	if db.Mdb == nil || db.Mdb.Dialector.Name() != "mysql" {
 		return nil
 	}
@@ -66,14 +77,14 @@ func ensureFilmIndex(name, columns string) error {
 	err := db.Mdb.Raw(`
 		SELECT COUNT(*) FROM information_schema.statistics
 		WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
-	`, "film_index", name).Scan(&n).Error
+	`, tableName, name).Scan(&n).Error
 	if err != nil {
 		return err
 	}
 	if n > 0 {
 		return nil
 	}
-	log.Printf("[Init] 正在建立索引 %s，片库较大时会久一些", name)
+	log.Printf("[Init] 正在建立索引 %s.%s，数据较大时会久一些", tableName, name)
 	conn, err := openLongReadConn(config.MysqlDsn)
 	if err != nil {
 		return err
@@ -82,9 +93,9 @@ func ensureFilmIndex(name, columns string) error {
 	if _, err = conn.Exec("SET SESSION net_read_timeout = 1800, net_write_timeout = 1800"); err != nil {
 		return err
 	}
-	_, err = conn.Exec("ALTER TABLE film_index ADD INDEX " + name + " (" + columns + "), ALGORITHM=INPLACE, LOCK=NONE")
+	_, err = conn.Exec("ALTER TABLE " + tableName + " ADD INDEX " + name + " (" + columns + "), ALGORITHM=INPLACE, LOCK=NONE")
 	if err == nil {
-		log.Printf("[Init] 索引 %s 已就绪", name)
+		log.Printf("[Init] 索引 %s.%s 已就绪", tableName, name)
 		return nil
 	}
 	var mysqlErr *mysql.MySQLError
@@ -95,10 +106,16 @@ func ensureFilmIndex(name, columns string) error {
 }
 
 func openLongReadConn(dsn string) (*sql.DB, error) {
-	if strings.Contains(dsn, "readTimeout=") {
+	if parsed, err := mysql.ParseDSN(dsn); err == nil {
+		parsed.ReadTimeout = 30 * time.Minute
+		parsed.WriteTimeout = 30 * time.Minute
+		dsn = parsed.FormatDSN()
+	} else if strings.Contains(dsn, "readTimeout=") {
 		dsn = strings.Replace(dsn, "readTimeout=30s", "readTimeout=30m", 1)
-	} else {
+	} else if strings.Contains(dsn, "?") {
 		dsn += "&readTimeout=30m"
+	} else {
+		dsn += "?readTimeout=30m"
 	}
 	conn, err := sql.Open("mysql", dsn)
 	if err != nil {

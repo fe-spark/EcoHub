@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -178,8 +179,23 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 }
 
 func isWebPlayableVideo(link string) bool {
-	lower := strings.ToLower(strings.TrimSpace(link))
-	return strings.Contains(lower, ".m3u8") ||
-		strings.Contains(lower, ".mp4") ||
-		strings.Contains(lower, ".flv")
+	raw := strings.TrimSpace(link)
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "" {
+		scheme := strings.ToLower(u.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return false
+		}
+	}
+	path := strings.ToLower(u.Path)
+	return strings.HasSuffix(path, ".m3u8") ||
+		strings.HasSuffix(path, ".mp4") ||
+		strings.HasSuffix(path, ".flv") ||
+		strings.HasSuffix(path, ".webm")
 }

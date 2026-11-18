@@ -120,6 +120,9 @@ func (s *InitService) TableInit() error {
 	if err := repository.EnsureFilmSourceDeletedIndex(); err != nil {
 		return fmt.Errorf("采集站统计索引失败: %w", err)
 	}
+	if err := repository.EnsureCollectRecordFilmSourceIndex(); err != nil {
+		return fmt.Errorf("采集清单站点索引失败: %w", err)
+	}
 	if err := repository.RefreshFilmCounts(); err != nil {
 		return fmt.Errorf("统计采集站影片数失败: %w", err)
 	}

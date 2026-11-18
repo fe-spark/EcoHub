@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -16,7 +17,16 @@ import (
 	"server/internal/utils"
 )
 
+var siteResetting atomic.Bool
+
+// IsSiteResetRunning 片库数据是否正在清空/重置中。
+func IsSiteResetRunning() bool {
+	return siteResetting.Load()
+}
+
 func ClearSpider() error {
+	siteResetting.Store(true)
+	defer siteResetting.Store(false)
 	filmrepo.ReportResetProgress(5, "正在停止采集任务")
 	StopAllCollect("清空片库，停止采集")
 	filmrepo.ReportResetProgress(15, "正在清空数据")

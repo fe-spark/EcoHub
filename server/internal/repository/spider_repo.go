@@ -8,6 +8,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -64,18 +65,9 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 }
 
 // PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前基准源）。
-// 统一原则：首位即基准（Sort-as-Master）。
-// 仅从已启用的站点中按顺序选取首位（sort ASC, created_at ASC）；
-// 若所有站点均停用或无站点，返回 nil，严禁无视停用开关进行静默兜底。
+// 统一委托给 support.PickPrimarySourceForCategory，跳过已停用和正在删除中的站点。
 func PickPrimarySourceForCategory() *model.FilmSource {
-	if db.Mdb == nil {
-		return nil
-	}
-	var primary model.FilmSource
-	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
-		return &primary
-	}
-	return nil
+	return support.PickPrimarySourceForCategory()
 }
 
 func GetActiveCollectSource() *model.FilmSource {
@@ -183,53 +175,20 @@ func FindCollectSourceById(id string) *model.FilmSource {
 	return &fs
 }
 
-// CascadeCleanSourceDataTx 删除该站自己的档案和挂载数据。有没有播放线路都删。
-// 返回被删除的档案 mid。其他站的档案不删。
-func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil, nil
-	}
-	var owned []int64
-	if err := tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-		return nil, err
-	}
-	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
-		return nil, err
-	}
-	if err := SetFilmCountTx(tx, id, 0); err != nil {
-		return nil, err
-	}
-	return owned, nil
-}
-
-func deleteOwnedFilmsTx(tx *gorm.DB, mids []int64) error {
-	for i := 0; i < len(mids); i += 1000 {
-		if err := deleteOwnedFilmChunk(tx, mids[i:min(i+1000, len(mids))]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// DelCollectResource 删除采集站。档案、失败记录、分类和站点行在同一个事务里提交。
+// DelCollectResource 删除采集站。
+// 重型数据按短事务分批清理避免长事务锁库，最后在同一事务里收口分类、历史批次与站点配置行。
 func DelCollectResource(id string) ([]int64, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("database not available")
 	}
-	var orphanMids []int64
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		var err error
-		orphanMids, err = cascadeCleanSourceDataTx(tx, id)
-		if err != nil {
-			return err
-		}
+	orphanMids, err := cleanSourceDataBatched(id)
+	if err != nil {
+		return orphanMids, err
+	}
+	if err := deleteBySourceBatched(&model.CollectRecordFilmItem{}, model.TableCollectRecordFilm, "source_id", id); err != nil {
+		return orphanMids, err
+	}
+	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := ClearSourceCategoryDataTx(tx, id); err != nil {
 			return err
 		}
@@ -242,7 +201,7 @@ func DelCollectResource(id string) ([]int64, error) {
 		return EnsureDefaultPosterSourceTx(tx)
 	})
 	if err != nil {
-		return nil, err
+		return orphanMids, err
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
@@ -253,19 +212,13 @@ func DelCollectResource(id string) ([]int64, error) {
 	return orphanMids, nil
 }
 
-// UpdateCollectSourceReplacingData 更换地址或协议时，清数据和更新配置在同一个事务里提交。
-func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData bool) ([]int64, error) {
+// UpdateCollectSourceUpdatingState 更新站点配置；换地址时同步清理该站分类，重型影片清理已提前分批完成。
+func UpdateCollectSourceReplacingData(source model.FilmSource, clearCategories bool) error {
 	if db.Mdb == nil {
-		return nil, errors.New("数据库未连接")
+		return errors.New("数据库未连接")
 	}
-	var owned []int64
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if cleanData {
-			var err error
-			owned, err = cascadeCleanSourceDataTx(tx, source.Id)
-			if err != nil {
-				return err
-			}
+		if clearCategories {
 			if err := ClearSourceCategoryDataTx(tx, source.Id); err != nil {
 				return err
 			}
@@ -273,12 +226,9 @@ func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData bool) (
 		return UpdateCollectSourceTx(tx, source)
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := RefreshCollectSourceCatalog(); err != nil {
-		return owned, err
-	}
-	return owned, nil
+	return RefreshCollectSourceCatalog()
 }
 
 // CleanCollectSourceData 清空该站已采集数据（保留采集站配置本身）。

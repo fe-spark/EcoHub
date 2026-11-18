@@ -199,6 +199,7 @@ export default function CollectManagePageView() {
     selectedSourceIds,
     batchStateUpdating,
     batchDeleting,
+    hasBusySelected,
     deleteConfirmTitle,
     deleteConfirmDescription,
     handleSelectSource,
@@ -382,6 +383,7 @@ export default function CollectManagePageView() {
           canWrite={canOperate}
           batchStateUpdating={batchStateUpdating}
           batchDeleting={batchDeleting}
+          hasBusySelected={hasBusySelected}
           isIndexing={searchIndexProgress?.status === "indexing"}
           deleteConfirmTitle={deleteConfirmTitle}
           deleteConfirmDescription={deleteConfirmDescription}

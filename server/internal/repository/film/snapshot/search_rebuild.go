@@ -56,6 +56,13 @@ func SearchIndexProgressToken() *SearchIndexProgress {
 	return latestSearchIndexProgress.Load()
 }
 
+// SearchRebuildGen 返回已请求的检索索引全量重建序号。
+func SearchRebuildGen() uint64 {
+	searchRebuild.mu.Lock()
+	defer searchRebuild.mu.Unlock()
+	return searchRebuild.gen
+}
+
 // GetLatestSearchIndexProgress 获取最新检索索引进度快照
 func GetLatestSearchIndexProgress() *SearchIndexProgress {
 	p := latestSearchIndexProgress.Load()

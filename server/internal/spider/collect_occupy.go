@@ -58,6 +58,10 @@ func occupyCollectSourcesWithTokens(sources []model.FilmSource, tag string) ([]m
 
 	for _, source := range candidates {
 		id := collectSourceID(source.Id)
+		if progress.IsSourceDeleting(id) {
+			log.Printf("[%s] 站点 %s 正在删除中，跳过采集", tag, source.Name)
+			continue
+		}
 		if progress.IsAlreadyQueuedOrRunning(id) {
 			log.Printf("[%s] 站点 %s 已在采集队列或正在运行，跳过", tag, source.Name)
 			continue

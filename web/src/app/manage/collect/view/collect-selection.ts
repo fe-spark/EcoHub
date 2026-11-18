@@ -10,18 +10,9 @@ export interface NamedSkip {
 export const collectIndexUpdatingReason =
   "检索索引正在更新，现在不能新开采集。正在进行的采集会继续跑完。";
 
-/** 分类采集中的站不能勾选，避免和正在拉取的分类冲突。 */
-export function isSourceSelectable(site: FilmSource): boolean {
-  return !site.categorySyncing;
-}
-
-/** 空字符串表示可以采集。多个静态原因用顿号连在一起。 */
-export function collectBlockReason(
-  site: FilmSource,
-  searchIndex?: SearchIndexProgress | null,
-): string {
-  if (searchIndex?.status === "indexing") {
-    return collectIndexUpdatingReason;
+export function siteBusyReason(site: FilmSource): string {
+  if (site.deleting) {
+    return "删除中";
   }
   if (site.categorySyncing) {
     return "分类采集中";
@@ -38,6 +29,26 @@ export function collectBlockReason(
   }
   if (isActiveCollectStatus(status)) {
     return "采集中";
+  }
+  return "";
+}
+
+/** 仅空闲站点允许勾选参与批量操作。 */
+export function isSourceSelectable(site: FilmSource): boolean {
+  return siteBusyReason(site) === "";
+}
+
+/** 空字符串表示可以采集。多个静态原因用顿号连在一起。 */
+export function collectBlockReason(
+  site: FilmSource,
+  searchIndex?: SearchIndexProgress | null,
+): string {
+  if (searchIndex?.status === "indexing") {
+    return collectIndexUpdatingReason;
+  }
+  const busyReason = siteBusyReason(site);
+  if (busyReason) {
+    return busyReason;
   }
   const parts: string[] = [];
   if (!site.state) {

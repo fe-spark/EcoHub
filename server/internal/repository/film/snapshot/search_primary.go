@@ -36,11 +36,15 @@ func EnsurePrimarySearchIndex() error {
 	return RebuildPrimarySearchIndex()
 }
 
-// RebuildPrimarySearchIndex 丢掉当前索引，只装当前主站。
+// RebuildPrimarySearchIndex 丢掉当前索引，只装当前主站。若当前主站索引已就绪则复用。
 func RebuildPrimarySearchIndex() error {
 	version := currentSearchIndexVersion()
 	if strings.TrimSpace(version) == "" || db.Mdb == nil {
 		return ErrSearchIndexMissing
+	}
+	primary := currentPrimarySourceID()
+	if cur := activeFilmSearchMetas.Load(); indexMatches(cur, version, primary) {
+		return nil
 	}
 	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(nil)

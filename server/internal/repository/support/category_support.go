@@ -347,15 +347,56 @@ func ResolveRootCategoryIDByCName(cName string) int64 {
 	return rootId
 }
 
+var (
+	sourceDeletingCheckerMu sync.RWMutex
+	sourceDeletingChecker   func(string) bool
+)
+
+// RegisterSourceDeletingChecker 注册站点删除运行态检查器，供选主站跳过正在删除的站点。
+func RegisterSourceDeletingChecker(fn func(string) bool) {
+	sourceDeletingCheckerMu.Lock()
+	sourceDeletingChecker = fn
+	sourceDeletingCheckerMu.Unlock()
+}
+
+func isSourceDeleting(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	sourceDeletingCheckerMu.RLock()
+	fn := sourceDeletingChecker
+	sourceDeletingCheckerMu.RUnlock()
+	return fn != nil && fn(id)
+}
+
+// PickFirstEnabledCollectSource 按排序返回首个已启用站点（不跳过正在删除中的站点）。
+func PickFirstEnabledCollectSource() *model.FilmSource {
+	return pickEnabledCollectSource(false)
+}
+
 // PickPrimarySourceForCategory 选取当前基准源站点（首位即基准原则）。
-// 仅从已启用的站点中按顺序选取首位；全部站点停用或无站点时返回 nil。
+// 仅从已启用且未在删除中的站点按顺序选取首位；全部站点停用、删除中或无站点时返回 nil。
 func PickPrimarySourceForCategory() *model.FilmSource {
+	return pickEnabledCollectSource(true)
+}
+
+func pickEnabledCollectSource(skipDeleting bool) *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
-	var primary model.FilmSource
-	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
-		return &primary
+	var list []model.FilmSource
+	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+		return nil
+	}
+	for i := range list {
+		if list[i].Id == "" {
+			continue
+		}
+		if skipDeleting && isSourceDeleting(list[i].Id) {
+			continue
+		}
+		return &list[i]
 	}
 	return nil
 }

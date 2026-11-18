@@ -9,6 +9,7 @@ export interface CollectToolbarProps {
   canWrite: boolean;
   batchStateUpdating: boolean;
   batchDeleting: boolean;
+  hasBusySelected?: boolean;
   isIndexing?: boolean;
   deleteConfirmTitle: string;
   deleteConfirmDescription: string;
@@ -28,6 +29,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
     canWrite,
     batchStateUpdating,
     batchDeleting,
+    hasBusySelected = false,
     isIndexing = false,
     deleteConfirmTitle,
     deleteConfirmDescription,
@@ -39,6 +41,9 @@ export default function CollectToolbar(props: CollectToolbarProps) {
     onBatchDisable,
     onBatchDelete,
   } = props;
+
+  const batchActionDisabled =
+    !canWrite || selectedCount === 0 || batchStateUpdating || batchDeleting || hasBusySelected;
 
   return (
     <Card size="small" className={styles.toolbarCard} styles={{ body: { padding: 12 } }}>
@@ -60,7 +65,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             <span>
               <Button
                 type="primary"
-                disabled={!canWrite || selectedCount === 0 || isIndexing}
+                disabled={batchActionDisabled || isIndexing}
                 data-tour="collect-batch"
                 onClick={onOpenBatchCollect}
               >
@@ -70,7 +75,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
           </Tooltip>
           <Button
             loading={batchStateUpdating}
-            disabled={!canWrite || selectedCount === 0}
+            disabled={batchActionDisabled || isIndexing}
             data-tour="collect-batch-enable"
             onClick={onBatchEnable}
           >
@@ -81,13 +86,13 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             okText="禁用"
             cancelText="取消"
             okButtonProps={{ danger: true }}
-            disabled={selectedCount === 0}
+            disabled={batchActionDisabled || isIndexing}
             onConfirm={onBatchDisable}
           >
             <Button
               danger
               loading={batchStateUpdating}
-              disabled={!canWrite || selectedCount === 0}
+              disabled={batchActionDisabled || isIndexing}
             >
               批量禁用{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </Button>
@@ -98,13 +103,13 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             okText="删除"
             cancelText="取消"
             okButtonProps={{ danger: true, loading: batchDeleting }}
-            disabled={!canWrite || selectedCount === 0 || batchDeleting}
+            disabled={batchActionDisabled}
             onConfirm={onBatchDelete}
           >
             <Button
               danger
               loading={batchDeleting}
-              disabled={!canWrite || selectedCount === 0}
+              disabled={batchActionDisabled}
             >
               批量删除{selectedCount > 0 ? ` (${selectedCount})` : ""}
             </Button>

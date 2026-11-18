@@ -4,8 +4,15 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import {
   formatSkipSummary,
   isSourceSelectable,
+  siteBusyReason,
 } from "./collect-selection";
-import { isCollectingStatus, type DelBatchResult, type FilmSource } from "./types";
+import type { FilmSource } from "./types";
+
+function collectBusySelected(sources: FilmSource[]) {
+  return sources
+    .map((item) => ({ name: item.name, reason: siteBusyReason(item) }))
+    .filter((item) => item.reason);
+}
 
 export function useCollectBatchActions(
   siteList: FilmSource[],
@@ -31,6 +38,10 @@ export function useCollectBatchActions(
   const selectedSources = useMemo(
     () => siteList.filter((item) => selectedSourceIds.includes(item.id)),
     [selectedSourceIds, siteList],
+  );
+  const hasBusySelected = useMemo(
+    () => selectedSources.some((item) => siteBusyReason(item) !== ""),
+    [selectedSources],
   );
 
   const handleSelectSource = useCallback((id: string, checked: boolean) => {
@@ -59,6 +70,11 @@ export function useCollectBatchActions(
     async (state: boolean) => {
       if (selectedSources.length === 0) {
         message.warning("请先选择采集站");
+        return;
+      }
+      const busy = collectBusySelected(selectedSources);
+      if (busy.length > 0) {
+        message.warning(formatSkipSummary(busy));
         return;
       }
       const sourceIdsToUpdate = selectedSources
@@ -96,14 +112,12 @@ export function useCollectBatchActions(
       message.warning("请先选择采集站");
       return;
     }
-    const skipped = selectedSources
-      .filter((item) => isCollectingStatus(item.progress?.status))
-      .map((item) => ({ name: item.name, reason: "采集中" }));
-    const targets = selectedSources.filter((item) => !isCollectingStatus(item.progress?.status));
-    if (targets.length === 0) {
-      message.warning(`没有可删除的站点：${formatSkipSummary(skipped)}`);
+    const busy = collectBusySelected(selectedSources);
+    if (busy.length > 0) {
+      message.warning(formatSkipSummary(busy));
       return;
     }
+    const targets = selectedSources;
     const ids = targets.map((item) => item.id);
     const idSet = new Set(ids);
     setSiteList((current) =>
@@ -115,8 +129,7 @@ export function useCollectBatchActions(
       const resp = await ApiPost("/manage/collect/delete", { ids });
       if (resp.code === 0) {
         onDeleteSubmitted?.(targets.map((s) => ({ id: s.id, name: s.name })));
-        const skipText = skipped.length > 0 ? `，跳过：${formatSkipSummary(skipped)}` : "";
-        message.success(`已提交批量删除${skipText}`);
+        message.success("已提交批量删除");
         return;
       }
       setSiteList((current) =>
@@ -143,6 +156,7 @@ export function useCollectBatchActions(
     setSelectedSourceIds,
     batchStateUpdating,
     batchDeleting,
+    hasBusySelected,
     deleteConfirmTitle,
     deleteConfirmDescription,
     handleSelectSource,

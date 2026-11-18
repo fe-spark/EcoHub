@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
@@ -11,8 +10,6 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/spider/progress"
-	"server/internal/utils"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,12 +28,15 @@ var (
 	primaryWarmups sync.WaitGroup
 	// categorySyncs 记录异步同步分类的协程，测试用来等它们结束。
 	categorySyncs sync.WaitGroup
+	// deleteSourceJobs 记录已入队待处理的异步删站任务（含尾部的切主站触发），保证 WaitAsyncWork 不与 Add 竞态。
+	deleteSourceJobs sync.WaitGroup
 )
 
-// WaitAsyncWork 等本包启动的后台协程（切主站预热、异步同步分类）全部结束，超时返回 false。测试用。
+// WaitAsyncWork 等本包启动的后台协程（异步删站、切主站预热、异步同步分类）全部结束，超时返回 false。测试用。
 func WaitAsyncWork(timeout time.Duration) bool {
 	done := make(chan struct{})
 	go func() {
+		deleteSourceJobs.Wait()
 		primaryWarmups.Wait()
 		categorySyncs.Wait()
 		close(done)
@@ -270,33 +270,6 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	return true
 }
 
-func (s *CollectService) SortFilmSources(ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	// 和重建开始共用一把锁：检查通过后才写排序，重建途中不能切主站。
-	return filmsnapshot.WithPrimaryAdmitted(func() error {
-		if isPrimaryWarming.Load() {
-			return filmsnapshot.ErrSearchIndexBusy
-		}
-		oldPrimary := repository.PickPrimarySourceForCategory()
-		if err := repository.SortCollectSources(ids); err != nil {
-			return err
-		}
-		filmsnapshot.ClearDynamicPlayCaches()
-		clearProvideNetworkConfigCache()
-		newPrimary := repository.PickPrimarySourceForCategory()
-		if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
-			enabled, err := repository.GetEnabledCollectSourceList()
-			if err != nil {
-				return err
-			}
-			NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
-		}
-		return nil
-	})
-}
-
 func getRunStatsBySource(sources []model.FilmSource) map[string]repository.CollectSourceRunStat {
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
@@ -332,133 +305,4 @@ func (s *CollectService) GetEnabledFilmSources() ([]model.FilmSource, error) {
 
 func (s *CollectService) GetAllFilmSources() ([]model.FilmSource, error) {
 	return repository.GetCollectSourceList()
-}
-
-// UpdateFilmSource 编辑采集源配置（单源）。
-// 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
-func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	if IsPrimarySiteSwitching() {
-		return errors.New("检索索引正在构建中，暂不可修改站点配置，请稍候")
-	}
-	if err := s.updateFilmSourceCore(source); err != nil {
-		return err
-	}
-	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
-	return nil
-}
-
-func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
-	old := repository.FindCollectSourceById(source.Id)
-	if old == nil {
-		return errors.New("采集站信息不存在")
-	}
-	if source.CreatedAt.IsZero() && !old.CreatedAt.IsZero() {
-		source.CreatedAt = old.CreatedAt
-	}
-	// 排序只走排序接口。编辑请求不带 sort，不能写成 0 把别的站顶成主站。
-	source.Sort = old.Sort
-
-	// 拉页、停止中、待检索都不许改地址或协议。待检索时清空数据会和封口抢同一批影片。
-	isUriChanged := old.Uri != source.Uri
-	isFormatChanged := old.ResolveFormat() != source.ResolveFormat()
-	if isUriChanged || isFormatChanged {
-		name := strings.TrimSpace(source.Name)
-		if name == "" {
-			name = old.Name
-		}
-		if progress.IsSealing(source.Id) {
-			return fmt.Errorf("采集站「%s」待检索，暂不可修改地址或协议", name)
-		}
-		if spider.IsTaskRunning(source.Id) {
-			return fmt.Errorf("采集站「%s」当前有采集任务正在运行或正在停止退出中，请稍候几秒后再修改地址或协议", name)
-		}
-	}
-
-	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged)
-	if len(orphanMids) > 0 {
-		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
-	}
-	if err != nil {
-		return err
-	}
-
-	if isUriChanged {
-		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据和分类，删除档案 %d 部", source.Name, source.Id, len(orphanMids))
-		repository.MarkCategoryChanged()
-		progress.BroadcastCategoryReady(source.Id, false)
-	}
-
-	spider.ClearLimiter(source.Id)
-	if old.State && !source.State {
-		spider.StopCollectSource(source.Id, "采集站已停用")
-	}
-
-	clearProvideNetworkConfigCache()
-	filmsnapshot.ClearDynamicPlayCaches()
-	if old.IsPosterSource != source.IsPosterSource {
-		filmsnapshot.BumpSearchCacheVersion()
-		filmsnapshot.ClearDerivedFilmListCaches()
-		filmsnapshot.RefreshAccessDataCaches()
-		filmsnapshot.ClearSearchCache()
-	}
-	return repository.RefreshCollectSourceCatalog()
-}
-
-func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
-	if IsPrimarySiteSwitching() {
-		return errors.New("检索索引正在构建中，暂不可切换站点状态，请稍候")
-	}
-	planned := make(map[string]bool)
-	for _, id := range ids {
-		source := repository.FindCollectSourceById(id)
-		if source == nil {
-			return errors.New("采集站信息不存在")
-		}
-		if source.State != state {
-			planned[id] = state
-		}
-	}
-	if len(planned) == 0 {
-		return nil
-	}
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	var firstErr error
-	changed := false
-	for _, id := range ids {
-		source := repository.FindCollectSourceById(id)
-		if source == nil {
-			firstErr = errors.New("采集站信息不存在")
-			break
-		}
-		if source.State == state {
-			continue
-		}
-		next := *source
-		next.State = state
-		if err := s.updateFilmSourceCore(next); err != nil {
-			firstErr = err
-			break
-		}
-		changed = true
-	}
-	if changed {
-		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
-	}
-	return firstErr
-}
-
-func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	if source.Id == "" {
-		source.Id = utils.GenerateHashKey(source.Uri)
-	}
-	if err := repository.AddCollectSource(source); err != nil {
-		return err
-	}
-	spider.ClearLimiter(source.Id)
-	clearProvideNetworkConfigCache()
-	filmsnapshot.ClearDynamicPlayCaches()
-	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
-	return nil
 }

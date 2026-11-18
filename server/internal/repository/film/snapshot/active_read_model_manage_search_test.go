@@ -168,6 +168,15 @@ func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
 	if len(trad) != 1 || trad[0].Mid != 4 {
 		t.Fatalf("traditional search = %+v", trad)
 	}
+
+	punctPage := &dto.Page{Current: 1, PageSize: 10}
+	punctRes, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "...", Paging: punctPage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(punctRes) != 0 || punctPage.Total != 0 {
+		t.Fatalf("punctuation search should return empty without scanning, got total=%d list=%+v", punctPage.Total, punctRes)
+	}
 }
 
 func TestManageNonPrimaryListReadsOwnedFilmsByUpdate(t *testing.T) {

@@ -160,6 +160,9 @@ func StopAllTasksAndWait(timeout time.Duration, reason string) error {
 
 // PrepareSingleCollectStart 单站采集启动前占用采集源并预置起始进度。
 func PrepareSingleCollectStart(source model.FilmSource) error {
+	if reason := batchCollectBlockReason(source); reason != "" {
+		return fmt.Errorf("站点 %s 暂不可采集: %s", source.Name, reason)
+	}
 	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")
 	if err != nil {
 		return err

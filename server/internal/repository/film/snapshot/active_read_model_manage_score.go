@@ -103,6 +103,11 @@ func keepManageHit(best []manageScoreHit, item manageScoreHit) []manageScoreHit 
 // 按更新时间分批读取，逐行打分，只留下得分最高的 manageScoreKeepCap 条。
 func pageScoredManageFilms(q *gorm.DB, page *dto.Page, name, sourceID string) ([]model.FilmIndex, error) {
 	query := utils.BuildQueryContext(name)
+	if query.CleanKey == "" {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmIndex{}, nil
+	}
 	q = applyNameNeedles(q, utils.NameLikeNeedles(query))
 	batchSize := manageScoreScanBatch
 	if batchSize <= 0 {

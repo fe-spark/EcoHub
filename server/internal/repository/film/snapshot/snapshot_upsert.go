@@ -76,6 +76,23 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 	RefreshAccessDataCaches()
 }
 
+// InvalidateCachesAfterSourceDelete 删站后的缓存与检索索引清理：
+// 内存索引属于被删站或主站已变时直接整盘丢掉，跳过十万级 mid 遍历与逐 key Redis Pipeline 删除。
+func InvalidateCachesAfterSourceDelete(deletedSourceID string) {
+	deletedSourceID = strings.TrimSpace(deletedSourceID)
+	cur := activeFilmSearchMetas.Load()
+	if cur != nil && (cur.PrimaryID == deletedSourceID || cur.PrimaryID != currentPrimarySourceID()) {
+		DropPrimarySearchIndex()
+	}
+	version := GetActiveSnapshotVersion()
+	if version != "" {
+		applyBroadSnapshotCacheInvalidation(version, nil)
+	} else {
+		RefreshAccessDataCaches()
+	}
+	ClearDynamicPlayCaches()
+}
+
 func UpsertActiveSnapshotByMid(mid int64) error {
 	_, _, err := UpsertActiveSnapshotsByMids(mid)
 	return err

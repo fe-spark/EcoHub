@@ -187,6 +187,15 @@ func TestSortFilmSources_RejectsWhileSearchRebuilding(t *testing.T) {
 	if len(list) == 0 || list[0].Id != "src_1" {
 		t.Fatalf("primary changed during rebuild: %+v", list)
 	}
+	if err := (&CollectService{}).UpdateFilmSource(model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", State: false}); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("UpdateFilmSource err=%v", err)
+	}
+	if err := (&CollectService{}).BatchUpdateFilmSourceState([]string{"src_1"}, false); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("BatchUpdateFilmSourceState err=%v", err)
+	}
+	if err := (&CollectService{}).SaveFilmSource(model.FilmSource{Id: "src_3", Name: "站3", Uri: "http://3", State: true}); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("SaveFilmSource err=%v", err)
+	}
 }
 
 func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {

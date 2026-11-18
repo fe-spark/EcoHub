@@ -343,15 +343,16 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	log.Printf("[Spider] 开始封口检索索引 pending=%d sealing=%d", pendingN, sealingN)
 
 	sealed := true
+	rebuildGenBefore := filmsnapshot.SearchRebuildGen()
 	progressBefore := filmsnapshot.SearchIndexProgressToken()
 	if len(mids) > 0 {
 		searchSealRunning.Store(true)
 		sealed = sealSearchIndex(mids)
-		searchSealRunning.Store(false)
 	}
 	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。
 	// 重建期间新进来的编号还在 pending，继续封。
 	if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
+		searchSealRunning.Store(false)
 		parked := false
 		// 先拿重建锁再拿 q.mu，和重建收尾通知监听的顺序一致。
 		filmsnapshot.WithSearchRebuildScheduled(func(scheduled bool) {
@@ -367,12 +368,17 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		return parked
 	}
 	if !sealed {
-		// 进度变过：重建已经接过或刚结束，编号不再放回。没变过才是所属站查询失败。
-		if filmsnapshot.SearchIndexProgressToken() != progressBefore {
+		tok := filmsnapshot.SearchIndexProgressToken()
+		// 仅当真正发起了全量重建，或外部进度已进入实质构建/终态（排除 waiting 占位）时，才认为重建已接管。
+		handedOff := filmsnapshot.SearchRebuildGen() != rebuildGenBefore ||
+			(tok != progressBefore && tok != nil && tok.Status != "waiting")
+		if handedOff {
+			searchSealRunning.Store(false)
 			log.Printf("[Spider] 封口未写入检索索引，进度已变化，编号交给重建 mids=%d", len(mids))
 			return false
 		}
 		q.restorePending(mids)
+		searchSealRunning.Store(false)
 		log.Printf("[Spider] 封口未写入检索索引，编号留在队列稍后重试 mids=%d", len(mids))
 		unfreezeCollectQueues()
 		if sealRetryWait > 0 {
@@ -380,6 +386,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		}
 		return false
 	}
+	searchSealRunning.Store(false)
 	// 按编号封口成功时 ResealSearchIndex 已发过 done；这里只收口 sealing，不再依赖全局监听。
 	q.complete()
 	if len(mids) == 0 {
