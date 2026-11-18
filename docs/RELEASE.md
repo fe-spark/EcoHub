@@ -1,4 +1,4 @@
-测试版 **v3.1.0-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.7。
+测试版 **v3.1.0-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.6。
 
 ### 升级说明
 
@@ -11,7 +11,7 @@
 
 ---
 
-正式版 **v3.0.7**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
 
@@ -21,7 +21,7 @@
 - **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
-### v3.0.7 更新内容
+### v3.0.6 更新内容
 
 - **检索索引**：内存只常驻当前主站。切主站立刻丢掉旧索引；构建或已排队时不能改站序。所属站查询失败时编号留队重试，不写未过滤编号，也不整表重建（#98）。
 - **工作台**：顶部是当前主站的片库影片、分类、当天失败页。展开看各站。影片数记在采集站上。
