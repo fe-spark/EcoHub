@@ -55,21 +55,25 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 // 采集链接变更时在单站独占锁与主站准入锁保护下先校验再分批清空该站数据并更新分类和配置，避免清库后配置更新被拒绝导致状态不一致。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	return spider.WithSourceExclusive(source.Id, func() error {
-		latest := repository.FindCollectSourceById(source.Id)
-		if latest == nil {
-			return errors.New("采集站信息不存在")
-		}
-		if progress.IsSourceDeleting(source.Id) {
-			return errors.New("该站正在删除")
-		}
-		if err := checkSourceEndpointMutable(latest, source); err != nil {
-			return err
-		}
-		isUriChanged := latest.Uri != source.Uri
-
 		var orphanMids []int64
 		cleaned := false
 		err := withPrimarySwitchAdmitted(func() error {
+			latest := repository.FindCollectSourceById(source.Id)
+			if latest == nil {
+				return errors.New("采集站信息不存在")
+			}
+			if progress.IsSourceDeleting(source.Id) {
+				return errors.New("该站正在删除")
+			}
+			if err := checkSourceEndpointMutable(latest, source); err != nil {
+				return err
+			}
+			if latest.State != source.State {
+				if reason := sourceBusyReason(source.Id); reason != "" {
+					return errors.New(reason)
+				}
+			}
+			isUriChanged := latest.Uri != source.Uri
 			oldPrimary := repository.PickPrimarySourceForCategory()
 			if isUriChanged {
 				cleaned = true
@@ -93,13 +97,16 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 }
 
 func checkSourceEndpointMutable(old *model.FilmSource, next model.FilmSource) error {
-	// 拉页、停止中、待检索都不许改地址或协议。待检索时清空数据会和封口抢同一批影片。
+	// 拉页、停止中、待检索、分类采集中都不许改地址或协议。待检索时清空数据会和封口抢同一批影片。
 	if old.Uri == next.Uri && old.ResolveFormat() == next.ResolveFormat() {
 		return nil
 	}
 	name := strings.TrimSpace(next.Name)
 	if name == "" {
 		name = old.Name
+	}
+	if progress.IsCategorySyncing(next.Id) {
+		return fmt.Errorf("采集站「%s」分类采集中，暂不可修改地址或协议", name)
 	}
 	if progress.IsSealing(next.Id) {
 		return fmt.Errorf("采集站「%s」待检索，暂不可修改地址或协议", name)

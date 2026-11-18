@@ -26,26 +26,6 @@ func likeNeedle(s string) string {
 	return "%" + s + "%"
 }
 
-func applyNameNeedles(query *gorm.DB, groups [][]string) *gorm.DB {
-	for _, group := range groups {
-		if len(group) == 0 {
-			continue
-		}
-		if len(group) == 1 {
-			query = query.Where("name LIKE ? ESCAPE '!'", likeNeedle(group[0]))
-			continue
-		}
-		parts := make([]string, len(group))
-		args := make([]any, len(group))
-		for i, needle := range group {
-			parts[i] = "name LIKE ? ESCAPE '!'"
-			args[i] = likeNeedle(needle)
-		}
-		query = query.Where("("+strings.Join(parts, " OR ")+")", args...)
-	}
-	return query
-}
-
 func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	tokens := utils.ExtractSearchTokens(keyword)
 	if len(tokens) == 0 {
@@ -124,7 +104,7 @@ func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 	return list, nil
 }
 
-// searchManageFilmsFromDB 非主站影片列表直接查库，不装进常驻索引。
+// searchManageFilmsFromDB 非主站无关键词列表直接走库翻页；带关键词时走按需加载的轻量倒排索引。
 func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmIndex, error) {
 	if db.Mdb == nil {
 		return nil, ErrSearchIndexMissing
@@ -134,6 +114,9 @@ func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmInde
 		page.Total = 0
 		page.PageCount = 1
 		return []model.FilmIndex{}, nil
+	}
+	if name := strings.TrimSpace(s.Name); name != "" {
+		return searchNonPrimaryManageFilms(filterCtx, page, name)
 	}
 	q := db.Mdb.Model(&model.FilmIndex{})
 	// 列表是这一站自己的档案。按所属站走索引取一页，不再用播放线路编号回表。
@@ -174,10 +157,6 @@ func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmInde
 	}
 	if filterCtx.plot != "" {
 		q = q.Where("class_tag LIKE ? ESCAPE '!'", likeNeedle(filterCtx.plot))
-	}
-	name := strings.TrimSpace(s.Name)
-	if name != "" {
-		return pageScoredManageFilms(q, page, name, filterCtx.sourceID)
 	}
 	knownTotal := int64(-1)
 	if plainSourceList(filterCtx) {
@@ -328,6 +307,13 @@ func (f *manageFilterContext) pass(meta *FilmSearchMeta) bool {
 		return false
 	}
 	if f.sourceID != "" && !meta.HasPlaySource(f.sourceID) {
+		return false
+	}
+	return f.passOwnedMeta(meta)
+}
+
+func (f *manageFilterContext) passOwnedMeta(meta *FilmSearchMeta) bool {
+	if meta == nil {
 		return false
 	}
 	switch f.categoryCheckMode {

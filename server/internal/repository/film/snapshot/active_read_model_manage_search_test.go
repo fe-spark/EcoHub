@@ -99,9 +99,8 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 // 这些用例只测纯内存逻辑，但被测函数会读全局 db.Mdb；包内其他用例可能把 db.Mdb 留成已关闭/缺表的库，
 // -count>1 时第二轮起就会读到它而失败。
 func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
-	prevBatch := manageScoreScanBatch
-	manageScoreScanBatch = 1
-	t.Cleanup(func() { manageScoreScanBatch = prevBatch })
+	DropNonPrimarySearchIndex("")
+	t.Cleanup(func() { DropNonPrimarySearchIndex("") })
 	prev := db.Mdb
 	t.Cleanup(func() { db.Mdb = prev })
 	gdb := setupSearchSourceTestDB(t)
@@ -309,6 +308,155 @@ func TestApplyManageScoreIndexHint_MySQLUsesSourceUpdateIndex(t *testing.T) {
 	}
 	if strings.Contains(sql, "`film_index USE INDEX") {
 		t.Fatalf("sql=%s", sql)
+	}
+}
+
+func TestNonPrimarySearchIndex_LazyLoadPinyinTTLEvictAndSwitch(t *testing.T) {
+	DropNonPrimarySearchIndex("")
+	prevTTL := nonPrimarySearchIdleTTL
+	nonPrimarySearchIdleTTL = 40 * time.Millisecond
+	t.Cleanup(func() {
+		nonPrimarySearchIdleTTL = prevTTL
+		DropNonPrimarySearchIndex("")
+	})
+	prev := db.Mdb
+	t.Cleanup(func() { db.Mdb = prev })
+	gdb := setupSearchSourceTestDB(t)
+	if err := gdb.AutoMigrate(&model.FilmTMDBScrape{}, &model.MovieSourceMapping{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&[]model.FilmSource{
+		{Id: "hd", Name: "备站A", Uri: "https://example.com/hd", State: true, Sort: 1},
+		{Id: "subo", Name: "备站B", Uri: "https://example.com/subo", State: true, Sort: 2},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	films := []model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "凡人修仙传", UpdateStamp: 100}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "庆余年", UpdateStamp: 200}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "subo"}, FilmIndexContent: model.FilmIndexContent{Name: "斗破苍穹", UpdateStamp: 300}},
+	}
+	for _, row := range films {
+		if err := gdb.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	activeFilmSearchMetas.Store(nil)
+	page := &dto.Page{Current: 1, PageSize: 10}
+	got, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "fanren", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(got) != 1 || got[0].Mid != 1 {
+		t.Fatalf("pinyin search = %+v total=%d", got, page.Total)
+	}
+	if activeFilmSearchMetas.Load() != nil {
+		t.Fatal("non-primary search must not load into primary search index")
+	}
+	nonPrimarySearchCache.mu.Lock()
+	firstEntry := nonPrimarySearchCache.entry
+	nonPrimarySearchCache.mu.Unlock()
+	if firstEntry == nil || firstEntry.sourceID != "hd" {
+		t.Fatalf("expected hd cached, got %+v", firstEntry)
+	}
+
+	// 切换到另一非主站时替换单槽位缓存
+	gotB, err := GetSearchPageReadModel(model.SearchVo{SourceId: "subo", Name: "doup", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(gotB) != 1 || gotB[0].Mid != 3 {
+		t.Fatalf("subo pinyin search = %+v total=%d", gotB, page.Total)
+	}
+	nonPrimarySearchCache.mu.Lock()
+	secondEntry := nonPrimarySearchCache.entry
+	nonPrimarySearchCache.mu.Unlock()
+	if secondEntry == nil || secondEntry.sourceID != "subo" || secondEntry == firstEntry {
+		t.Fatalf("expected single-slot cache replaced with subo, got %+v", secondEntry)
+	}
+
+	// 空闲超时后自动淘汰释放内存
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		nonPrimarySearchCache.mu.Lock()
+		cur := nonPrimarySearchCache.entry
+		nonPrimarySearchCache.mu.Unlock()
+		if cur == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	nonPrimarySearchCache.mu.Lock()
+	cur := nonPrimarySearchCache.entry
+	nonPrimarySearchCache.mu.Unlock()
+	if cur != nil {
+		t.Fatalf("expected non-primary search index to evict after idle TTL, still got %+v", cur.sourceID)
+	}
+}
+
+func TestNonPrimarySearchIndex_InvalidatesOnUpsertAndDelete(t *testing.T) {
+	DropNonPrimarySearchIndex("")
+	t.Cleanup(func() { DropNonPrimarySearchIndex("") })
+	prev := db.Mdb
+	t.Cleanup(func() { db.Mdb = prev })
+	gdb := setupSearchSourceTestDB(t)
+	if err := gdb.AutoMigrate(&model.FilmTMDBScrape{}, &model.MovieSourceMapping{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "hd", Name: "备站", Uri: "https://example.com/hd", State: true, Sort: 1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetActiveSnapshotVersion("v-np-invalidate"); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 10, FirstSourceId: "hd"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	page := &dto.Page{Current: 1, PageSize: 10}
+	got, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "仙逆", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("initial search len=%d", len(got))
+	}
+
+	// 新增同站影片并触达增量刷新：应淘汰非主站缓存并在下次搜到
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 11, FirstSourceId: "hd"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆番外"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := UpsertActiveSnapshotsByMids(11); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "仙逆", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got2) != 2 {
+		t.Fatalf("expected 2 results after upsert invalidation, got %d", len(got2))
+	}
+
+	// 删除影片后触发失效：应不再搜到已删除影片
+	if err := gdb.Unscoped().Where("mid = ?", 11).Delete(&model.FilmIndex{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	DeleteActiveSnapshotsByMids(11)
+	got3, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "仙逆", Paging: page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got3) != 1 || got3[0].Mid != 10 {
+		t.Fatalf("expected 1 result after delete invalidation, got %+v", got3)
 	}
 }
 

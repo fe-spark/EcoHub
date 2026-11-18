@@ -108,22 +108,33 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 }
 
 func loadFilmSearchMetaItems(ctx context.Context, version, primary string) ([]FilmSearchMeta, error) {
-	primary = strings.TrimSpace(primary)
-	if primary == "" {
-		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 无主站", version)
+	return loadSearchMetaItemsForSource(ctx, primary, true, version)
+}
+
+func loadSearchMetaItemsForSource(ctx context.Context, sourceID string, withProgress bool, version string) ([]FilmSearchMeta, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		if withProgress {
+			log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 无主站", version)
+		}
 		return []FilmSearchMeta{}, nil
 	}
 	var total int64
-	if err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Where("first_source_id = ?", primary).Count(&total).Error; err != nil {
+	if err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Where("first_source_id = ?", sourceID).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	if total == 0 {
-		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 影片 0/0", version)
+		if withProgress {
+			log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 影片 0/0", version)
+		}
 		return []FilmSearchMeta{}, nil
 	}
-	NotifySearchIndexProgress(total, 0, "indexing")
-	progress := newSearchLoadProgress(version, total)
-	spans, err := searchMetaSpans(ctx, primary, total)
+	var progress *searchLoadProgress
+	if withProgress {
+		NotifySearchIndexProgress(total, 0, "indexing")
+		progress = newSearchLoadProgress(version, total)
+	}
+	spans, err := searchMetaSpans(ctx, sourceID, total)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +162,7 @@ func loadFilmSearchMetaItems(ctx context.Context, version, primary string) ([]Fi
 		scanWg.Add(1)
 		go func(span midSpan) {
 			defer scanWg.Done()
-			if err := streamMetaRows(ctx, primary, span, batches); err != nil && ctx.Err() == nil {
+			if err := streamMetaRows(ctx, sourceID, span, batches); err != nil && ctx.Err() == nil {
 				fail(err)
 			}
 		}(span)
@@ -182,7 +193,9 @@ func loadFilmSearchMetaItems(ctx context.Context, version, primary string) ([]Fi
 				mu.Lock()
 				items = append(items, page...)
 				mu.Unlock()
-				progress.add(len(page))
+				if progress != nil {
+					progress.add(len(page))
+				}
 			}
 		}()
 	}

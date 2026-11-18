@@ -493,3 +493,49 @@ func TestCollectService_UpdateFilmSource_RejectsUriChangeAtomicallyWhenSearchBus
 		t.Fatalf("data should remain intact when UpdateFilmSource rejected, films=%d lines=%d maps=%d", filmCount, lineCount, mapCount)
 	}
 }
+
+func TestCollectService_UpdateFilmSource_RejectsUriAndStateChangeWhenCategorySyncing(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	src := model.FilmSource{Id: "src_cat_sync_edit", Name: "同步中站", Uri: "http://old.example/api", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: src.Id},
+		FilmIndexContent:  model.FilmIndexContent{Name: "保留影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{Mid: 101, SourceId: src.Id, LineKind: "play", Content: "[]"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 8}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	progress.BroadcastCategoryStatus(src.Id, "syncing")
+	t.Cleanup(func() { progress.BroadcastCategoryStatus(src.Id, "idle") })
+
+	srv := new(CollectService)
+	next := src
+	next.Uri = "http://new.example/api"
+	next.State = false
+	if err := srv.UpdateFilmSource(next); err == nil {
+		t.Fatal("expected UpdateFilmSource to reject while category syncing")
+	}
+
+	var saved model.FilmSource
+	if err := gdb.First(&saved, "id = ?", src.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Uri != src.Uri || !saved.State {
+		t.Fatalf("source changed despite rejection: got uri=%s state=%v", saved.Uri, saved.State)
+	}
+	var filmCount, lineCount, mapCount int64
+	gdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", src.Id).Count(&filmCount)
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", src.Id).Count(&lineCount)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", src.Id).Count(&mapCount)
+	if filmCount != 1 || lineCount != 1 || mapCount != 1 {
+		t.Fatalf("data must not be wiped when UpdateFilmSource fails validation, films=%d lines=%d maps=%d", filmCount, lineCount, mapCount)
+	}
+}

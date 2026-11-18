@@ -70,6 +70,7 @@ func ClearActiveFilmReadModel() {
 	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(nil)
 	activeFilmSearchMetasMu.Unlock()
+	DropNonPrimarySearchIndex("")
 }
 
 type searchCacheVerState struct {
