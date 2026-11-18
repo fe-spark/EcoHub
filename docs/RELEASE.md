@@ -1,3 +1,16 @@
+测试版 **v3.1.0-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.0.7。
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.0-beta.0 更新内容
+
+- **检索索引全面重构**：主站索引与非主站索引分离管理，检索路径与索引加载策略独立拆分。
+
+---
+
 正式版 **v3.0.7**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.7`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

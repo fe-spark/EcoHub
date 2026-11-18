@@ -1,3 +1,16 @@
+Test release **v3.1.0-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.7 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0` in the install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.0-beta.0 changes
+
+- **Search index full refactor**: primary and non-primary source indexes are managed independently, with separate search paths and index-loading strategies.
+
+---
+
 Release **v3.0.7**, image `ghcr.io/fe-spark/ecohub:v3.0.7` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
