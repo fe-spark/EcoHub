@@ -417,16 +417,16 @@ func parseEpisode(seg string) (episode, link string, ok bool) {
 	ep, lk = strings.TrimSpace(ep), strings.TrimSpace(lk)
 	if name, url, glued := splitGluedEpisode(ep); glued {
 		ep = name
-		if !isVideoURL(lk) {
+		if lk == "" {
 			lk = url
 		}
 	}
 	switch {
 	case !hasDollar && lk == "":
-		return "", ep, ep != "" // 整条是 URL
+		return "", ep, isValidPlayURL(ep) // 整条是 URL
 	case lk != "":
-		return ep, lk, true // 正常 "集名$URL"
-	case strings.HasPrefix(ep, "http"):
+		return ep, lk, isValidPlayURL(lk) // 正常 "集名$URL"
+	case strings.HasPrefix(strings.ToLower(ep), "http://") || strings.HasPrefix(strings.ToLower(ep), "https://"):
 		return "", ep, true // "$URL" 形式，ep 实为 URL
 	default:
 		return "", "", false // "集名$"，link 为空
@@ -454,12 +454,10 @@ func splitGluedEpisode(ep string) (name, url string, ok bool) {
 	return name, url, true
 }
 
-// isVideoURL 判断是否为视频直链，过滤 share/ 等网页链接
-func isVideoURL(link string) bool {
-	lower := strings.ToLower(link)
-	return strings.Contains(lower, ".m3u8") ||
-		strings.Contains(lower, ".mp4") ||
-		strings.Contains(lower, ".flv")
+// isValidPlayURL 判断是否为合法网络播放链接（支持直链及需嗅探的网页链接）
+func isValidPlayURL(link string) bool {
+	lower := strings.ToLower(strings.TrimSpace(link))
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 // ConvertPlayUrl 将单条 playFrom 地址字符串解析为播放列表
@@ -468,7 +466,7 @@ func ConvertPlayUrl(playUrl string) []model.MovieUrlInfo {
 	var result []model.MovieUrlInfo
 	for seg := range strings.SplitSeq(playUrl, "#") {
 		episode, link, ok := parseEpisode(strings.TrimSpace(seg))
-		if !ok || !isVideoURL(link) {
+		if !ok || !isValidPlayURL(link) {
 			continue
 		}
 		if episode == "" {

@@ -87,14 +87,30 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 			return
 		}
 	}
-	for i := range detail.List {
+	var playableList []model.PlayLinkVo
+	for _, src := range detail.List {
 		var valid []model.MovieUrlInfo
-		for _, ep := range detail.List[i].LinkList {
-			if ep.Link != "" {
+		for _, ep := range src.LinkList {
+			if isWebPlayableVideo(ep.Link) {
 				valid = append(valid, ep)
 			}
 		}
-		detail.List[i].LinkList = valid
+		if len(valid) > 0 {
+			src.LinkList = valid
+			playableList = append(playableList, src)
+		}
+	}
+	detail.List = playableList
+	if len(detail.List) > 0 {
+		detail.PlayList = make([][]model.MovieUrlInfo, len(detail.List))
+		detail.PlayFrom = make([]string, len(detail.List))
+		for i, v := range detail.List {
+			detail.PlayList[i] = v.LinkList
+			detail.PlayFrom[i] = v.Name
+		}
+	} else {
+		detail.PlayList = nil
+		detail.PlayFrom = nil
 	}
 	if len(detail.List) > 0 {
 		primarySourceID := ""
@@ -159,4 +175,11 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 	}
 	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
 	dto.Success(service.WrapMovieBasicInfos(relateMovie), "相关推荐获取成功", c)
+}
+
+func isWebPlayableVideo(link string) bool {
+	lower := strings.ToLower(strings.TrimSpace(link))
+	return strings.Contains(lower, ".m3u8") ||
+		strings.Contains(lower, ".mp4") ||
+		strings.Contains(lower, ".flv")
 }

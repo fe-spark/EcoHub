@@ -91,22 +91,13 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	plot := c.Query("plot")
 	sort := c.Query("sort")
 
-	classList, filters, classErr := service.ProvideSvc.GetClassList()
-	if classErr != nil {
-		c.JSON(200, gin.H{"code": 0, "msg": classErr.Error()})
-		return
-	}
-	if classList == nil {
-		classList = []model.FilmClass{}
-	}
-
 	baseURL, err := resolveProvideBaseURL(c)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 		return
 	}
 
-	writeProvide := func(page, pagecount, total int, list any, withRecord bool) {
+	writeProvide := func(page, pagecount, total int, list any, withRecord bool, withMeta bool) {
 		body := gin.H{
 			"code":      1,
 			"msg":       "数据列表",
@@ -115,11 +106,21 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			"limit":     strconv.Itoa(limit),
 			"total":     total,
 			"list":      list,
-			"class":     classList,
-			"filters":   filters,
 		}
 		if withRecord {
 			body["recordcount"] = total
+		}
+		if withMeta {
+			classList, filters, classErr := service.ProvideSvc.GetClassList()
+			if classErr != nil {
+				c.JSON(200, gin.H{"code": 0, "msg": classErr.Error()})
+				return
+			}
+			if classList == nil {
+				classList = []model.FilmClass{}
+			}
+			body["class"] = classList
+			body["filters"] = filters
 		}
 		c.JSON(200, body)
 	}
@@ -132,7 +133,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 				return
 			}
-			writeProvide(1, 1, len(vodList), prefixDetailPics(vodList, baseURL), false)
+			writeProvide(1, 1, len(vodList), prefixDetailPics(vodList, baseURL), false, false)
 			return
 		}
 		page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
@@ -149,14 +150,14 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
-		writeProvide(page, pagecount, total, prefixDetailPics(detailList, baseURL), true)
+		writeProvide(page, pagecount, total, prefixDetailPics(detailList, baseURL), true, wd == "")
 	default:
 		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
-		writeProvide(page, pagecount, total, prefixListPics(vodList, baseURL), true)
+		writeProvide(page, pagecount, total, prefixListPics(vodList, baseURL), true, wd == "")
 	}
 }
 

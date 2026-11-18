@@ -438,16 +438,24 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		}
 
 		var res struct {
-			Code  int                `json:"code"`
-			Msg   string             `json:"msg"`
-			Total int                `json:"total"`
-			List  []model.FilmDetail `json:"list"`
+			Code    int                `json:"code"`
+			Msg     string             `json:"msg"`
+			Total   int                `json:"total"`
+			List    []model.FilmDetail `json:"list"`
+			Class   any                `json:"class"`
+			Filters any                `json:"filters"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
 		if res.Code != 1 || len(res.List) != 2 {
 			t.Fatalf("expected code=1 and 2 details, got code=%d, count=%d", res.Code, len(res.List))
+		}
+		if res.Class != nil {
+			t.Fatalf("expected class to be omitted in detail response, got: %v", res.Class)
+		}
+		if res.Filters != nil {
+			t.Fatalf("expected filters to be omitted in detail response, got: %v", res.Filters)
 		}
 
 		// 验证 TVBox 标准格式：

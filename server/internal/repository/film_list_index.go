@@ -18,6 +18,9 @@ const SourceFilmListIndex = "idx_film_index_source_updated"
 // FilmCategoryScoreIndex 排片按分类键、评分取前几部。
 const FilmCategoryScoreIndex = "idx_film_index_cat_score"
 
+// FilmSourceDeletedIndex 启动统计各采集站未删除影片数走覆盖索引，避免全表回表超时。
+const FilmSourceDeletedIndex = "idx_film_index_source_del"
+
 // EnsureSourceFilmListIndex 让后台按所属站、更新时间取一页。
 // 业务连接的读超时是 30 秒，百万行上建索引会超过它。这条语句单独用更长的读超时，已存在则跳过。
 func EnsureSourceFilmListIndex() error {
@@ -28,6 +31,31 @@ func EnsureSourceFilmListIndex() error {
 // 不写进模型标签，避免启动时用 30 秒读超时去建这个索引。
 func EnsureFilmCategoryScoreIndex() error {
 	return ensureFilmIndex(FilmCategoryScoreIndex, "category_key, score, hits, mid")
+}
+
+// EnsureFilmSourceDeletedIndex 让 RefreshFilmCounts 的 GROUP BY first_source_id 走覆盖索引。
+// 不写进模型标签，避免启动时用 30 秒读超时去建这个索引；若表上已有同列前缀索引（如手动建的 idx_sourceid_del）则跳过。
+func EnsureFilmSourceDeletedIndex() error {
+	if db.Mdb == nil || db.Mdb.Dialector.Name() != "mysql" {
+		return nil
+	}
+	var n int64
+	err := db.Mdb.Raw(`
+		SELECT COUNT(*) FROM (
+			SELECT index_name
+			FROM information_schema.statistics
+			WHERE table_schema = DATABASE() AND table_name = 'film_index'
+			GROUP BY index_name
+			HAVING GROUP_CONCAT(column_name ORDER BY seq_in_index) LIKE 'first_source_id,deleted_at%'
+		) AS matched
+	`).Scan(&n).Error
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	return ensureFilmIndex(FilmSourceDeletedIndex, "first_source_id, deleted_at")
 }
 
 func ensureFilmIndex(name, columns string) error {

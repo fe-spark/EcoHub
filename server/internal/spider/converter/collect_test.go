@@ -48,6 +48,15 @@ func TestParseEpisodeGluedURL(t *testing.T) {
 	if len(bare) != 1 || bare[0].Episode != "第1集" || bare[0].Link != "https://cdn.example/only.m3u8" {
 		t.Fatalf("bare=%+v", bare)
 	}
+
+	// 嗅探链接（非 m3u8/mp4/flv）保留入库
+	sniffList := ConvertPlayUrl("第1集$https://vip.example.com/play/1001.html#第2集$https://jx.player.com/?url=xyz")
+	if len(sniffList) != 2 {
+		t.Fatalf("expected 2 sniff links to be preserved, got %d", len(sniffList))
+	}
+	if sniffList[0].Link != "https://vip.example.com/play/1001.html" || sniffList[1].Link != "https://jx.player.com/?url=xyz" {
+		t.Fatalf("sniff links altered: %+v", sniffList)
+	}
 }
 
 func TestLovedanDollarNoteDoesNotMergePlayGroups(t *testing.T) {

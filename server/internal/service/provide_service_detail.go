@@ -166,7 +166,7 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		return model.FilmDetail{}, err
 	}
 
-	vodPlayFrom, vodPlayURL := FormatTVBoxFilmPlayLists(movieDetailVo.List)
+	vodPlayFrom, vodPlayURL := formatProvidePlayLists(movieDetailVo.List)
 
 	vodPic := movieDetailVo.Picture
 	if vodPic == "" {
@@ -210,4 +210,41 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		VodScore:    movieDetailVo.DbScore,
 		VodContent:  movieDetailVo.Content,
 	}, nil
+}
+
+// formatProvidePlayLists 组装电视端 vod_play_from 与 vod_play_url：手动线路置顶，全量下发所有线路。
+func formatProvidePlayLists(sources []model.PlayLinkVo) (string, string) {
+	if len(sources) == 0 {
+		return "", ""
+	}
+	var manualFrom, manualURL []string
+	var normalFrom, normalURL []string
+
+	for _, source := range sources {
+		isManual := source.IsManual || source.SourceId == "manual"
+		var linkStrs []string
+		for _, link := range source.LinkList {
+			linkStrs = append(linkStrs, providePlayItem(link.Episode, link.Link))
+		}
+		name := strings.TrimSpace(source.Name)
+		joined := strings.Join(linkStrs, "#")
+		if isManual {
+			manualFrom = append(manualFrom, name)
+			manualURL = append(manualURL, joined)
+		} else {
+			normalFrom = append(normalFrom, name)
+			normalURL = append(normalURL, joined)
+		}
+	}
+	allFrom := append(manualFrom, normalFrom...)
+	allURL := append(manualURL, normalURL...)
+
+	return strings.Join(allFrom, "$$$"), strings.Join(allURL, "$$$")
+}
+
+// providePlayItem 把一集拼成电视端的「集名$地址」。集名里的分隔符改成全角，地址里的分隔符改成百分号编码。
+func providePlayItem(episode, link string) string {
+	episode = strings.NewReplacer("$", "＄", "#", "＃").Replace(episode)
+	link = strings.NewReplacer("$", "%24", "#", "%23").Replace(link)
+	return episode + "$" + link
 }
