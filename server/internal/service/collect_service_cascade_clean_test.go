@@ -1,7 +1,9 @@
 package service
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -15,6 +17,92 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func TestEnqueueDelFilmSources_ConcurrentBatchesAreAtomic(t *testing.T) {
+	if !WaitAsyncWork(5 * time.Second) {
+		t.Fatal("previous async work did not finish")
+	}
+	batches := [][]*model.FilmSource{
+		{
+			{Id: "src_atomic_a1", Name: "站点A1"},
+			{Id: "src_atomic_a2", Name: "站点A2"},
+		},
+		{
+			{Id: "src_atomic_b1", Name: "站点B1"},
+			{Id: "src_atomic_b2", Name: "站点B2"},
+		},
+	}
+	queue := make(chan string, 2)
+	t.Cleanup(func() {
+		for len(queue) > 0 {
+			<-queue
+			deleteSourceJobs.Done()
+		}
+		for _, batch := range batches {
+			for _, src := range batch {
+				progress.SetSourceDeleting(src.Id, false)
+			}
+		}
+	})
+
+	start := make(chan struct{})
+	results := make([]error, len(batches))
+	var wg sync.WaitGroup
+	for i, batch := range batches {
+		wg.Add(1)
+		go func(i int, batch []*model.FilmSource) {
+			defer wg.Done()
+			<-start
+			results[i] = enqueueDelFilmSources(queue, batch)
+		}(i, batch)
+	}
+	close(start)
+	wg.Wait()
+
+	success := -1
+	for i, err := range results {
+		if err == nil {
+			if success >= 0 {
+				t.Fatal("both batches unexpectedly succeeded")
+			}
+			success = i
+		}
+	}
+	if success < 0 {
+		t.Fatal("neither batch succeeded")
+	}
+	if len(queue) != len(batches[success]) {
+		t.Fatalf("queued %d sources, want whole batch of %d", len(queue), len(batches[success]))
+	}
+	queued := make(map[string]struct{}, len(batches[success]))
+	for len(queue) > 0 {
+		queued[<-queue] = struct{}{}
+	}
+	for id := range queued {
+		queue <- id
+	}
+	for _, src := range batches[success] {
+		if _, ok := queued[src.Id]; !ok {
+			t.Fatalf("queued batch does not contain %s", src.Id)
+		}
+		if !progress.IsSourceDeleting(src.Id) {
+			t.Fatalf("accepted source %s was not marked deleting", src.Id)
+		}
+	}
+	for i, batch := range batches {
+		if i == success {
+			continue
+		}
+		if results[i] == nil {
+			t.Fatal("rejected batch unexpectedly succeeded")
+		}
+		for _, src := range batch {
+			if progress.IsSourceDeleting(src.Id) {
+				t.Fatalf("rejected source %s was marked deleting", src.Id)
+			}
+		}
+	}
+}
 
 func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

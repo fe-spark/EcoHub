@@ -2,11 +2,33 @@ package spider
 
 import (
 	"testing"
+	"time"
 
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
 )
+
+func TestSearchResealRetryWaitBacksOffAndCaps(t *testing.T) {
+	prevWait := sealRetryWait
+	sealRetryWait = 2 * time.Second
+	t.Cleanup(func() { sealRetryWait = prevWait })
+
+	q := &searchResealQueue{}
+	want := []time.Duration{
+		2 * time.Second, 4 * time.Second, 8 * time.Second,
+		16 * time.Second, 32 * time.Second, time.Minute, time.Minute,
+	}
+	for _, expected := range want {
+		if got := q.nextSealRetryWait(); got != expected {
+			t.Fatalf("nextSealRetryWait() = %s, want %s", got, expected)
+		}
+	}
+	q.resetSealRetryWait()
+	if got := q.nextSealRetryWait(); got != 2*time.Second {
+		t.Fatalf("after reset nextSealRetryWait() = %s, want 2s", got)
+	}
+}
 
 func TestSealFrozenRound_RestoresMidsWhenSealFails(t *testing.T) {
 	resetSearchReseal()

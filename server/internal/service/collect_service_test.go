@@ -165,16 +165,27 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	}
 }
 
-func TestSortFilmSources_RejectsWhileSearchRebuilding(t *testing.T) {
+func TestSourceMutationsWhileSearchRebuilding(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
-	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", Sort: 0, State: true}).Error; err != nil {
+	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", Sort: 2, State: true}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", Sort: 1, State: true}).Error; err != nil {
+	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", Sort: 3, State: true}).Error; err != nil {
 		t.Fatal(err)
 	}
 	filmsnapshot.NotifySearchIndexProgress(1, 0, "indexing")
 	t.Cleanup(func() { filmsnapshot.NotifySearchIndexProgress(0, 0, "idle") })
+	// 这里用 isPrimaryWarming 模拟重建/预热占位；Notify 的 indexing 状态可能被
+	// 上面异步重建的 done/idle 终态覆盖，导致 searchBusy 变 false、断言失效。
+	// 与 onPrimarySourceMaybeChanged 一样共用 primaryWarmMu，防止后台预热结束时清掉占位。
+	primaryWarmMu.Lock()
+	isPrimaryWarming.Store(true)
+	primaryWarmMu.Unlock()
+	t.Cleanup(func() {
+		primaryWarmMu.Lock()
+		isPrimaryWarming.Store(false)
+		primaryWarmMu.Unlock()
+	})
 
 	err := (&CollectService{}).SortFilmSources([]string{"src_2", "src_1"})
 	if err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
@@ -193,8 +204,41 @@ func TestSortFilmSources_RejectsWhileSearchRebuilding(t *testing.T) {
 	if err := (&CollectService{}).BatchUpdateFilmSourceState([]string{"src_1"}, false); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
 		t.Fatalf("BatchUpdateFilmSourceState err=%v", err)
 	}
-	if err := (&CollectService{}).SaveFilmSource(model.FilmSource{Id: "src_3", Name: "站3", Uri: "http://3", State: true}); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
-		t.Fatalf("SaveFilmSource err=%v", err)
+	if err := (&CollectService{}).UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "副站改名", Uri: "http://2", Sort: 1, State: true}); err != nil {
+		t.Fatalf("renaming non-primary source err=%v", err)
+	}
+	if err := (&CollectService{}).BatchUpdateFilmSourceState([]string{"src_2"}, false); err != nil {
+		t.Fatalf("disabling non-primary source err=%v", err)
+	}
+	if err := (&CollectService{}).SaveFilmSource(model.FilmSource{Id: "src_3", Name: "站3", Uri: "http://3", State: true}); err != nil {
+		t.Fatalf("adding source at the end err=%v", err)
+	}
+	// 排在主站前面的停用站被启用，或以更靠前的显式排序新增启用站，都会改变主站。
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "src_2").Update("sort", -1).Error; err != nil {
+		t.Fatal(err)
+	}
+	var disabledBefore int64
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ? AND state = ?", "src_2", false).Count(&disabledBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	if disabledBefore != 1 {
+		t.Fatalf("expected src_2 disabled before enabling, got %d", disabledBefore)
+	}
+	if err := (&CollectService{}).BatchUpdateFilmSourceState([]string{"src_2"}, true); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("enabling an earlier disabled source err=%v", err)
+	}
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "src_2").Update("sort", 3).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := (&CollectService{}).SaveFilmSource(model.FilmSource{Id: "src_4", Name: "站4", Uri: "http://4", Sort: 1, State: true}); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("adding an enabled source with an earlier sort err=%v", err)
+	}
+	list, err = (&CollectService{}).GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 3 || list[0].Id != "src_1" {
+		t.Fatalf("safe edits changed the primary or lost a source: %+v", list)
 	}
 }
 

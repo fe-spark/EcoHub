@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/infra/syslog"
@@ -56,6 +57,7 @@ func waitDeleteIdle(id string, timeout time.Duration) error {
 }
 
 var deleteSourceQueue = make(chan string, 1000)
+var deleteSourceEnqueueMu sync.Mutex
 
 func init() {
 	go runDeleteSourceWorker()
@@ -128,17 +130,29 @@ func validateSourceForDelete(id string) (*model.FilmSource, error) {
 	return src, nil
 }
 
-func enqueueDelFilmSource(src *model.FilmSource) error {
-	progress.BroadcastSourceDeleteStatus(src.Id, src.Name, "deleting", "", 0)
-	deleteSourceJobs.Add(1)
-	select {
-	case deleteSourceQueue <- src.Id:
-		return nil
-	default:
-		deleteSourceJobs.Done()
-		progress.SetSourceDeleting(src.Id, false)
+func enqueueDelFilmSources(queue chan string, sources []*model.FilmSource) error {
+	deleteSourceEnqueueMu.Lock()
+	defer deleteSourceEnqueueMu.Unlock()
+
+	if cap(queue)-len(queue) < len(sources) {
 		return errors.New("删除队列已满")
 	}
+	for _, src := range sources {
+		if progress.IsSourceDeleting(src.Id) {
+			return errors.New("该站正在删除")
+		}
+	}
+
+	deleteSourceJobs.Add(len(sources))
+	for _, src := range sources {
+		progress.BroadcastSourceDeleteStatus(src.Id, src.Name, "deleting", "", 0)
+		queue <- src.Id
+	}
+	return nil
+}
+
+func enqueueDelFilmSource(src *model.FilmSource) error {
+	return enqueueDelFilmSources(deleteSourceQueue, []*model.FilmSource{src})
 }
 
 // TriggerDelFilmSource 异步触发采集站删除：广播 deleting 状态并毫秒级返回，后台串行队列安全停工与级联清理
@@ -177,15 +191,7 @@ func (s *CollectService) TriggerDelFilmSourceBatch(ids []string) error {
 	if len(targets) == 0 {
 		return errors.New("采集站ID不能为空")
 	}
-	if cap(deleteSourceQueue)-len(deleteSourceQueue) < len(targets) {
-		return errors.New("删除队列已满")
-	}
-	for _, src := range targets {
-		if err := enqueueDelFilmSource(src); err != nil {
-			return err
-		}
-	}
-	return nil
+	return enqueueDelFilmSources(deleteSourceQueue, targets)
 }
 
 func (s *CollectService) DelFilmSource(id string) (int, error) {

@@ -23,8 +23,47 @@ func withPrimarySwitchAdmitted(fn func() error) error {
 	})
 }
 
-func ensurePrimarySwitchAdmitted() error {
-	return withPrimarySwitchAdmitted(func() error { return nil })
+func withPrimaryMutation(fn func(searchBusy bool) error) error {
+	return filmsnapshot.WithPrimarySwitchLock(func(searchBusy bool) error {
+		return fn(searchBusy || isPrimaryWarming.Load())
+	})
+}
+
+func sourceMayPrecedePrimary(source model.FilmSource, primary *model.FilmSource) bool {
+	if primary == nil {
+		return true
+	}
+	if source.Sort != primary.Sort {
+		return source.Sort < primary.Sort
+	}
+	if source.CreatedAt.IsZero() || primary.CreatedAt.IsZero() {
+		return true
+	}
+	if !source.CreatedAt.Equal(primary.CreatedAt) {
+		return source.CreatedAt.Before(primary.CreatedAt)
+	}
+	return source.Id < primary.Id
+}
+
+func sourceStateMayChangePrimary(source model.FilmSource, state bool, primary *model.FilmSource) bool {
+	if source.State == state {
+		return false
+	}
+	if !state {
+		return primary != nil && primary.Id == source.Id
+	}
+	return sourceMayPrecedePrimary(source, primary)
+}
+
+func sourceAdditionMayChangePrimary(source model.FilmSource, primary *model.FilmSource) bool {
+	if !source.State {
+		return false
+	}
+	if primary == nil {
+		return true
+	}
+	// 默认新增站排在末尾，不会改变已有主站。
+	return source.Sort > 0 && sourceMayPrecedePrimary(source, primary)
 }
 
 func (s *CollectService) SortFilmSources(ids []string) error {
@@ -57,7 +96,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	return spider.WithSourceExclusive(source.Id, func() error {
 		var orphanMids []int64
 		cleaned := false
-		err := withPrimarySwitchAdmitted(func() error {
+		err := withPrimaryMutation(func(searchBusy bool) error {
 			latest := repository.FindCollectSourceById(source.Id)
 			if latest == nil {
 				return errors.New("采集站信息不存在")
@@ -75,6 +114,11 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 			}
 			isUriChanged := latest.Uri != source.Uri
 			oldPrimary := repository.PickPrimarySourceForCategory()
+			if searchBusy &&
+				(sourceStateMayChangePrimary(*latest, source.State, oldPrimary) ||
+					(isUriChanged && oldPrimary != nil && oldPrimary.Id == source.Id)) {
+				return filmsnapshot.ErrSearchIndexBusy
+			}
 			if isUriChanged {
 				cleaned = true
 				var cleanErr error
@@ -189,7 +233,8 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 	if len(ids) == 0 {
 		return nil
 	}
-	return withPrimarySwitchAdmitted(func() error {
+	return withPrimaryMutation(func(searchBusy bool) error {
+		oldPrimary := repository.PickPrimarySourceForCategory()
 		planned := make(map[string]bool)
 		for _, id := range ids {
 			source := repository.FindCollectSourceById(id)
@@ -204,12 +249,14 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 			}
 			if source.State != state {
 				planned[id] = state
+				if searchBusy && sourceStateMayChangePrimary(*source, state, oldPrimary) {
+					return filmsnapshot.ErrSearchIndexBusy
+				}
 			}
 		}
 		if len(planned) == 0 {
 			return nil
 		}
-		oldPrimary := repository.PickPrimarySourceForCategory()
 		var firstErr error
 		changed := false
 		for _, id := range ids {
@@ -237,13 +284,16 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 }
 
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
-	return withPrimarySwitchAdmitted(func() error {
+	return withPrimaryMutation(func(searchBusy bool) error {
 		if source.Id != "" && progress.IsSourceDeleting(source.Id) {
 			return errors.New("该站正在删除")
 		}
 		oldPrimary := repository.PickPrimarySourceForCategory()
 		if source.Id == "" {
 			source.Id = utils.GenerateHashKey(source.Uri)
+		}
+		if searchBusy && sourceAdditionMayChangePrimary(source, oldPrimary) {
+			return filmsnapshot.ErrSearchIndexBusy
 		}
 		if err := repository.AddCollectSource(source); err != nil {
 			return err

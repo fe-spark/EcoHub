@@ -127,18 +127,28 @@ func RequestActiveFilmSearchIndexRebuild() {
 	searchRebuild.mu.Unlock()
 }
 
-// WithPrimaryAdmitted 重建已开始或已排队时直接拒绝。通过后在同一把锁里改主站。
+// WithPrimarySwitchLock 在同一把锁里检查索引状态并执行采集站变更。
 // fn 里不能再调用 RequestActiveFilmSearchIndexRebuild，否则死锁。
-func WithPrimaryAdmitted(fn func() error) error {
+func WithPrimarySwitchLock(fn func(searchBusy bool) error) error {
 	if fn == nil {
 		return nil
 	}
 	primaryAdmitMu.Lock()
 	defer primaryAdmitMu.Unlock()
-	if IsSearchIndexBuilding() || SearchRebuildScheduled() {
-		return ErrSearchIndexBusy
+	return fn(IsSearchIndexBuilding() || SearchRebuildScheduled())
+}
+
+// WithPrimaryAdmitted 重建已开始或已排队时拒绝可能切换主站的变更。
+func WithPrimaryAdmitted(fn func() error) error {
+	if fn == nil {
+		return nil
 	}
-	return fn()
+	return WithPrimarySwitchLock(func(searchBusy bool) error {
+		if searchBusy {
+			return ErrSearchIndexBusy
+		}
+		return fn()
+	})
 }
 
 // IsSearchIndexRebuilding 检索索引是否正在全量重建中。

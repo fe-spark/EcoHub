@@ -20,6 +20,7 @@ func resetSearchReseal() {
 	searchReseal.pending = map[int64]struct{}{}
 	searchReseal.sealing = map[string]struct{}{}
 	searchReseal.running = false
+	searchReseal.retryWait = 0
 	searchReseal.awaitDone = false
 	searchReseal.mu.Unlock()
 	searchSealRunning.Store(false)
