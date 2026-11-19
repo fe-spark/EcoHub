@@ -162,6 +162,7 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/save`, handler.CollectHd.FilmSourceSave)
 			collect.POST(`/state`, handler.CollectHd.FilmSourceBatchChange)
 			collect.POST(`/delete`, handler.CollectHd.FilmSourceDelBatch)
+			collect.POST(`/delete/cancel`, handler.CollectHd.FilmSourceDelCancel)
 			collect.POST(`/check/all`, handler.CollectHd.FilmSourceCheckAll)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
 			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)

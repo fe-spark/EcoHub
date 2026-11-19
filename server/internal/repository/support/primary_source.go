@@ -3,9 +3,10 @@ package support
 import (
 	"errors"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 
 	"server/internal/infra/db"
@@ -18,19 +19,59 @@ import (
 //   - 存储有效（存在、启用、未在删除中）→ 返回存储站；
 //   - 存储指向停用/删除中的站 → 异常，告警并返回 nil，不自动换站（D6）。
 
-var lazyPrimaryMu sync.Mutex
+type primaryCacheHolder struct {
+	dbConn *gorm.DB
+	source *model.FilmSource
+}
 
-// CurrentPrimarySource 当前主站。没有主站时返回 nil。
+var (
+	primaryCache atomic.Pointer[primaryCacheHolder]
+	primarySF    singleflight.Group
+)
+
+// InvalidatePrimarySourceCache 使主站内存缓存失效，下次读取时重新加载。
+func InvalidatePrimarySourceCache() {
+	primaryCache.Store(nil)
+}
+
+func cloneFilmSource(src *model.FilmSource) *model.FilmSource {
+	if src == nil {
+		return nil
+	}
+	cpy := *src
+	return &cpy
+}
+
+// CurrentPrimarySource 当前主站。
+// 正常状态直接从原子快照读取；未命中或数据库连接变更时通过 singleflight 合并并发请求探活并懒加载。
 func CurrentPrimarySource() *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
-	if id := storedPrimarySourceID(); id != "" {
-		return primarySourceByID(id)
+	if p := primaryCache.Load(); p != nil && p.dbConn == db.Mdb {
+		return cloneFilmSource(p.source)
 	}
-	lazyPrimaryMu.Lock()
-	defer lazyPrimaryMu.Unlock()
-	// 双检：并发首次调用只让一个请求做懒初始化
+	res, err, _ := primarySF.Do("current_primary", func() (any, error) {
+		// 双检：并发排队请求不重复查库
+		if p := primaryCache.Load(); p != nil && p.dbConn == db.Mdb {
+			return p.source, nil
+		}
+		src := resolveCurrentPrimarySourceDB()
+		if src != nil {
+			primaryCache.Store(&primaryCacheHolder{
+				dbConn: db.Mdb,
+				source: src,
+			})
+		}
+		return src, nil
+	})
+	if err != nil || res == nil {
+		return nil
+	}
+	return cloneFilmSource(res.(*model.FilmSource))
+}
+
+func resolveCurrentPrimarySourceDB() *model.FilmSource {
 	if id := storedPrimarySourceID(); id != "" {
 		return primarySourceByID(id)
 	}
@@ -62,7 +103,7 @@ func SetPrimarySourceID(id string) error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		var rows int64
 		if err := tx.Model(&model.PrimaryState{}).Count(&rows).Error; err != nil {
 			return err
@@ -79,6 +120,10 @@ func SetPrimarySourceID(id string) error {
 		}
 		return moveCollectSourceToFirstTx(tx, id)
 	})
+	if err == nil {
+		InvalidatePrimarySourceCache()
+	}
+	return err
 }
 
 // moveCollectSourceToFirstTx 在事务内将新主站排序移至首位 (sort=0)，其余站点保持原有相对顺序依次顺延。
@@ -128,7 +173,11 @@ func ClearPrimarySourceState() error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
-	return db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.PrimaryState{}).Error
+	err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.PrimaryState{}).Error
+	if err == nil {
+		InvalidatePrimarySourceCache()
+	}
+	return err
 }
 
 // FindOtherEnabledCollectSource 返回除 excludeID 外排序最前且未在删除中的启用站。
@@ -187,6 +236,8 @@ func ReconcilePrimaryAfterSourceReplace(list []model.FilmSource) {
 	}
 	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.PrimaryState{}).Error; err != nil {
 		syslog.Errorf("[Primary] 备份导入后清理失效主站状态失败: %v", err)
+	} else {
+		InvalidatePrimarySourceCache()
 	}
 }
 

@@ -114,6 +114,10 @@ export function useCollectSourceEvents({
         );
       } else if (evt.status === "deleted") {
         setSiteList((prev) => prev.filter((s) => s.id !== evt.sourceId));
+      } else if (evt.status === "canceled") {
+        setSiteList((prev) =>
+          prev.map((s) => (s.id === evt.sourceId ? { ...s, deleting: false } : s)),
+        );
       } else if (evt.status === "failed") {
         setSiteList((prev) =>
           prev.map((s) => (s.id === evt.sourceId ? { ...s, deleting: false } : s)),

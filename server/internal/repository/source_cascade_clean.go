@@ -28,7 +28,7 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 		return nil, errors.New("采集站不存在")
 	}
 	var owned []int64
-	if err := tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
+	if err := tx.Unscoped().Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
 		return nil, err
 	}
 	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
@@ -59,7 +59,7 @@ func cleanSourceDataBatched(id string) ([]int64, error) {
 	var allOwned []int64
 	for {
 		var chunkMids []int64
-		if err := db.Mdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Limit(5000).Pluck("mid", &chunkMids).Error; err != nil {
+		if err := db.Mdb.Unscoped().Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Limit(5000).Pluck("mid", &chunkMids).Error; err != nil {
 			return allOwned, err
 		}
 		if len(chunkMids) == 0 {
@@ -74,6 +74,9 @@ func cleanSourceDataBatched(id string) ([]int64, error) {
 		return allOwned, err
 	}
 	if err := deleteBySourceBatched(&model.MovieSourceMapping{}, model.TableMovieSourceMapping, "source_id", id); err != nil {
+		return allOwned, err
+	}
+	if err := deleteBySourceBatched(&model.CollectRecordFilmItem{}, model.TableCollectRecordFilm, "source_id", id); err != nil {
 		return allOwned, err
 	}
 	if err := DeleteBannerSlotsBySource(db.Mdb, id); err != nil {
@@ -93,7 +96,7 @@ func AssertSourceDataCleanedTx(tx *gorm.DB, sourceID string) error {
 		return nil
 	}
 	var count int64
-	if err := tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", sourceID).Count(&count).Error; err != nil {
+	if err := tx.Unscoped().Model(&model.FilmIndex{}).Where("first_source_id = ?", sourceID).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
@@ -111,11 +114,13 @@ func AssertSourceDataCleanedTx(tx *gorm.DB, sourceID string) error {
 	if count > 0 {
 		return fmt.Errorf("采集站影片映射未清理完毕（剩余 %d 条），保留站点以供重试", count)
 	}
-	if err := tx.Model(&model.CollectRecordFilmItem{}).Where("source_id = ?", sourceID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
-		return fmt.Errorf("采集站采集记录清单未清理完毕（剩余 %d 条），保留站点以供重试", count)
+	if tx.Migrator().HasTable(&model.CollectRecordFilmItem{}) {
+		if err := tx.Model(&model.CollectRecordFilmItem{}).Where("source_id = ?", sourceID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return fmt.Errorf("采集站采集记录清单未清理完毕（剩余 %d 条），保留站点以供重试", count)
+		}
 	}
 	return nil
 }
@@ -123,6 +128,9 @@ func AssertSourceDataCleanedTx(tx *gorm.DB, sourceID string) error {
 func deleteBySourceBatched(modelPtr any, tableName, col, sourceID string) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if db.Mdb == nil || sourceID == "" {
+		return nil
+	}
+	if !db.Mdb.Migrator().HasTable(tableName) {
 		return nil
 	}
 	if db.Mdb.Dialector == nil || db.Mdb.Dialector.Name() != "mysql" {

@@ -1,6 +1,7 @@
 package support
 
 import (
+	"sync"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -25,7 +26,11 @@ func setupPrimaryTestDB(t *testing.T) *gorm.DB {
 	}
 	prev := db.Mdb
 	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
+	InvalidatePrimarySourceCache()
+	t.Cleanup(func() {
+		db.Mdb = prev
+		InvalidatePrimarySourceCache()
+	})
 	return gdb
 }
 
@@ -158,4 +163,33 @@ func TestCurrentPrimarySource_NoEnabledReturnsNil(t *testing.T) {
 	if p := CurrentPrimarySource(); p == nil || p.Id != "a" {
 		t.Fatalf("expected a after enabling, got %+v", p)
 	}
+}
+
+// 高并发调用 CurrentPrimarySource 与 CurrentPrimaryID 不死锁、无竞态
+func TestCurrentPrimarySource_ConcurrentReadSafe(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "main_src", Name: "Main", Uri: "http://main", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	const workers = 50
+	const iters = 200
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				p := CurrentPrimarySource()
+				if p == nil || p.Id != "main_src" {
+					t.Errorf("unexpected primary: %+v", p)
+					return
+				}
+				if id := CurrentPrimaryID(); id != "main_src" {
+					t.Errorf("unexpected primary id: %s", id)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

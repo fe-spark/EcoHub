@@ -13,6 +13,7 @@ import (
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmcache "server/internal/repository/film/cache"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/spider/progress"
 )
@@ -270,38 +271,89 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 	return fmt.Errorf("有 %d 个采集站分类获取失败，首个错误: %w", failed, first)
 }
 
-// SyncMissingSourceCategories 只给还没有分类副本的采集站补拉一次。已有副本的站不覆盖。
+// SyncMissingSourceCategories 只给还没有分类副本的已启用采集站补拉一次。已有副本或已停用的站不处理。
 func (s *SpiderService) SyncMissingSourceCategories() {
-	sources, err := repository.GetCollectSourceList()
+	categorySyncs.Add(1)
+	defer categorySyncs.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			syslog.Errorf("[SpiderService] 启动补拉分类发生异常: %v", r)
+		}
+	}()
+
+	sources, err := repository.GetEnabledCollectSourceList()
 	if err != nil {
-		log.Printf("[SpiderService] 读取采集站失败: %v", err)
+		log.Printf("[SpiderService] 读取已启用采集站失败: %v", err)
 		return
 	}
+	if len(sources) == 0 {
+		return
+	}
+
+	ids := make([]string, 0, len(sources))
+	for _, src := range sources {
+		if strings.TrimSpace(src.Uri) != "" && !progress.IsSourceDeleting(src.Id) {
+			ids = append(ids, src.Id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	readyIDs := repository.SourceIDsWithCategory(ids)
 	var missing []model.FilmSource
-	for i := range sources {
-		if !repository.SourceHasCategoryMapping(sources[i].Id) {
-			missing = append(missing, sources[i])
-			progress.BroadcastCategoryStatus(sources[i].Id, "syncing")
+	for _, src := range sources {
+		if _, ok := readyIDs[src.Id]; !ok && strings.TrimSpace(src.Uri) != "" && !progress.IsSourceDeleting(src.Id) {
+			missing = append(missing, src)
 		}
 	}
 	if len(missing) == 0 {
 		return
 	}
+
+	primary := repository.PickPrimarySourceForCategory()
+	primaryID := ""
+	if primary != nil {
+		primaryID = primary.Id
+	}
+
 	synced := 0
+	primarySynced := false
+
 	for i := range missing {
 		source := missing[i]
-		log.Printf("[SpiderService] 采集站还没有分类副本，补拉: name=%s id=%s", source.Name, source.Id)
+		if progress.IsSourceDeleting(source.Id) {
+			continue
+		}
+		// 真正开始当前站点拉取时，才广播 syncing 状态，避免全局提前虚挂
+		progress.BroadcastCategoryStatus(source.Id, "syncing")
+		log.Printf("[SpiderService] 采集站还没有分类副本，开始补拉: name=%s id=%s", source.Name, source.Id)
+
 		pageCount, err := spider.CollectCategory(&source)
 		if err != nil {
 			log.Printf("[SpiderService] 补拉采集站分类失败: name=%s id=%s err=%v", source.Name, source.Id, err)
-			progress.BroadcastCategoryStatus(source.Id, "failed")
+			if repository.FindCollectSourceById(source.Id) == nil {
+				progress.BroadcastCategoryStatus(source.Id, "idle")
+			} else {
+				progress.BroadcastCategoryStatus(source.Id, "failed")
+			}
 			continue
 		}
+
 		progress.BroadcastCategoryReadyMessage(source.Id, "分类获取成功", false, pageCount)
 		synced++
+		if source.Id == primaryID {
+			primarySynced = true
+		}
 	}
+
 	if synced > 0 {
 		finalizeCategorySync()
+		if primarySynced {
+			_ = filmsnapshot.RefreshActiveProjectedReadModel()
+			repository.ClearIndexPageCache()
+			log.Printf("[SpiderService] 主站分类补拉完成，已刷新前台投影读模型")
+		}
 	}
 }
 

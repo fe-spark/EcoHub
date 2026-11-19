@@ -333,7 +333,7 @@ function ManageLayoutInner({
               }}
               className={styles.headerIconBtn}
              />
-             <PrimarySelector isAdmin={Boolean(userInfo?.isAdmin)} />
+             <PrimarySelector isAdmin={userInfo ? Boolean(userInfo.isAdmin) : undefined} />
            </Space>
 
           <Space size="small" className={styles.userArea}>

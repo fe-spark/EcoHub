@@ -148,6 +148,8 @@ export default function CollectManagePageView() {
 
   const {
     deleteQueueItems,
+    stoppingDelete,
+    stopDeleteQueue,
     enqueueDeletingSources,
     handleSourceDeleteEvent,
     handleDeleteSnapshot: handleDeleteSnapshotQueue,
@@ -402,6 +404,8 @@ export default function CollectManagePageView() {
           <DeleteQueueBar
             items={deleteQueueItems}
             onDismiss={dismissDeleteQueue}
+            onStop={() => void stopDeleteQueue()}
+            stopping={stoppingDelete}
           />
         ) : null}
 

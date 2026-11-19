@@ -125,25 +125,41 @@ func validatePrimaryFilmIDs(ids []int64, expectedSourceID string) (string, error
 	return primary.Id, nil
 }
 
-// DeletePrimaryFilms 删除主站影片。校验与删除串行化，避免切主竞态。
+// DeletePrimaryFilms 删除主站影片。在准入锁内校验主站归属，耗时物理删除在锁外执行，执行前复验主站未变，避免阻塞全站管理同时消除切主 TOCTOU。
 func (s *FilmService) DeletePrimaryFilms(ids []int64, sourceID string) error {
-	return withPrimaryMutation(func(_ bool) error {
-		if _, err := validatePrimaryFilmIDs(ids, sourceID); err != nil {
-			return err
-		}
-		return filmrepo.DelFilmSearchBatch(ids)
+	var validatedSourceID string
+	err := withPrimarySwitchAdmitted(func() error {
+		sid, valErr := validatePrimaryFilmIDs(ids, sourceID)
+		validatedSourceID = sid
+		return valErr
 	})
+	if err != nil {
+		return err
+	}
+	current := repository.GetActiveCollectSource()
+	if current == nil || current.Id != validatedSourceID {
+		return ErrPrimaryMismatch
+	}
+	return filmrepo.DelFilmSearchBatch(ids)
 }
 
-// RefreshPrimaryFilms 校验影片属于当前主站后启动采集更新。
+// RefreshPrimaryFilms 校验影片属于当前主站后启动采集更新。执行前复验主站未变，消除切主 TOCTOU。
 func (s *FilmService) RefreshPrimaryFilms(ids []int64, sourceID string) error {
-	return withPrimaryMutation(func(_ bool) error {
-		if _, err := validatePrimaryFilmIDs(ids, sourceID); err != nil {
-			return err
-		}
-		SpiderSvc.CollectFilms(ids)
-		return nil
+	var validatedSourceID string
+	err := withPrimarySwitchAdmitted(func() error {
+		sid, valErr := validatePrimaryFilmIDs(ids, sourceID)
+		validatedSourceID = sid
+		return valErr
 	})
+	if err != nil {
+		return err
+	}
+	current := repository.GetActiveCollectSource()
+	if current == nil || current.Id != validatedSourceID {
+		return ErrPrimaryMismatch
+	}
+	SpiderSvc.CollectFilms(ids)
+	return nil
 }
 
 // DelFilm 删除分类影片

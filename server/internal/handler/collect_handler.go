@@ -245,6 +245,20 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 	dto.SuccessOnlyMsg("已提交批量删除", c)
 }
 
+// FilmSourceDelCancel 撤回排队中尚未开始删除的采集站
+func (h *CollectHandler) FilmSourceDelCancel(c *gin.Context) {
+	var req struct {
+		Ids []string `json:"ids"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	canceled := service.CollectSvc.CancelDelFilmSources(req.Ids)
+	dto.Success(gin.H{
+		"canceled": canceled,
+		"count":    len(canceled),
+	}, "已终止后续排队删除", c)
+}
+
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
 	var body struct {
 		model.FilmSource

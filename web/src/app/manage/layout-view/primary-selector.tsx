@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Select, Tag } from "antd";
 import { ApiGet } from "@/lib/client-api";
 import { usePrimarySource } from "@/lib/manage-primary";
@@ -9,7 +9,7 @@ import { useAppMessage } from "@/lib/useAppMessage";
 type SourceOption = { id: string; name: string };
 
 /** 后台顶栏主站选择器：仅超管可切换（D4），其余只读展示。 */
-export default function PrimarySelector({ isAdmin }: { isAdmin: boolean }) {
+export default function PrimarySelector({ isAdmin }: { isAdmin?: boolean }) {
   const { primary, loading, switching, refresh, switchPrimary } = usePrimarySource();
   const { message, modal } = useAppMessage();
   const [options, setOptions] = useState<SourceOption[]>([]);
@@ -25,12 +25,21 @@ export default function PrimarySelector({ isAdmin }: { isAdmin: boolean }) {
   }, []);
 
   useEffect(() => {
-    if (isAdmin) void loadOptions();
+    if (isAdmin !== false) void loadOptions();
   }, [isAdmin, loadOptions]);
+
+  const selectOptions = useMemo(() => {
+    const list = [...options];
+    if (primary && !list.some((item) => item.id === primary.id)) {
+      list.unshift({ id: primary.id, name: primary.name });
+    }
+    return list.map((item) => ({ value: item.id, label: item.name }));
+  }, [options, primary]);
 
   const askSwitch = useCallback(
     (id: string) => {
-      const chosen = options.find((item) => item.id === id);
+      const candidateList = primary ? [primary, ...options] : options;
+      const chosen = candidateList.find((item) => item.id === id);
       if (!chosen) {
         return;
       }
@@ -50,25 +59,27 @@ export default function PrimarySelector({ isAdmin }: { isAdmin: boolean }) {
         },
       });
     },
-    [message, modal, options, refresh, switchPrimary],
+    [message, modal, options, primary, refresh, switchPrimary],
   );
 
-  if (loading) {
-    return <Tag color="gold">主站加载中…</Tag>;
-  }
-  if (!primary) {
-    return <Tag color="warning">未配置主站</Tag>;
-  }
-  if (!isAdmin) {
+  if (isAdmin === false) {
+    if (loading) {
+      return <Tag color="gold">主站加载中…</Tag>;
+    }
+    if (!primary) {
+      return <Tag color="warning">未配置主站</Tag>;
+    }
     return <Tag color="gold">{primary.name}</Tag>;
   }
+
   return (
     <Select
-      value={primary.id}
-      loading={switching}
-      disabled={switching}
+      value={primary?.id}
+      placeholder={loading ? "加载中…" : "未配置主站"}
+      loading={loading || switching}
+      disabled={loading || switching}
       popupMatchSelectWidth={false}
-      options={options.map((item) => ({ value: item.id, label: item.name }))}
+      options={selectOptions}
       onOpenChange={(open) => {
         if (open) void loadOptions();
       }}

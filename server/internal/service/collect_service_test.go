@@ -627,3 +627,62 @@ func TestTriggerDelFilmSource_RejectsWhileCollecting(t *testing.T) {
 		t.Fatal("拒绝后不应进入删除中")
 	}
 }
+
+// 验证启动缺分类补拉逻辑：只拉取已启用站点，跳过停用站，补拉成功后生成分类映射
+func TestSyncMissingSourceCategories_OnlyEnabledSources(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+
+	ts := mockCollectServer()
+	defer ts.Close()
+
+	// 1. 已停用站（缺分类）
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_disabled",
+		Name:  "停用站",
+		Uri:   ts.URL + "/disabled",
+		State: false,
+		Sort:  2,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. 已有分类的启用站
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_ready",
+		Name:  "已有分类站",
+		Uri:   ts.URL + "/ready",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_ready", SourceTypeId: 1, CategoryId: 10}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. 缺分类的启用站
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_missing_enabled",
+		Name:  "缺分类启用站",
+		Uri:   ts.URL + "/missing",
+		State: true,
+		Sort:  1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_ = repository.RefreshCollectSourceCatalog()
+
+	// 执行启动补拉
+	SpiderSvc.SyncMissingSourceCategories()
+
+	// 断言：启用站成功补齐了分类
+	if !repository.SourceHasCategoryMapping("src_missing_enabled") {
+		t.Fatal("missing enabled source should have category mapping after sync")
+	}
+
+	// 断言：停用站被完全跳过，不会被补拉
+	if repository.SourceHasCategoryMapping("src_disabled") {
+		t.Fatal("disabled source should NOT be synced")
+	}
+}

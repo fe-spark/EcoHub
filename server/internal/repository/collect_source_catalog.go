@@ -7,6 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 )
 
 var collectSourceCatalog atomic.Pointer[[]model.FilmSource]
@@ -21,11 +22,13 @@ func RefreshCollectSourceCatalog() error {
 		return err
 	}
 	collectSourceCatalog.Store(&list)
+	support.InvalidatePrimarySourceCache()
 	return nil
 }
 
 // forgetCollectSource 站点行已经删掉、目录重读失败时，从当前目录摘掉这一条。
 func forgetCollectSource(id string) {
+	support.InvalidatePrimarySourceCache()
 	cur := collectSourceCatalog.Load()
 	if cur == nil {
 		return

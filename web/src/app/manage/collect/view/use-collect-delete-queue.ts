@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import type { DeletingQueueItem } from "./delete-queue-bar";
 import type { SourceDeleteEvent } from "./use-collect-stream";
@@ -6,6 +7,7 @@ import type { FilmSource } from "./types";
 
 export function useCollectDeleteQueue() {
   const [deleteQueueItems, setDeleteQueueItems] = useState<DeletingQueueItem[]>([]);
+  const [stoppingDelete, setStoppingDelete] = useState(false);
   const autoDismissTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { message } = useAppMessage();
   const wasRunningRef = useRef(false);
@@ -21,6 +23,22 @@ export function useCollectDeleteQueue() {
     clearAutoDismiss();
     setDeleteQueueItems([]);
   }, [clearAutoDismiss]);
+
+  const stopDeleteQueue = useCallback(async () => {
+    setStoppingDelete(true);
+    try {
+      const resp = await ApiPost("/manage/collect/delete/cancel", {});
+      if (resp.code !== 0) {
+        message.error(resp.msg || "终止删除失败");
+      } else {
+        message.info(resp.msg || "已终止排队中的站点删除");
+      }
+    } catch {
+      message.error("终止删除请求失败");
+    } finally {
+      setStoppingDelete(false);
+    }
+  }, [message]);
 
   const enqueueDeletingSources = useCallback(
     (sources: { id: string; name: string }[]) => {
@@ -59,7 +77,9 @@ export function useCollectDeleteQueue() {
             ? "deleting"
             : evt.status === "deleted"
               ? "deleted"
-              : "failed";
+              : evt.status === "canceled"
+                ? "canceled"
+                : "failed";
 
         const deletedFilms = evt.deletedFilms ?? 0;
 
@@ -133,18 +153,27 @@ export function useCollectDeleteQueue() {
       wasRunningRef.current = true;
     }
     const allTerminal = deleteQueueItems.every(
-      (item) => item.status === "deleted" || item.status === "failed",
+      (item) => item.status === "deleted" || item.status === "failed" || item.status === "canceled",
     );
     if (allTerminal && wasRunningRef.current) {
       wasRunningRef.current = false;
       const total = deleteQueueItems.length;
       const failedCount = deleteQueueItems.filter((i) => i.status === "failed").length;
+      const canceledCount = deleteQueueItems.filter((i) => i.status === "canceled").length;
       const totalDeletedFilms = deleteQueueItems.reduce((sum, i) => sum + (i.deletedFilms || 0), 0);
       const noticeKey = "collect-delete-queue-finished";
       if (failedCount > 0) {
         message.warning({
           key: noticeKey,
-          content: total > 1 ? `删除完成，其中 ${failedCount} 站失败` : "删除失败",
+          content: total > 1 ? `删除结束，其中 ${failedCount} 站失败` : "删除失败",
+          duration: 3,
+        });
+      } else if (canceledCount > 0) {
+        const doneCount = total - canceledCount;
+        const extraText = doneCount > 0 ? `，已清理 ${doneCount} 站` : "";
+        message.info({
+          key: noticeKey,
+          content: `已终止删除队列（已取消 ${canceledCount} 站${extraText}）`,
           duration: 3,
         });
       } else {
@@ -169,6 +198,8 @@ export function useCollectDeleteQueue() {
 
   return {
     deleteQueueItems,
+    stoppingDelete,
+    stopDeleteQueue,
     enqueueDeletingSources,
     handleSourceDeleteEvent,
     handleDeleteSnapshot,
