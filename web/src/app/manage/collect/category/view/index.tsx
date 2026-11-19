@@ -49,15 +49,10 @@ export default function CategoryWorkspacePageView() {
         expandedKeys={treeState.expandedKeys}
         loadingTree={treeState.loadingTree}
         savingTree={treeState.savingTree}
-        sources={treeState.sources}
-        sourceId={treeState.sourceId}
         stats={treeState.stats}
-        onSourceChange={(value) =>
-          runUnlessDirty(() => void treeState.fetchFilmClassTree(value), "切换采集源？", "切换")
-        }
         onRefresh={() =>
           runUnlessDirty(
-            () => void treeState.fetchFilmClassTree(treeState.sourceId),
+            () => void treeState.fetchFilmClassTree(true),
             "刷新分类？",
             "刷新",
           )

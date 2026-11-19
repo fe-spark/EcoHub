@@ -76,7 +76,7 @@ func (h *CollectHandler) FilmSourceSave(c *gin.Context) {
 			}
 			isUriChanged := fs.Uri != s.Uri
 			isFormatChanged := fs.ResolveFormat() != s.ResolveFormat()
-			if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
+			if err := service.CollectSvc.UpdateFilmSource(s, body.NewPrimaryId, body.ConfirmClearPrimary); err != nil {
 				dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 				return
 			}
@@ -237,7 +237,7 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 		return
 	}
 
-	if err := service.CollectSvc.TriggerDelFilmSourceBatch(ids); err != nil {
+	if err := service.CollectSvc.TriggerDelFilmSourceBatch(ids, req.NewPrimaryId, req.ConfirmClearPrimary); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
@@ -319,7 +319,9 @@ func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
 
 type filmSourceBody struct {
 	model.FilmSource
-	UseProxy *bool `json:"useProxy"`
+	UseProxy            *bool  `json:"useProxy"`
+	NewPrimaryId        string `json:"newPrimaryId"`
+	ConfirmClearPrimary bool   `json:"confirmClearPrimary"`
 }
 
 func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {
@@ -332,13 +334,48 @@ func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {
 		return filmSourceBody{}, err
 	}
 	var extra struct {
-		UseProxy *bool `json:"useProxy"`
+		UseProxy            *bool  `json:"useProxy"`
+		NewPrimaryId        string `json:"newPrimaryId"`
+		ConfirmClearPrimary bool   `json:"confirmClearPrimary"`
 	}
 	if err := json.Unmarshal(raw, &extra); err != nil {
 		return filmSourceBody{}, err
 	}
 	body.UseProxy = extra.UseProxy
+	body.NewPrimaryId = extra.NewPrimaryId
+	body.ConfirmClearPrimary = extra.ConfirmClearPrimary
 	return body, nil
+}
+
+// PrimaryState GET /manage/primary 当前主站。无主站时 data 为 null。
+func (h *CollectHandler) PrimaryState(c *gin.Context) {
+	primary := service.CollectSvc.CurrentPrimary()
+	if primary == nil {
+		dto.Success(nil, "暂无主站", c)
+		return
+	}
+	dto.Success(gin.H{"id": primary.Id, "name": primary.Name, "state": primary.State}, "获取主站成功", c)
+}
+
+// SwitchPrimary PUT /manage/primary 切换主站（仅超管，D4）。
+func (h *CollectHandler) SwitchPrimary(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if err := service.CollectSvc.SwitchPrimary(req.Id); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	primary := service.CollectSvc.CurrentPrimary()
+	if primary == nil {
+		dto.Success(nil, "主站已置空", c)
+		return
+	}
+	dto.Success(gin.H{"id": primary.Id, "name": primary.Name, "state": primary.State}, "主站已切换", c)
 }
 
 func testFilmSourceAPI(s model.FilmSource, useProxy *bool) error {

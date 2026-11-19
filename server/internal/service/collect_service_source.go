@@ -16,7 +16,7 @@ import (
 
 func withPrimarySwitchAdmitted(fn func() error) error {
 	return filmsnapshot.WithPrimaryAdmitted(func() error {
-		if isPrimaryWarming.Load() {
+		if primaryWarmCount.Load() > 0 {
 			return filmsnapshot.ErrSearchIndexBusy
 		}
 		return fn()
@@ -25,74 +25,29 @@ func withPrimarySwitchAdmitted(fn func() error) error {
 
 func withPrimaryMutation(fn func(searchBusy bool) error) error {
 	return filmsnapshot.WithPrimarySwitchLock(func(searchBusy bool) error {
-		return fn(searchBusy || isPrimaryWarming.Load())
+		return fn(searchBusy || primaryWarmCount.Load() > 0)
 	})
-}
-
-func sourceMayPrecedePrimary(source model.FilmSource, primary *model.FilmSource) bool {
-	if primary == nil {
-		return true
-	}
-	if source.Sort != primary.Sort {
-		return source.Sort < primary.Sort
-	}
-	if source.CreatedAt.IsZero() || primary.CreatedAt.IsZero() {
-		return true
-	}
-	if !source.CreatedAt.Equal(primary.CreatedAt) {
-		return source.CreatedAt.Before(primary.CreatedAt)
-	}
-	return source.Id < primary.Id
-}
-
-func sourceStateMayChangePrimary(source model.FilmSource, state bool, primary *model.FilmSource) bool {
-	if source.State == state {
-		return false
-	}
-	if !state {
-		return primary != nil && primary.Id == source.Id
-	}
-	return sourceMayPrecedePrimary(source, primary)
-}
-
-func sourceAdditionMayChangePrimary(source model.FilmSource, primary *model.FilmSource) bool {
-	if !source.State {
-		return false
-	}
-	if primary == nil {
-		return true
-	}
-	// 默认新增站排在末尾，不会改变已有主站。
-	return source.Sort > 0 && sourceMayPrecedePrimary(source, primary)
 }
 
 func (s *CollectService) SortFilmSources(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	// 和重建开始共用一把锁：检查通过后才写排序，重建途中不能切主站。
+	// 排序只改顺序，不再切换主站；仍与索引重建共用锁，避免重建途中排序产生竞态。
 	return withPrimarySwitchAdmitted(func() error {
-		oldPrimary := repository.PickPrimarySourceForCategory()
 		if err := repository.SortCollectSources(ids); err != nil {
 			return err
 		}
 		filmsnapshot.ClearDynamicPlayCaches()
 		clearProvideNetworkConfigCache()
-		newPrimary := repository.PickPrimarySourceForCategory()
-		if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
-			enabled, err := repository.GetEnabledCollectSourceList()
-			if err != nil {
-				return err
-			}
-			NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
-		}
 		return nil
 	})
 }
 
 // UpdateFilmSource 编辑采集源配置（单源）。
 // 采集链接变更时在单站独占锁与主站准入锁保护下先校验再分批清空该站数据并更新分类和配置，避免清库后配置更新被拒绝导致状态不一致。
-func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
+// 停用当前主站必须携带 newPrimaryID，或无其他启用站时 confirmClearPrimary 置空（D6）。
+func (s *CollectService) UpdateFilmSource(source model.FilmSource, newPrimaryID string, confirmClearPrimary bool) error {
 	return spider.WithSourceExclusive(source.Id, func() error {
 		var orphanMids []int64
 		cleaned := false
@@ -114,10 +69,16 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 			}
 			isUriChanged := latest.Uri != source.Uri
 			oldPrimary := repository.PickPrimarySourceForCategory()
-			if searchBusy &&
-				(sourceStateMayChangePrimary(*latest, source.State, oldPrimary) ||
-					(isUriChanged && oldPrimary != nil && oldPrimary.Id == source.Id)) {
+			// 主站换地址会清空其数据并牵动检索索引，重建忙碌时拒绝
+			if searchBusy && isUriChanged && oldPrimary != nil && oldPrimary.Id == source.Id {
 				return filmsnapshot.ErrSearchIndexBusy
+			}
+			// D6：停用当前主站必须同时完成主站交接
+			disablingPrimary := oldPrimary != nil && oldPrimary.Id == source.Id && latest.State && !source.State
+			if disablingPrimary {
+				if err := planPrimaryHandover(searchBusy, source.Id, newPrimaryID, confirmClearPrimary); err != nil {
+					return err
+				}
 			}
 			if isUriChanged {
 				cleaned = true
@@ -130,7 +91,14 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 			if err := s.updateFilmSourceCore(source, isUriChanged, len(orphanMids)); err != nil {
 				return err
 			}
-			onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+			if disablingPrimary {
+				if err := applyPrimaryHandover(oldPrimary, source.Id, newPrimaryID, confirmClearPrimary); err != nil {
+					return err
+				}
+			} else if oldPrimary == nil && source.State {
+				// D5：主站为空时，被启用的站经懒初始化自动成为主站
+				applyPrimaryChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+			}
 			return nil
 		})
 		if len(orphanMids) > 0 || (err != nil && cleaned) {
@@ -200,7 +168,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource, clearCate
 	if source.CreatedAt.IsZero() && !old.CreatedAt.IsZero() {
 		source.CreatedAt = old.CreatedAt
 	}
-	// 排序只走排序接口。编辑请求不带 sort，不能写成 0 把别的站顶成主站。
+	// 排序只走排序接口。编辑请求不带 sort，避免把别的站的排序覆盖成 0。
 	source.Sort = old.Sort
 
 	if err := repository.UpdateCollectSourceReplacingData(source, clearCategories); err != nil {
@@ -235,51 +203,49 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 	}
 	return withPrimaryMutation(func(searchBusy bool) error {
 		oldPrimary := repository.PickPrimarySourceForCategory()
-		planned := make(map[string]bool)
+		// D6：批量停用不允许包含当前主站，主站交接须走单站停用
+		if !state && oldPrimary != nil {
+			for _, id := range ids {
+				if strings.TrimSpace(id) == oldPrimary.Id {
+					return errors.New("批量停用包含当前主站，请单独停用并指定新主站")
+				}
+			}
+		}
+		idsToUpdate := make([]string, 0, len(ids))
 		for _, id := range ids {
 			source := repository.FindCollectSourceById(id)
+			if source == nil {
+				return errors.New("采集站信息不存在")
+			}
 			if reason := sourceBusyReason(id); reason != "" {
-				if reason == "该站正在删除" || source == nil {
+				if reason == "该站正在删除" {
 					return errors.New(reason)
 				}
 				return fmt.Errorf("站点「%s」%s，暂不可批量操作", source.Name, reason)
 			}
-			if source == nil {
-				return errors.New("采集站信息不存在")
-			}
 			if source.State != state {
-				planned[id] = state
-				if searchBusy && sourceStateMayChangePrimary(*source, state, oldPrimary) {
-					return filmsnapshot.ErrSearchIndexBusy
-				}
+				idsToUpdate = append(idsToUpdate, id)
 			}
 		}
-		if len(planned) == 0 {
+		if len(idsToUpdate) == 0 {
 			return nil
 		}
-		var firstErr error
-		changed := false
-		for _, id := range ids {
-			source := repository.FindCollectSourceById(id)
-			if source == nil {
-				firstErr = errors.New("采集站信息不存在")
-				break
-			}
-			if source.State == state {
-				continue
-			}
-			next := *source
-			next.State = state
-			if err := s.updateFilmSourceCore(next, false, 0); err != nil {
-				firstErr = err
-				break
-			}
-			changed = true
+		if err := repository.BatchUpdateCollectSourceState(idsToUpdate, state); err != nil {
+			return err
 		}
-		if changed {
-			onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+		for _, id := range idsToUpdate {
+			spider.ClearLimiter(id)
+			if !state {
+				spider.StopCollectSource(id, "采集站已停用")
+			}
 		}
-		return firstErr
+		clearProvideNetworkConfigCache()
+		filmsnapshot.ClearDynamicPlayCaches()
+		if len(idsToUpdate) > 0 && oldPrimary == nil && state {
+			// D5：主站为空时，被启用的站经懒初始化自动成为主站
+			applyPrimaryChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+		}
+		return nil
 	})
 }
 
@@ -288,12 +254,9 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 		if source.Id != "" && progress.IsSourceDeleting(source.Id) {
 			return errors.New("该站正在删除")
 		}
-		oldPrimary := repository.PickPrimarySourceForCategory()
+		primaryWasEmpty := repository.PickPrimarySourceForCategory() == nil
 		if source.Id == "" {
 			source.Id = utils.GenerateHashKey(source.Uri)
-		}
-		if searchBusy && sourceAdditionMayChangePrimary(source, oldPrimary) {
-			return filmsnapshot.ErrSearchIndexBusy
 		}
 		if err := repository.AddCollectSource(source); err != nil {
 			return err
@@ -301,7 +264,10 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 		spider.ClearLimiter(source.Id)
 		clearProvideNetworkConfigCache()
 		filmsnapshot.ClearDynamicPlayCaches()
-		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+		if primaryWasEmpty && source.State {
+			// D5：主站为空时新增的启用站自动成为主站
+			applyPrimaryChanged(nil, repository.PickPrimarySourceForCategory())
+		}
 		return nil
 	})
 }

@@ -3,6 +3,7 @@ import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { collectIndexUpdatingReason } from "./collect-selection";
 import { isActiveCollectStatus, type FilmSource } from "./types";
+import type { HandoverChoice } from "./use-primary-handover";
 import type { SearchIndexProgress } from "./use-collect-stream";
 
 interface UseCollectCardActionsParams {
@@ -12,6 +13,11 @@ interface UseCollectCardActionsParams {
   getCollectList: (createdId?: string) => Promise<void>;
   onDeleteSubmitted?: (sources: { id: string; name: string }[]) => void;
   searchIndex?: SearchIndexProgress;
+  askPrimaryHandover: (req: {
+    title: string;
+    leavingName: string;
+    otherEnabled: FilmSource[];
+  }) => Promise<HandoverChoice | null>;
 }
 
 export function useCollectCardActions({
@@ -21,6 +27,7 @@ export function useCollectCardActions({
   getCollectList,
   onDeleteSubmitted,
   searchIndex,
+  askPrimaryHandover,
 }: UseCollectCardActionsParams) {
   const { message } = useAppMessage();
   const [togglingStateSourceId, setTogglingStateSourceId] = useState<string | null>(null);
@@ -28,6 +35,41 @@ export function useCollectCardActions({
 
   const changeSourceState = useCallback(
     async (id: string, nextState: boolean) => {
+      const record = siteList.find((s) => s.id === id);
+      // D6：停用当前主站须先完成主站交接，走单站编辑接口携带交接参数
+      if (!nextState && record?.isPrimary) {
+        const choice = await askPrimaryHandover({
+          title: `停用主站「${record.name}」？`,
+          leavingName: record.name,
+          otherEnabled: siteList.filter((s) => s.state && s.id !== id),
+        });
+        if (!choice) {
+          return;
+        }
+        setTogglingStateSourceId(id);
+        updateSiteListItem(id, (item) => ({ ...item, state: false }));
+        try {
+          const resp = await ApiPost("/manage/collect/save", {
+            ...record,
+            state: false,
+            newPrimaryId: choice.newPrimaryId,
+            confirmClearPrimary: choice.confirmClear,
+          });
+          if (resp.code === 0) {
+            message.success(resp.msg || "采集站已禁用");
+            await getCollectList();
+          } else {
+            message.error(resp.msg || "状态切换失败");
+            updateSiteListItem(id, (item) => ({ ...item, state: true }));
+          }
+        } catch {
+          message.error("状态切换失败");
+          updateSiteListItem(id, (item) => ({ ...item, state: true }));
+        } finally {
+          setTogglingStateSourceId(null);
+        }
+        return;
+      }
       setTogglingStateSourceId(id);
       updateSiteListItem(id, (item) => ({ ...item, state: nextState }));
       try {
@@ -46,7 +88,7 @@ export function useCollectCardActions({
         setTogglingStateSourceId(null);
       }
     },
-    [getCollectList, message, updateSiteListItem],
+    [askPrimaryHandover, getCollectList, message, siteList, updateSiteListItem],
   );
 
   const startTask = useCallback(
@@ -119,10 +161,33 @@ export function useCollectCardActions({
   const delSource = useCallback(
     async (id: string) => {
       const src = siteList.find((s) => s.id === id);
+      let extra: { newPrimaryId?: string; confirmClearPrimary?: boolean } = {};
+      // D6：删除当前主站须先完成主站交接
+      if (src?.isPrimary) {
+        const otherEnabled = siteList.filter((s) => s.state && s.id !== id);
+        if (otherEnabled.length > 0) {
+          if (askPrimaryHandover) {
+            const choice = await askPrimaryHandover({
+              title: "指定新主站",
+              leavingName: src.name,
+              otherEnabled,
+            });
+            if (!choice) {
+              return;
+            }
+            extra = {
+              newPrimaryId: choice.newPrimaryId || undefined,
+              confirmClearPrimary: choice.confirmClear || undefined,
+            };
+          }
+        } else {
+          extra = { confirmClearPrimary: true };
+        }
+      }
       setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, deleting: true } : s)));
       setDeletingSourceId(id);
       try {
-        const resp = await ApiPost("/manage/collect/delete", { ids: [id] });
+        const resp = await ApiPost("/manage/collect/delete", { ids: [id], ...extra });
         if (resp.code === 0) {
           onDeleteSubmitted?.([{ id, name: src?.name || id }]);
           message.success("已提交删除");
@@ -139,7 +204,7 @@ export function useCollectCardActions({
         setDeletingSourceId("");
       }
     },
-    [getCollectList, message, onDeleteSubmitted, setSiteList, siteList],
+    [askPrimaryHandover, getCollectList, message, onDeleteSubmitted, setSiteList, siteList],
   );
 
   return {

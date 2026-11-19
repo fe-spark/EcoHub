@@ -232,7 +232,7 @@ func TestFormatBatchOverviewHTML(t *testing.T) {
 	}
 }
 
-func TestFormatSourceOrderChangeHTML(t *testing.T) {
+func TestFormatPrimaryChangeHTML(t *testing.T) {
 	oldPrimary := &model.FilmSource{Id: "s1", Name: "量子资源"}
 	newPrimary := &model.FilmSource{Id: "s2", Name: "非凡资源"}
 	enabled := []model.FilmSource{
@@ -241,17 +241,16 @@ func TestFormatSourceOrderChangeHTML(t *testing.T) {
 		{Id: "s3", Name: "暴风资源", State: true},
 	}
 
-	switchedHTML := formatSourceOrderChangeHTML("EcoHub", oldPrimary, newPrimary, enabled)
+	switchedHTML := formatPrimaryChangeHTML("EcoHub", oldPrimary, newPrimary, enabled)
 	if !strings.Contains(switchedHTML, "主站已切换") ||
 		!strings.Contains(switchedHTML, "<b>量子资源</b> → <b>非凡资源</b>") ||
 		!strings.Contains(switchedHTML, "<b>非凡资源</b> → 量子资源 → 暴风资源") {
 		t.Fatalf("unexpected switched HTML: %s", switchedHTML)
 	}
 
-	reorderedHTML := formatSourceOrderChangeHTML("EcoHub", newPrimary, newPrimary, enabled)
-	if !strings.Contains(reorderedHTML, "采集站排序已更新") ||
-		!strings.Contains(reorderedHTML, "⭐ 主站：<b>非凡资源</b>") ||
-		!strings.Contains(reorderedHTML, "<b>非凡资源</b> → 量子资源 → 暴风资源") {
-		t.Fatalf("unexpected reordered HTML: %s", reorderedHTML)
+	clearedHTML := formatPrimaryChangeHTML("EcoHub", oldPrimary, nil, enabled)
+	if !strings.Contains(clearedHTML, "主站已置空") ||
+		!strings.Contains(clearedHTML, "<b>量子资源</b> → 无") {
+		t.Fatalf("unexpected cleared HTML: %s", clearedHTML)
 	}
 }

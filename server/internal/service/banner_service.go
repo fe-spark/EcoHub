@@ -9,7 +9,6 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/utils"
 )
@@ -50,9 +49,10 @@ type BannerFields struct {
 
 // BannerListView 一个站点的轮播列表。
 type BannerListView struct {
-	SourceId string                  `json:"sourceId"`
-	Revision string                  `json:"revision"`
-	Items    []model.BannerAdminItem `json:"items"`
+	SourceId        string                  `json:"sourceId"`
+	PrimarySourceId string                  `json:"primarySourceId"`
+	Revision        string                  `json:"revision"`
+	Items           []model.BannerAdminItem `json:"items"`
 }
 
 // BannerQuota 一键排片里一个分类排几部。
@@ -61,9 +61,9 @@ type BannerQuota struct {
 	Count      int   `json:"count"`
 }
 
-// BannerGenerateReq 一键排片请求。策略和数量都由前端提交，服务端不保存。
+// BannerGenerateReq 一键排片请求。策略和数量都由前端提交，服务端不保存；主站由服务端固定。
 type BannerGenerateReq struct {
-	SourceId string        `json:"sourceId"`
+	SourceId string        `json:"sourceId"` // 读请求兼容旧客户端；忽略并固定主站（D3）
 	Strategy string        `json:"strategy"`
 	Quotas   []BannerQuota `json:"quotas"`
 }
@@ -78,9 +78,10 @@ type BannerSkipped struct {
 
 // BannerGenerateResult 一键排片预览。revision 是生成时该站轮播的版本号，发布时带回。
 type BannerGenerateResult struct {
-	Revision string                  `json:"revision"`
-	Items    []model.BannerAdminItem `json:"items"`
-	Skipped  []BannerSkipped         `json:"skipped"`
+	PrimarySourceId string                  `json:"primarySourceId"`
+	Revision        string                  `json:"revision"`
+	Items           []model.BannerAdminItem `json:"items"`
+	Skipped         []BannerSkipped         `json:"skipped"`
 }
 
 var bannerStrategies = map[string]string{
@@ -89,134 +90,16 @@ var bannerStrategies = map[string]string{
 	"score":  "score_random",
 }
 
-// resolveBannerSource 不传站点时用当前首选站。
-func resolveBannerSource(sourceID string) (*model.FilmSource, error) {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		primary := repository.PickPrimarySourceForCategory()
-		if primary == nil {
-			return nil, bannerInputErr("没有已启用的采集站")
-		}
-		return primary, nil
+// resolveBannerSource 当前主站。写请求可带 sourceId 作为旧页面的上下文断言（D3）。
+func resolveBannerSource(expectedSourceID string) (*model.FilmSource, error) {
+	primary := repository.PickPrimarySourceForCategory()
+	if primary == nil {
+		return nil, bannerInputErr("没有已启用的采集站")
 	}
-	src := repository.FindCollectSourceById(sourceID)
-	if src == nil {
-		return nil, bannerInputErr("采集站不存在")
+	if expected := strings.TrimSpace(expectedSourceID); expected != "" && expected != primary.Id {
+		return nil, ErrPrimaryMismatch
 	}
-	return src, nil
-}
-
-// AssembleBanners 用片库数据组装轮播行。影片不在片库、或在该行站点已没有播放线路时视为不可用：
-// keepUnavailable 为 false（首页）时跳过；为 true（后台）时保留并标记 Unavailable，便于删除和排序。
-// 读路径不删数据。片库查询出错时返回 error，不当成“没有影片”。
-func AssembleBanners(ctx context.Context, slots []model.BannerSlot, keepUnavailable bool) ([]model.BannerAdminItem, error) {
-	out := make([]model.BannerAdminItem, 0, len(slots))
-	if len(slots) == 0 {
-		return out, nil
-	}
-	midsBySource := make(map[string][]int64)
-	for _, s := range slots {
-		midsBySource[s.SourceId] = append(midsBySource[s.SourceId], s.Mid)
-	}
-	live := make(map[string]map[int64]filmrepo.LiveBannerSnapshot, len(midsBySource))
-	for sourceID, mids := range midsBySource {
-		snaps, err := filmrepo.LiveBannerSnapshotsByMIDs(ctx, sourceID, mids)
-		if err != nil {
-			return nil, err
-		}
-		live[sourceID] = snaps
-	}
-	for _, s := range slots {
-		snap, ok := live[s.SourceId][s.Mid]
-		if !ok {
-			if !keepUnavailable {
-				continue
-			}
-			item := assembleBanner(s, filmrepo.LiveBannerSnapshot{Mid: s.Mid})
-			item.Unavailable = true
-			out = append(out, item)
-			continue
-		}
-		out = append(out, assembleBanner(s, snap))
-	}
-	for i := range out {
-		out[i].Sort = int64(i + 1)
-	}
-	return out, nil
-}
-
-func assembleBanner(s model.BannerSlot, snap filmrepo.LiveBannerSnapshot) model.BannerAdminItem {
-	libPoster := strings.TrimSpace(snap.DisplayPicture())
-	libSlide := strings.TrimSpace(snap.DisplayPictureSlide())
-	if libSlide == libPoster {
-		libSlide = ""
-	}
-	library := model.BannerValues{
-		Poster: libPoster, Backdrop: libSlide, Blurb: snap.Blurb, Score: snap.Score, Year: snap.Year,
-	}
-	overrides := model.BannerValues{
-		Poster: s.PosterOverride, Backdrop: s.BackdropOverride, Blurb: s.BlurbOverride,
-		Score: s.ScoreOverride, Year: s.YearOverride,
-	}
-
-	custom := s.ImageMode == model.BannerImageCustom
-	poster, slide, customPic := libPoster, libSlide, ""
-	if custom {
-		if s.PosterOverride != "" {
-			poster = s.PosterOverride
-			customPic = s.PosterOverride
-		}
-		if s.BackdropOverride != "" {
-			slide = s.BackdropOverride
-		}
-	}
-	if slide == poster {
-		slide = ""
-	}
-	blurb := snap.Blurb
-	if s.BlurbOverride != "" {
-		blurb = s.BlurbOverride
-	}
-	score := snap.Score
-	if s.ScoreOverride > 0 {
-		score = s.ScoreOverride
-	}
-	year := snap.Year
-	if s.YearOverride > 0 {
-		year = s.YearOverride
-	}
-	imageMode := model.BannerImageFollow
-	if custom {
-		imageMode = model.BannerImageCustom
-	}
-	return model.BannerAdminItem{
-		Banner: model.Banner{
-			Id:            s.Id,
-			Mid:           s.Mid,
-			Name:          snap.Name,
-			Year:          year,
-			CName:         snap.CName,
-			Poster:        poster,
-			Picture:       poster,
-			PictureSlide:  slide,
-			CustomPicture: customPic,
-			Remark:        snap.Remarks,
-			Sort:          s.Sort,
-			IsCustomPic:   custom,
-			Area:          snap.Area,
-			ClassTag:      snap.ClassTag,
-			Actor:         snap.Actor,
-			Director:      snap.Director,
-			Blurb:         blurb,
-			Score:         score,
-			TmdbID:        s.TmdbID,
-			IsScraped:     s.TmdbID > 0,
-		},
-		SourceId:  s.SourceId,
-		ImageMode: imageMode,
-		Overrides: overrides,
-		Library:   library,
-	}
+	return primary, nil
 }
 
 // HomeBanners 首页用的轮播：该站组装后的行，字段和旧版 /home 一致。
@@ -239,10 +122,10 @@ func (s *BannerService) HomeBanners(sourceID string) (model.Banners, error) {
 	return out, nil
 }
 
-// List 一个站点的全部轮播和版本号。不可用的行也列出（带 unavailable 标记），
+// List 主站的全部轮播和版本号。不可用的行也列出（带 unavailable 标记），
 // 这样前端提交排序时的 ids 和服务端算 revision 用的是同一组行。
-func (s *BannerService) List(sourceID string) (BannerListView, error) {
-	src, err := resolveBannerSource(sourceID)
+func (s *BannerService) List() (BannerListView, error) {
+	src, err := resolveBannerSource("")
 	if err != nil {
 		return BannerListView{}, err
 	}
@@ -255,9 +138,10 @@ func (s *BannerService) List(sourceID string) (BannerListView, error) {
 		return BannerListView{}, err
 	}
 	return BannerListView{
-		SourceId: src.Id,
-		Revision: repository.BannerRevision(slots),
-		Items:    items,
+		SourceId:        src.Id,
+		PrimarySourceId: src.Id,
+		Revision:        repository.BannerRevision(slots),
+		Items:           items,
 	}, nil
 }
 
@@ -272,20 +156,6 @@ func (s *BannerService) findItem(slot model.BannerSlot) (model.BannerAdminItem, 
 	item := items[0]
 	item.Sort = slot.Sort
 	return item, nil
-}
-
-func checkFilmOnSource(mid int64, sourceID string) error {
-	if mid <= 0 {
-		return bannerInputErr("请选择影片")
-	}
-	ok, err := repository.FilmsOnSource(context.Background(), sourceID, []int64{mid})
-	if err != nil {
-		return err
-	}
-	if !ok[mid] {
-		return bannerInputErr("影片不存在或不属于该采集站")
-	}
-	return nil
 }
 
 // applyBannerFields 把提交的字段合并进轮播行。没提交的字段保持原值。
@@ -351,122 +221,159 @@ func applyBannerFields(slot *model.BannerSlot, f BannerFields) error {
 	return nil
 }
 
-// Create 新增一行，排在末尾，立即生效。
+// Create 新增一行，排在末尾，立即生效（固定主站，D1）。
 func (s *BannerService) Create(sourceID string, f BannerFields) (model.BannerAdminItem, error) {
-	src, err := resolveBannerSource(sourceID)
-	if err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	if f.Mid == nil {
-		return model.BannerAdminItem{}, bannerInputErr("请选择影片")
-	}
-	if err := checkFilmOnSource(*f.Mid, src.Id); err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	id, err := utils.GenerateSalt()
-	if err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	slot := model.BannerSlot{Id: id, SourceId: src.Id, Mid: *f.Mid, ImageMode: model.BannerImageFollow}
-	if err := applyBannerFields(&slot, f); err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	if err := repository.CreateBannerSlot(&slot); err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	return s.findItem(slot)
-}
-
-// Update 只改提交了的字段，立即生效。读出、合并、保存在同一个事务里完成。
-func (s *BannerService) Update(id string, f BannerFields) (model.BannerAdminItem, error) {
-	slot, err := repository.UpdateBannerSlot(id, func(slot *model.BannerSlot) error {
-		oldMid := slot.Mid
-		if err := applyBannerFields(slot, f); err != nil {
+	var item model.BannerAdminItem
+	err := withPrimaryMutation(func(_ bool) error {
+		src, err := resolveBannerSource(sourceID)
+		if err != nil {
 			return err
 		}
-		if slot.Mid != oldMid {
-			return checkFilmOnSource(slot.Mid, slot.SourceId)
+		if f.Mid == nil {
+			return bannerInputErr("请选择影片")
 		}
-		return nil
-	})
-	if err != nil {
-		return model.BannerAdminItem{}, err
-	}
-	return s.findItem(slot)
-}
-
-// Delete 删除一行，立即生效。
-func (s *BannerService) Delete(id string) error {
-	return repository.DeleteBannerSlot(id)
-}
-
-// Reorder 只提交顺序。revision 不一致返回 repository.ErrBannerRevisionConflict。
-func (s *BannerService) Reorder(sourceID, revision string, ids []string) (BannerListView, error) {
-	src, err := resolveBannerSource(sourceID)
-	if err != nil {
-		return BannerListView{}, err
-	}
-	if err := repository.ReorderBannerSlots(src.Id, revision, ids); err != nil {
-		return BannerListView{}, err
-	}
-	return s.List(src.Id)
-}
-
-// PublishDeck 发布一键排片的预览结果，整组替换该站轮播。
-func (s *BannerService) PublishDeck(sourceID, revision string, items []BannerFields) (BannerListView, error) {
-	src, err := resolveBannerSource(sourceID)
-	if err != nil {
-		return BannerListView{}, err
-	}
-	mids := make([]int64, 0, len(items))
-	seen := make(map[int64]bool, len(items))
-	for _, f := range items {
-		if f.Mid == nil || *f.Mid <= 0 {
-			return BannerListView{}, bannerInputErr("排片里有未选择影片的行")
-		}
-		if seen[*f.Mid] {
-			return BannerListView{}, bannerInputErr("排片里有重复的影片")
-		}
-		seen[*f.Mid] = true
-		mids = append(mids, *f.Mid)
-	}
-	onSource, err := repository.FilmsOnSource(context.Background(), src.Id, mids)
-	if err != nil {
-		return BannerListView{}, err
-	}
-	slots := make([]model.BannerSlot, 0, len(items))
-	for _, f := range items {
-		if !onSource[*f.Mid] {
-			return BannerListView{}, bannerInputErr("影片不存在或不属于该采集站")
+		if err := checkFilmOnSource(*f.Mid, src.Id); err != nil {
+			return err
 		}
 		id, err := utils.GenerateSalt()
 		if err != nil {
-			return BannerListView{}, err
+			return err
 		}
 		slot := model.BannerSlot{Id: id, SourceId: src.Id, Mid: *f.Mid, ImageMode: model.BannerImageFollow}
 		if err := applyBannerFields(&slot, f); err != nil {
-			return BannerListView{}, err
+			return err
 		}
-		slot.Sort = int64(len(slots) + 1)
-		slots = append(slots, slot)
-	}
-	if err := repository.ReplaceBannerSlots(src.Id, revision, slots); err != nil {
-		return BannerListView{}, err
-	}
-	return s.List(src.Id)
+		if err := repository.CreateBannerSlot(&slot); err != nil {
+			return err
+		}
+		item, err = s.findItem(slot)
+		return err
+	})
+	return item, err
 }
 
-// Generate 按策略和每个分类的数量生成预览，不落库、不保存配置。
+// Update 只改提交了的字段，立即生效。读出、合并、保存在同一个事务里完成。
+// D3：对象级写，非主站轮播一律拒绝。
+func (s *BannerService) Update(id string, f BannerFields) (model.BannerAdminItem, error) {
+	var item model.BannerAdminItem
+	err := withPrimaryMutation(func(_ bool) error {
+		primary, err := resolveBannerSource("")
+		if err != nil {
+			return err
+		}
+		// Capture primary before opening the repository transaction. Querying the
+		// primary table inside UpdateBannerSlot's SQLite transaction can deadlock.
+		slot, err := repository.UpdateBannerSlot(id, func(slot *model.BannerSlot) error {
+			if slot.SourceId != primary.Id {
+				return ErrPrimaryMismatch
+			}
+			oldMid := slot.Mid
+			if err := applyBannerFields(slot, f); err != nil {
+				return err
+			}
+			if slot.Mid != oldMid {
+				return checkFilmOnSource(slot.Mid, slot.SourceId)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		item, err = s.findItem(slot)
+		return err
+	})
+	return item, err
+}
+
+// Delete 删除一行，立即生效。D3：对象级写，非主站轮播一律拒绝。
+func (s *BannerService) Delete(id string) error {
+	return withPrimaryMutation(func(_ bool) error {
+		primary, err := resolveBannerSource("")
+		if err != nil {
+			return err
+		}
+		slot, err := repository.GetBannerSlot(id)
+		if err != nil {
+			return err
+		}
+		if slot.SourceId != primary.Id {
+			return ErrPrimaryMismatch
+		}
+		return repository.DeleteBannerSlot(id)
+	})
+}
+
+// Reorder 只提交顺序（固定主站）。revision 不一致返回 repository.ErrBannerRevisionConflict。
+func (s *BannerService) Reorder(sourceID, revision string, ids []string) (BannerListView, error) {
+	var view BannerListView
+	err := withPrimaryMutation(func(_ bool) error {
+		src, err := resolveBannerSource(sourceID)
+		if err != nil {
+			return err
+		}
+		if err := repository.ReorderBannerSlots(src.Id, revision, ids); err != nil {
+			return err
+		}
+		view, err = s.List()
+		return err
+	})
+	return view, err
+}
+
+// PublishDeck 发布一键排片的预览结果，整组替换主站轮播。
+func (s *BannerService) PublishDeck(sourceID, revision string, items []BannerFields) (BannerListView, error) {
+	var view BannerListView
+	err := withPrimaryMutation(func(_ bool) error {
+		src, err := resolveBannerSource(sourceID)
+		if err != nil {
+			return err
+		}
+		mids := make([]int64, 0, len(items))
+		seen := make(map[int64]bool, len(items))
+		for _, f := range items {
+			if f.Mid == nil || *f.Mid <= 0 {
+				return bannerInputErr("排片里有未选择影片的行")
+			}
+			if seen[*f.Mid] {
+				return bannerInputErr("排片里有重复的影片")
+			}
+			seen[*f.Mid] = true
+			mids = append(mids, *f.Mid)
+		}
+		onSource, err := repository.FilmsOnSource(context.Background(), src.Id, mids)
+		if err != nil {
+			return err
+		}
+		slots := make([]model.BannerSlot, 0, len(items))
+		for _, f := range items {
+			if !onSource[*f.Mid] {
+				return bannerInputErr("影片不存在或不属于该采集站")
+			}
+			id, err := utils.GenerateSalt()
+			if err != nil {
+				return err
+			}
+			slot := model.BannerSlot{Id: id, SourceId: src.Id, Mid: *f.Mid, ImageMode: model.BannerImageFollow}
+			if err := applyBannerFields(&slot, f); err != nil {
+				return err
+			}
+			slot.Sort = int64(len(slots) + 1)
+			slots = append(slots, slot)
+		}
+		if err := repository.ReplaceBannerSlots(src.Id, revision, slots); err != nil {
+			return err
+		}
+		view, err = s.List()
+		return err
+	})
+	return view, err
+}
+
+// Generate 按策略和每个分类的数量生成预览，不落库、不保存配置（固定主站，D1）。
 func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (BannerGenerateResult, error) {
-	if strings.TrimSpace(req.SourceId) == "" {
-		return BannerGenerateResult{}, bannerInputErr("缺少采集站")
-	}
-	src, err := resolveBannerSource(req.SourceId)
+	src, err := resolveBannerSource("")
 	if err != nil {
 		return BannerGenerateResult{}, err
-	}
-	if !src.State {
-		return BannerGenerateResult{}, bannerInputErr("采集站已停用")
 	}
 	strategy, ok := bannerStrategies[strings.TrimSpace(req.Strategy)]
 	if !ok {
@@ -561,9 +468,10 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 		return BannerGenerateResult{}, err
 	}
 	return BannerGenerateResult{
-		Revision: repository.BannerRevision(current),
-		Items:    items,
-		Skipped:  skipped,
+		PrimarySourceId: src.Id,
+		Revision:        repository.BannerRevision(current),
+		Items:           items,
+		Skipped:         skipped,
 	}, nil
 }
 

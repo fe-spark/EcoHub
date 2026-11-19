@@ -61,6 +61,8 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	if err != nil {
 		return err
 	}
+	// 备份导入整体替换站点：存储的主站不在新列表时清空，由懒初始化按新列表重选
+	support.ReconcilePrimaryAfterSourceReplace(list)
 	return RefreshCollectSourceCatalog()
 }
 
@@ -72,6 +74,29 @@ func PickPrimarySourceForCategory() *model.FilmSource {
 
 func GetActiveCollectSource() *model.FilmSource {
 	return PickPrimarySourceForCategory()
+}
+
+// SetPrimarySourceID 写入主站状态（切换与交接的持久化入口）。
+func SetPrimarySourceID(id string) error {
+	if err := support.SetPrimarySourceID(id); err != nil {
+		return err
+	}
+	return RefreshCollectSourceCatalog()
+}
+
+// ClearPrimarySourceState 置空主站状态（停用/删除最后一个启用站时的例外路径）。
+func ClearPrimarySourceState() error {
+	return support.ClearPrimarySourceState()
+}
+
+// FindOtherEnabledCollectSource 返回除 excludeID 外排序最前的可用启用站；不存在时返回 nil。
+func FindOtherEnabledCollectSource(excludeID string) *model.FilmSource {
+	return support.FindOtherEnabledCollectSource(excludeID)
+}
+
+// FindOtherEnabledCollectSourcesExcluding 返回除 excludeIDs 外排序靠前的可用启用站列表。
+func FindOtherEnabledCollectSourcesExcluding(excludeIDs map[string]struct{}) []*model.FilmSource {
+	return support.FindOtherEnabledCollectSourcesExcluding(excludeIDs)
 }
 
 // GetEnabledCollectSourceList 获取已启用采集站列表。
@@ -181,6 +206,8 @@ func DelCollectResource(id string) ([]int64, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("database not available")
 	}
+	_ = EnsureFilmSourceDeletedIndex()
+	_ = EnsureCollectRecordFilmSourceIndex()
 	orphanMids, err := cleanSourceDataBatched(id)
 	if err != nil {
 		return orphanMids, err
@@ -193,6 +220,9 @@ func DelCollectResource(id string) ([]int64, error) {
 			return err
 		}
 		if err := purgeSourceCollectHistoryTx(tx, id); err != nil {
+			return err
+		}
+		if err := AssertSourceDataCleanedTx(tx, id); err != nil {
 			return err
 		}
 		if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
@@ -313,6 +343,23 @@ func SortCollectSources(ids []string) error {
 			}
 		}
 		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return RefreshCollectSourceCatalog()
+}
+
+// BatchUpdateCollectSourceState 批量更新采集源启用状态（原子事务提交）
+func BatchUpdateCollectSourceState(ids []string, state bool) error {
+	if db.Mdb == nil {
+		return errors.New("database not available")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return tx.Model(&model.FilmSource{}).Where("id IN ?", ids).Update("state", state).Error
 	})
 	if err != nil {
 		return err

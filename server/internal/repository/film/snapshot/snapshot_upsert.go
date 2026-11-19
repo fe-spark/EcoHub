@@ -52,9 +52,6 @@ func buildFilmListSnapshot(version string, index model.FilmIndex) model.FilmList
 }
 
 func DeleteActiveSnapshotsByMids(mids ...int64) {
-	if len(mids) > 0 {
-		DropNonPrimarySearchIndex("")
-	}
 	version := GetActiveSnapshotVersion()
 	if version == "" || len(mids) == 0 {
 		return
@@ -83,7 +80,6 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 // 内存索引属于被删站或主站已变时直接整盘丢掉，跳过十万级 mid 遍历与逐 key Redis Pipeline 删除。
 func InvalidateCachesAfterSourceDelete(deletedSourceID string) {
 	deletedSourceID = strings.TrimSpace(deletedSourceID)
-	DropNonPrimarySearchIndex(deletedSourceID)
 	cur := activeFilmSearchMetas.Load()
 	if cur != nil && (cur.PrimaryID == deletedSourceID || cur.PrimaryID != currentPrimarySourceID()) {
 		DropPrimarySearchIndex()
@@ -142,7 +138,6 @@ func upsertActiveSnapshots(mids []int64, refreshSearch bool) (string, int, error
 	existing := make([]int64, 0, len(rows))
 	primaryMids := make([]int64, 0, len(rows))
 	otherMids := make([]int64, 0, len(rows))
-	otherSources := make(map[string]struct{})
 	for _, row := range rows {
 		existing = append(existing, row.Mid)
 		src := strings.TrimSpace(row.FirstSourceId)
@@ -151,18 +146,8 @@ func upsertActiveSnapshots(mids []int64, refreshSearch bool) (string, int, error
 			continue
 		}
 		otherMids = append(otherMids, row.Mid)
-		if src != "" {
-			otherSources[src] = struct{}{}
-		}
 	}
 	deletedMIDs := diffMIDs(ids, existing)
-	if len(deletedMIDs) > 0 {
-		DropNonPrimarySearchIndex("")
-	} else {
-		for src := range otherSources {
-			DropNonPrimarySearchIndex(src)
-		}
-	}
 	if refreshSearch {
 		remove := indexedMIDs(append(append([]int64{}, deletedMIDs...), otherMids...))
 		if len(remove) > 0 {

@@ -5,16 +5,12 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository"
+	"server/internal/repository/support"
 )
 
 // currentPrimarySourceID 当前主站。没有已启用采集站时为空。
 func currentPrimarySourceID() string {
-	primary := repository.PickPrimarySourceForCategory()
-	if primary == nil {
-		return ""
-	}
-	return strings.TrimSpace(primary.Id)
+	return support.CurrentPrimaryID()
 }
 
 func indexMatches(cur *filmSearchMetaIndex, version, primary string) bool {
@@ -26,9 +22,6 @@ func DropPrimarySearchIndex() {
 	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(nil)
 	activeFilmSearchMetasMu.Unlock()
-	if primary := currentPrimarySourceID(); primary != "" {
-		DropNonPrimarySearchIndex(primary)
-	}
 }
 
 // EnsurePrimarySearchIndex 索引被丢掉又没有装上新主站时补建。已经有索引则不动。
@@ -46,9 +39,6 @@ func RebuildPrimarySearchIndex() error {
 		return ErrSearchIndexMissing
 	}
 	primary := currentPrimarySourceID()
-	if primary != "" {
-		DropNonPrimarySearchIndex(primary)
-	}
 	if cur := activeFilmSearchMetas.Load(); indexMatches(cur, version, primary) {
 		return nil
 	}

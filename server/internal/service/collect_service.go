@@ -20,15 +20,14 @@ type CollectService struct{}
 var CollectSvc = new(CollectService)
 
 var (
-	primarySwitchEpoch atomic.Uint64
-	primarySwitchMu    sync.Mutex
-	primaryWarmMu      sync.Mutex
-	isPrimaryWarming   atomic.Bool
+	primarySwitchMu sync.Mutex
+	// primaryWarmCount 在途的主站切换预热数量，大于 0 即视为切换中（预热闸门）。
+	primaryWarmCount atomic.Int64
 	// primaryWarmups 记录切换主站后异步预热的协程，测试用来等它们结束。
 	primaryWarmups sync.WaitGroup
 	// categorySyncs 记录异步同步分类的协程，测试用来等它们结束。
 	categorySyncs sync.WaitGroup
-	// deleteSourceJobs 记录已入队待处理的异步删站任务（含尾部的切主站触发），保证 WaitAsyncWork 不与 Add 竞态。
+	// deleteSourceJobs 记录已入队待处理的异步删站任务，保证 WaitAsyncWork 不与 Add 竞态。
 	deleteSourceJobs sync.WaitGroup
 )
 
@@ -51,7 +50,7 @@ func WaitAsyncWork(timeout time.Duration) bool {
 
 // IsPrimarySiteSwitching 返回当前是否正在构建检索索引或预热主站缓存
 func IsPrimarySiteSwitching() bool {
-	return filmsnapshot.IsSearchIndexBuilding() || isPrimaryWarming.Load()
+	return filmsnapshot.IsSearchIndexBuilding() || primaryWarmCount.Load() > 0
 }
 
 func (s *CollectService) SearchIndexProgress() filmsnapshot.SearchIndexProgress {
@@ -174,7 +173,9 @@ func (s *CollectService) GetCategoryReadyMap() (map[string]bool, error) {
 	return result, nil
 }
 
-func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool {
+// applyPrimaryChanged 主站实际发生变化时调用：失效相关缓存并异步预热新主站检索索引。
+// old 与 new 相同时为无操作。调用方保证仅在主站切换/交接/懒初始化生效时调用。
+func applyPrimaryChanged(oldPrimary, newPrimary *model.FilmSource) bool {
 	oldID := ""
 	if oldPrimary != nil {
 		oldID = oldPrimary.Id
@@ -186,56 +187,36 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	if oldID == newID {
 		return false
 	}
-	epoch := primarySwitchEpoch.Add(1)
 	repository.MarkCategoryChanged()
 	repository.ClearIndexPageCache()
 	filmsnapshot.BumpSearchCacheVersion()
 	filmsnapshot.RefreshAccessDataCaches()
 	filmsnapshot.ClearSearchCache()
+	filmsnapshot.ClearDynamicPlayCaches()
+	clearProvideNetworkConfigCache()
 	enabled, err := repository.GetEnabledCollectSourceList()
 	if err != nil {
 		syslog.Errorf("[Collect] 读取启用采集站失败: %v", err)
 	} else {
-		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
+		NotifySvc.PublishPrimaryChange(oldPrimary, newPrimary, enabled)
 	}
-	// 先占住切换状态再丢掉上一站索引。防抖只推迟扫描，不让旧索引继续常驻，也不让这段时间再切一次。
-	// 标志的置位和清除共用一把锁，避免上一轮结束时把新一轮刚置上的状态清掉。
-	primaryWarmMu.Lock()
-	isPrimaryWarming.Store(true)
-	primaryWarmMu.Unlock()
+	// 先占住切换状态再丢掉上一站索引，不让旧索引继续常驻，也不让这段时间再切一次。
+	primaryWarmCount.Add(1)
 	filmsnapshot.DropPrimarySearchIndex()
 	primaryWarmups.Add(1)
-	go func(targetSourceID string, currentEpoch uint64) {
+	go func(targetSourceID string) {
 		defer primaryWarmups.Done()
+		defer primaryWarmCount.Add(-1)
 		defer func() {
 			if r := recover(); r != nil {
 				syslog.Errorf("[Collect] 切换主站后异步预热索引发生异常: %v", r)
 			}
 		}()
-		defer func() {
-			primaryWarmMu.Lock()
-			if primarySwitchEpoch.Load() == currentEpoch {
-				isPrimaryWarming.Store(false)
-			}
-			primaryWarmMu.Unlock()
-		}()
 
-		// 150ms 防抖：如果连续快速拖拽切换主站，直接跳过旧代数，避免短时间内多次扫描主站
-		time.Sleep(150 * time.Millisecond)
-		if primarySwitchEpoch.Load() != currentEpoch {
-			syslog.Infof("[Collect] 检测到更新的主站切换，跳过历史代数预热 epoch=%d targetSource=%s", currentEpoch, targetSourceID)
-			return
-		}
-
-		// 互斥排队串行化构建，避免重叠扫描主站
+		// 连续切换时旧协程在这里排队；轮到自己时目标已不是当前主站就直接退出。
 		primarySwitchMu.Lock()
 		defer primarySwitchMu.Unlock()
 
-		// 获取锁后再次检查代数与当前最新主站：如果中途有更新切换，立即退出
-		if primarySwitchEpoch.Load() != currentEpoch {
-			syslog.Infof("[Collect] 排队期间主站再次变更，放弃本代构建 epoch=%d", currentEpoch)
-			return
-		}
 		latestPrimary := repository.PickPrimarySourceForCategory()
 		if latestPrimary == nil || latestPrimary.Id != targetSourceID {
 			syslog.Infof("[Collect] 实际主站已非目标站，改为补建当前主站索引 targetSource=%s", targetSourceID)
@@ -245,7 +226,7 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			return
 		}
 
-		syslog.Infof("[Collect] 开始重建主站检索索引 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
+		syslog.Infof("[Collect] 开始重建主站检索索引 (targetSource=%s)...", targetSourceID)
 		if err := filmsnapshot.RebuildPrimarySearchIndex(); err != nil {
 			syslog.Errorf("[Collect] 切换主站后重建检索索引失败: %v", err)
 			if err := filmsnapshot.EnsurePrimarySearchIndex(); err != nil {
@@ -254,19 +235,14 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			return
 		}
 
-		if primarySwitchEpoch.Load() != currentEpoch {
-			syslog.Infof("[Collect] 索引已就绪，但主站代数已失效，跳过首页缓存写入 epoch=%d", currentEpoch)
-			return
-		}
-
 		if targetSourceID != "" {
 			if _, err := IndexSvc.IndexPage(targetSourceID); err != nil {
 				syslog.Errorf("[Collect] 切换主站后预热首页数据失败: %v", err)
 			} else {
-				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
+				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (targetSource=%s)", targetSourceID)
 			}
 		}
-	}(newID, epoch)
+	}(newID)
 	return true
 }
 

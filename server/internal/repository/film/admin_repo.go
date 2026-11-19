@@ -83,6 +83,49 @@ func DelFilmSearch(id int64) error {
 	return DelFilmSearchBatch([]int64{id})
 }
 
+// FilmIDsBelongToSource 验证影片档案均属于指定采集站。
+// 管理端按站点展示影片，但 mid 是全局 ID，写操作不能只依赖前端列表过滤。
+func FilmIDsBelongToSource(ids []int64, sourceID string) (bool, error) {
+	if db.Mdb == nil {
+		return false, ErrDatabaseUnavailable
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || len(ids) == 0 {
+		return false, nil
+	}
+	unique := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return true, nil
+	}
+	var rows []struct {
+		Mid           int64
+		FirstSourceId string
+	}
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("mid, first_source_id").
+		Where("mid IN ?", unique).
+		Find(&rows).Error; err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if strings.TrimSpace(row.FirstSourceId) != sourceID {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func ClearMasterDataBySourceIDsFast(sourceIDs ...string) error {
 	ids := normalizeSourceIDs(sourceIDs...)
 	if len(ids) == 0 {

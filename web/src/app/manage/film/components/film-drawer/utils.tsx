@@ -135,7 +135,6 @@ export function buildFilmDetailFormValues(
   const desc = (filmData.descriptor as Record<string, unknown> | undefined) || {};
   return {
     id: filmData.id,
-    sourceId: filmData.sourceId || "",
     name: filmData.name || "",
     subTitle: desc.subTitle || filmData.subTitle || "",
     cid: cat.cid,

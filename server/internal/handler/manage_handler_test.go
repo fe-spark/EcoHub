@@ -12,6 +12,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/testutil"
 	"server/internal/utils"
@@ -29,7 +30,7 @@ func setupManageConfigDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.BannerSlot{}, &model.FilmIndex{}, &model.FilmSourcePlaylist{}, &model.FilmSource{}, &model.MappingRule{}, &model.TMDBConfigRecord{}, &model.User{}, &model.FileInfo{}); err != nil {
+	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.BannerSlot{}, &model.FilmIndex{}, &model.FilmSourcePlaylist{}, &model.FilmSource{}, &model.MappingRule{}, &model.TMDBConfigRecord{}, &model.User{}, &model.FileInfo{}, &model.PrimaryState{}); err != nil {
 		t.Fatal(err)
 	}
 	prev := db.Mdb
@@ -264,8 +265,29 @@ func TestBannerHandlers(t *testing.T) {
 		return out
 	}
 
+	// D3：读请求忽略非主站 sourceId，仍只返回主站数据。
+	db.Mdb.Create(&model.FilmSource{Id: "src2", Name: "站二", Uri: "http://src2.test", State: true, Sort: 2})
+	c, w := testContext(http.MethodGet, "/api/manage/banners?sourceId=src2")
+	h.BannerList(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("non-primary list should fall back to primary: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	raw, _ := json.Marshal(decodeResponse(t, w).Data)
+	var primaryList listData
+	_ = json.Unmarshal(raw, &primaryList)
+	if primaryList.SourceId != "src1" {
+		t.Fatalf("read must ignore sourceId, got source=%s", primaryList.SourceId)
+	}
+
+	// D3：写请求带非主站 sourceId 返回独立业务码。
+	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":101}`)
+	h.BannerCreate(c)
+	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
+		t.Fatalf("non-primary create want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
+	}
+
 	// 新增
-	c, w := testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src1","mid":101}`)
+	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src1","mid":101}`)
 	h.BannerCreate(c)
 	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("create code=%d msg=%s", resp.Code, resp.Msg)
@@ -326,6 +348,28 @@ func TestBannerHandlers(t *testing.T) {
 	}
 	if len(list().Items) != 0 {
 		t.Fatalf("banner should be deleted")
+	}
+
+	// T-06：切换主站后，旧站轮播的对象级写返回 409 PRIMARY_MISMATCH（D3）
+	db.Mdb.Create(&model.FilmSource{Id: "src2", Name: "站二", Uri: "http://src2.test", State: true, Sort: 2})
+	if err := repository.SetPrimarySourceID("src2"); err != nil {
+		t.Fatal(err)
+	}
+	legacy := model.BannerSlot{Id: "legacy-src1", SourceId: "src1", Mid: 101, ImageMode: model.BannerImageFollow, Sort: 1}
+	if err := db.Mdb.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1", `{"blurb":"x"}`)
+	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
+	h.BannerUpdate(c)
+	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
+		t.Fatalf("non-primary patch want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
+	}
+	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1")
+	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
+	h.BannerDelete(c)
+	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
+		t.Fatalf("non-primary delete want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

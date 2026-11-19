@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"server/internal/model/dto"
@@ -14,6 +15,8 @@ const bannerConflictCode = http.StatusConflict
 
 func bannerFail(err error, c *gin.Context) {
 	switch {
+	case errors.Is(err, service.ErrPrimaryMismatch):
+		dto.PrimaryMismatch(c)
 	case service.IsBannerConflict(err):
 		dto.CustomResult(http.StatusConflict, bannerConflictCode, nil, err.Error(), c)
 	case service.IsBannerUserError(err):
@@ -23,9 +26,9 @@ func bannerFail(err error, c *gin.Context) {
 	}
 }
 
-// BannerList GET /manage/banners?sourceId= 一个站点的轮播，不传时用首选站。
+// BannerList GET /manage/banners 主站轮播（D1：固定主站，忽略 sourceId）。
 func (h *ManageHandler) BannerList(c *gin.Context) {
-	view, err := service.BannerSvc.List(c.Query("sourceId"))
+	view, err := service.BannerSvc.List()
 	if err != nil {
 		bannerFail(err, c)
 		return
@@ -33,14 +36,12 @@ func (h *ManageHandler) BannerList(c *gin.Context) {
 	dto.Success(view, "获取轮播列表成功", c)
 }
 
-type bannerCreateReq struct {
-	SourceId string `json:"sourceId"`
-	service.BannerFields
-}
-
-// BannerCreate POST /manage/banners 新增一行，立即生效。
+// BannerCreate POST /manage/banners 新增一行，立即生效（固定主站）。
 func (h *ManageHandler) BannerCreate(c *gin.Context) {
-	var req bannerCreateReq
+	var req struct {
+		SourceId string `json:"sourceId"`
+		service.BannerFields
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
@@ -120,7 +121,7 @@ type bannerDeckReq struct {
 	Items    []service.BannerFields `json:"items"`
 }
 
-// BannerDeck PUT /manage/banners/deck 发布排片，整组替换该站轮播。revision 不一致返回 409。
+// BannerDeck PUT /manage/banners/deck 发布排片，整组替换主站轮播。revision 不一致返回 409。
 func (h *ManageHandler) BannerDeck(c *gin.Context) {
 	var req bannerDeckReq
 	if err := c.ShouldBindJSON(&req); err != nil {

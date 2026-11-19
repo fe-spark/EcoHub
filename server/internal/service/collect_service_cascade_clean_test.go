@@ -9,7 +9,6 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/repository/support"
 	"server/internal/spider/progress"
 	"server/internal/testutil"
 
@@ -128,6 +127,7 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.CollectRecord{},
 		&model.CollectRecordFilmItem{},
 		&model.CollectSourceStats{},
+		&model.PrimaryState{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 		Uri:   "http://new-src.com",
 		State: true,
 	}
-	if err := srv.UpdateFilmSource(updateReq); err != nil {
+	if err := srv.UpdateFilmSource(updateReq, "", false); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
@@ -363,24 +363,22 @@ func TestPickPrimarySourceForCategory_SkipsDeletingSource(t *testing.T) {
 		progress.SetSourceDeleting("src2", false)
 	})
 
+	// 主站为空时懒初始化会跳过删除中的站
 	primary := repository.PickPrimarySourceForCategory()
 	if primary == nil || primary.Id != "src3" {
 		t.Fatalf("expected primary to skip deleting sources and pick src3, got %#v", primary)
 	}
-	rawFirst := support.PickFirstEnabledCollectSource()
-	if rawFirst == nil || rawFirst.Id != "src1" {
-		t.Fatalf("expected raw first enabled source src1, got %#v", rawFirst)
-	}
 
 	progress.SetSourceDeleting("src1", false)
 	progress.SetSourceDeleting("src2", false)
+	// 主站已持久化：排序首位恢复可用也不改变主站
 	primary = repository.PickPrimarySourceForCategory()
-	if primary == nil || primary.Id != "src1" {
-		t.Fatalf("expected primary to return to src1 after deleting flag cleared, got %#v", primary)
+	if primary == nil || primary.Id != "src3" {
+		t.Fatalf("expected primary to stick to src3 after deleting flags cleared, got %#v", primary)
 	}
 }
 
-func TestCollectService_TriggerDelFilmSourceBatch_DeletesCleanlyAndUpdatesPrimary(t *testing.T) {
+func TestCollectService_TriggerDelFilmSourceBatch_SupportsPrimaryAndDeletesCleanly(t *testing.T) {
 	gdb := setupCascadeCleanTestDB(t)
 	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true, Sort: 0})
 	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true, Sort: 1})
@@ -402,13 +400,14 @@ func TestCollectService_TriggerDelFilmSourceBatch_DeletesCleanlyAndUpdatesPrimar
 	}
 
 	srv := new(CollectService)
-	if err := srv.TriggerDelFilmSourceBatch([]string{"src1", "src2"}); err != nil {
+	// 批量删除包含当前主站 src1：自动交接至未删除的启用站 src3，src1 排在最后删除
+	if err := srv.TriggerDelFilmSourceBatch([]string{"src1", "src2"}, "src3", false); err != nil {
 		t.Fatalf("TriggerDelFilmSourceBatch failed: %v", err)
 	}
 
-	// 入队后、删除未完成前，PickPrimarySourceForCategory 不应选待删站点 src1/src2
+	// 入队后主站已交接至 src3
 	if curPrimary := repository.PickPrimarySourceForCategory(); curPrimary == nil || curPrimary.Id != "src3" {
-		t.Fatalf("expected deleting sources to be skipped immediately, got %#v", curPrimary)
+		t.Fatalf("expected primary src3 while deleting, got %#v", curPrimary)
 	}
 
 	waitSearchWorkIdle(t)
@@ -440,7 +439,7 @@ func TestCollectService_RejectsUpdateAndStateChangeWhileDeleting(t *testing.T) {
 	srv := new(CollectService)
 	next := src
 	next.Name = "改名"
-	if err := srv.UpdateFilmSource(next); err == nil || err.Error() != "该站正在删除" {
+	if err := srv.UpdateFilmSource(next, "", false); err == nil || err.Error() != "该站正在删除" {
 		t.Fatalf("UpdateFilmSource err = %v, want 该站正在删除", err)
 	}
 	if err := srv.BatchUpdateFilmSourceState([]string{src.Id}, false); err == nil || err.Error() != "该站正在删除" {
@@ -523,7 +522,7 @@ func TestCollectService_TriggerDelFilmSourceBatch_RejectsBusyAtomically(t *testi
 	})
 
 	srv := new(CollectService)
-	if err := srv.TriggerDelFilmSourceBatch([]string{srcIdle.Id, srcBusy.Id}); err == nil {
+	if err := srv.TriggerDelFilmSourceBatch([]string{srcIdle.Id, srcBusy.Id}, "", false); err == nil {
 		t.Fatal("expected batch delete to reject when a source is busy")
 	}
 	if progress.IsSourceDeleting(srcIdle.Id) {
@@ -561,7 +560,7 @@ func TestCollectService_UpdateFilmSource_RejectsUriChangeAtomicallyWhenSearchBus
 	srv := new(CollectService)
 	next := src
 	next.Uri = "http://new.example/api"
-	err := srv.UpdateFilmSource(next)
+	err := srv.UpdateFilmSource(next, "", false)
 	if err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
 		t.Fatalf("UpdateFilmSource err = %v, want %v", err, filmsnapshot.ErrSearchIndexBusy)
 	}
@@ -608,7 +607,7 @@ func TestCollectService_UpdateFilmSource_RejectsUriAndStateChangeWhenCategorySyn
 	next := src
 	next.Uri = "http://new.example/api"
 	next.State = false
-	if err := srv.UpdateFilmSource(next); err == nil {
+	if err := srv.UpdateFilmSource(next, "", false); err == nil {
 		t.Fatal("expected UpdateFilmSource to reject while category syncing")
 	}
 

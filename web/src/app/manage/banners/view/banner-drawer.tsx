@@ -22,7 +22,8 @@ import {
   CompassOutlined,
 } from "@ant-design/icons";
 
-import { ApiPatch, ApiPost } from "@/lib/client-api";
+import { API_PRIMARY_MISMATCH, ApiPatch, ApiPost } from "@/lib/client-api";
+import { usePrimarySource } from "@/lib/manage-primary";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ImagePicker from "@/app/manage/components/image-picker";
@@ -53,7 +54,7 @@ const { Title, Text } = Typography;
 interface BannerDrawerProps {
   open: boolean;
   mode: EditorMode;
-  sourceId: string;
+  primarySourceId: string;
   currentRow: BannerRecord | null;
   tmdbEnabled?: boolean;
   onClose: () => void;
@@ -63,13 +64,14 @@ interface BannerDrawerProps {
 export default function BannerDrawer({
   open,
   mode,
-  sourceId,
+  primarySourceId,
   currentRow,
   tmdbEnabled = false,
   onClose,
   onSuccess,
 }: BannerDrawerProps) {
   const { message } = useAppMessage();
+  const { refresh: refreshPrimary } = usePrimarySource();
   const [form] = Form.useForm<BannerFormValues>();
 
   const [selectedFilm, setSelectedFilm] = useState<FilmOption | null>(null);
@@ -254,11 +256,14 @@ export default function BannerDrawer({
       setSubmitting(true);
       const resp = editing
         ? await ApiPatch(`/manage/banners/${encodeURIComponent(editing.id)}`, fields)
-        : await ApiPost("/manage/banners", { sourceId, ...fields });
+        : await ApiPost("/manage/banners", { sourceId: primarySourceId, ...fields });
       if (resp.code === 0) {
         message.success(resp.msg || "保存成功");
         onSuccess();
         onClose();
+      } else if (resp.code === API_PRIMARY_MISMATCH) {
+        message.warning(resp.msg || "主站已变更，请刷新后重试");
+        void refreshPrimary();
       } else {
         message.error(resp.msg || "保存失败");
       }
@@ -440,7 +445,7 @@ export default function BannerDrawer({
       <FilmPicker
         open={filmPickerOpen}
         selectedMid={currentMid}
-        sourceId={sourceId}
+        primarySourceId={primarySourceId}
         onCancel={() => setFilmPickerOpen(false)}
         onSelect={onFilmSelect}
       />

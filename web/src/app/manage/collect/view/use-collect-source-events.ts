@@ -9,6 +9,7 @@ import type {
 interface UseCollectSourceEventsParams {
   setSiteList: React.Dispatch<React.SetStateAction<FilmSource[]>>;
   message: MessageInstance;
+  reloadList?: () => Promise<void> | void;
 }
 
 /**
@@ -18,6 +19,7 @@ interface UseCollectSourceEventsParams {
 export function useCollectSourceEvents({
   setSiteList,
   message,
+  reloadList,
 }: UseCollectSourceEventsParams) {
   const pendingCategoryStatusRef = useRef<Map<string, string>>(new Map());
   const syncingSourcesRef = useRef<Set<string>>(new Set());
@@ -116,9 +118,11 @@ export function useCollectSourceEvents({
         setSiteList((prev) =>
           prev.map((s) => (s.id === evt.sourceId ? { ...s, deleting: false } : s)),
         );
+        message.error("删除失败");
+        void reloadList?.();
       }
     },
-    [message, setSiteList],
+    [message, reloadList, setSiteList],
   );
 
   const handleDeleteSnapshot = useCallback(

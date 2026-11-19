@@ -111,9 +111,6 @@ func (s *InitService) TableInit() error {
 	if err := repository.AlignUserAutoIncrement(); err != nil {
 		return fmt.Errorf("用户表自增对齐失败: %w", err)
 	}
-	if err := repository.EnsureSourceFilmListIndex(); err != nil {
-		return fmt.Errorf("影片列表索引失败: %w", err)
-	}
 	if err := repository.EnsureFilmCategoryScoreIndex(); err != nil {
 		return fmt.Errorf("排片评分索引失败: %w", err)
 	}

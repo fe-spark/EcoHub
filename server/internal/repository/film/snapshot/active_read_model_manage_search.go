@@ -9,7 +9,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
@@ -59,21 +58,12 @@ func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 	startedAt := time.Now()
 	page := shared.EnsurePage(s.Paging)
-	sourceID := strings.TrimSpace(s.SourceId)
-	primary := currentPrimarySourceID()
-	if sourceID != "" && sourceID != primary {
-		list, err := searchManageFilmsFromDB(s, page)
-		if err != nil {
-			return nil, err
-		}
-		log.Printf("[ManageFilmSearch] 数据库检索完成 name=%q source=%s total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), sourceID, page.Total, page.Current, len(list), time.Since(startedAt))
-		return list, nil
-	}
+	sourceID := currentPrimarySourceID()
 	idx, err := loadCurrentSearchIndex()
 	if err != nil {
 		return nil, err
 	}
-	matched, total, err := pageManageMetas(idx, s, page)
+	matched, total, err := pageManageMetas(idx, s, page, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,110 +87,43 @@ func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 		return nil, err
 	}
 	list := convertSnapshotsToFilmIndexes(snaps)
-	if err := fillFilmSourceMids(strings.TrimSpace(s.SourceId), list); err != nil {
+	if err := fillFilmSourceMids(sourceID, list); err != nil {
 		return nil, err
 	}
-	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q source=%s pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), strings.TrimSpace(s.SourceId), s.Pid, s.Cid, page.Total, page.Current, len(list), time.Since(startedAt))
+	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q source=%s pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), sourceID, s.Pid, s.Cid, page.Total, page.Current, len(list), time.Since(startedAt))
 	return list, nil
 }
 
-// searchManageFilmsFromDB 非主站无关键词列表直接走库翻页；带关键词时走按需加载的轻量倒排索引。
-func searchManageFilmsFromDB(s model.SearchVo, page *dto.Page) ([]model.FilmIndex, error) {
-	if db.Mdb == nil {
-		return nil, ErrSearchIndexMissing
+// fillFilmSourceMids 把当前主站的源站编号写到列表上。库内 mid 是入库序号，不给后台当 ID 展示。
+func fillFilmSourceMids(sourceID string, list []model.FilmIndex) error {
+	if sourceID == "" || len(list) == 0 {
+		return nil
 	}
-	filterCtx, ok := newManageFilterContext(s)
-	if !ok {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmIndex{}, nil
-	}
-	if name := strings.TrimSpace(s.Name); name != "" {
-		return searchNonPrimaryManageFilms(filterCtx, page, name)
-	}
-	q := db.Mdb.Model(&model.FilmIndex{})
-	// 列表是这一站自己的档案。按所属站走索引取一页，不再用播放线路编号回表。
-	if filterCtx.sourceID != "" {
-		q = q.Where("first_source_id = ?", filterCtx.sourceID)
-	}
-	switch filterCtx.categoryCheckMode {
-	case 1:
-		q = q.Where("cid = ?", filterCtx.cid)
-	case 2:
-		q = q.Where("pid = ?", filterCtx.pid)
-	case 3:
-		keys := make([]string, 0, len(filterCtx.validCategoryKeys))
-		for key := range filterCtx.validCategoryKeys {
-			keys = append(keys, key)
-		}
-		if len(keys) == 0 {
-			page.Total = 0
-			page.PageCount = 1
-			return []model.FilmIndex{}, nil
-		}
-		q = q.Where("category_key IN ?", keys)
-	}
-	if filterCtx.year > 0 {
-		q = q.Where("year = ?", filterCtx.year)
-	}
-	if filterCtx.beginTime > 0 {
-		q = q.Where("update_stamp >= ?", filterCtx.beginTime)
-	}
-	if filterCtx.endTime > 0 {
-		q = q.Where("update_stamp <= ?", filterCtx.endTime)
-	}
-	if filterCtx.area != "" {
-		q = q.Where("area = ?", filterCtx.area)
-	}
-	if filterCtx.language != "" {
-		q = q.Where("language = ?", filterCtx.language)
-	}
-	if filterCtx.plot != "" {
-		q = q.Where("class_tag LIKE ? ESCAPE '!'", likeNeedle(filterCtx.plot))
-	}
-	knownTotal := int64(-1)
-	if plainSourceList(filterCtx) {
-		n, err := sourceFilmCount(filterCtx.sourceID)
-		if err != nil {
-			return nil, err
-		}
-		// 0 可能是还没对齐，不能当成这个站没有影片。
-		if n > 0 {
-			knownTotal = n
+	mids := make([]int64, 0, len(list))
+	for i := range list {
+		if list[i].Mid > 0 {
+			mids = append(mids, list[i].Mid)
 		}
 	}
-	list, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC", knownTotal, filterCtx.sourceID)
+	byGlobal, err := shared.LoadSourceMidsByGlobalMids(sourceID, mids)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := fillFilmSourceMids(filterCtx.sourceID, list); err != nil {
-		return nil, err
+	for i := range list {
+		list[i].SourceMid = byGlobal[list[i].Mid]
 	}
-	return list, nil
-}
-
-// plainSourceList 只有所属站、没有分类和筛选。总数直接用采集站上的影片数。
-func plainSourceList(f *manageFilterContext) bool {
-	return f != nil && f.sourceID != "" && f.categoryCheckMode == 0 &&
-		f.year == 0 && f.beginTime == 0 && f.endTime == 0 &&
-		f.area == "" && f.language == "" && f.plot == ""
-}
-
-func sourceFilmCount(id string) (int64, error) {
-	var n int64
-	err := db.Mdb.Model(&model.FilmSource{}).Where("id = ?", id).Pluck("film_count", &n).Error
-	return n, err
+	return nil
 }
 
 // pageManageMetas 无关键词时只拷贝当前页；有关键词时先打分再切页。
-func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page) ([]FilmSearchMeta, int, error) {
+func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page, sourceID string) ([]FilmSearchMeta, int, error) {
 	if idx == nil {
 		return nil, 0, ErrSearchIndexMissing
 	}
 	if len(idx.ByUpdate) != len(idx.Items) {
 		return nil, 0, fmt.Errorf("检索索引损坏")
 	}
-	filterCtx, ok := newManageFilterContext(s)
+	filterCtx, ok := newManageFilterContext(s, sourceID)
 	if !ok {
 		return nil, 0, nil
 	}
@@ -259,9 +182,9 @@ type manageFilterContext struct {
 	plot              string
 }
 
-func newManageFilterContext(s model.SearchVo) (*manageFilterContext, bool) {
+func newManageFilterContext(s model.SearchVo, sourceID string) (*manageFilterContext, bool) {
 	ctx := &manageFilterContext{
-		sourceID:  strings.TrimSpace(s.SourceId),
+		sourceID:  strings.TrimSpace(sourceID),
 		cid:       s.Cid,
 		pid:       s.Pid,
 		year:      s.Year,

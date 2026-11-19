@@ -370,18 +370,14 @@ func isSourceDeleting(id string) bool {
 	return fn != nil && fn(id)
 }
 
-// PickFirstEnabledCollectSource 按排序返回首个已启用站点（不跳过正在删除中的站点）。
-func PickFirstEnabledCollectSource() *model.FilmSource {
-	return pickEnabledCollectSource(false)
-}
-
-// PickPrimarySourceForCategory 选取当前基准源站点（首位即基准原则）。
-// 仅从已启用且未在删除中的站点按顺序选取首位；全部站点停用、删除中或无站点时返回 nil。
+// PickPrimarySourceForCategory 选取当前主站。
+// 主站已改为持久化状态（CurrentPrimarySource），保留旧名，既有调用方无需改动。
 func PickPrimarySourceForCategory() *model.FilmSource {
-	return pickEnabledCollectSource(true)
+	return CurrentPrimarySource()
 }
 
-func pickEnabledCollectSource(skipDeleting bool) *model.FilmSource {
+// pickEnabledCollectSource 返回排序最前且未在删除中的启用站（主站为空时的懒初始化来源）。
+func pickEnabledCollectSource() *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
@@ -390,23 +386,10 @@ func pickEnabledCollectSource(skipDeleting bool) *model.FilmSource {
 		return nil
 	}
 	for i := range list {
-		if list[i].Id == "" {
-			continue
-		}
-		if skipDeleting && isSourceDeleting(list[i].Id) {
+		if list[i].Id == "" || isSourceDeleting(list[i].Id) {
 			continue
 		}
 		return &list[i]
 	}
 	return nil
-}
-
-// IsBaselineCollectSource 判断指定采集站是否为当前首位基准源。
-func IsBaselineCollectSource(sourceID string) bool {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return false
-	}
-	primary := PickPrimarySourceForCategory()
-	return primary != nil && strings.TrimSpace(primary.Id) == sourceID
 }

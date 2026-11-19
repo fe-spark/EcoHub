@@ -34,6 +34,7 @@ func setupBannerMySQL(t *testing.T) *gorm.DB {
 		&model.FilmIndex{}, &model.FilmSourcePlaylist{}, &model.FilmSource{}, &model.BannerSlot{},
 		&model.SourceCategory{}, &model.Category{}, &model.CategoryMapping{}, &model.MappingRule{},
 		&model.MovieMatchKey{}, &model.MovieSourceMapping{}, &model.FilmTMDBScrape{},
+		&model.PrimaryState{},
 	}
 	_ = gdb.Migrator().DropTable(models...)
 	if err := gdb.AutoMigrate(models...); err != nil {
@@ -59,13 +60,13 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	}
 	ids := make([]string, 0, 4)
 	for mid := int64(1); mid <= 4; mid++ {
-		item, err := BannerSvc.Create("src1", BannerFields{Mid: i64Ptr(mid)})
+		item, err := BannerSvc.Create("", BannerFields{Mid: i64Ptr(mid)})
 		if err != nil {
 			t.Fatalf("create %d: %v", mid, err)
 		}
 		ids = append(ids, item.Id)
 	}
-	if _, err := BannerSvc.Create("src1", BannerFields{Mid: i64Ptr(1)}); !IsBannerUserError(err) {
+	if _, err := BannerSvc.Create("", BannerFields{Mid: i64Ptr(1)}); !IsBannerUserError(err) {
 		t.Fatalf("duplicate film should be a user error, got %v", err)
 	}
 
@@ -75,7 +76,7 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	if err != nil || len(home) != 3 {
 		t.Fatalf("home should skip film without line on site: %v %+v", err, home)
 	}
-	view, err := BannerSvc.List("src1")
+	view, err := BannerSvc.List()
 	if err != nil || len(view.Items) != 4 || !view.Items[3].Unavailable {
 		t.Fatalf("admin list should mark unavailable: %v %+v", err, view.Items)
 	}
@@ -88,7 +89,7 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = BannerSvc.Reorder("src1", view.Revision, orders[i])
+			_, errs[i] = BannerSvc.Reorder("", view.Revision, orders[i])
 		}(i)
 	}
 	wg.Wait()
@@ -108,23 +109,23 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	}
 
 	// 排序没变化的行 MySQL 返回 RowsAffected=0，不能误判为冲突。
-	cur, _ := BannerSvc.List("src1")
+	cur, _ := BannerSvc.List()
 	same := make([]string, 0, len(cur.Items))
 	for _, it := range cur.Items {
 		same = append(same, it.Id)
 	}
-	if _, err := BannerSvc.Reorder("src1", cur.Revision, same); err != nil {
+	if _, err := BannerSvc.Reorder("", cur.Revision, same); err != nil {
 		t.Fatalf("reorder with unchanged order should succeed: %v", err)
 	}
 
 	// 并发发布整组：同样只能一个成功。
-	cur, _ = BannerSvc.List("src1")
+	cur, _ = BannerSvc.List()
 	decks := [][]BannerFields{{{Mid: i64Ptr(1)}}, {{Mid: i64Ptr(2)}, {Mid: i64Ptr(3)}}}
 	for i := range decks {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = BannerSvc.PublishDeck("src1", cur.Revision, decks[i])
+			_, errs[i] = BannerSvc.PublishDeck("", cur.Revision, decks[i])
 		}(i)
 	}
 	wg.Wait()
@@ -144,12 +145,12 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	}
 
 	// 并发新增同一部影片：一个成功，另一个是友好的重复错误。
-	seedBannerFilm(t, gdb, 9, "src2", 1, "站二", 1)
+	seedBannerFilm(t, gdb, 9, "src1", 1, "站九", 1)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, errs[i] = BannerSvc.Create("src2", BannerFields{Mid: i64Ptr(9)})
+			_, errs[i] = BannerSvc.Create("", BannerFields{Mid: i64Ptr(9)})
 		}(i)
 	}
 	wg.Wait()

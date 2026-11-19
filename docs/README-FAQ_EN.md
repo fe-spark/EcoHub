@@ -16,9 +16,9 @@ The site lists, the admin film list, and the TVBox / MacCMS subscriptions all re
 
 ### What is the main source?
 
-The main source is the first enabled collect source in sort order. The site's home page, categories, search, and daily updates show only the films and categories collected by the main source.
+The main source is set from the admin panel's "主站" (main source) selector and is the collect source the whole site currently uses. The site's home page, categories, search, and daily updates show only the films and categories collected by the main source.
 
-Example: with collect sources A, B, and C in that order and all enabled, the main source is A. Moving B to the top switches the site to the data already collected by B immediately; nothing is re-collected, and the data of A and C is not deleted. When all collect sources are disabled, there is no main source.
+Reordering collect sources does not change the main source. Disabling or deleting the current main source requires choosing a new one at the same time. When all collect sources are disabled, there is no main source.
 
 The play page starts from the main source's film, uses match keys to find the same film in other enabled collect sources, and appends their play lines. Play lines are grouped by collect source.
 

@@ -90,6 +90,9 @@ export const ApiDelete = <T = any>(
 /** 版本号冲突时服务端返回的 code。 */
 export const API_CONFLICT = 409;
 
+/** 写请求的主站上下文已过期。 */
+export const API_PRIMARY_MISMATCH = 40901;
+
 /** 长耗时请求（如批量站点连通性检测），可单独指定超时时间（ms）。 */
 export const ApiPostLong = <T = any>(
   url: string,

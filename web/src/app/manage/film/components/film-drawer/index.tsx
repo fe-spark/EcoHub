@@ -12,9 +12,10 @@ import {
   Space,
 } from "antd";
 import { VideoCameraOutlined } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { API_PRIMARY_MISMATCH, ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { usePrimarySource } from "@/lib/manage-primary";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import { isAllowedImageFile } from "@/lib/imageUpload";
 import TmdbModal from "../tmdb-modal";
@@ -37,7 +38,6 @@ import styles from "./index.module.less";
 export default function FilmDrawer({
   open,
   filmId,
-  defaultSourceId,
   defaultCid,
   onClose,
   onSuccess,
@@ -45,9 +45,11 @@ export default function FilmDrawer({
   const [form] = Form.useForm();
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
+  const { primary, refresh: refreshPrimary } = usePrimarySource();
+  const primaryId = primary?.id || "";
+  const previousPrimaryIdRef = useRef(primaryId);
   const tmdbEnabled = useTmdbEnabled();
 
-  const [sources, setSources] = useState<{ id: string; name: string; state?: boolean }[]>([]);
   const [categoryTreeNodes, setCategoryTreeNodes] = useState<any[]>([]);
   const [categoryLoading, setCategoryLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -71,24 +73,25 @@ export default function FilmDrawer({
   allCategoryListRef.current = allCategoryList;
 
   const loadCategoryTree = useCallback(
-    async (targetSourceId: string) => {
+    async () => {
+      if (!primaryId) {
+        setCategoryTreeNodes([]);
+        return null;
+      }
       setCategoryLoading(true);
       try {
-        const resp = await ApiGet("/manage/film/search/options", {
-          sourceId: targetSourceId || undefined,
-        });
+        const resp = await ApiGet("/manage/film/search/options");
         if (resp.code === 0 && resp.data) {
-          if (Array.isArray(resp.data.sources)) {
-            setSources(resp.data.sources);
+          if (resp.data.primarySourceId && resp.data.primarySourceId !== primaryId) {
+            void refreshPrimary();
+            return null;
           }
           const treeNodes = Array.isArray(resp.data.categoryTree) ? resp.data.categoryTree : [];
           setCategoryTreeNodes(treeNodes);
           const flatList = Array.isArray(resp.data.class) ? resp.data.class : flattenCategoryNodes(treeNodes);
           allCategoryListRef.current = flatList;
           return {
-            sources: resp.data.sources,
-            currentSourceId: resp.data.currentSourceId,
-            defaultSourceId: resp.data.defaultSourceId,
+            primarySourceId: resp.data.primarySourceId || primaryId,
             allCategories: flatList,
           };
         }
@@ -99,7 +102,7 @@ export default function FilmDrawer({
       }
       return null;
     },
-    [message],
+    [message, primaryId, refreshPrimary],
   );
 
   const populateForm = useCallback(
@@ -112,7 +115,14 @@ export default function FilmDrawer({
       const customPic = isCustom ? savedCustom || displayPic : displayPic;
       const slidePic = filmData.customPictureSlide || filmData.pictureSlide || "";
       const cat = resolveCategoryFields(filmData, categoryList || allCategoryListRef.current);
-      const lines = Array.isArray(filmData.list) ? (filmData.list as PlayLine[]) : [];
+      const allLines = Array.isArray(filmData.list) ? (filmData.list as PlayLine[]) : [];
+      const lines = allLines.filter(
+        (line) =>
+          primaryId &&
+          (line.sourceId === primaryId ||
+            line.id === primaryId ||
+            Boolean(line.id?.startsWith(primaryId))),
+      );
       setPlayLines(lines);
       const initialLinks: Record<string, string> = {};
       lines.forEach((l) => {
@@ -120,7 +130,7 @@ export default function FilmDrawer({
         initialLinks[k] = formatEpisodesToPlayLink(l.linkList || []);
       });
       setLineLinksMap(initialLinks);
-      const targetSourceId = String(filmData.sourceId || filmData.firstSourceId || "");
+      const targetSourceId = primaryId;
       const ownerLine =
         lines.find(
           (l) =>
@@ -133,8 +143,8 @@ export default function FilmDrawer({
           ? formatEpisodesToPlayLink(ownerLine.linkList)
           : "";
 
-      form.setFieldsValue(
-        buildFilmDetailFormValues(
+      form.setFieldsValue({
+        ...buildFilmDetailFormValues(
           filmData,
           cat,
           isCustom,
@@ -143,13 +153,25 @@ export default function FilmDrawer({
           ownerLine,
           formattedPlayLink,
         ),
-      );
+        sourceId: primaryId,
+      });
     },
-    [form],
+    [form, primaryId],
   );
 
   useEffect(() => {
+    if (previousPrimaryIdRef.current !== primaryId) {
+      if (open && previousPrimaryIdRef.current && form.isFieldsTouched()) {
+        message.warning("主站已变更，未保存的影片编辑已重新加载");
+      }
+      previousPrimaryIdRef.current = primaryId;
+    }
     if (!open) return;
+    if (!primaryId) {
+      setFetching(false);
+      setCategoryTreeNodes([]);
+      return;
+    }
     let cancelled = false;
     setFetching(true);
     setTmdbSnapshot(null);
@@ -163,7 +185,7 @@ export default function FilmDrawer({
             loadedDetailRef.current = filmData;
             setLoadedDetail(filmData);
 
-            const optionsData = await loadCategoryTree(filmData.sourceId || "");
+            const optionsData = await loadCategoryTree();
             if (cancelled) return;
             const categoryList =
               optionsData?.allCategories || allCategoryListRef.current || [];
@@ -182,13 +204,11 @@ export default function FilmDrawer({
       loadedDetailRef.current = null;
       setLoadedDetail(null);
       setPlayLines([]);
-      loadCategoryTree(defaultSourceId || "")
+      loadCategoryTree()
         .then((data) => {
           if (cancelled) return;
-          const resolvedSourceId =
-            defaultSourceId || data?.currentSourceId || data?.defaultSourceId || data?.sources?.[0]?.id || "";
           const initialValues: Record<string, any> = {
-            sourceId: resolvedSourceId,
+            sourceId: primaryId,
             followPosterSource: false,
             dbId: 0,
             hits: 0,
@@ -211,17 +231,7 @@ export default function FilmDrawer({
     return () => {
       cancelled = true;
     };
-  }, [open, filmId, defaultSourceId, defaultCid, form, loadCategoryTree, message, populateForm]);
-
-  const handleSourceChange = async (newSourceId: string) => {
-    form.setFieldsValue({
-      sourceId: newSourceId,
-      cid: undefined,
-      pid: 0,
-      cName: "",
-    });
-    await loadCategoryTree(newSourceId);
-  };
+  }, [open, filmId, primaryId, defaultCid, form, loadCategoryTree, message, populateForm]);
 
   const handleClassChange = (value?: number) => {
     if (!value) {
@@ -317,7 +327,7 @@ export default function FilmDrawer({
       const { playLink, playForm, ...restValues } = values;
       const payload: Record<string, any> = {
         ...restValues,
-        sourceId: values.sourceId || loadedDetailRef.current?.sourceId || defaultSourceId || "",
+        sourceId: primaryId,
         language: restValues.language || "",
         id: filmId ? Number(filmId) : 0,
         dbId: Number(restValues.dbId) || 0,
@@ -350,6 +360,9 @@ export default function FilmDrawer({
         message.success(filmId ? "更新成功" : "添加成功");
         onSuccess();
         onClose();
+      } else if (resp.code === API_PRIMARY_MISMATCH) {
+        message.warning(resp.msg || "主站已变更，请刷新后重试");
+        void refreshPrimary();
       } else {
         message.error(resp.msg || "保存失败");
       }
@@ -357,7 +370,6 @@ export default function FilmDrawer({
       setSubmitting(false);
     }
   };
-
   const handleAfterClose = () => {
     form.resetFields();
     setTmdbSnapshot(null);
@@ -368,7 +380,6 @@ export default function FilmDrawer({
     setPickerOpen(false);
     setTmdbModalOpen(false);
   };
-
   return (
     <>
       <Drawer
@@ -419,7 +430,7 @@ export default function FilmDrawer({
             onFinish={onFinish}
             requiredMark={renderDrawerRequiredMark}
             initialValues={{
-              sourceId: defaultSourceId || undefined,
+              sourceId: primaryId || undefined,
               dbId: 0,
               hits: 0,
               followPosterSource: Boolean(filmId),
@@ -436,10 +447,8 @@ export default function FilmDrawer({
             </Form.Item>
 
             <div className={styles.drawerStack}>
-              <FilmBasicSection
+    <FilmBasicSection
                 form={form}
-                filmId={filmId}
-                sources={sources}
                 categoryTreeData={categoryTreeData}
                 categoryLoading={categoryLoading}
                 tmdbEnabled={tmdbEnabled}
@@ -452,7 +461,6 @@ export default function FilmDrawer({
                 onUndoTmdb={handleUndoTmdb}
                 onOpenPicker={() => setPickerOpen(true)}
                 onCustomUpload={customUpload}
-                onSourceChange={handleSourceChange}
                 onClassChange={handleClassChange}
               />
 
@@ -461,7 +469,7 @@ export default function FilmDrawer({
               <FilmPlaySection
                 lines={playLines}
                 filmId={filmId}
-                ownerSourceId={form.getFieldValue("sourceId") || loadedDetail?.sourceId || ""}
+                ownerSourceId={primaryId}
                 lineLinks={lineLinksMap}
                 onLineLinkChange={(lineKey, newLink) => {
                   setLineLinksMap((prev) => ({ ...prev, [lineKey]: newLink }));

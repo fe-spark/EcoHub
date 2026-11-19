@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -37,6 +37,8 @@ import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import type { ThemeMode } from "@/components/theme/ThemeDock";
 import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
 import { ManagePermissionProvider } from "@/lib/manage-permission";
+import { ManagePrimaryProvider, usePrimarySource } from "@/lib/manage-primary";
+import PrimarySelector from "./primary-selector";
 import ManageTour, { replayManageTour } from "@/app/manage/components/manage-tour";
 import SiderVersion from "@/app/manage/components/sider-version";
 import {
@@ -58,11 +60,28 @@ type AdminNotice = {
 const { Sider, Header, Content } = Layout;
 const { useBreakpoint } = Grid;
 
-export default function ManageLayoutView({
+function ManageLayoutInner({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { primary, loading: primaryLoading } = usePrimarySource();
+  const [switchVersion, setSwitchVersion] = useState(0);
+  const previousPrimaryIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (primaryLoading) return;
+    const currentId = primary?.id || "empty";
+    if (previousPrimaryIdRef.current === null) {
+      previousPrimaryIdRef.current = currentId;
+      return;
+    }
+    if (previousPrimaryIdRef.current !== currentId) {
+      previousPrimaryIdRef.current = currentId;
+      setSwitchVersion((v) => v + 1);
+    }
+  }, [primary?.id, primaryLoading]);
+
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { config: siteInfo } = useSiteConfig();
@@ -293,7 +312,7 @@ export default function ManageLayoutView({
       ) : null}
       <Layout className={styles.mainLayout}>
         <Header className={styles.header}>
-          <Space size="middle">
+          <Space size="small" split={<span className={styles.headerDivider} />}>
             <Button
               type="text"
               icon={
@@ -314,7 +333,7 @@ export default function ManageLayoutView({
               }}
               className={styles.headerIconBtn}
              />
-             <span className={styles.headerTitle}>管理后台</span>
+             <PrimarySelector isAdmin={Boolean(userInfo?.isAdmin)} />
            </Space>
 
           <Space size="small" className={styles.userArea}>
@@ -390,6 +409,7 @@ export default function ManageLayoutView({
           </Space>
         </Header>
         <Content
+          key={switchVersion}
           className={`${styles.content} ${isFixedTabbedPage ? styles.contentFixed : ""}`}
           style={{ flex: 1, overflow: isFixedTabbedPage ? "hidden" : "auto" }}
         >
@@ -450,5 +470,17 @@ export default function ManageLayoutView({
         <div className={styles.drawerInner}>{menuNode}</div>
       </Drawer>
     </Layout>
+  );
+}
+
+export default function ManageLayoutView({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <ManagePrimaryProvider>
+      <ManageLayoutInner>{children}</ManageLayoutInner>
+    </ManagePrimaryProvider>
   );
 }

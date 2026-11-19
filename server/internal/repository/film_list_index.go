@@ -14,9 +14,6 @@ import (
 	"server/internal/model"
 )
 
-// SourceFilmListIndex 后台按所属站、更新时间取一页，非主站搜索也按它分批往后扫。
-const SourceFilmListIndex = "idx_film_index_source_updated"
-
 // FilmCategoryScoreIndex 排片按分类键、评分取前几部。
 const FilmCategoryScoreIndex = "idx_film_index_cat_score"
 
@@ -25,12 +22,6 @@ const FilmSourceDeletedIndex = "idx_film_index_source_del"
 
 // CollectRecordFilmSourceIndex 让删站清理历史采集影片清单按 source_id 走索引，避免全表扫删。
 const CollectRecordFilmSourceIndex = "idx_crf_source_id"
-
-// EnsureSourceFilmListIndex 让后台按所属站、更新时间取一页。
-// 业务连接的读超时是 30 秒，百万行上建索引会超过它。这条语句单独用更长的读超时，已存在则跳过。
-func EnsureSourceFilmListIndex() error {
-	return ensureTableIndex(model.TableFilmIndex, SourceFilmListIndex, "first_source_id, update_stamp, mid")
-}
 
 // EnsureFilmCategoryScoreIndex 让一键排片按分类键和评分取前几部。
 // 不写进模型标签，避免启动时用 30 秒读超时去建这个索引。

@@ -8,9 +8,7 @@ import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission, ManagePermissionProvider } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import BatchCollectDrawer from "./batch-collect-drawer";
-import CategoryChangeModal from "./category-change-modal";
-import CleanupInvalidModal from "./cleanup-invalid-modal";
+import CollectModals from "./collect-modals";
 import CollectQueueBars from "./collect-queue-bars";
 import DeleteQueueBar from "./delete-queue-bar";
 import CollectSourceGrid from "./collect-source-grid";
@@ -20,6 +18,7 @@ import { useCollectProgressStream } from "./use-collect-progress-stream";
 import { useCollectStream, type CategoryTreeChange, type SearchIndexProgress } from "./use-collect-stream";
 import { useCollectSourceEvents } from "./use-collect-source-events";
 import { useCategoryChangeConfirm } from "./use-category-change-confirm";
+import { usePrimaryHandover } from "./use-primary-handover";
 import { useCollectCleanup } from "./use-collect-cleanup";
 import { useCollectBatchActions } from "./use-collect-batch-actions";
 import { useCollectBatchRunner } from "./use-collect-batch-runner";
@@ -57,7 +56,7 @@ export default function CollectManagePageView() {
     handleCategoryStatus,
     handleSourceDelete,
     handleDeleteSnapshot,
-  } = useCollectSourceEvents({ setSiteList, message });
+  } = useCollectSourceEvents({ setSiteList, message, reloadList: () => void getCollectList() });
 
   const getCollectList = useCallback(
     async (createdId?: string) => {
@@ -195,6 +194,8 @@ export default function CollectManagePageView() {
 
   const categoryConfirm = useCategoryChangeConfirm(getCollectList);
 
+  const primaryHandover = usePrimaryHandover();
+
   const {
     selectedSourceIds,
     batchStateUpdating,
@@ -208,7 +209,7 @@ export default function CollectManagePageView() {
     clearSelection,
     batchChangeSourceState,
     batchDeleteSources,
-  } = useCollectBatchActions(siteList, setSiteList, getCollectList, enqueueDeletingSources);
+  } = useCollectBatchActions(siteList, setSiteList, getCollectList, enqueueDeletingSources, primaryHandover.ask);
 
   const {
     batchOpen,
@@ -286,6 +287,7 @@ export default function CollectManagePageView() {
     getCollectList,
     onDeleteSubmitted: enqueueDeletingSources,
     searchIndex: searchIndexProgress,
+    askPrimaryHandover: primaryHandover.ask,
   });
 
   const {
@@ -464,34 +466,23 @@ export default function CollectManagePageView() {
         onTest={testApi}
       />
 
-      <BatchCollectDrawer
-        open={batchOpen}
-        rows={batchRows}
+      <CollectModals
+        batchOpen={batchOpen}
+        batchRows={batchRows}
         batchTime={batchTime}
         isIndexing={searchIndexProgress?.status === "indexing"}
-        onCancel={() => setBatchOpen(false)}
-        onSubmit={() => void startBatchCollect()}
+        onCancelBatch={() => setBatchOpen(false)}
+        onSubmitBatch={() => void startBatchCollect()}
         onBatchTimeChange={setBatchTime}
-      />
-
-      <CleanupInvalidModal
-        open={cleanupOpen}
-        scanning={cleanupScanning}
-        deleting={cleanupDeleting}
+        cleanupOpen={cleanupOpen}
+        cleanupScanning={cleanupScanning}
+        cleanupDeleting={cleanupDeleting}
         invalidSources={invalidSources}
-        skipped={cleanupSkipped}
-        onCancel={cancelCleanup}
-        onConfirm={() => void confirmCleanup()}
-      />
-
-      <CategoryChangeModal
-        open={categoryConfirm.open}
-        sourceName={categoryConfirm.sourceName}
-        changes={categoryConfirm.changes}
-        loading={categoryConfirm.loading}
-        onCancel={categoryConfirm.closeConfirm}
-        onKeep={() => void categoryConfirm.handleKeep()}
-        onClear={() => void categoryConfirm.handleClear()}
+        cleanupSkipped={cleanupSkipped}
+        onCancelCleanup={cancelCleanup}
+        onConfirmCleanup={() => void confirmCleanup()}
+        categoryConfirm={categoryConfirm}
+        primaryHandoverNode={primaryHandover.modalNode}
       />
       </div>
     </ManagePermissionProvider>

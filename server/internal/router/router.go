@@ -148,6 +148,10 @@ func SetupRouter() *gin.Engine {
 			userRoute.POST(`/delete`, middleware.AdminAccess(), handler.UserHd.UserDelete)
 		}
 
+		// 主站状态与切换（切换仅超管，D4；查询保持默认可写权限供只读展示）
+		manageRoute.GET(`/primary`, handler.CollectHd.PrimaryState)
+		manageRoute.PUT(`/primary`, middleware.AdminAccess(), handler.CollectHd.SwitchPrimary)
+
 		// 采集相关
 		collect := manageRoute.Group(`/collect`)
 		{

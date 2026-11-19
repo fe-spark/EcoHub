@@ -1,26 +1,19 @@
 package snapshot
 
 import (
-	"fmt"
-	"strings"
 	"testing"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/utils"
-
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 )
 
 func TestManageMetaCategory_SourceKey(t *testing.T) {
 	detachGlobalDB(t)
-	s := model.SearchVo{SourceId: "1208629981", Pid: 57}
-	ctx, ok := newManageFilterContext(s)
+	s := model.SearchVo{SourceId: "other", Pid: 57}
+	ctx, ok := newManageFilterContext(s, "1208629981")
 	if !ok {
 		t.Fatal("expected filter context to be created")
 	}
@@ -34,8 +27,8 @@ func TestManageMetaCategory_SourceKey(t *testing.T) {
 		t.Fatal("local pid must not match another source key")
 	}
 
-	sCid := model.SearchVo{SourceId: "1208629981", Cid: 58}
-	ctxCid, ok := newManageFilterContext(sCid)
+	sCid := model.SearchVo{SourceId: "other", Cid: 58}
+	ctxCid, ok := newManageFilterContext(sCid, "1208629981")
 	if !ok {
 		t.Fatal("expected cid filter context to be created")
 	}
@@ -79,7 +72,7 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 
 	// 50,000 条数据内存切页应在 50ms 内完成，绝对不能出现 18s 级卡顿
 	start := time.Now()
-	res, total, err := pageManageMetas(idx, s, page)
+	res, total, err := pageManageMetas(idx, s, page, "3370810636")
 	cost := time.Since(start)
 	if err != nil {
 		t.Fatalf("pageManageMetas error: %v", err)
@@ -95,124 +88,7 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 	}
 }
 
-// detachGlobalDB 让用例在"未连接数据库"的前提下运行，结束后还原。
-// 这些用例只测纯内存逻辑，但被测函数会读全局 db.Mdb；包内其他用例可能把 db.Mdb 留成已关闭/缺表的库，
-// -count>1 时第二轮起就会读到它而失败。
-func TestManageNonPrimarySearchUsesScoreAndScrape(t *testing.T) {
-	DropNonPrimarySearchIndex("")
-	t.Cleanup(func() { DropNonPrimarySearchIndex("") })
-	prev := db.Mdb
-	t.Cleanup(func() { db.Mdb = prev })
-	gdb := setupSearchSourceTestDB(t)
-	if err := gdb.AutoMigrate(&model.FilmTMDBScrape{}, &model.MovieSourceMapping{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmSource{
-		Id: "hd", Name: "其他站", Uri: "https://example.com/hd", State: true, Sort: 1,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	films := []model.FilmIndex{
-		{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "hd"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "修仙", Hits: 1},
-		},
-		{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "hd"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "凡人修仙传", Hits: 99999},
-		},
-		{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "hd"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "慶餘年２", Hits: 10},
-		},
-	}
-	for _, row := range films {
-		if err := gdb.Create(&row).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, mid := range []int64{2, 3, 4} {
-		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: mid, SourceId: "hd", LineKind: "play"}).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := gdb.Create(&model.FilmTMDBScrape{Mid: 3, TmdbID: 42, MediaType: "tv"}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	page := &dto.Page{Current: 1, PageSize: 10}
-	scored, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "修仙", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(scored) != 2 || scored[0].Mid != 2 || scored[1].Mid != 3 {
-		t.Fatalf("score order = %+v", scored)
-	}
-	if !scored[1].IsScraped || scored[1].TmdbID != 42 {
-		t.Fatalf("scrape flag = scraped:%v tmdb:%d", scored[1].IsScraped, scored[1].TmdbID)
-	}
-
-	skipped, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "凡人传", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(skipped) != 1 || skipped[0].Mid != 3 || !skipped[0].IsScraped {
-		t.Fatalf("skip-char search = %+v", skipped)
-	}
-
-	trad, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "庆余年2", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(trad) != 1 || trad[0].Mid != 4 {
-		t.Fatalf("traditional search = %+v", trad)
-	}
-
-	punctPage := &dto.Page{Current: 1, PageSize: 10}
-	punctRes, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "...", Paging: punctPage})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(punctRes) != 0 || punctPage.Total != 0 {
-		t.Fatalf("punctuation search should return empty without scanning, got total=%d list=%+v", punctPage.Total, punctRes)
-	}
-}
-
-func TestManageNonPrimaryListReadsOwnedFilmsByUpdate(t *testing.T) {
-	gdb := setupSearchSourceTestDB(t)
-	if err := gdb.AutoMigrate(&model.MovieSourceMapping{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmSource{
-		Id: "hd", Name: "其他站", Uri: "https://example.com/hd", State: true, Sort: 1, FilmCount: 2,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	films := []model.FilmIndex{
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "旧片", UpdateStamp: 100}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "新片", UpdateStamp: 300}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "uku"}, FilmIndexContent: model.FilmIndexContent{Name: "主站片", UpdateStamp: 999}},
-	}
-	for _, row := range films {
-		if err := gdb.Create(&row).Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: row.Mid, SourceId: "hd", LineKind: "play"}).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	page := &dto.Page{Current: 1, PageSize: 10}
-	list, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.Total != 2 || len(list) != 2 || list[0].Mid != 3 || list[1].Mid != 2 {
-		t.Fatalf("list=%+v total=%d", list, page.Total)
-	}
-}
-
-func TestUpsertNonPrimaryDoesNotResealIndex(t *testing.T) {
+func TestOtherSourceUpsertDoesNotResealPrimaryIndex(t *testing.T) {
 	prevDB := db.Mdb
 	prevIdx := activeFilmSearchMetas.Load()
 	t.Cleanup(func() {
@@ -244,219 +120,6 @@ func TestUpsertNonPrimaryDoesNotResealIndex(t *testing.T) {
 	}
 	if got := activeFilmSearchMetas.Load(); got != idx {
 		t.Fatal("non-primary snapshot save wrote the search index")
-	}
-}
-
-type sqlPrintfWriter struct {
-	lines []string
-}
-
-func (w *sqlPrintfWriter) Printf(format string, args ...any) {
-	w.lines = append(w.lines, fmt.Sprintf(format, args...))
-}
-
-func TestPageOrderedManageFilmsUsesSourceUpdateIndex(t *testing.T) {
-	writer := &sqlPrintfWriter{}
-	gdb, err := gorm.Open(mysql.New(mysql.Config{
-		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
-		SkipInitializeWithVersion: true,
-	}), &gorm.Config{
-		DryRun:               true,
-		DisableAutomaticPing: true,
-		Logger: logger.New(writer, logger.Config{
-			LogLevel: logger.Info,
-		}),
-	})
-	if err != nil {
-		t.Fatalf("open mysql dry-run: %v", err)
-	}
-	page := &dto.Page{Current: 1, PageSize: 10}
-	q := gdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", "hd")
-	if _, err := pageOrderedManageFilms(q, page, "update_stamp DESC, mid DESC", 100, "hd"); err != nil {
-		t.Fatal(err)
-	}
-	sql := strings.Join(writer.lines, "\n")
-	want := "USE INDEX (`" + repository.SourceFilmListIndex + "`)"
-	if !strings.Contains(sql, want) {
-		t.Fatalf("sql=%s", sql)
-	}
-	if strings.Contains(sql, "`film_index USE INDEX") {
-		t.Fatalf("sql=%s", sql)
-	}
-}
-
-func TestApplyManageScoreIndexHint_MySQLUsesSourceUpdateIndex(t *testing.T) {
-	gdb, err := gorm.Open(mysql.New(mysql.Config{
-		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
-		SkipInitializeWithVersion: true,
-	}), &gorm.Config{
-		DryRun:               true,
-		DisableAutomaticPing: true,
-		Logger:               logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open mysql dry-run: %v", err)
-	}
-	sql := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var rows []model.FilmIndex
-		q := applyManageScoreIndexHint(tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", "hd"), "hd")
-		return q.Order("update_stamp DESC, mid DESC").Limit(14).Find(&rows)
-	})
-	want := "USE INDEX (`" + repository.SourceFilmListIndex + "`)"
-	if !strings.Contains(sql, want) {
-		t.Fatalf("sql=%s", sql)
-	}
-	if strings.Contains(sql, "`film_index USE INDEX") {
-		t.Fatalf("sql=%s", sql)
-	}
-}
-
-func TestNonPrimarySearchIndex_LazyLoadPinyinTTLEvictAndSwitch(t *testing.T) {
-	DropNonPrimarySearchIndex("")
-	prevTTL := nonPrimarySearchIdleTTL
-	nonPrimarySearchIdleTTL = 40 * time.Millisecond
-	t.Cleanup(func() {
-		nonPrimarySearchIdleTTL = prevTTL
-		DropNonPrimarySearchIndex("")
-	})
-	prev := db.Mdb
-	t.Cleanup(func() { db.Mdb = prev })
-	gdb := setupSearchSourceTestDB(t)
-	if err := gdb.AutoMigrate(&model.FilmTMDBScrape{}, &model.MovieSourceMapping{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&[]model.FilmSource{
-		{Id: "hd", Name: "备站A", Uri: "https://example.com/hd", State: true, Sort: 1},
-		{Id: "subo", Name: "备站B", Uri: "https://example.com/subo", State: true, Sort: 2},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	films := []model.FilmIndex{
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "凡人修仙传", UpdateStamp: 100}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "hd"}, FilmIndexContent: model.FilmIndexContent{Name: "庆余年", UpdateStamp: 200}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "subo"}, FilmIndexContent: model.FilmIndexContent{Name: "斗破苍穹", UpdateStamp: 300}},
-	}
-	for _, row := range films {
-		if err := gdb.Create(&row).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	activeFilmSearchMetas.Store(nil)
-	page := &dto.Page{Current: 1, PageSize: 10}
-	got, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "fanren", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.Total != 1 || len(got) != 1 || got[0].Mid != 1 {
-		t.Fatalf("pinyin search = %+v total=%d", got, page.Total)
-	}
-	if activeFilmSearchMetas.Load() != nil {
-		t.Fatal("non-primary search must not load into primary search index")
-	}
-	nonPrimarySearchCache.mu.Lock()
-	firstEntry := nonPrimarySearchCache.entry
-	nonPrimarySearchCache.mu.Unlock()
-	if firstEntry == nil || firstEntry.sourceID != "hd" {
-		t.Fatalf("expected hd cached, got %+v", firstEntry)
-	}
-
-	// 切换到另一非主站时替换单槽位缓存
-	gotB, err := GetSearchPageReadModel(model.SearchVo{SourceId: "subo", Name: "doup", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.Total != 1 || len(gotB) != 1 || gotB[0].Mid != 3 {
-		t.Fatalf("subo pinyin search = %+v total=%d", gotB, page.Total)
-	}
-	nonPrimarySearchCache.mu.Lock()
-	secondEntry := nonPrimarySearchCache.entry
-	nonPrimarySearchCache.mu.Unlock()
-	if secondEntry == nil || secondEntry.sourceID != "subo" || secondEntry == firstEntry {
-		t.Fatalf("expected single-slot cache replaced with subo, got %+v", secondEntry)
-	}
-
-	// 空闲超时后自动淘汰释放内存
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		nonPrimarySearchCache.mu.Lock()
-		cur := nonPrimarySearchCache.entry
-		nonPrimarySearchCache.mu.Unlock()
-		if cur == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	nonPrimarySearchCache.mu.Lock()
-	cur := nonPrimarySearchCache.entry
-	nonPrimarySearchCache.mu.Unlock()
-	if cur != nil {
-		t.Fatalf("expected non-primary search index to evict after idle TTL, still got %+v", cur.sourceID)
-	}
-}
-
-func TestNonPrimarySearchIndex_InvalidatesOnUpsertAndDelete(t *testing.T) {
-	DropNonPrimarySearchIndex("")
-	t.Cleanup(func() { DropNonPrimarySearchIndex("") })
-	prev := db.Mdb
-	t.Cleanup(func() { db.Mdb = prev })
-	gdb := setupSearchSourceTestDB(t)
-	if err := gdb.AutoMigrate(&model.FilmTMDBScrape{}, &model.MovieSourceMapping{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmSource{
-		Id: "hd", Name: "备站", Uri: "https://example.com/hd", State: true, Sort: 1,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := SetActiveSnapshotVersion("v-np-invalidate"); err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 10, FirstSourceId: "hd"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	page := &dto.Page{Current: 1, PageSize: 10}
-	got, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "仙逆", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("initial search len=%d", len(got))
-	}
-
-	// 新增同站影片并触达增量刷新：应淘汰非主站缓存并在下次搜到
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 11, FirstSourceId: "hd"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆番外"},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := UpsertActiveSnapshotsByMids(11); err != nil {
-		t.Fatal(err)
-	}
-	got2, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "仙逆", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got2) != 2 {
-		t.Fatalf("expected 2 results after upsert invalidation, got %d", len(got2))
-	}
-
-	// 删除影片后触发失效：应不再搜到已删除影片
-	if err := gdb.Unscoped().Where("mid = ?", 11).Delete(&model.FilmIndex{}).Error; err != nil {
-		t.Fatal(err)
-	}
-	DeleteActiveSnapshotsByMids(11)
-	got3, err := GetSearchPageReadModel(model.SearchVo{SourceId: "hd", Name: "仙逆", Paging: page})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got3) != 1 || got3[0].Mid != 10 {
-		t.Fatalf("expected 1 result after delete invalidation, got %+v", got3)
 	}
 }
 

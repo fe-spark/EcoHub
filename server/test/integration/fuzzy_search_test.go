@@ -25,6 +25,13 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		model.FilmListSnapshot{Mid: 107, Pid: 3, Cid: 30, Name: "少林足球", Hits: 16000, Score: 8.9, Year: 2001, UpdateStamp: now - 9000},
 		model.FilmListSnapshot{Mid: 108, Pid: 3, Cid: 31, Name: "星际穿越", Hits: 22000, Score: 9.6, Year: 2014, UpdateStamp: now - 100},
 	)
+	for mid := int64(101); mid <= 108; mid++ {
+		if err := gdb.Create(&model.FilmSourcePlaylist{
+			Mid: mid, SourceId: integrationPrimarySourceID, LineKind: model.LineKindPlay,
+		}).Error; err != nil {
+			t.Fatalf("写入主站播放线路失败: %v", err)
+		}
+	}
 	activateVersion(t, version)
 
 	t.Run("KeywordSearch_QingYuNian", func(t *testing.T) {

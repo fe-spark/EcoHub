@@ -161,9 +161,12 @@ type SourceHealthItem struct {
 	Reason string `json:"reason"`
 }
 
-// FilmSourceDelBatchRequest 批量删除采集站请求
+// FilmSourceDelBatchRequest 批量删除采集站请求。
+// 删除当前主站时必须单站提交，并携带 NewPrimaryId（或 ConfirmClearPrimary 置空，D6）。
 type FilmSourceDelBatchRequest struct {
-	Ids []string `json:"ids"`
+	Ids                 []string `json:"ids"`
+	NewPrimaryId        string   `json:"newPrimaryId"`
+	ConfirmClearPrimary bool     `json:"confirmClearPrimary"`
 }
 
 type CollectProgress struct {

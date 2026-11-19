@@ -14,29 +14,13 @@ export function useCollectSort(
   const handleSortList = useCallback(
     (nextList: FilmSource[]) => {
       const prevList = pendingSortRef.current?.prev ?? siteList;
-      const prevPrimary = prevList.find((s) => s.state) ?? prevList[0];
-      const nextPrimary = nextList.find((s) => s.state) ?? nextList[0];
-      const isPrimaryChanged = Boolean(prevPrimary && nextPrimary && prevPrimary.id !== nextPrimary.id);
-      let assignedPrimary = false;
-      const optimisticList = nextList.map((item) => {
-        if (item.state && !assignedPrimary) {
-          assignedPrimary = true;
-          return { ...item, isPrimary: true };
-        }
-        return { ...item, isPrimary: false };
-      });
-      if (!assignedPrimary && optimisticList.length > 0) {
-        optimisticList[0] = { ...optimisticList[0], isPrimary: true };
-      }
-      setSiteList(optimisticList);
-      pendingSortRef.current = { prev: prevList, next: optimisticList };
+      // 排序只改顺序；主站是持久化状态，不随排序变化
+      setSiteList(nextList);
+      pendingSortRef.current = { prev: prevList, next: nextList };
 
       sortConfirmRef.current?.destroy();
       sortConfirmRef.current = modal.confirm({
         title: "保存顺序？",
-        content: isPrimaryChanged && nextPrimary
-          ? `主站改为「${nextPrimary.name}」。将清空当前轮播卡组与排片配置。`
-          : undefined,
         okText: "保存",
         cancelText: "取消",
         centered: true,
@@ -50,7 +34,7 @@ export function useCollectSort(
             if (resp.code === 0) {
               pendingSortRef.current = null;
               message.success({
-                content: isPrimaryChanged && nextPrimary ? `主站：${nextPrimary.name}` : "顺序已保存",
+                content: "顺序已保存",
                 key: "collect-sort",
               });
               return;

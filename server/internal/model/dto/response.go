@@ -71,6 +71,14 @@ func CustomResult(statusCode int, code int, data any, msg string, c *gin.Context
 	})
 }
 
+// PrimaryMismatchCode 主站不一致的业务码（HTTP 409）。与轮播 revision 冲突（code 409）区分（D3）。
+const PrimaryMismatchCode = 40901
+
+// PrimaryMismatch 写操作目标与当前主站不一致（D3）。
+func PrimaryMismatch(c *gin.Context) {
+	CustomResult(http.StatusConflict, PrimaryMismatchCode, nil, "主站已变更，请刷新后重试", c)
+}
+
 // GetPage 统计当前查询的总数和页数。
 func GetPage(query *gorm.DB, page *Page) error {
 	if page.PageSize <= 0 {

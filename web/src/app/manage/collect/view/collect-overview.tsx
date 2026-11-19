@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Descriptions, Select, Statistic, Tag, Tooltip, Typography } from "antd";
+import { Card, Descriptions, Statistic, Tag, Tooltip, Typography } from "antd";
 import Link from "next/link";
-import { ApiGet, ApiPost } from "@/lib/client-api";
-import { useAppMessage } from "@/lib/useAppMessage";
+import { ApiGet } from "@/lib/client-api";
 import { type FilmSource } from "./types";
 import styles from "./collect-overview.module.less";
 
@@ -31,21 +30,14 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
   };
 }
 
-/** 工作台：运行概览 + 优先采集站（进入页面拉取一次） */
-function orderBySort(list: FilmSource[]) {
-  return [...list].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.id.localeCompare(b.id));
-}
-
+/** 工作台：运行概览 + 当前主站（进入页面拉取一次） */
 interface CollectOverviewProps {
   onPrimaryChange?: (primary: FilmSource | null) => void;
-  onSwitchingChange?: (switching: boolean) => void;
 }
 
-export default function CollectOverview({ onPrimaryChange, onSwitchingChange }: CollectOverviewProps = {}) {
-  const { message, modal } = useAppMessage();
+export default function CollectOverview({ onPrimaryChange }: CollectOverviewProps = {}) {
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
-  const [switching, setSwitching] = useState(false);
   const mountedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -84,79 +76,17 @@ export default function CollectOverview({ onPrimaryChange, onSwitchingChange }: 
     [siteList],
   );
 
+  // 服务端标记的主站；主站为持久化状态，排序不改变主站
   const topSite = useMemo(
-    () => orderBySort(siteList).find((item) => item.state) ?? null,
+    () => siteList.find((item) => item.isPrimary) ?? null,
     [siteList],
   );
 
   useEffect(() => {
-    onSwitchingChange?.(switching);
-  }, [switching, onSwitchingChange]);
-
-  // 排序接口返回前，服务端主站还是旧的。提前通知会让片库规模读到上一站的分类数，之后不再请求。
-  useEffect(() => {
-    if (!loading && !switching) {
+    if (!loading) {
       onPrimaryChange?.(topSite);
     }
-  }, [topSite, loading, switching, onPrimaryChange]);
-
-  const switchCandidates = useMemo(
-    () => orderBySort(siteList).filter((item) => item.state && item.id !== topSite?.id),
-    [siteList, topSite?.id],
-  );
-  const askSwitchPrimary = (sourceId: string) => {
-    if (!sourceId || sourceId === topSite?.id || switching) {
-      return;
-    }
-    const chosen = siteList.find((item) => item.id === sourceId && item.state);
-    if (!chosen) {
-      return;
-    }
-    modal.confirm({
-      title: `主站改为「${chosen.name}」？`,
-      content: "将清空当前轮播卡组与排片配置。",
-      okText: "切换",
-      cancelText: "取消",
-      centered: true,
-      onOk: () => switchPrimary(sourceId),
-    });
-  };
-
-  const switchPrimary = async (sourceId: string) => {
-    const chosen = siteList.find((item) => item.id === sourceId && item.state);
-    if (!chosen || switching) {
-      return;
-    }
-    const previous = siteList;
-    const next = [chosen, ...orderBySort(siteList).filter((item) => item.id !== chosen.id)].map((item, index) => ({
-      ...item,
-      sort: index,
-      isPrimary: item.id === chosen.id,
-    }));
-    setSiteList(next);
-    setSwitching(true);
-    try {
-      const resp = await ApiPost("/manage/collect/sort", { ids: next.map((item) => item.id) });
-      if (!mountedRef.current) {
-        return;
-      }
-      if (resp.code !== 0) {
-        setSiteList(previous);
-        message.error(resp.msg || "切换主站失败");
-        return;
-      }
-      message.success(`主站：${chosen.name}`);
-    } catch {
-      if (mountedRef.current) {
-        setSiteList(previous);
-        message.error("切换主站失败");
-      }
-    } finally {
-      if (mountedRef.current) {
-        setSwitching(false);
-      }
-    }
-  };
+  }, [topSite, loading, onPrimaryChange]);
 
   const summaryCardClassNames = {
     header: styles.summaryCardHead,
@@ -207,28 +137,7 @@ export default function CollectOverview({ onPrimaryChange, onSwitchingChange }: 
       >
         {topSite ? (
           <Descriptions column={1} size="small" className={styles.masterDescriptions}>
-            <Descriptions.Item label="名称">
-              {switchCandidates.length > 0 ? (
-                <span className={styles.sourceSelect}>
-                  <Select
-                    className={styles.sourceSelect}
-                    size="middle"
-                    value={topSite.id}
-                    loading={switching}
-                    disabled={switching}
-                    popupMatchSelectWidth={false}
-                    options={orderBySort(siteList)
-                      .filter((item) => item.state)
-                      .map((item) => ({ value: item.id, label: item.name }))}
-                    onChange={(sourceId) => {
-                      askSwitchPrimary(sourceId);
-                    }}
-                  />
-                </span>
-              ) : (
-                topSite.name
-              )}
-            </Descriptions.Item>
+            <Descriptions.Item label="名称">{topSite.name}</Descriptions.Item>
             <Descriptions.Item label="接口地址">
               <Tooltip title={topSite.uri}>
                 <Typography.Link
