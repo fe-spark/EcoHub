@@ -1,14 +1,12 @@
 <div align="center">
 
-<img src="../logo.png" alt="EcoHub" width="120" />
+<img src="../logo.png" alt="EcoHub" width="110" />
 
 # EcoHub
 
 [![Release](https://img.shields.io/github/v/release/fe-spark/EcoHub)](https://github.com/fe-spark/EcoHub/releases)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
-[![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/ghcr.io-fe--spark%2Fecohub-2496ED?logo=docker&logoColor=white)](https://github.com/fe-spark/EcoHub/pkgs/container/ecohub)
 [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue)](../LICENSE)
 
@@ -16,7 +14,7 @@
 
 [中文](../README.md) | English
 
-[Demo](https://eco.fe-spark.cn) · [Admin demo](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Release notes](./RELEASE_EN.md) · [Telegram](https://t.me/ecohub_club)
+[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Release notes](./RELEASE_EN.md) · [Telegram](https://t.me/ecohub_club)
 
 </div>
 
@@ -25,39 +23,36 @@
 
 ## Overview
 
-EcoHub is a self-hosted film aggregation system for individuals and small teams. After an administrator configures collect sources in the admin panel, EcoHub periodically fetches film metadata into the database and exposes a viewing site, an admin panel, and subscription endpoints for clients.
-
-The application ships as a single All-in-One Docker image and runs alongside MySQL 8 and Redis 7.
+EcoHub is a self-hosted film aggregation system for individuals and small teams. After an administrator configures collect sources in the admin panel, EcoHub periodically fetches film metadata into the database. The application ships as a single All-in-One Docker image alongside MySQL 8 and Redis 7.
 
 EcoHub neither provides nor stores any media files; all sources come from collect APIs configured by the deployer.
 
+| Demo | URL |
+| --- | --- |
+| Viewing site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
+| Admin panel | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
+
 ## Main features
 
-- **Multi-source collection and scheduling**: supports JSON and XML collect APIs, full and incremental collects, failed-page retries, and collect batch records; includes an hourly incremental collect and three maintenance tasks (library, log, and collect record cleanup).
-- **Main source and in-memory search**: the global main source is explicitly selected in the admin panel (reordering sources does not change the main source); the in-memory inverted index stays resident for the current main source with word segmentation, full pinyin, and pinyin initials; supports category rules and TMDB metadata scraping.
-- **Viewing site and player**: home page banners, category filters, daily updates, watch history, and private access control; Artplayer and Hls.js player with multi-line switching, playback position memory, and danmaku support.
-- **Subscription endpoints**: provides `/api/provide/app` (EcoHub clients), `/api/provide/tvbox` (TVBox / 影视仓), and `/api/provide/vod` (MacCMS); the play page aggregates play lines from other enabled sources by match key.
-- **Admin panel and operations**: collect center, library and banner management, asset center, analytics, multi-role accounts, per-module network proxy, Telegram notifications, configuration export/import, and online upgrade.
-- **Native clients**: separate repositories linked as git submodules: [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) (`app-for-android/`) and [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (`app-for-ohos/`).
+| Module | Capabilities |
+| --- | --- |
+| Multi-source collect | JSON / XML APIs, scheduled full and incremental collects |
+| Main source and search | Explicit global main source, in-memory pinyin/word search, TMDB scraping |
+| Viewing site | Banners, filters, watch history, Artplayer + danmaku, private access |
+| Subscription endpoints | `/api/provide/app` (clients), `tvbox`, and `vod` (MacCMS) |
+| Admin panel | Collect and library management, category rules, analytics, proxy, Telegram, online upgrade |
+| Native clients | [Android](https://github.com/fe-spark/EcoHub-for-Android) (`app-for-android/`), [OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (`app-for-ohos/`) |
 
 For behavioral details, see the [FAQ](./README-FAQ_EN.md).
 
 ## Architecture
 
-| Component | Stack | Directory |
-| --- | --- | --- |
-| Backend API | Go 1.27, Gin, GORM | `server/` |
-| Frontend | Next.js 16, React 19, TypeScript, Ant Design 6 | `web/` |
-| Database and cache | MySQL 8, Redis 7 | — |
-| Release image | `ghcr.io/fe-spark/ecohub` (`linux/amd64`, `linux/arm64`) | `Dockerfile`, `deploy/release/` |
-
 ```mermaid
 flowchart LR
-    Browser["Browser / Clients / TVBox / MacCMS"] --> Web["Next.js frontend (web/ :3000)"]
-    Web -- "/api/*" --> API["Go API (server/ :8080)"]
-    API --> MySQL[("MySQL 8")]
-    API --> Redis[("Redis 7")]
-    API --> External["Collect sources / TMDB / Telegram / Danmaku APIs"]
+    Client["Browser / Subscription clients"] --> Web["Next.js :3000"]
+    Web -- "/api/*" --> API["Go API :8080"]
+    API --> DB[("MySQL 8 / Redis 7")]
+    API --> Ext["Collect sources / TMDB / Telegram / Danmaku"]
 ```
 
 ## Quick start
@@ -69,16 +64,16 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
   | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.0 sh
 ```
 
-After installation, the terminal prints the site and admin URLs, initial credentials, and subscription URLs. The default web port is `3000`, the install directory is `~/ecohub`, and daily management uses the `ecohub` command. For passwords, ports, 1Panel, manual deployment, reverse proxies, and environment variables, see the [Deploy guide](./README-Deploy_EN.md).
+After installation, the terminal prints the URLs, initial credentials, and subscription URLs. The default web port is `3000`, the install directory is `~/ecohub`, and daily management uses `ecohub`. For passwords, ports, 1Panel, manual deployment, reverse proxies, and environment variables, see the [Deploy guide](./README-Deploy_EN.md).
 
 ## Recommendations
 
-| Kind | Provider | Link |
-| --- | --- | --- |
-| Server | CloudCone (hosts the demo; unthrottled disk I/O) | [Visit](https://app.cloudcone.com/?ref=14393) |
-| Network | LiangXinYun, from ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| Network | PeiQian, from ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| Network | DOVE | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
+| Kind | Provider | Notes | Link |
+| --- | --- | --- | --- |
+| Server | CloudCone | Hosts the demo; unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
+| Network | LiangXinYun | From ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| Network | PeiQian | From ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| Network | DOVE | Reliable backup network service | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## Documentation
 

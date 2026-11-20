@@ -1,14 +1,12 @@
 <div align="center">
 
-<img src="logo.png" alt="EcoHub" width="120" />
+<img src="logo.png" alt="EcoHub" width="110" />
 
 # EcoHub
 
 [![Release](https://img.shields.io/github/v/release/fe-spark/EcoHub)](https://github.com/fe-spark/EcoHub/releases)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
-[![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
-[![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/ghcr.io-fe--spark%2Fecohub-2496ED?logo=docker&logoColor=white)](https://github.com/fe-spark/EcoHub/pkgs/container/ecohub)
 [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue)](./LICENSE)
 
@@ -16,7 +14,7 @@
 
 中文 | [English](./docs/README_EN.md)
 
-[在线演示](https://eco.fe-spark.cn) · [管理后台演示](https://eco.fe-spark.cn/manage) · [部署指南](./docs/README-Deploy.md) · [常见问题](./docs/README-FAQ.md) · [版本说明](./docs/RELEASE.md) · [交流群组](https://t.me/ecohub_club)
+[在线演示](https://eco.fe-spark.cn) · [管理后台](https://eco.fe-spark.cn/manage) · [部署指南](./docs/README-Deploy.md) · [常见问题](./docs/README-FAQ.md) · [版本说明](./docs/RELEASE.md) · [交流群组](https://t.me/ecohub_club)
 
 </div>
 
@@ -25,39 +23,36 @@
 
 ## 简介
 
-EcoHub 是一套面向个人与小型团队的自托管影视聚合系统。管理员在后台配置采集站后，系统定时拉取影片数据并统一入库，提供观影网站、管理后台及客户端订阅接口。
-
-系统以单个 All-in-One Docker 镜像发布，配合 MySQL 8 和 Redis 7 即可运行。
+EcoHub 是一套面向个人与小型团队的自托管影视聚合系统。管理员在后台配置采集站后，系统定时拉取影片数据并统一入库，以单个 All-in-One Docker 镜像发布，配合 MySQL 8 与 Redis 7 即可运行。
 
 EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自行配置的采集接口。
 
+| 演示入口 | 地址 |
+| --- | --- |
+| 观影前台 | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
+| 管理后台 | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
+
 ## 主要功能
 
-- **多站采集与调度**：支持 JSON / XML 采集接口、全量/增量采集、失败重试与采集批次记录；内置每小时增量采集及片库、日志、采集记录清理任务。
-- **主站与内存检索**：后台显式指定全局主站（调整排序不改变主站），内存倒排索引常驻当前主站并支持分词、全拼与简拼检索；支持分类规则配置与 TMDB 元数据刮削。
-- **观影网站与播放器**：提供首页轮播、分类筛选、每日更新、观看历史与私有化访问控制；集成 Artplayer 与 Hls.js 播放器，支持多线路切换、进度记忆与全网弹幕。
-- **多端订阅接口**：提供 `/api/provide/app`（EcoHub 客户端）、`/api/provide/tvbox`（TVBox / 影视仓）与 `/api/provide/vod`（MacCMS）订阅地址，播放页按匹配键聚合其他启用站点的线路。
-- **管理后台与运维**：覆盖采集中心、片库与轮播管理、素材中心、数据分析、多角色账号、分模块网络代理、Telegram 通知、配置导出导入及在线升级。
-- **独立客户端**：以 git submodule 形式关联 [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)（`app-for-android/`）与 [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`）。
+| 模块 | 核心能力 |
+| --- | --- |
+| 多站采集 | JSON / XML 接口，全量与增量定时采集 |
+| 主站与检索 | 全局主站、内存拼音/分词检索、TMDB 刮削 |
+| 观影网站 | 轮播筛选、观看历史、Artplayer 弹幕播放、私有访问 |
+| 订阅接口 | `/api/provide/app`（客户端）、`tvbox`、`vod`（MacCMS） |
+| 管理后台 | 采集与片库管理、分类规则、统计、代理、Telegram 通知、在线升级 |
+| 独立客户端 | [Android](https://github.com/fe-spark/EcoHub-for-Android)（`app-for-android/`）、[OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`） |
 
-功能细节与机制说明见 [常见问题](./docs/README-FAQ.md)。
+功能细节见 [常见问题](./docs/README-FAQ.md)。
 
 ## 技术架构
 
-| 组件 | 技术栈 | 目录 |
-| --- | --- | --- |
-| 后端 API | Go 1.27、Gin、GORM | `server/` |
-| 前端 | Next.js 16、React 19、TypeScript、Ant Design 6 | `web/` |
-| 数据库与缓存 | MySQL 8、Redis 7 | — |
-| 发布镜像 | `ghcr.io/fe-spark/ecohub`（`linux/amd64`、`linux/arm64`） | `Dockerfile`、`deploy/release/` |
-
 ```mermaid
 flowchart LR
-    Browser["浏览器 / 客户端 / TVBox / MacCMS"] --> Web["Next.js 前端 (web/ :3000)"]
-    Web -- "/api/*" --> API["Go API (server/ :8080)"]
-    API --> MySQL[("MySQL 8")]
-    API --> Redis[("Redis 7")]
-    API --> External["采集站 / TMDB / Telegram / 弹幕接口"]
+    Client["浏览器 / 订阅客户端"] --> Web["Next.js 前端 :3000"]
+    Web -- "/api/*" --> API["Go API :8080"]
+    API --> DB[("MySQL 8 / Redis 7")]
+    API --> Ext["采集站 / TMDB / Telegram / 弹幕"]
 ```
 
 ## 快速开始
@@ -69,16 +64,16 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
   | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.0 sh
 ```
 
-安装完成后终端将输出前台/后台地址、初始账号与订阅地址，默认 Web 端口为 `3000`，数据目录为 `~/ecohub`，后续可通过 `ecohub` 命令管理。自定义密码、端口、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/README-Deploy.md)。
+安装完成后终端将输出访问地址、初始账号与订阅地址，默认 Web 端口为 `3000`，数据目录为 `~/ecohub`，后续可通过 `ecohub` 命令管理。密码、端口、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/README-Deploy.md)。
 
 ## 推荐
 
-| 类型 | 服务商 | 链接 |
-| --- | --- | --- |
-| 服务器 | CloudCone（演示站所用，磁盘 I/O 不限） | [选购](https://app.cloudcone.com/?ref=14393) |
-| 网络 | 良心云，低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| 网络 | 赔钱机场，低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| 网络 | DOVE | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
+| 类型 | 服务商 | 说明 | 链接 |
+| --- | --- | --- | --- |
+| 服务器 | CloudCone | 演示站所用，磁盘 I/O 不限 | [选购](https://app.cloudcone.com/?ref=14393) |
+| 网络 | 良心云 | 低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| 网络 | 赔钱机场 | 低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| 网络 | DOVE | 稳定备用网络服务 | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## 文档
 
