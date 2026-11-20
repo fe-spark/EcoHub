@@ -18,6 +18,8 @@ import (
 func resetSearchReseal() {
 	searchReseal.mu.Lock()
 	searchReseal.pending = map[int64]struct{}{}
+	searchReseal.verifiedPrimary = ""
+	searchReseal.allPendingVerified = false
 	searchReseal.sealing = map[string]struct{}{}
 	searchReseal.running = false
 	searchReseal.retryWait = 0
@@ -489,4 +491,84 @@ func TestResealQueue_SealsMidsArrivedDuringFailedSeal(t *testing.T) {
 	}
 	snap, _ := progress.Snapshot("rebuild-more")
 	t.Fatalf("后续编号封完后应收入完成, got %q", snap.Status)
+}
+
+func TestSchedulePrimarySearchReseal_PassesVerifiedPrimaryToSeal(t *testing.T) {
+	resetSearchReseal()
+	prevOwned := sealOwnedSearchIndex
+	prevSeal := sealSearchIndex
+	t.Cleanup(func() {
+		sealOwnedSearchIndex = prevOwned
+		sealSearchIndex = prevSeal
+		resetSearchReseal()
+	})
+
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.FilmIndex{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "uku", Name: "主站", Uri: "https://example.com/uku", State: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&[]model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "uku"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "uku"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "other"}},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	type ownedCall struct {
+		primary string
+		mids    []int64
+	}
+	ownedCh := make(chan ownedCall, 1)
+	sealOwnedSearchIndex = func(primary string, mids []int64) bool {
+		ownedCh <- ownedCall{primary: primary, mids: append([]int64(nil), mids...)}
+		return true
+	}
+
+	schedulePrimarySearchReseal([]int64{1, 2, 3})
+
+	select {
+	case got := <-ownedCh:
+		if got.primary != "uku" {
+			t.Fatalf("primary = %q, want uku", got.primary)
+		}
+		if len(got.mids) != 2 {
+			t.Fatalf("mids = %v, want 2 primary mids", got.mids)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected sealOwnedSearchIndex to be called with verified primary")
+	}
+
+	// 若混入未过滤的 scheduleSearchReseal，则应清空验证标记并回退至 sealSearchIndex
+	beginCollectQueue()
+	unverifiedCh := make(chan []int64, 1)
+	sealSearchIndex = func(mids []int64) bool {
+		unverifiedCh <- append([]int64(nil), mids...)
+		return true
+	}
+	schedulePrimarySearchReseal([]int64{1, 2, 3})
+	scheduleSearchReseal([]int64{9})
+	endCollectQueue()
+
+	select {
+	case got := <-unverifiedCh:
+		if len(got) != 3 {
+			t.Fatalf("mixed mids = %v, want 3 mids routed to sealSearchIndex", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected mixed queue to fall back to sealSearchIndex")
+	}
 }

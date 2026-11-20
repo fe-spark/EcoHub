@@ -54,15 +54,21 @@ func RebuildPrimarySearchIndex() error {
 // 数据库未连接时无法判断所属站，原样返回，避免测试里的封口队列被清空。
 // 查询失败返回 error。写入检索索引前必须再用这次结果过滤；失败则放弃写入，不点查未过滤编号，也不因此全表重建。
 func PrimarySearchMIDs(mids []int64) ([]int64, error) {
+	_, kept, err := PrimarySearchMIDsWithSource(mids)
+	return kept, err
+}
+
+// PrimarySearchMIDsWithSource 过滤出属于当前主站的影片编号，并同时返回过滤时使用的主站 ID。
+func PrimarySearchMIDsWithSource(mids []int64) (string, []int64, error) {
 	if len(mids) == 0 {
-		return nil, nil
+		return currentPrimarySourceID(), nil, nil
 	}
 	if db.Mdb == nil {
-		return append([]int64(nil), mids...), nil
+		return "", append([]int64(nil), mids...), nil
 	}
 	primary := currentPrimarySourceID()
 	if primary == "" {
-		return nil, nil
+		return "", nil, nil
 	}
 	const batchSize = 2500
 	owned := make(map[int64]string, len(mids))
@@ -79,7 +85,7 @@ func PrimarySearchMIDs(mids []int64) ([]int64, error) {
 			Select("mid, first_source_id").
 			Where("mid IN ?", mids[i:end]).
 			Find(&rows).Error; err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		for _, row := range rows {
 			owned[row.Mid] = strings.TrimSpace(row.FirstSourceId)
@@ -93,5 +99,5 @@ func PrimarySearchMIDs(mids []int64) ([]int64, error) {
 		}
 		kept = append(kept, mid)
 	}
-	return kept, nil
+	return primary, kept, nil
 }

@@ -12,24 +12,42 @@ import (
 	"server/internal/model"
 )
 
+// resealFullRebuildMinMids 单轮封口主站编号达到该阈值时，放弃逐批 IN 回表与增量克隆，
+// 改为整站顺序流式重建，避免新旧两份大索引同时驻留内存并缩短大批量读库耗时。
+var resealFullRebuildMinMids = 50000
+
 // ResealSearchIndexMids 按编号封口。
 func ResealSearchIndexMids(mids []int64) bool {
 	return ResealSearchIndex(mids)
 }
 
+// ResealOwnedSearchIndex 对已按 primaryID 过滤过所属站的编号执行封口。
+// 若当前主站未变，跳过重复的 PrimarySearchMIDs 查询；主站变化或未传主站时仍兜底回查。
+func ResealOwnedSearchIndex(primaryID string, mids []int64) bool {
+	return resealSearchIndex(mids, strings.TrimSpace(primaryID))
+}
+
 // ResealSearchIndex 全部采集队列结束后的唯一封口。
-// 内存索引不可用时整表顺序重建。索引已就绪但还是空的，按编号点查。
+// 内存索引不可用或待封口规模超过阈值时整表顺序重建。索引已就绪且未超阈值时，按编号点查。
 // 点查失败改为顺序加载。所属站查询失败时直接放弃，不拿未过滤编号点查，也不因此整表重建。
 // 成功打进内存索引时返回 true。
 func ResealSearchIndex(mids []int64) bool {
+	return resealSearchIndex(mids, "")
+}
+
+func resealSearchIndex(mids []int64, verifiedPrimary string) bool {
 	startedAt := time.Now()
 	raw := NormalizeSnapshotMIDs(mids)
-	owned, err := PrimarySearchMIDs(raw)
-	if err != nil {
-		log.Printf("[ActiveReadModel] 检索索引封口所属站查询失败，放弃本次封口 raw=%d err=%v", len(raw), err)
-		return false
+	if verifiedPrimary != "" && db.Mdb != nil && verifiedPrimary == currentPrimarySourceID() {
+		mids = raw
+	} else {
+		owned, err := PrimarySearchMIDs(raw)
+		if err != nil {
+			log.Printf("[ActiveReadModel] 检索索引封口所属站查询失败，放弃本次封口 raw=%d err=%v", len(raw), err)
+			return false
+		}
+		mids = owned
 	}
-	mids = owned
 	log.Printf("[ActiveReadModel] 检索索引封口进入 raw=%d", len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return len(mids) == 0 && db.Mdb != nil
@@ -43,6 +61,12 @@ func ResealSearchIndex(mids []int64) bool {
 	}
 	if !searchIndexReady(base, version) {
 		log.Printf("[ActiveReadModel] 检索索引整表顺序加载 mids=%d items=%d", len(mids), items)
+		RequestActiveFilmSearchIndexRebuild()
+		return false
+	}
+	if resealFullRebuildMinMids > 0 && len(mids) >= resealFullRebuildMinMids {
+		log.Printf("[ActiveReadModel] 检索索引待封口规模过大，转整站顺序重建 mids=%d threshold=%d items=%d",
+			len(mids), resealFullRebuildMinMids, items)
 		RequestActiveFilmSearchIndexRebuild()
 		return false
 	}
