@@ -38,17 +38,20 @@ html[data-theme="dark"] .panelCard {
   width: 150px;
 }
 
-.categorySelect {
+.categorySelect.categorySelect {
   width: 150px;
+  flex: none;
 }
 
-.searchInput {
+.searchInput.searchInput {
   width: 240px;
+  flex: none;
 }
 
-.dateRange {
+.dateRange.dateRange {
   width: 320px;
   max-width: 100%;
+  flex: none;
 }
 
 .searchButton {
@@ -117,12 +120,12 @@ html[data-theme="dark"] .panelCard {
   }
 
   .sourceSelect,
-  .categorySelect {
-    width: 50%;
+  .categorySelect.categorySelect {
+    width: 100%;
   }
 
-  .searchInput,
-  .dateRange,
+  .searchInput.searchInput,
+  .dateRange.dateRange,
   .searchButton {
     width: 100%;
   }

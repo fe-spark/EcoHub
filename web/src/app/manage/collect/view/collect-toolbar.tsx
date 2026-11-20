@@ -1,7 +1,8 @@
 import React from "react";
-import { Button, Card, Popconfirm, Space, Tooltip } from "antd";
+import { Button, Popconfirm, Space, Tooltip } from "antd";
+import { ThunderboltOutlined } from "@ant-design/icons";
+import { ContentSectionCard } from "@/app/manage/components/content-shell";
 import { collectIndexUpdatingReason } from "./collect-selection";
-import styles from "./index.module.less";
 
 export interface CollectToolbarProps {
   totalCount: number;
@@ -20,6 +21,7 @@ export interface CollectToolbarProps {
   onBatchEnable: () => void;
   onBatchDisable: () => void;
   onBatchDelete: () => void;
+  children?: React.ReactNode;
 }
 
 export default function CollectToolbar(props: CollectToolbarProps) {
@@ -40,16 +42,19 @@ export default function CollectToolbar(props: CollectToolbarProps) {
     onBatchEnable,
     onBatchDisable,
     onBatchDelete,
+    children,
   } = props;
 
   const batchActionDisabled =
     !canWrite || selectedCount === 0 || batchStateUpdating || batchDeleting || hasBusySelected;
 
   return (
-    <Card size="small" className={styles.toolbarCard} styles={{ body: { padding: 12 } }}>
-      <div className={styles.toolbar}>
-        <Space size={[8, 8]} wrap className={styles.toolbarSpace}>
-          <span className={styles.toolbarHint}>共 {totalCount} 个</span>
+    <ContentSectionCard
+      icon={<ThunderboltOutlined />}
+      title="采集站列表"
+      count={totalCount}
+      extra={
+        <Space size={6} wrap>
           <Button size="small" data-tour="collect-select-all" onClick={onSelectAll}>
             全选
           </Button>
@@ -60,7 +65,9 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             清空选择
           </Button>
         </Space>
-        <Space size={8} wrap className={`${styles.toolbarSpace} ${styles.toolbarActions}`}>
+      }
+      actions={
+        <Space size={8} wrap>
           <Tooltip title={isIndexing ? collectIndexUpdatingReason : undefined}>
             <span>
               <Button
@@ -115,7 +122,10 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             </Button>
           </Popconfirm>
         </Space>
-      </div>
-    </Card>
+      }
+      bodyPadding
+    >
+      {children}
+    </ContentSectionCard>
   );
 }

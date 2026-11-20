@@ -26,9 +26,9 @@ func bannerFail(err error, c *gin.Context) {
 	}
 }
 
-// BannerList GET /manage/banners 主站轮播（D1：固定主站，忽略 sourceId）。
+// BannerList GET /manage/banners 获取指定采集站轮播（sourceId 为空时默认当前主站）。
 func (h *ManageHandler) BannerList(c *gin.Context) {
-	view, err := service.BannerSvc.List()
+	view, err := service.BannerSvc.List(c.Query("sourceId"))
 	if err != nil {
 		bannerFail(err, c)
 		return
@@ -36,7 +36,43 @@ func (h *ManageHandler) BannerList(c *gin.Context) {
 	dto.Success(view, "获取轮播列表成功", c)
 }
 
-// BannerCreate POST /manage/banners 新增一行，立即生效（固定主站）。
+// BannerCategories GET /manage/banners/categories 获取指定采集站可用于一键排片的一级分类。
+func (h *ManageHandler) BannerCategories(c *gin.Context) {
+	list, err := service.BannerSvc.Categories(c.Query("sourceId"))
+	if err != nil {
+		bannerFail(err, c)
+		return
+	}
+	dto.Success(list, "获取轮播分类成功", c)
+}
+
+// BannerFilms GET /manage/banners/films 按采集站检索可供轮播选取的影片。
+func (h *ManageHandler) BannerFilms(c *gin.Context) {
+	page := dto.GetPageParams(c)
+	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("limit") == "" && c.Query("size") == "" {
+		page.PageSize = 10
+	}
+	list, resolvedSourceID, err := service.BannerSvc.SearchFilms(
+		c.Request.Context(),
+		c.Query("sourceId"),
+		c.Query("name"),
+		c.Query("sort"),
+		page,
+	)
+	if err != nil {
+		bannerFail(err, c)
+		return
+	}
+	dto.Success(gin.H{
+		"sourceId": resolvedSourceID,
+		"list":     list,
+		"params": gin.H{
+			"paging": page,
+		},
+	}, "获取影片列表成功", c)
+}
+
+// BannerCreate POST /manage/banners 新增一行，立即生效。
 func (h *ManageHandler) BannerCreate(c *gin.Context) {
 	var req struct {
 		SourceId string `json:"sourceId"`
@@ -62,7 +98,7 @@ func (h *ManageHandler) BannerUpdate(c *gin.Context) {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	item, err := service.BannerSvc.Update(c.Param("id"), req)
+	item, err := service.BannerSvc.Update(c.Param("id"), c.Query("sourceId"), req)
 	if err != nil {
 		bannerFail(err, c)
 		return
@@ -72,7 +108,7 @@ func (h *ManageHandler) BannerUpdate(c *gin.Context) {
 
 // BannerDelete DELETE /manage/banners/:id 删除一行，立即生效。
 func (h *ManageHandler) BannerDelete(c *gin.Context) {
-	if err := service.BannerSvc.Delete(c.Param("id")); err != nil {
+	if err := service.BannerSvc.Delete(c.Param("id"), c.Query("sourceId")); err != nil {
 		bannerFail(err, c)
 		return
 	}
@@ -121,7 +157,7 @@ type bannerDeckReq struct {
 	Items    []service.BannerFields `json:"items"`
 }
 
-// BannerDeck PUT /manage/banners/deck 发布排片，整组替换主站轮播。revision 不一致返回 409。
+// BannerDeck PUT /manage/banners/deck 发布排片，整组替换指定采集站轮播。revision 不一致返回 409。
 func (h *ManageHandler) BannerDeck(c *gin.Context) {
 	var req bannerDeckReq
 	if err := c.ShouldBindJSON(&req); err != nil {

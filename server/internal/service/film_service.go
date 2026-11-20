@@ -10,12 +10,29 @@ import (
 	"server/internal/repository/film/writer"
 	"server/internal/spider/converter"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 type FilmService struct{}
 
 var FilmSvc = new(FilmService)
+
+var manualFilmSeq atomic.Int64
+
+func nextManualSourceMid(now time.Time) int64 {
+	candidate := -now.UnixNano()
+	for {
+		prev := manualFilmSeq.Load()
+		next := candidate
+		if prev != 0 && next >= prev {
+			next = prev - 1
+		}
+		if manualFilmSeq.CompareAndSwap(prev, next) {
+			return next
+		}
+	}
+}
 
 // GetFilmPage 获取影片检索信息分页数据（D3：读请求忽略 sourceId，固定当前主站）。
 func (s *FilmService) GetFilmPage(vo *model.SearchVo) ([]model.FilmIndex, error) {
@@ -73,8 +90,9 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	fd.UpdateTime = now.Format(time.DateTime)
 	fd.AddTime = fd.UpdateTime
 	isUpdate := fd.Id > 0
-	if fd.Id == 0 {
-		fd.Id = now.Unix()
+	if !isUpdate {
+		// 手动新建分配单调唯一负数作为源站临时映射标识，避免与 source_mid=0 或源站正数 vod_id 碰撞
+		fd.Id = nextManualSourceMid(now)
 	}
 	detail, err := converter.CovertFilmDetailVo(fd)
 	if err != nil {
@@ -115,14 +133,6 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(savedMid)
 	}
 	return nil
-}
-
-// DelFilms 删除影片（支持单个与批量）
-func (s *FilmService) DelFilms(ids []int64) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	return filmrepo.DelFilmSearchBatch(ids)
 }
 
 // validatePrimaryFilmIDs 校验写操作的影片 ID 均属于当前主站（D3）。
@@ -173,11 +183,6 @@ func (s *FilmService) RefreshPrimaryFilms(ids []int64, sourceID string) error {
 		SpiderSvc.CollectFilms(ids)
 		return nil
 	})
-}
-
-// DelFilm 删除分类影片
-func (s *FilmService) DelFilm(id int64) error {
-	return s.DelFilms([]int64{id})
 }
 
 // GetFilmClassTree 获取影片分类信息

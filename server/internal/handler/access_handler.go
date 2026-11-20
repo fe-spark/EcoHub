@@ -6,12 +6,10 @@ import (
 	"strings"
 
 	"server/internal/access"
-	"server/internal/config"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
-	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -134,14 +132,7 @@ func (h *AccessHandler) Logs(c *gin.Context) {
 
 // DataStats 查询数据分析积累数据体量统计（仅超级管理员）
 func (h *AccessHandler) DataStats(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可查看数据分析统计", c)
+	if _, ok := requireAdminClaims(c, "权限不足，仅超级管理员可查看数据分析统计"); !ok {
 		return
 	}
 	stats, err := access.GetAccessDataStats()
@@ -160,14 +151,8 @@ type CleanAccessDataRequest struct {
 
 // CleanData 清理数据分析积累的数据（仅超级管理员，需校验管理密码）
 func (h *AccessHandler) CleanData(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := requireAdminClaims(c, "权限不足，仅超级管理员可清理数据分析数据")
 	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可清理数据分析数据", c)
 		return
 	}
 

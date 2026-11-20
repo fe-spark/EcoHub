@@ -46,16 +46,25 @@ func (h *CronHandler) GetFilmCronTask(c *gin.Context) {
 
 // FilmCronSave 保存定时任务信息
 func (h *CronHandler) FilmCronSave(c *gin.Context) {
-	t := model.FilmCollectTask{}
-	if err := c.ShouldBindJSON(&t); err != nil {
+	var req struct {
+		Id     string    `json:"id"`
+		Ids    *[]string `json:"ids"`
+		Time   *int      `json:"time"`
+		Spec   string    `json:"spec"`
+		Model  *int      `json:"model"`
+		State  *bool     `json:"state"`
+		Remark *string   `json:"remark"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	if strings.TrimSpace(t.Id) == "" {
+	taskID := strings.TrimSpace(req.Id)
+	if taskID == "" {
 		dto.Failed("任务Id不能为空", c)
 		return
 	}
-	spec := strings.TrimSpace(t.Spec)
+	spec := strings.TrimSpace(req.Spec)
 	if spec == "" {
 		dto.Failed("参数校验失败, Cron表达式不能为空", c)
 		return
@@ -64,20 +73,34 @@ func (h *CronHandler) FilmCronSave(c *gin.Context) {
 		dto.Failed(fmt.Sprint("参数校验失败 cron表达式校验失败: ", err.Error()), c)
 		return
 	}
-	t.Spec = spec
-	task, err := service.CronSvc.GetFilmCrontabById(t.Id)
+	task, err := service.CronSvc.GetFilmCrontabById(taskID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		dto.Failed(err.Error(), c)
 		return
 	}
 	created := errors.Is(err, gorm.ErrRecordNotFound)
 	if created {
-		task = t
+		task = model.FilmCollectTask{
+			Id:   taskID,
+			Spec: spec,
+		}
 	} else {
 		task.Spec = spec
-		if remark := strings.TrimSpace(t.Remark); remark != "" {
-			task.Remark = remark
-		}
+	}
+	if req.Ids != nil {
+		task.Ids = *req.Ids
+	}
+	if req.Time != nil {
+		task.Time = *req.Time
+	}
+	if req.Model != nil {
+		task.Model = *req.Model
+	}
+	if req.State != nil {
+		task.State = *req.State
+	}
+	if req.Remark != nil {
+		task.Remark = strings.TrimSpace(*req.Remark)
 	}
 	if err := service.CronSvc.UpdateFilmCron(task); err != nil {
 		dto.Failed(err.Error(), c)

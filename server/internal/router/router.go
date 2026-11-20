@@ -118,6 +118,8 @@ func SetupRouter() *gin.Engine {
 		banner := manageRoute.Group(`/banners`)
 		{
 			banner.GET(``, handler.ManageHd.BannerList)
+			banner.GET(`/categories`, handler.ManageHd.BannerCategories)
+			banner.GET(`/films`, handler.ManageHd.BannerFilms)
 			banner.POST(``, handler.ManageHd.BannerCreate)
 			banner.PUT(`/order`, handler.ManageHd.BannerOrder)
 			banner.POST(`/generate`, handler.ManageHd.BannerGenerate)
@@ -217,7 +219,6 @@ func SetupRouter() *gin.Engine {
 			tmdbRoute.POST(`/config`, middleware.AdminAccess(), handler.TMDBHd.UpdateConfig)
 			tmdbRoute.POST(`/config/test`, middleware.AdminAccess(), handler.TMDBHd.TestConfig)
 			tmdbRoute.GET(`/search`, handler.TMDBHd.Search)
-			tmdbRoute.POST(`/scrape`, handler.TMDBHd.Scrape)
 			tmdbRoute.POST(`/apply`, handler.TMDBHd.Apply)
 			tmdbRoute.GET(`/prefill`, handler.TMDBHd.Prefill)
 		}

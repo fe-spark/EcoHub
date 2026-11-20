@@ -32,5 +32,6 @@ func (ProxyConfigRecord) TableName() string {
 
 // ProxyTestReq 连通测试请求（移除自定义 Target 彻底杜绝 SSRF）
 type ProxyTestReq struct {
-	ProxyURL string `json:"proxyUrl"`
+	ProxyURL     string `json:"proxyUrl"`
+	PreserveAuth bool   `json:"preserveAuth"`
 }

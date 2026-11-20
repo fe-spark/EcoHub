@@ -16,7 +16,6 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { VideoCameraOutlined } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
-import { usePrimarySource } from "@/lib/manage-primary";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { FilmOption } from "@/app/manage/banners/view/types";
 import styles from "./index.module.less";
@@ -27,8 +26,8 @@ interface FilmPickerProps {
   open: boolean;
   title?: string;
   selectedMid?: number;
-  /** 当前全局主站上下文；不是可切换项。 */
-  primarySourceId?: string;
+  /** 当前选片所属采集站 ID。 */
+  sourceId?: string;
   onCancel: () => void;
   onSelect: (film: FilmOption) => void;
 }
@@ -37,7 +36,7 @@ export default function FilmPicker({
   open,
   title = "选择影片",
   selectedMid,
-  primarySourceId,
+  sourceId,
   onCancel,
   onSelect,
 }: FilmPickerProps) {
@@ -48,7 +47,6 @@ export default function FilmPicker({
   const [inputValue, setInputValue] = useState("");
   const [sortField, setSortField] = useState<string>("");
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
-  const { refresh: refreshPrimary } = usePrimarySource();
 
   const fetchList = useCallback(
     async (current = 1, query = "", sort = "") => {
@@ -60,30 +58,21 @@ export default function FilmPicker({
         let curPage = current;
         const pSize = 10;
 
-        if (!primarySourceId) {
+        if (!sourceId) {
           setList([]);
           setPage({ current: 1, pageSize: pSize, total: 0 });
           return;
         }
 
-        // 管理端选片始终使用主站片库；不走前台跨来源搜索。
-        const resp = await ApiGet("/manage/film/search/list", {
+        // 按指定采集站直查片库，确保非主站选片与轮播站点一致。
+        const resp = await ApiGet("/manage/banners/films", {
           name: trimmed || undefined,
-          sourceId: primarySourceId,
+          sourceId,
           current,
           pageSize: pSize,
           sort: sort || undefined,
         });
         if (resp?.code === 0 && resp.data) {
-          if (
-            typeof resp.data.primarySourceId === "string" &&
-            resp.data.primarySourceId !== primarySourceId
-          ) {
-            void refreshPrimary();
-            setList([]);
-            setPage({ current: 1, pageSize: pSize, total: 0 });
-            return;
-          }
           rawList = resp.data.list || [];
           if (resp.data.params?.paging) {
             curPage = resp.data.params.paging.current || current;
@@ -118,7 +107,7 @@ export default function FilmPicker({
         setLoading(false);
       }
     },
-    [primarySourceId, refreshPrimary],
+    [sourceId],
   );
 
   useEffect(() => {

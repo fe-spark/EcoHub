@@ -12,6 +12,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	"server/internal/repository/support"
@@ -136,7 +137,7 @@ func TestBannerUpdate_PartialFields(t *testing.T) {
 	}
 
 	// 只改简介，图片模式、评分不变。
-	item, err = BannerSvc.Update(item.Id, BannerFields{Blurb: strPtr("自定义简介")})
+	item, err = BannerSvc.Update(item.Id, "src1", BannerFields{Blurb: strPtr("自定义简介")})
 	if err != nil {
 		t.Fatalf("patch blurb: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestBannerUpdate_PartialFields(t *testing.T) {
 	}
 
 	// 改成自定义封面，简介保持覆盖值。
-	item, err = BannerSvc.Update(item.Id, BannerFields{ImageMode: strPtr("custom"), Poster: strPtr("http://custom.jpg"), Score: f64Ptr(9.1)})
+	item, err = BannerSvc.Update(item.Id, "src1", BannerFields{ImageMode: strPtr("custom"), Poster: strPtr("http://custom.jpg"), Score: f64Ptr(9.1)})
 	if err != nil {
 		t.Fatalf("patch custom: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestBannerUpdate_PartialFields(t *testing.T) {
 	}
 
 	// 清空简介覆盖回到片库值；恢复跟随时清掉覆盖图。
-	item, err = BannerSvc.Update(item.Id, BannerFields{Blurb: strPtr(""), ImageMode: strPtr("follow")})
+	item, err = BannerSvc.Update(item.Id, "src1", BannerFields{Blurb: strPtr(""), ImageMode: strPtr("follow")})
 	if err != nil {
 		t.Fatalf("patch reset: %v", err)
 	}
@@ -163,10 +164,10 @@ func TestBannerUpdate_PartialFields(t *testing.T) {
 		t.Fatalf("patch reset mismatch: %+v", item)
 	}
 
-	if _, err := BannerSvc.Update(item.Id, BannerFields{ImageMode: strPtr("pinned")}); !IsBannerUserError(err) {
+	if _, err := BannerSvc.Update(item.Id, "src1", BannerFields{ImageMode: strPtr("pinned")}); !IsBannerUserError(err) {
 		t.Fatalf("invalid image mode should be rejected, got %v", err)
 	}
-	if _, err := BannerSvc.Update("missing", BannerFields{}); !IsBannerUserError(err) {
+	if _, err := BannerSvc.Update("missing", "src1", BannerFields{}); !IsBannerUserError(err) {
 		t.Fatalf("missing id should be a user error, got %v", err)
 	}
 }
@@ -182,8 +183,11 @@ func TestBannerCreate_Validation(t *testing.T) {
 	if _, err := BannerSvc.Create("", BannerFields{Mid: i64Ptr(2)}); !IsBannerUserError(err) {
 		t.Fatalf("film of another site should be rejected, got %v", err)
 	}
-	if _, err := BannerSvc.Create("src2", BannerFields{Mid: i64Ptr(1)}); !errors.Is(err, ErrPrimaryMismatch) {
-		t.Fatalf("write with non-primary sourceId should mismatch, got %v", err)
+	if _, err := BannerSvc.Create("src2", BannerFields{Mid: i64Ptr(1)}); !IsBannerUserError(err) {
+		t.Fatalf("film not on src2 should be rejected, got %v", err)
+	}
+	if _, err := BannerSvc.Create("missing", BannerFields{Mid: i64Ptr(1)}); !IsBannerUserError(err) {
+		t.Fatalf("unknown source should be rejected, got %v", err)
 	}
 	if _, err := BannerSvc.Create("", BannerFields{Mid: i64Ptr(1)}); err != nil {
 		t.Fatalf("create: %v", err)
@@ -191,49 +195,68 @@ func TestBannerCreate_Validation(t *testing.T) {
 	if _, err := BannerSvc.Create("", BannerFields{Mid: i64Ptr(1)}); !IsBannerUserError(err) {
 		t.Fatalf("duplicate film should be rejected, got %v", err)
 	}
+	if _, err := BannerSvc.Create("src2", BannerFields{Mid: i64Ptr(2)}); err != nil {
+		t.Fatalf("create on non-primary source: %v", err)
+	}
 }
 
-// D1/D3：后台轮播固定主站；切换前遗留的非主站轮播行不可见、不可改、不可删。
-func TestBanner_NonPrimaryRowsRejected(t *testing.T) {
+// 按采集站切换管理轮播：各站独立读写、互不串站，且首页仍按站读取。
+func TestBanner_SourceSwitchIsolation(t *testing.T) {
 	gdb := setupBannerSvcDB(t)
 	seedBannerFilm(t, gdb, 1, "src1", 1, "站一影片", 10)
 	seedBannerFilm(t, gdb, 2, "src2", 1, "站二影片", 10)
 	if _, err := BannerSvc.Create("", BannerFields{Mid: i64Ptr(1)}); err != nil {
 		t.Fatal(err)
 	}
-	// 模拟切换主站前遗留的非主站轮播行
-	legacy := model.BannerSlot{Id: "legacy-src2", SourceId: "src2", Mid: 2, ImageMode: model.BannerImageFollow, Sort: 1}
-	if err := gdb.Create(&legacy).Error; err != nil {
-		t.Fatal(err)
+	src2Item, err := BannerSvc.Create("src2", BannerFields{Mid: i64Ptr(2)})
+	if err != nil {
+		t.Fatalf("create on src2: %v", err)
 	}
 
-	// 后台列表只显示主站轮播
-	view, err := BannerSvc.List()
-	if err != nil || view.SourceId != "src1" || fmt.Sprint(bannerMidList(view.Items)) != "[1]" {
-		t.Fatalf("list should only show primary rows: %v %+v", err, view)
+	view1, err := BannerSvc.List("")
+	if err != nil || view1.SourceId != "src1" || view1.PrimarySourceId != "src1" || len(view1.Sources) != 3 || fmt.Sprint(bannerMidList(view1.Items)) != "[1]" {
+		t.Fatalf("list default primary mismatch: %v %+v", err, view1)
+	}
+	view2, err := BannerSvc.List("src2")
+	if err != nil || view2.SourceId != "src2" || view2.PrimarySourceId != "src1" || fmt.Sprint(bannerMidList(view2.Items)) != "[2]" {
+		t.Fatalf("list src2 mismatch: %v %+v", err, view2)
 	}
 
-	// 对象级写：非主站轮播一律返回主站不一致
-	if _, err := BannerSvc.Update(legacy.Id, BannerFields{Blurb: strPtr("x")}); !errors.Is(err, ErrPrimaryMismatch) {
-		t.Fatalf("update non-primary row should mismatch, got %v", err)
+	// 对象级写传错 sourceId 时拒绝，传入正确 sourceId 时放行。
+	if _, err := BannerSvc.Update(src2Item.Id, "src1", BannerFields{Blurb: strPtr("x")}); !IsBannerUserError(err) {
+		t.Fatalf("cross-site update should be rejected, got %v", err)
 	}
-	if err := BannerSvc.Delete(legacy.Id); !errors.Is(err, ErrPrimaryMismatch) {
-		t.Fatalf("delete non-primary row should mismatch, got %v", err)
+	if err := BannerSvc.Delete(src2Item.Id, "src1"); !IsBannerUserError(err) {
+		t.Fatalf("cross-site delete should be rejected, got %v", err)
+	}
+	if updated, err := BannerSvc.Update(src2Item.Id, "src2", BannerFields{Blurb: strPtr("站二简介")}); err != nil || updated.Blurb != "站二简介" {
+		t.Fatalf("update src2 row: %v %+v", err, updated)
 	}
 
-	// 排片只能用主站影片
-	if _, err := BannerSvc.PublishDeck("", view.Revision, []BannerFields{{Mid: i64Ptr(2)}}); !IsBannerUserError(err) {
+	// 排片只能用对应采集站的影片。
+	if _, err := BannerSvc.PublishDeck("src2", view2.Revision, []BannerFields{{Mid: i64Ptr(1)}}); !IsBannerUserError(err) {
 		t.Fatalf("cross-site film in deck should be rejected, got %v", err)
 	}
 
-	// 遗留行不属于主站展示，但按站读取的前台数据不受影响
 	home1, _ := BannerSvc.HomeBanners("src1")
 	if len(home1) != 1 || home1[0].Mid != 1 {
 		t.Fatalf("primary home = %+v", home1)
 	}
 	home2, _ := BannerSvc.HomeBanners("src2")
-	if len(home2) != 1 || home2[0].Mid != 2 {
-		t.Fatalf("legacy src2 home = %+v", home2)
+	if len(home2) != 1 || home2[0].Mid != 2 || home2[0].Blurb != "站二简介" {
+		t.Fatalf("src2 home = %+v", home2)
+	}
+
+	if err := BannerSvc.Delete(src2Item.Id, "src2"); err != nil {
+		t.Fatalf("delete src2 row: %v", err)
+	}
+	after2, _ := BannerSvc.List("src2")
+	if len(after2.Items) != 0 {
+		t.Fatalf("src2 banner should be deleted")
+	}
+	after1, _ := BannerSvc.List("src1")
+	if len(after1.Items) != 1 {
+		t.Fatalf("deleting src2 banner must not affect src1")
 	}
 }
 
@@ -243,7 +266,7 @@ func TestBannerReorder_RevisionConflict(t *testing.T) {
 	seedBannerFilm(t, gdb, 2, "src1", 1, "B", 9)
 	a, _ := BannerSvc.Create("", BannerFields{Mid: i64Ptr(1)})
 	b, _ := BannerSvc.Create("", BannerFields{Mid: i64Ptr(2)})
-	view, _ := BannerSvc.List()
+	view, _ := BannerSvc.List("")
 	stale := view.Revision
 
 	next, err := BannerSvc.Reorder("", stale, []string{b.Id, a.Id})
@@ -253,8 +276,8 @@ func TestBannerReorder_RevisionConflict(t *testing.T) {
 	if fmt.Sprint(bannerMidList(next.Items)) != "[2 1]" || next.Revision == stale {
 		t.Fatalf("reorder result mismatch: %+v", next)
 	}
-	if _, err := BannerSvc.Reorder("src2", next.Revision, []string{a.Id, b.Id}); !errors.Is(err, ErrPrimaryMismatch) {
-		t.Fatalf("reorder with non-primary sourceId should mismatch, got %v", err)
+	if _, err := BannerSvc.Reorder("src2", next.Revision, []string{a.Id, b.Id}); !IsBannerConflict(err) {
+		t.Fatalf("reorder on src2 with src1 ids should conflict, got %v", err)
 	}
 	if _, err := BannerSvc.Reorder("", stale, []string{a.Id, b.Id}); !IsBannerConflict(err) {
 		t.Fatalf("stale revision should conflict, got %v", err)
@@ -263,7 +286,7 @@ func TestBannerReorder_RevisionConflict(t *testing.T) {
 		t.Fatalf("ids not matching current rows should conflict, got %v", err)
 	}
 	// 单行编辑也会让版本号变化。
-	if _, err := BannerSvc.Update(a.Id, BannerFields{Blurb: strPtr("x")}); err != nil {
+	if _, err := BannerSvc.Update(a.Id, "src1", BannerFields{Blurb: strPtr("x")}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := BannerSvc.Reorder("", next.Revision, []string{a.Id, b.Id}); !IsBannerConflict(err) {
@@ -277,19 +300,16 @@ func TestBannerDeck_RevisionConflict(t *testing.T) {
 	seedBannerFilm(t, gdb, 2, "src1", 1, "B", 9)
 	a, _ := BannerSvc.Create("", BannerFields{Mid: i64Ptr(1)})
 	b, _ := BannerSvc.Create("", BannerFields{Mid: i64Ptr(2)})
-	view, _ := BannerSvc.List()
+	view, _ := BannerSvc.List("")
 
 	// 生成预览之后有人保存了顺序，再发布应当冲突。
 	if _, err := BannerSvc.Reorder("", view.Revision, []string{b.Id, a.Id}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := BannerSvc.PublishDeck("src2", view.Revision, []BannerFields{{Mid: i64Ptr(1)}}); !errors.Is(err, ErrPrimaryMismatch) {
-		t.Fatalf("publish with non-primary sourceId should mismatch, got %v", err)
-	}
 	if _, err := BannerSvc.PublishDeck("", view.Revision, []BannerFields{{Mid: i64Ptr(1)}}); !IsBannerConflict(err) {
 		t.Fatalf("stale deck publish should conflict, got %v", err)
 	}
-	cur, _ := BannerSvc.List()
+	cur, _ := BannerSvc.List("")
 	published, err := BannerSvc.PublishDeck("", cur.Revision, []BannerFields{
 		{Mid: i64Ptr(2), ImageMode: strPtr("custom"), Poster: strPtr("http://tmdb.jpg"), TmdbID: i64Ptr(42)},
 	})
@@ -461,7 +481,7 @@ func TestBanner_UnavailableRows(t *testing.T) {
 		t.Fatalf("home should only show films playable on this site: %v %+v", err, home)
 	}
 
-	view, err := BannerSvc.List()
+	view, err := BannerSvc.List("")
 	if err != nil || len(view.Items) != 3 {
 		t.Fatalf("admin list should keep all rows: %v %+v", err, view.Items)
 	}
@@ -476,13 +496,13 @@ func TestBanner_UnavailableRows(t *testing.T) {
 	if fmt.Sprint(bannerMidList(next.Items)) != "[3 1 2]" {
 		t.Fatalf("reorder result = %v", bannerMidList(next.Items))
 	}
-	if err := BannerSvc.Delete(c.Id); err != nil {
+	if err := BannerSvc.Delete(c.Id, ""); err != nil {
 		t.Fatalf("delete unavailable row: %v", err)
 	}
-	if err := BannerSvc.Delete(c.Id); !IsBannerUserError(err) {
+	if err := BannerSvc.Delete(c.Id, ""); !IsBannerUserError(err) {
 		t.Fatalf("deleting twice should be not found, got %v", err)
 	}
-	after, _ := BannerSvc.List()
+	after, _ := BannerSvc.List("")
 	if fmt.Sprint(bannerMidList(after.Items)) != "[1 2]" {
 		t.Fatalf("after delete = %v", bannerMidList(after.Items))
 	}
@@ -500,7 +520,7 @@ func TestBannerUpdate_ChangeFilmResetsImages(t *testing.T) {
 	if err != nil || !item.IsCustomPic {
 		t.Fatalf("create custom: %v %+v", err, item)
 	}
-	item, err = BannerSvc.Update(item.Id, BannerFields{Mid: i64Ptr(2)})
+	item, err = BannerSvc.Update(item.Id, "", BannerFields{Mid: i64Ptr(2)})
 	if err != nil {
 		t.Fatalf("change film: %v", err)
 	}
@@ -509,7 +529,7 @@ func TestBannerUpdate_ChangeFilmResetsImages(t *testing.T) {
 		t.Fatalf("changing film should reset images: %+v", item)
 	}
 	// 换片时一起提交了新图片，则保留新图片。
-	item, err = BannerSvc.Update(item.Id, BannerFields{Mid: i64Ptr(3), ImageMode: strPtr("custom"), Poster: strPtr("http://new.jpg")})
+	item, err = BannerSvc.Update(item.Id, "", BannerFields{Mid: i64Ptr(3), ImageMode: strPtr("custom"), Poster: strPtr("http://new.jpg")})
 	if err != nil {
 		t.Fatalf("change film with image: %v", err)
 	}
@@ -551,5 +571,43 @@ func TestHomeBanners_ReturnsErrorOnLibraryFailure(t *testing.T) {
 	}
 	if _, err := BannerSvc.HomeBanners("src1"); err == nil {
 		t.Fatalf("library failure should surface as error")
+	}
+}
+
+func TestBannerSearchFilmsAndCategories_BySource(t *testing.T) {
+	gdb := setupBannerSvcDB(t)
+	cats := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 1, RawName: "站一电影", Sort: 1},
+		{SourceId: "src2", SourceTypeId: 10, RawName: "站二剧集", Sort: 1},
+	}
+	if err := gdb.Create(&cats).Error; err != nil {
+		t.Fatal(err)
+	}
+	support.RefreshCategoryCache()
+	seedBannerFilm(t, gdb, 1, "src1", 1, "站一独有", 100)
+	seedBannerFilm(t, gdb, 2, "src2", 10, "站二独有", 90)
+
+	cat1, err := BannerSvc.Categories("src1")
+	if err != nil || len(cat1) != 1 || cat1[0].Name != "站一电影" {
+		t.Fatalf("src1 categories mismatch: %v %+v", err, cat1)
+	}
+	cat2, err := BannerSvc.Categories("src2")
+	if err != nil || len(cat2) != 1 || cat2[0].Name != "站二剧集" {
+		t.Fatalf("src2 categories mismatch: %v %+v", err, cat2)
+	}
+
+	page := &dto.Page{Current: 1, PageSize: 10}
+	films2, resolved, err := BannerSvc.SearchFilms(context.Background(), "src2", "", "hits", page)
+	if err != nil || resolved != "src2" || len(films2) != 1 || films2[0].Mid != 2 {
+		t.Fatalf("src2 search films mismatch: err=%v resolved=%s list=%+v", err, resolved, films2)
+	}
+
+	res, err := BannerSvc.Generate(context.Background(), BannerGenerateReq{
+		SourceId: "src2",
+		Strategy: "hot",
+		Quotas:   []BannerQuota{{CategoryID: cat2[0].Id, Count: 1}},
+	})
+	if err != nil || res.SourceId != "src2" || fmt.Sprint(bannerMidList(res.Items)) != "[2]" {
+		t.Fatalf("src2 generate mismatch: err=%v res=%+v", err, res)
 	}
 }

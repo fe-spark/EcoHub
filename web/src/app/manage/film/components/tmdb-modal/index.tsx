@@ -10,7 +10,7 @@ import {
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
-import { TmdbCandidate, TmdbModalProps, FIELD_OPTIONS } from "./types";
+import { TmdbCandidate, TmdbModalProps, FIELD_OPTIONS, APPLY_FIELD_OPTIONS } from "./types";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -44,21 +44,10 @@ export default function TmdbModal({
   const [selectedCandidate, setSelectedCandidate] = useState<TmdbCandidate | null>(null);
   const [previewDetail, setPreviewDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [selectedFields, setSelectedFields] = useState<string[]>([
-    "name",
-    "poster",
-    "backdrop",
-    "overview",
-    "subTitle",
-    "actor",
-    "director",
-    "writer",
-    "area",
-    "language",
-    "year",
-    "score",
-    "tag",
-  ]);
+  const fieldOptions = onPrefill ? FIELD_OPTIONS : APPLY_FIELD_OPTIONS;
+  const [selectedFields, setSelectedFields] = useState<string[]>(() =>
+    (onPrefill ? FIELD_OPTIONS : APPLY_FIELD_OPTIONS).map((opt) => opt.value),
+  );
   const [submitting, setSubmitting] = useState(false);
   const { message } = useAppMessage();
   const searchSeq = useRef(0);
@@ -435,7 +424,7 @@ export default function TmdbModal({
               <div className={styles.fieldsSection}>
                 <div className={styles.fieldsTitle}>同步字段</div>
                 <Checkbox.Group
-                  options={FIELD_OPTIONS}
+                  options={fieldOptions}
                   value={selectedFields}
                   onChange={(vals) => setSelectedFields(vals as string[])}
                 />

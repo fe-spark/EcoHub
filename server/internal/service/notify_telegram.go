@@ -9,6 +9,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -155,9 +156,7 @@ func sendTelegramMessage(ctx context.Context, token, target, htmlText string, ma
 	if err != nil {
 		return err
 	}
-	if utf8.RuneCountInString(htmlText) > telegramMaxMessageLen {
-		htmlText = truncateRunes(htmlText, telegramMaxMessageLen-16) + "\n..."
-	}
+	htmlText = safeTruncateHTML(htmlText, telegramMaxMessageLen)
 	body := map[string]any{
 		"chat_id":                  chatID,
 		"text":                     htmlText,
@@ -175,9 +174,7 @@ func sendTelegramMessage(ctx context.Context, token, target, htmlText string, ma
 }
 
 func editTelegramMessage(ctx context.Context, token, chatID string, messageID int64, htmlText string, markup *InlineKeyboardMarkup) error {
-	if utf8.RuneCountInString(htmlText) > telegramMaxMessageLen {
-		htmlText = truncateRunes(htmlText, telegramMaxMessageLen-16) + "\n..."
-	}
+	htmlText = safeTruncateHTML(htmlText, telegramMaxMessageLen)
 	body := map[string]any{
 		"chat_id":                  chatID,
 		"message_id":               messageID,
@@ -277,7 +274,10 @@ func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPa
 
 	if len(payload.Sources) > 0 {
 		b.WriteString("\n<b>站点明细：</b>\n")
-		for _, src := range payload.Sources {
+		// 预留长度给末尾省略提示，避免触及 Telegram 4096 字符上限导致标签截断
+		const overviewSoftLimit = telegramMaxMessageLen - 200
+		writtenRunes := utf8.RuneCountInString(b.String())
+		for i, src := range payload.Sources {
 			icon := "✅"
 			if src.Status == progress.StatusFailed || src.Error != "" {
 				icon = "❌"
@@ -292,7 +292,13 @@ func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPa
 			if src.Error != "" {
 				line += " — <code>" + html.EscapeString(truncateRunes(src.Error, 80)) + "</code>"
 			}
+			lineRunes := utf8.RuneCountInString(line) + 1
+			if writtenRunes+lineRunes > overviewSoftLimit {
+				fmt.Fprintf(&b, "<i>… 其余 %d 个站点已省略</i>\n", len(payload.Sources)-i)
+				break
+			}
 			b.WriteString(line + "\n")
+			writtenRunes += lineRunes
 		}
 	}
 
@@ -367,35 +373,20 @@ func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (st
 	return b.String(), totalPages, nil
 }
 
-func buildCategoryKeyboard(cats []model.NotifyCategoryGroup, total int) (*InlineKeyboardMarkup, error) {
-	basic, err := repository.GetSiteBasic()
-	if err != nil {
-		return nil, err
-	}
-	return buildCategoryKeyboardForSite(basic.SiteURL, cats, total), nil
-}
-
-func buildCategoryKeyboardForSite(rawSiteURL string, cats []model.NotifyCategoryGroup, total int) *InlineKeyboardMarkup {
-	if total <= 0 {
-		return nil
-	}
-	siteURL := strings.TrimRight(strings.TrimSpace(rawSiteURL), "/")
-	if !isTelegramSupportedWebURL(siteURL) {
+// buildCategoryKeyboard 构建采集汇总底部的分类内联翻页按钮（点击进入对应分类的分页片单）
+func buildCategoryKeyboard(batchID string, cats []model.NotifyCategoryGroup, total int) *InlineKeyboardMarkup {
+	if total <= 0 || strings.TrimSpace(batchID) == "" {
 		return nil
 	}
 	var rows [][]InlineKeyboardButton
 	var row []InlineKeyboardButton
-	for _, c := range cats {
+	for idx, c := range cats {
 		if len(c.Films) == 0 {
 			continue
 		}
-		targetURL := siteURL
-		if c.CategoryID > 0 {
-			targetURL = fmt.Sprintf("%s/category/filter?pid=%d", siteURL, c.CategoryID)
-		}
 		row = append(row, InlineKeyboardButton{
-			Text: fmt.Sprintf("%s (%d)", c.CategoryName, len(c.Films)),
-			URL:  targetURL,
+			Text:         fmt.Sprintf("%s (%d)", c.CategoryName, len(c.Films)),
+			CallbackData: fmt.Sprintf("%s:%s:%d:1", telegramCallbackPref, batchID, idx),
 		})
 		if len(row) == 2 {
 			rows = append(rows, row)
@@ -404,8 +395,8 @@ func buildCategoryKeyboardForSite(rawSiteURL string, cats []model.NotifyCategory
 	}
 	if len(cats) > 1 || len(rows) == 0 {
 		row = append(row, InlineKeyboardButton{
-			Text: fmt.Sprintf("📋 全部 (%d)", total),
-			URL:  siteURL,
+			Text:         fmt.Sprintf("📋 全部 (%d)", total),
+			CallbackData: fmt.Sprintf("%s:%s:-1:1", telegramCallbackPref, batchID),
 		})
 	}
 	if len(row) > 0 {
@@ -440,6 +431,40 @@ func buildPagedKeyboard(batchID string, catIdx, page, totalPages int) *InlineKey
 		CallbackData: fmt.Sprintf("%s:%s:back:0", telegramCallbackPref, batchID),
 	}})
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+var htmlTagStripRe = regexp.MustCompile(`<[^>]*>`)
+
+// safeTruncateHTML 按完整行安全截断 Telegram HTML 消息，避免切断标签或 HTML 实体导致发送报错。
+func safeTruncateHTML(htmlText string, maxRunes int) string {
+	if maxRunes <= 0 || utf8.RuneCountInString(htmlText) <= maxRunes {
+		return htmlText
+	}
+	budget := maxRunes - 16
+	if budget <= 0 {
+		return html.EscapeString(truncateRunes(htmlTagStripRe.ReplaceAllString(htmlText, ""), maxRunes))
+	}
+	lines := strings.Split(htmlText, "\n")
+	var kept []string
+	used := 0
+	for _, line := range lines {
+		lineRunes := utf8.RuneCountInString(line)
+		sep := 0
+		if len(kept) > 0 {
+			sep = 1
+		}
+		if used+sep+lineRunes > budget {
+			break
+		}
+		kept = append(kept, line)
+		used += sep + lineRunes
+	}
+	if len(kept) == 0 {
+		// 单行本身超长时，剥离标签后做纯文本转义截断作为兜底
+		plain := html.UnescapeString(htmlTagStripRe.ReplaceAllString(htmlText, ""))
+		return html.EscapeString(truncateRunes(plain, budget)) + "\n..."
+	}
+	return strings.Join(kept, "\n") + "\n..."
 }
 
 func truncateRunes(s string, max int) string {

@@ -40,6 +40,8 @@ func NormalizeTMDBConfig(cfg model.TMDBConfig) model.TMDBConfig {
 		cfg.ImageDomain = DefaultTMDBImageDomain
 	}
 	cfg.ImageDomain = strings.TrimRight(cfg.ImageDomain, "/")
+	// 运行时只读展示字段不落库
+	cfg.Configured = false
 	return cfg
 }
 
@@ -77,6 +79,7 @@ func IsMaskedTMDBApiKey(key string) bool {
 
 // PublicTMDBConfig 返回前端展示的脱敏配置
 func PublicTMDBConfig(cfg model.TMDBConfig) model.TMDBConfig {
+	cfg.Configured = strings.TrimSpace(cfg.ApiKey) != ""
 	cfg.ApiKey = MaskTMDBApiKey(cfg.ApiKey)
 	return cfg
 }

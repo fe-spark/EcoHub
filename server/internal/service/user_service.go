@@ -22,7 +22,7 @@ func (s *UserService) UserLogin(account, password string) (token string, err err
 		return "", err
 	}
 	if u == nil {
-		return "", errors.New("用户信息不存在!!!")
+		return "", errors.New("用户名或密码错误")
 	}
 	// 校验用户信息, 执行账号密码校验逻辑
 	if utils.PasswordEncrypt(password, u.Salt) != u.Password {

@@ -90,7 +90,10 @@ func normalizeProxyURL(proxyStr string) string {
 		return ""
 	}
 	if !strings.Contains(proxyStr, "://") {
-		proxyStr = "http://" + proxyStr
+		return "http://" + proxyStr
+	}
+	if idx := strings.Index(proxyStr, "://"); idx > 0 {
+		return strings.ToLower(proxyStr[:idx]) + proxyStr[idx:]
 	}
 	return proxyStr
 }

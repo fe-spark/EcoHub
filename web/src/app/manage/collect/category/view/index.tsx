@@ -1,6 +1,12 @@
 "use client";
 
-import ManagePageHeader from "@/app/manage/components/page-header";
+import { Button } from "antd";
+import { ApartmentOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  ContentPageShell,
+  ContentSectionCard,
+  ContentSourceSelect,
+} from "@/app/manage/components/content-shell";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import { useManagePermission } from "@/lib/manage-permission";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -31,47 +37,82 @@ export default function CategoryWorkspacePageView() {
   };
 
   return (
-    <div className={styles.pageBody}>
-      <ManagePageHeader
-        className={styles.pageHeader}
-        title="分类管理"
-        description="调整分类的排序，以及是否在前台显示。"
-      />
-
-      <CategoryTreeCard
-        sources={treeState.sources}
-        sourceId={treeState.sourceId}
-        primaryId={treeState.primaryId}
-        classTree={treeState.classTree}
-        expandedKeys={treeState.expandedKeys}
-        loadingTree={treeState.loadingTree}
-        savingTree={treeState.savingTree}
-        stats={treeState.stats}
-        onSourceChange={(nextSourceId) => {
-          if (nextSourceId === treeState.sourceId) return;
-          runUnlessDirty(
-            () => void treeState.selectSource(nextSourceId),
-            "切换采集源？",
-            "切换",
-          );
-        }}
-        onRefresh={() =>
-          runUnlessDirty(
-            () => void treeState.fetchFilmClassTree(true),
-            "刷新分类？",
-            "刷新",
-          )
+    <ContentPageShell
+      title="分类管理"
+      description="调整分类的排序，以及是否在前台显示。"
+      headerActions={
+        <ContentSourceSelect
+          sources={treeState.sources}
+          sourceId={treeState.sourceId}
+          primaryId={treeState.primaryId}
+          disabled={treeState.loadingTree || treeState.savingTree}
+          onChange={(nextSourceId) => {
+            if (nextSourceId === treeState.sourceId) return;
+            runUnlessDirty(
+              () => void treeState.selectSource(nextSourceId),
+              "切换采集源？",
+              "切换",
+            );
+          }}
+        />
+      }
+      dirty={canWrite && treeState.hasPendingChanges}
+    >
+      <ContentSectionCard
+        icon={<ApartmentOutlined />}
+        title="分类结构"
+        count={treeState.stats.total}
+        extra={
+          <div className={styles.stats}>
+            <span>
+              <span className={styles.statValue}>{treeState.stats.roots}</span> 主类
+            </span>
+            <span className={styles.statSep} />
+            <span>
+              <span className={styles.statValue}>{treeState.stats.children}</span> 子类
+            </span>
+            {treeState.stats.hidden > 0 ? (
+              <>
+                <span className={styles.statSep} />
+                <span className={styles.statWarn}>隐藏 {treeState.stats.hidden}</span>
+              </>
+            ) : null}
+          </div>
         }
-        onExpand={(keys) => treeState.setExpandedKeys(keys)}
-        onMove={treeState.moveClassWithinSameParent}
-        onShowChange={(id, show) => void treeState.updateClassVisibility(id, show)}
-      />
+        actions={
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() =>
+              runUnlessDirty(
+                () => void treeState.fetchFilmClassTree(true),
+                "刷新分类？",
+                "刷新",
+              )
+            }
+            loading={treeState.loadingTree}
+            disabled={treeState.savingTree}
+          >
+            刷新分类
+          </Button>
+        }
+      >
+        <CategoryTreeCard
+          classTree={treeState.classTree}
+          expandedKeys={treeState.expandedKeys}
+          loadingTree={treeState.loadingTree}
+          savingTree={treeState.savingTree}
+          onExpand={(keys) => treeState.setExpandedKeys(keys)}
+          onMove={treeState.moveClassWithinSameParent}
+          onShowChange={(id, show) => void treeState.updateClassVisibility(id, show)}
+        />
+      </ContentSectionCard>
+
       <UnsavedChangesBar
         visible={canWrite && treeState.hasPendingChanges}
         saving={treeState.savingTree}
         onDiscard={treeState.discardTree}
         onSave={() => void treeState.saveTree()}
       />
-    </div>
+    </ContentPageShell>
   );
 }

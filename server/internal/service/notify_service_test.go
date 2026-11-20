@@ -36,6 +36,18 @@ func setupNotifyConfigDB(t *testing.T) {
 	t.Cleanup(func() { db.Mdb = prev })
 }
 
+func TestPublishFailed_DisabledDoesNotBurnCooldown(t *testing.T) {
+	setupNotifyConfigDB(t)
+	s := &NotifyService{alertLast: map[string]time.Time{}}
+	s.PublishSourceFailed("src1", "站", "超时")
+	s.PublishCronFailed("task1", "清理", "失败")
+	s.alertMu.Lock()
+	defer s.alertMu.Unlock()
+	if len(s.alertLast) != 0 {
+		t.Fatalf("disabled notify recorded cooldown: %+v", s.alertLast)
+	}
+}
+
 func TestMaskAndMergeNotifyConfig(t *testing.T) {
 	rawToken := "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
 	masked := repository.MaskBotToken(rawToken)
@@ -70,6 +82,22 @@ func TestMaskAndMergeNotifyConfig(t *testing.T) {
 	}
 	if merged.MaxFilmsInMessage != model.MaxNotifyPageSize {
 		t.Fatalf("expected capped pageSize %d, got %d", model.MaxNotifyPageSize, merged.MaxFilmsInMessage)
+	}
+
+	// 显式清空 BotToken（禁用状态下）应保留为空，不再回填旧值
+	cleared := model.NotifyConfig{
+		Enabled:           false,
+		BotToken:          "",
+		ChatIDs:           []string{"-100123456"},
+		Events:            stored.Events,
+		MaxFilmsInMessage: 15,
+	}
+	mergedCleared, err := validateAndMergeNotifyConfig(stored, cleared)
+	if err != nil {
+		t.Fatalf("unexpected error clearing token: %v", err)
+	}
+	if mergedCleared.BotToken != "" {
+		t.Fatalf("expected BotToken to be cleared, got %q", mergedCleared.BotToken)
 	}
 
 	// 测试非法 threadId
@@ -108,19 +136,16 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 		t.Fatalf("SaveNotifyBatchSession failed: %v", err)
 	}
 
-	if kb := buildCategoryKeyboardForSite("", sess.Categories, len(sess.AllFilms)); kb != nil {
-		t.Fatalf("expected nil keyboard when siteURL is empty, got %+v", kb)
-	}
-
-	kb := buildCategoryKeyboardForSite("http://localhost:3300/", sess.Categories, len(sess.AllFilms))
+	// 无论是否配置 SiteURL，分类与“全部”按钮均应生成内联翻页 CallbackData
+	kb := buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
 	if kb == nil || len(kb.InlineKeyboard) == 0 {
-		t.Fatalf("expected non-empty category keyboard when siteURL is http://localhost:3300/")
+		t.Fatalf("expected non-empty category keyboard")
 	}
-	if got := kb.InlineKeyboard[0][0].URL; got != "http://localhost:3300/category/filter?pid=1" {
-		t.Fatalf("unexpected category button URL: %q", got)
+	if got := kb.InlineKeyboard[0][0].CallbackData; got != "nfp:b123:0:1" {
+		t.Fatalf("unexpected category button callback: %q", got)
 	}
-	if got := kb.InlineKeyboard[0][1].URL; got != "http://localhost:3300" {
-		t.Fatalf("unexpected all button URL: %q", got)
+	if got := kb.InlineKeyboard[0][1].CallbackData; got != "nfp:b123:-1:1" {
+		t.Fatalf("unexpected all button callback: %q", got)
 	}
 
 	batchID, action, catIdx, page, ok := parseNotifyCallback("nfp:b123:0:1")
@@ -128,12 +153,28 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 		t.Fatalf("unexpected callback parse result: batch=%s action=%s catIdx=%d page=%d ok=%v", batchID, action, catIdx, page, ok)
 	}
 
+	// 未配置 SiteURL 时，片单正常展示但不附带超链接
 	pageHTML, totalPages, err := formatFilmListPageHTML(sess, 0, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if totalPages != 2 || !strings.Contains(pageHTML, "影片A") || !strings.Contains(pageHTML, "影片B") || strings.Contains(pageHTML, "影片C") {
 		t.Fatalf("unexpected page 1 html (totalPages=%d): %s", totalPages, pageHTML)
+	}
+	if strings.Contains(pageHTML, "<a href=") {
+		t.Fatalf("did not expect film link when siteURL is empty: %s", pageHTML)
+	}
+
+	// 配置 SiteURL 后，每部影片可直接跳转播放页
+	if err := repository.SaveSiteBasic(model.BasicConfig{SiteName: "EcoHub", SiteURL: "http://localhost:3300/"}); err != nil {
+		t.Fatal(err)
+	}
+	linkedHTML, _, err := formatFilmListPageHTML(sess, -1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(linkedHTML, `<a href="http://localhost:3300/play?id=101">影片A</a>`) {
+		t.Fatalf("expected film play link in page html: %s", linkedHTML)
 	}
 
 	page2HTML, _, err := formatFilmListPageHTML(sess, 0, 2)
@@ -252,5 +293,50 @@ func TestFormatPrimaryChangeHTML(t *testing.T) {
 	if !strings.Contains(clearedHTML, "主站已置空") ||
 		!strings.Contains(clearedHTML, "<b>量子资源</b> → 无") {
 		t.Fatalf("unexpected cleared HTML: %s", clearedHTML)
+	}
+}
+
+func TestSafeTruncateHTMLAndOverviewLimit(t *testing.T) {
+	// 多行超长 HTML 截断不应留下半截标签
+	var lines []string
+	for i := 0; i < 30; i++ {
+		lines = append(lines, "· <b>测试影片</b> (<code>#100</code>)")
+	}
+	truncated := safeTruncateHTML(strings.Join(lines, "\n"), 200)
+	if strings.Count(truncated, "<b>") != strings.Count(truncated, "</b>") {
+		t.Fatalf("unbalanced <b> tags after truncate: %s", truncated)
+	}
+	if strings.Count(truncated, "<code>") != strings.Count(truncated, "</code>") {
+		t.Fatalf("unbalanced <code> tags after truncate: %s", truncated)
+	}
+
+	// 单行超长兜底剥离标签并保持合法长度
+	longSingle := "<b>" + strings.Repeat("A", 500) + "</b>"
+	singleTruncated := safeTruncateHTML(longSingle, 100)
+	if strings.Contains(singleTruncated, "<b>") {
+		t.Fatalf("expected tags stripped on single-line overflow: %s", singleTruncated)
+	}
+
+	// 超多站点汇总应自动折叠且不超过 Telegram 消息长度限制
+	var sources []model.SourceNotifyResult
+	for i := 0; i < 120; i++ {
+		sources = append(sources, model.SourceNotifyResult{
+			SourceID:   "s",
+			SourceName: "超长采集站点名称测试_" + strings.Repeat("X", 20),
+			Status:     progress.StatusFailed,
+			Error:      strings.Repeat("err_", 15),
+		})
+	}
+	overview := formatBatchOverviewHTML("EcoHub", model.CollectBatchNotifyPayload{
+		Trigger:    model.CollectTriggerManual,
+		StartedAt:  time.Now().Add(-10 * time.Second),
+		FinishedAt: time.Now(),
+		Sources:    sources,
+	}, 5)
+	if len([]rune(overview)) > telegramMaxMessageLen {
+		t.Fatalf("overview exceeded telegram max len: %d", len([]rune(overview)))
+	}
+	if !strings.Contains(overview, "已省略") {
+		t.Fatalf("expected omitted hint in oversized overview: %s", overview)
 	}
 }

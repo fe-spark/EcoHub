@@ -1,11 +1,10 @@
 import React, { useCallback, useMemo, useRef } from "react";
-import { Button, Empty, Select, Space, Switch, Table, Tag, Typography } from "antd";
+import { Empty, Space, Switch, Table, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   FolderOpenOutlined,
   HolderOutlined,
-  ReloadOutlined,
   SubnodeOutlined,
 } from "@ant-design/icons";
 import {
@@ -25,16 +24,10 @@ import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./index.module.less";
 
 interface CategoryTreeCardProps {
-  sources: { id: string; name: string; state?: boolean }[];
-  sourceId: string;
-  primaryId: string;
   classTree: FilmClassNode[];
   expandedKeys: React.Key[];
   loadingTree: boolean;
   savingTree: boolean;
-  stats: { total: number; roots: number; children: number; hidden: number };
-  onSourceChange: (sourceId: string) => void;
-  onRefresh: () => void;
   onExpand: (keys: React.Key[]) => void;
   onMove: (dragId: number, dropId: number) => void;
   onShowChange: (id: number, show: boolean) => void;
@@ -74,16 +67,10 @@ function SortableTableRow(props: React.HTMLAttributes<HTMLTableRowElement> & { "
 
 export default function CategoryTreeCard(props: CategoryTreeCardProps) {
   const {
-    sources,
-    sourceId,
-    primaryId,
     classTree,
     expandedKeys,
     loadingTree,
     savingTree,
-    stats,
-    onSourceChange,
-    onRefresh,
     onExpand,
     onMove,
     onShowChange,
@@ -303,58 +290,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
                 }
               },
             })}
-            title={() => (
-              <div className={styles.tableHeader}>
-                <div className={styles.toolbarLead}>
-                  <div className={styles.sourceField}>
-                    <span className={styles.sourceLabel}>采集源</span>
-                    <Select
-                      placeholder="选择采集源"
-                      className={styles.sourceSelect}
-                      value={sourceId || undefined}
-                      disabled={loadingTree || savingTree}
-                      onChange={(value) => onSourceChange(value)}
-                      options={sources.map((source) => ({
-                        label: source.state === false ? `${source.name} (已停用)` : source.name,
-                        value: source.id,
-                      }))}
-                      showSearch
-                      optionFilterProp="label"
-                      popupMatchSelectWidth={false}
-                    />
-                    {sourceId && primaryId ? (
-                      <Tag color={sourceId === primaryId ? "processing" : "default"}>
-                        {sourceId === primaryId ? "主站" : "非主站"}
-                      </Tag>
-                    ) : null}
-                  </div>
-                  <div className={styles.stats}>
-                    <span>
-                      <span className={styles.statValue}>{stats.total}</span> 个分类
-                    </span>
-                    <span className={styles.statSep} />
-                    <span>
-                      <span className={styles.statValue}>{stats.roots}</span> 主类
-                    </span>
-                    <span className={styles.statSep} />
-                    <span>
-                      <span className={styles.statValue}>{stats.children}</span> 子类
-                    </span>
-                    {stats.hidden > 0 ? (
-                      <>
-                        <span className={styles.statSep} />
-                        <span className={styles.statWarn}>隐藏 {stats.hidden}</span>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-                <div className={styles.tableActions}>
-                  <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree} disabled={savingTree}>
-                    刷新分类
-                  </Button>
-                </div>
-              </div>
-            )}
             expandable={{
               expandedRowKeys: expandedKeys,
               rowExpandable: (record) => (record.children?.length || 0) > 0,

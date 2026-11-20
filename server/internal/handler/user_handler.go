@@ -7,12 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/config"
 	"server/internal/middleware"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
-	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -36,28 +34,26 @@ func loginLimiterKey(c *gin.Context, username string) string {
 	return c.ClientIP() + "|" + strings.ToLower(strings.TrimSpace(username))
 }
 
-func checkLoginAllowed(key string) bool {
+func loginAccountLimiterKey(username string) string {
+	return "acct|" + strings.ToLower(strings.TrimSpace(username))
+}
+
+// reserveLoginAttempts 在同一把锁里检查并占一次尝试。并发请求不能都看到「还没锁定」。
+func reserveLoginAttempts(keys ...string) bool {
 	now := time.Now()
 	loginFailMu.Lock()
 	defer loginFailMu.Unlock()
-	if st, ok := loginFailState[key]; ok {
+	for _, key := range keys {
+		st, ok := loginFailState[key]
+		if !ok {
+			continue
+		}
 		if now.Before(st.lockUntil) {
 			return false
 		}
 		if now.Sub(st.lastSeen) > 10*time.Minute {
 			delete(loginFailState, key)
 		}
-	}
-	return true
-}
-
-func recordLoginResult(key string, ok bool) {
-	now := time.Now()
-	loginFailMu.Lock()
-	defer loginFailMu.Unlock()
-	if ok {
-		delete(loginFailState, key)
-		return
 	}
 	if len(loginFailState) > 4096 {
 		cutoff := now.Add(-10 * time.Minute)
@@ -67,13 +63,24 @@ func recordLoginResult(key string, ok bool) {
 			}
 		}
 	}
-	st := loginFailState[key]
-	st.fails++
-	st.lastSeen = now
-	if st.fails >= 5 {
-		st.lockUntil = now.Add(30 * time.Second)
+	for _, key := range keys {
+		st := loginFailState[key]
+		st.fails++
+		st.lastSeen = now
+		if st.fails >= 5 {
+			st.lockUntil = now.Add(30 * time.Second)
+		}
+		loginFailState[key] = st
 	}
-	loginFailState[key] = st
+	return true
+}
+
+func clearLoginAttempts(keys ...string) {
+	loginFailMu.Lock()
+	defer loginFailMu.Unlock()
+	for _, key := range keys {
+		delete(loginFailState, key)
+	}
 }
 
 // Login 管理员登录接口
@@ -88,29 +95,24 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 	limitKey := loginLimiterKey(c, u.UserName)
-	if !checkLoginAllowed(limitKey) {
+	acctKey := loginAccountLimiterKey(u.UserName)
+	if !reserveLoginAttempts(limitKey, acctKey) {
 		dto.Failed("登录尝试过于频繁，请 30 秒后再试", c)
 		return
 	}
 	token, err := service.UserSvc.UserLogin(u.UserName, u.Password)
 	if err != nil {
-		recordLoginResult(limitKey, false)
 		dto.Failed(err.Error(), c)
 		return
 	}
-	recordLoginResult(limitKey, true)
+	clearLoginAttempts(limitKey, acctKey)
 	middleware.SetAuthCookie(c, token)
 	dto.SuccessOnlyMsg("登录成功!!!", c)
 }
 
 // Logout 退出登录
 func (h *UserHandler) Logout(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.Failed("请求失败,登录信息获取异常!!!", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
 		dto.Failed("注销失败, 身份信息格式化异常!!!", c)
 		return
@@ -125,14 +127,9 @@ func (h *UserHandler) Logout(c *gin.Context) {
 
 // UserInfo 获取用户信息
 func (h *UserHandler) UserInfo(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
 		dto.Failed("用户信息获取失败, 未获取到用户授权信息", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok {
-		dto.Failed("用户信息获取失败, 户授权信息异常", c)
 		return
 	}
 	info, err := service.UserSvc.GetUserInfo(uc.UserID)
@@ -145,13 +142,8 @@ func (h *UserHandler) UserInfo(c *gin.Context) {
 
 // UserProfile 当前登录用户修改个人资料（支持修改密码、昵称、头像、性别、邮箱）
 func (h *UserHandler) UserProfile(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
-		dto.Failed("鉴权失败，请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil {
 		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
@@ -187,13 +179,8 @@ func (h *UserHandler) UserListPage(c *gin.Context) {
 
 // UserSave 保存用户（新增或更新）
 func (h *UserHandler) UserSave(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
-		dto.Failed("鉴权失败，请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil {
 		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
@@ -235,13 +222,8 @@ func (h *UserHandler) UserSave(c *gin.Context) {
 
 // UserDelete 删除用户（统一批量/单用户删除，接收整型数组 ids: []uint）
 func (h *UserHandler) UserDelete(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
-		dto.Failed("鉴权失败，请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil {
 		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}

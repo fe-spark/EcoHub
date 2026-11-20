@@ -16,7 +16,8 @@ import { positiveQuotas } from "./banner-quick-recipe";
 
 interface BannerQuickModalProps {
   open: boolean;
-  // 当前主站上次排片用的配置；没有时用默认值。
+  sourceId: string;
+  // 当前采集站上次排片用的配置；没有时用默认值。
   lastConfig?: QuickConfigMemo;
   onRemember: (config: QuickConfigMemo) => void;
   onClose: () => void;
@@ -29,6 +30,7 @@ const DEFAULT_COUNT = 1;
 
 export default function BannerQuickModal({
   open,
+  sourceId,
   lastConfig,
   onRemember,
   onClose,
@@ -55,9 +57,9 @@ export default function BannerQuickModal({
     setRunning(false);
   };
 
-  // 每次打开都重新读当前主站分类。
+  // 每次打开都重新读当前采集站分类。
   useEffect(() => {
-    if (!open) {
+    if (!open || !sourceId) {
       abortRunning();
       return;
     }
@@ -67,7 +69,7 @@ export default function BannerQuickModal({
     setStrategy(memo?.strategy ?? DEFAULT_STRATEGY);
     setCategories([]);
     setLoadingCategories(true);
-    ApiGet("/categories")
+    ApiGet("/manage/banners/categories", { sourceId })
       .then((resp) => {
         if (cancelled) return;
         const nav: CategoryQuotaItem[] =
@@ -95,7 +97,7 @@ export default function BannerQuickModal({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, sourceId]);
 
   // 组件卸载时中止仍在进行的排片。
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -103,6 +105,10 @@ export default function BannerQuickModal({
   const quotas = useMemo(() => positiveQuotas(categories), [categories]);
 
   const startGenerate = async () => {
+    if (!sourceId) {
+      messageRef.current.warning("请先选择采集站");
+      return;
+    }
     if (quotas.length === 0) {
       messageRef.current.warning("请至少为一个分类设置排片数量");
       return;
@@ -118,7 +124,7 @@ export default function BannerQuickModal({
     try {
       const resp = await ApiPost<BannerGenerateResult>(
         "/manage/banners/generate",
-        { strategy: runStrategy, quotas },
+        { sourceId, strategy: runStrategy, quotas },
         { signal: controller.signal },
       );
       if (abortRef.current !== controller) return;

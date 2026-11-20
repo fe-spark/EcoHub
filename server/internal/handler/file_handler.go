@@ -28,13 +28,8 @@ const maxUploadImageBytes = 20 << 20 // 20MB
 
 // Upload 统一文件上传接口（支持图片上传）
 func (h *FileHandler) Upload(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
-		dto.Failed("上传失败, 当前用户信息异常", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil {
 		dto.Failed("上传失败, 当前用户信息异常", c)
 		return
 	}
@@ -69,19 +64,18 @@ func (h *FileHandler) Upload(c *gin.Context) {
 	if name == "" {
 		name = strings.TrimSuffix(file.Filename, filepath.Ext(file.Filename))
 	}
-	link := service.FileSvc.SingleFileUpload(fileName, name, int(uc.UserID))
+	link, err := service.FileSvc.SingleFileUpload(fileName, name, int(uc.UserID))
+	if err != nil {
+		dto.Failed("保存文件记录失败: "+err.Error(), c)
+		return
+	}
 	dto.Success(link, "上传成功", c)
 }
 
 // RenameFile 重命名素材
 func (h *FileHandler) RenameFile(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
-		dto.Failed("鉴权失败，请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil {
 		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
@@ -112,13 +106,8 @@ func (h *FileHandler) RenameFile(c *gin.Context) {
 
 // DelFile 删除文件（统一批量/单文件删除）
 func (h *FileHandler) DelFile(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
-		dto.Failed("鉴权失败，请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil {
 		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
@@ -140,15 +129,9 @@ func (h *FileHandler) DelFile(c *gin.Context) {
 		return
 	}
 	isAdmin := model.IsAdmin(uc.UserID, uc.Role)
-	if err := service.FileSvc.ValidateFilesRemovable(cleanIds, uc.UserID, isAdmin); err != nil {
-		dto.Failed(fmt.Sprint("操作失败: ", err.Error()), c)
+	if err := service.FileSvc.RemoveFiles(cleanIds, uc.UserID, isAdmin); err != nil {
+		dto.Failed(fmt.Sprint("删除失败: ", err.Error()), c)
 		return
-	}
-	for _, id := range cleanIds {
-		if e := service.FileSvc.RemoveFileById(id, uc.UserID, isAdmin); e != nil {
-			dto.Failed(fmt.Sprint("删除失败: ", e.Error()), c)
-			return
-		}
 	}
 	dto.SuccessOnlyMsg("文件已删除", c)
 }

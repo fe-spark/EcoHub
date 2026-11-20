@@ -80,7 +80,8 @@ func (s *NotifyService) UpdateConfig(incoming model.NotifyConfig) (model.NotifyC
 
 func validateAndMergeNotifyConfig(stored, incoming model.NotifyConfig) (model.NotifyConfig, error) {
 	incoming.BotToken = strings.TrimSpace(incoming.BotToken)
-	if incoming.BotToken == "" || repository.IsMaskedBotToken(incoming.BotToken) {
+	// 仅当提交的是脱敏占位串时保留原 Token；空字符串视为显式清空
+	if repository.IsMaskedBotToken(incoming.BotToken) {
 		incoming.BotToken = stored.BotToken
 	}
 	incoming = repository.NormalizeNotifyConfig(incoming)
@@ -147,15 +148,30 @@ func (s *NotifyService) SendTest(req model.NotifyTestReq) (model.NotifyTestResul
 		time.Now().Format("2006-01-02 15:04:05"),
 	)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	// 每个接收目标独立超时与有界并发发送，避免单个慢目标拖垮整批测试
+	const maxSendConc = 5
+	sem := make(chan struct{}, maxSendConc)
+	errs := make([]error, len(cleaned))
+	var wg sync.WaitGroup
+	for i, cid := range cleaned {
+		wg.Add(1)
+		go func(idx int, target string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			errs[idx] = sendTelegramMessage(ctx, token, target, text, nil)
+		}(i, cid)
+	}
+	wg.Wait()
 
 	var res model.NotifyTestResult
-	for _, cid := range cleaned {
-		if err := sendTelegramMessage(ctx, token, cid, text, nil); err != nil {
+	for i, cid := range cleaned {
+		if errs[i] != nil {
 			res.Failed = append(res.Failed, model.NotifyChatError{
 				ChatID: cid,
-				Error:  err.Error(),
+				Error:  errs[i].Error(),
 			})
 		} else {
 			res.Sent++
@@ -197,11 +213,7 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 	var markup *InlineKeyboardMarkup
 	if len(sess.AllFilms) > 0 {
 		_ = repository.SaveNotifyBatchSession(sess)
-		markup, err = buildCategoryKeyboard(sess.Categories, len(sess.AllFilms))
-		if err != nil {
-			syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
-			return
-		}
+		markup = buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
 	}
 
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, sess.OverviewHTML, markup)
@@ -217,12 +229,12 @@ func (s *NotifyService) PublishSourceFailed(sourceID, sourceName, reason string)
 	if !cfg.Enabled || !cfg.Events.CollectSourceFailed || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
 		return
 	}
-	if !s.allowAlert("src_fail:" + sourceID) {
-		return
-	}
 	basic, err := repository.GetSiteBasic()
 	if err != nil {
 		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+		return
+	}
+	if !s.allowAlert("src_fail:" + sourceID) {
 		return
 	}
 	siteName := basic.SiteName
@@ -246,12 +258,12 @@ func (s *NotifyService) PublishCronFailed(taskID, remark, reason string) {
 	if !cfg.Enabled || !cfg.Events.CronTaskFailed || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
 		return
 	}
-	if !s.allowAlert("cron_fail:" + taskID) {
-		return
-	}
 	basic, err := repository.GetSiteBasic()
 	if err != nil {
 		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+		return
+	}
+	if !s.allowAlert("cron_fail:" + taskID) {
 		return
 	}
 	siteName := basic.SiteName
@@ -353,13 +365,23 @@ func (s *NotifyService) allowAlert(key string) bool {
 }
 
 func broadcastTelegram(token string, chatIDs []string, htmlText string, markup *InlineKeyboardMarkup) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
+	const maxSendConc = 5
+	sem := make(chan struct{}, maxSendConc)
+	var wg sync.WaitGroup
 	for _, cid := range chatIDs {
-		if err := sendTelegramMessage(ctx, token, cid, htmlText, markup); err != nil {
-			log.Printf("[Notify] 发送 Telegram 消息失败 chat=%s err=%v", cid, err)
-		}
+		wg.Add(1)
+		go func(target string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := sendTelegramMessage(ctx, token, target, htmlText, markup); err != nil {
+				log.Printf("[Notify] 发送 Telegram 消息失败 chat=%s err=%v", target, err)
+			}
+		}(cid)
 	}
+	wg.Wait()
 }
 
 // buildNotifyBatchSession 按前台「每日更新」同源分类树与排序规则构建批次翻页会话

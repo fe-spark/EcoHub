@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SwapOutlined } from "@ant-design/icons";
 import { Select, Tag } from "antd";
 import { ApiGet } from "@/lib/client-api";
 import { usePrimarySource } from "@/lib/manage-primary";
@@ -8,7 +9,7 @@ import { useAppMessage } from "@/lib/useAppMessage";
 
 type SourceOption = { id: string; name: string };
 
-/** 后台顶栏主站选择器：仅超管可切换（D4），其余只读展示。 */
+/** 后台顶栏主站选择器：展示当前主站，仅超管可切换（D4）。 */
 export default function PrimarySelector({ isAdmin }: { isAdmin?: boolean }) {
   const { primary, deletingPrimary, loading, switching, refresh, switchPrimary } = usePrimarySource();
   const { message, modal } = useAppMessage();
@@ -69,13 +70,20 @@ export default function PrimarySelector({ isAdmin }: { isAdmin?: boolean }) {
     if (!displayPrimary) {
       return <Tag color="warning">未配置主站</Tag>;
     }
-    return <Tag color="gold">{displayPrimary.name}</Tag>;
+    return <Tag color="gold">当前主站：{displayPrimary.name}</Tag>;
   }
 
   return (
     <Select
       value={displayPrimary?.id}
-      placeholder={loading ? undefined : "未配置主站"}
+      prefix={
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <SwapOutlined />
+          当前主站
+        </span>
+      }
+      styles={{ prefix: { color: "var(--ant-color-text-secondary)" } }}
+      placeholder={loading ? undefined : "未配置"}
       loading={loading || switching || isDeletingPrimary}
       disabled={isAdmin !== true || loading || switching || isDeletingPrimary}
       popupMatchSelectWidth={false}

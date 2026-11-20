@@ -18,7 +18,7 @@
 .ruleWorkspace {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
 }
 
@@ -103,13 +103,14 @@
   gap: 8px;
 }
 
-.groupSelect {
-  min-width: 160px;
+.groupSelect.groupSelect {
+  width: 140px;
+  flex: none;
 }
 
-.searchInput {
-  min-width: 220px;
-  max-width: 100%;
+.searchInput.searchInput {
+  width: 240px;
+  flex: none;
 }
 
 .searchButton {
@@ -165,8 +166,8 @@
 }
 
 @media (max-width: 768px) {
-  .groupSelect,
-  .searchInput,
+  .groupSelect.groupSelect,
+  .searchInput.searchInput,
   .searchButton,
   .sourceSelect {
     width: 100%;

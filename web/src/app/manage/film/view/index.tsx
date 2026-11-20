@@ -2,12 +2,17 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Table, Pagination, Alert, Spin } from "antd";
+import { Table, Pagination, Alert, Spin, Tag } from "antd";
 import { API_PRIMARY_MISMATCH, ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import { usePrimarySource } from "@/lib/manage-primary";
-import ManagePageHeader from "@/app/manage/components/page-header";
+import {
+  ContentFilterBar,
+  ContentPageShell,
+  ContentSectionCard,
+} from "@/app/manage/components/content-shell";
+import { VideoCameraOutlined } from "@ant-design/icons";
 import { useFilmColumns, type FilmItem } from "./film-columns";
 import { FilmFilterBar } from "./film-filter-bar";
 import { FilmBatchBar } from "./film-batch-bar";
@@ -314,23 +319,25 @@ export default function FilmListPageView() {
   }, [options.categoryTree]);
 
   return (
-    <div className={styles.pageStack}>
-      <ManagePageHeader title="影片列表" description="查找和编辑片库中的影片。" />
-
-      <FilmFilterBar
-        params={params}
-        setParams={setParams}
-        classId={classId}
-        dateRange={dateRange}
-        setDateRange={setDateRange}
-        handleClassChange={handleClassChange}
-        onSearch={onSearch}
-        onReset={onReset}
-        categoryTreeData={categoryTreeData}
-        categoryLoading={categoryLoading}
-        treeExpandedKeys={treeExpandedKeys}
-        onTreeExpand={setTreeExpandedKeys}
-        styles={styles}
+    <ContentPageShell title="影片列表" description="查找和编辑片库中的影片。">
+      <ContentFilterBar
+        lead={
+          <FilmFilterBar
+            params={params}
+            setParams={setParams}
+            classId={classId}
+            dateRange={dateRange}
+            setDateRange={setDateRange}
+            handleClassChange={handleClassChange}
+            onSearch={onSearch}
+            onReset={onReset}
+            categoryTreeData={categoryTreeData}
+            categoryLoading={categoryLoading}
+            treeExpandedKeys={treeExpandedKeys}
+            onTreeExpand={setTreeExpandedKeys}
+            styles={styles}
+          />
+        }
       />
 
       {indexing ? (
@@ -350,31 +357,26 @@ export default function FilmListPageView() {
         />
       ) : null}
 
-      <Table
-        columns={columns}
-        dataSource={list}
-        rowKey="mid"
-        loading={loading}
-        pagination={false}
-        scroll={{ x: "max-content" }}
-        size="middle"
-        locale={{
-          emptyText: indexing ? (
-            <div className={styles.indexingEmptyText}>
-              <Spin size="small" />
-              <span className={styles.indexingEmptyLabel}>
-                正在构建检索索引
-                {indexingProgress?.total ? `（${indexingProgress.percent ?? 0}%）` : ""}
-                ，请稍候...
-              </span>
-            </div>
-          ) : undefined,
-        }}
-        rowSelection={{
-          selectedRowKeys,
-          onChange: (keys) => setSelectedRowKeys(keys),
-        }}
-        title={() => (
+      <ContentSectionCard
+        icon={<VideoCameraOutlined />}
+        title="影片列表"
+        count={page.total}
+        extra={
+          selectedRowKeys.length > 0 ? (
+            <Tag
+              color="processing"
+              closable
+              onClose={(e) => {
+                e.preventDefault();
+                setSelectedRowKeys([]);
+              }}
+              style={{ borderRadius: 4, margin: 0 }}
+            >
+              已选择 {selectedRowKeys.length} 项
+            </Tag>
+          ) : null
+        }
+        actions={
           <FilmBatchBar
             selectedCount={selectedRowKeys.length}
             canWrite={canWrite && Boolean(primaryId)}
@@ -390,35 +392,57 @@ export default function FilmListPageView() {
               await handleDelFilms(ids);
               setSelectedRowKeys([]);
             }}
-            onClearSelection={() => setSelectedRowKeys([])}
             onAdd={() => {
               const targetCid = classId || params.cid || params.pid || undefined;
               setEditingFilmId(null);
               setModalDefaultCid(targetCid);
               setFilmDrawerOpen(true);
             }}
-            styles={styles}
           />
-        )}
-        footer={() => (
-          <div className={styles.pagination}>
-            <Pagination
-              current={page.current}
-              pageSize={page.pageSize}
-              total={page.total}
-              showSizeChanger
-              pageSizeOptions={[10, 20, 50, 100, 500]}
-              showTotal={(total) => `共 ${total} 条`}
-              onChange={(current, pageSize) => {
-                setSelectedRowKeys([]);
-                const newPage = { ...page, current, pageSize };
-                setPage(newPage);
-                getFilmPage(newPage);
-              }}
-            />
-          </div>
-        )}
-      />
+        }
+        footer={
+          <Pagination
+            current={page.current}
+            pageSize={page.pageSize}
+            total={page.total}
+            showSizeChanger
+            pageSizeOptions={[10, 20, 50, 100, 500]}
+            showTotal={(total) => `共 ${total} 条`}
+            onChange={(current, pageSize) => {
+              setSelectedRowKeys([]);
+              const newPage = { ...page, current, pageSize };
+              setPage(newPage);
+              getFilmPage(newPage);
+            }}
+          />
+        }
+      >
+        <Table
+          columns={columns}
+          dataSource={list}
+          rowKey="mid"
+          loading={loading}
+          pagination={false}
+          scroll={{ x: "max-content" }}
+          size="middle"
+          locale={{
+            emptyText: indexing ? (
+              <div className={styles.indexingEmptyText}>
+                <Spin size="small" />
+                <span className={styles.indexingEmptyLabel}>
+                  正在构建检索索引
+                  {indexingProgress?.total ? `（${indexingProgress.percent ?? 0}%）` : ""}
+                  ，请稍候...
+                </span>
+              </div>
+            ) : undefined,
+          }}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys),
+          }}
+        />
+      </ContentSectionCard>
 
       <FilmDrawer
         open={filmDrawerOpen}
@@ -430,6 +454,6 @@ export default function FilmListPageView() {
           void getFilmPage();
         }}
       />
-    </div>
+    </ContentPageShell>
   );
 }

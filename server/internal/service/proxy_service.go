@@ -36,35 +36,66 @@ func (s *ProxyService) PublicConfig() (model.ProxyConfig, error) {
 	return cfg, nil
 }
 
-func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) error {
-	cfg.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
-	if preserveAuth {
-		stored, err := s.GetConfig()
-		if err != nil {
-			return err
-		}
-		if RedactProxyURL(cfg.ProxyURL) == RedactProxyURL(stored.ProxyURL) && !proxyURLHasUser(cfg.ProxyURL) {
-			cfg.ProxyURL = stored.ProxyURL
-		}
+func resolveEffectiveProxyURL(raw string, preserveAuth bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if !preserveAuth || raw == "" || proxyURLHasUser(raw) {
+		return raw, nil
 	}
+	stored, err := repository.GetProxyConfig()
+	if err != nil {
+		return "", err
+	}
+	if RedactProxyURL(raw) == RedactProxyURL(stored.ProxyURL) {
+		return stored.ProxyURL, nil
+	}
+	return raw, nil
+}
+
+func normalizeAndValidateProxyURL(raw string) (string, error) {
+	proxyStr := strings.TrimSpace(raw)
+	if proxyStr == "" {
+		return "", errors.New("代理服务器地址不能为空")
+	}
+	if !strings.Contains(proxyStr, "://") {
+		proxyStr = "http://" + proxyStr
+	}
+	u, err := url.Parse(proxyStr)
+	if err != nil || u.Host == "" {
+		return "", errors.New("代理地址格式无效，请输入正确的 http://、https://、socks5:// 或 socks5h:// 地址")
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+		u.Scheme = strings.ToLower(u.Scheme)
+		return u.String(), nil
+	default:
+		return "", errors.New("代理地址格式无效，请输入正确的 http://、https://、socks5:// 或 socks5h:// 地址")
+	}
+}
+
+func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) error {
+	resolved, err := resolveEffectiveProxyURL(cfg.ProxyURL, preserveAuth)
+	if err != nil {
+		return err
+	}
+	cfg.ProxyURL = resolved
 	if cfg.Enabled {
 		if cfg.ProxyURL == "" {
 			return errors.New("启用代理时代理服务器地址不能为空")
 		}
-		proxyStr := cfg.ProxyURL
-		if !strings.HasPrefix(proxyStr, "http://") &&
-			!strings.HasPrefix(proxyStr, "https://") &&
-			!strings.HasPrefix(proxyStr, "socks5://") {
-			proxyStr = "http://" + proxyStr
+		normalized, err := normalizeAndValidateProxyURL(cfg.ProxyURL)
+		if err != nil {
+			return err
 		}
-		u, err := url.Parse(proxyStr)
-		if err != nil || u.Host == "" {
-			return errors.New("代理地址格式无效，请输入正确的 http://、https:// 或 socks5:// 地址")
+		cfg.ProxyURL = normalized
+	} else if cfg.ProxyURL != "" {
+		if normalized, err := normalizeAndValidateProxyURL(cfg.ProxyURL); err == nil {
+			cfg.ProxyURL = normalized
 		}
 	}
 	if err := repository.SaveProxyConfig(cfg); err != nil {
 		return err
 	}
+	utils.CloseIdleHTTPConnections()
 	filmsnapshot.ClearDynamicPlayCaches()
 	NotifySvc.EnsureBotPoller()
 	upgrade.TriggerReleasePoll()
@@ -72,16 +103,19 @@ func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) er
 }
 
 // TestProxy 测试代理连通性（固定请求受控公网端点，杜绝 SSRF）
-func (s *ProxyService) TestProxy(proxyURL string) (int64, error) {
-	proxyURL = strings.TrimSpace(proxyURL)
-	if proxyURL == "" {
+func (s *ProxyService) TestProxy(proxyURL string, preserveAuth bool) (int64, error) {
+	resolved, err := resolveEffectiveProxyURL(proxyURL, preserveAuth)
+	if err != nil {
+		return 0, err
+	}
+	if resolved == "" {
 		return 0, errors.New("代理地址不能为空")
 	}
-	if !strings.HasPrefix(proxyURL, "http://") &&
-		!strings.HasPrefix(proxyURL, "https://") &&
-		!strings.HasPrefix(proxyURL, "socks5://") {
-		proxyURL = "http://" + proxyURL
+	normalized, err := normalizeAndValidateProxyURL(resolved)
+	if err != nil {
+		return 0, err
 	}
+	proxyURL = normalized
 
 	target := defaultProxyTestTarget
 
@@ -162,15 +196,4 @@ func proxyURLHasUser(raw string) bool {
 	}
 	u, err := url.Parse(raw)
 	return err == nil && u.User != nil
-}
-
-func sourceProxyURL(sourceID string) (string, error) {
-	ok, proxy, err := repository.ResolveSourceProxy(sourceID)
-	if err != nil {
-		return "", err
-	}
-	if ok {
-		return proxy, nil
-	}
-	return "", nil
 }

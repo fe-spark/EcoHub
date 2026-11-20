@@ -149,6 +149,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
       setTestResult(null);
       const resp = await ApiPost("/manage/proxy/config/test", {
         proxyUrl: values.proxyUrl,
+        preserveAuth: !proxyUrlTouched.current,
       });
       if (resp.code === 0) {
         const latency = resp.data?.latency ?? 0;
@@ -256,14 +257,16 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
                                     if (!trimmed) {
                                       return Promise.reject(new Error("开启代理时请输入代理服务器地址"));
                                     }
+                                    const lower = trimmed.toLowerCase();
                                     const ok =
-                                      trimmed.startsWith("http://") ||
-                                      trimmed.startsWith("https://") ||
-                                      trimmed.startsWith("socks5://") ||
+                                      lower.startsWith("http://") ||
+                                      lower.startsWith("https://") ||
+                                      lower.startsWith("socks5://") ||
+                                      lower.startsWith("socks5h://") ||
                                       /^[a-zA-Z0-9.-]+:\d+$/.test(trimmed);
                                     if (!ok) {
                                       return Promise.reject(
-                                        new Error("需以 http://、https:// 或 socks5:// 开头"),
+                                        new Error("需以 http://、https://、socks5:// 或 socks5h:// 开头"),
                                       );
                                     }
                                   },
@@ -271,10 +274,10 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
                               ]
                             : []
                         }
-                        tooltip="支持 HTTP、HTTPS 与 SOCKS5 协议，例如：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+                        tooltip="支持 HTTP、HTTPS 与 SOCKS5/SOCKS5H 协议，例如：http://127.0.0.1:7890 或 socks5h://127.0.0.1:1080"
                       >
                         <Input
-                          placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+                          placeholder="http://127.0.0.1:7890 或 socks5h://127.0.0.1:1080"
                           allowClear
                           disabled={!isEnabled || !canOperate}
                         />
