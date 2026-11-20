@@ -18,41 +18,6 @@ Release **v3.1.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0` (`:latest` also point
 
 ---
 
-Test release **v3.1.0-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.0-beta.1`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.1.0-beta.1` in the install directory, then run `docker compose pull && docker compose up -d`.
-- Upgrade notes from `v3.0.6` still apply for index creation and source recounts on first startup; instances already running `v3.1.0-beta.0` upgrade smoothly.
-
-### v3.1.0-beta.1 changes
-
-- **Global primary source & collect management**: completed global primary switching, disable/delete handover validation, admin access enforcement, batch-delete queue cancellation, primary deleting indicator in header selector, and fixed full-page remount flicker on batch delete.
-- **Category rules & hidden-category filtering (#106)**: synthetic root groups created by `CategoryRoot` rules now use dedicated `film_category` rows and non-colliding public IDs instead of borrowing the first child's ID; filtered hidden subcategories out of homepage recommendations, top category rank pools, local fallbacks, and banner candidate pools, and added classify/category cache invalidation on visibility changes.
-- **Reset & server hardening**: improved full-site database reset and seed re-initialization under large catalogs; added danmaku validation/IP rate limits, SSRF and bounded decompression guards, config redaction, batch detail caps, and cache/lifecycle concurrency fixes.
-
----
-
-Test release **v3.1.0-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
-
-### Upgrade notes
-
-- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0` in the install directory, then run `docker compose pull && docker compose up -d`.
-- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.1.0-beta.0 changes
-
-- **Search index**: memory keeps only the current primary source. Switching drops the previous index immediately; source order cannot change while a rebuild is running or queued. If the ownership query fails, the ids stay on the queue and are retried; unfiltered ids are not written, and the failure does not trigger a full rebuild (#98).
-- **Workbench**: the top card shows the current primary source's films, categories, and today's failed pages. Expand it to see the same three numbers for every source. Film totals live on the source row.
-- **Provide API and TVBox**: categories, lists, and the subscription expose only the current primary source. The subscription name is the site name. Playback detail still includes lines from the other sources.
-- **Film list**: a non-primary source is paged by owner and update time. A stored total of 0 is counted again.
-- **Search and filters**: a Chinese query on a non-primary source filters by character, then scores, and keeps the 200 best hits. A simplified keyword matches a traditional title, and a halfwidth digit matches a fullwidth digit. `%` and `_` in title, plot, and filter queries match literally.
-- **Banners**: each category takes its top rows from the matching index, then the rows are merged. Films with no play line are skipped.
-- **Startup**: `film_index` no longer gains a `(first_source_id, deleted_at)` index during migration.
-
----
-
 Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
