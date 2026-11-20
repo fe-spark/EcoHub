@@ -9,7 +9,7 @@ import (
 
 // groupPublicTypes 按规则合成前台分类树。
 // 一级改名后原名落到目标下作为二级；二级只改名合并，不再往下挂一层。
-// 隐藏的 type 仍参与合并，组是否上前台看代表分类的 show。
+// 隐藏的 type 仍参与合并，只要组内存在未隐藏成员则合并组保持显示。
 func groupPublicTypes(rows []sourceTypeRow, sourceID string) []publicTypeGroup {
 	childrenOf := map[int64][]sourceTypeRow{}
 	roots := make([]sourceTypeRow, 0)
@@ -68,7 +68,11 @@ func groupPublicTypes(rows []sourceTypeRow, sourceID string) []publicTypeGroup {
 				group.RootMemberIDs = append(group.RootMemberIDs, row.ID)
 			}
 		}
-		childRows := append([]sourceTypeRow{}, item.renamed...)
+		childRows := make([]sourceTypeRow, 0, len(item.renamed))
+		for _, row := range item.renamed {
+			row.Name = support.NormalizeSubCategoryName(sourceID, row.Name)
+			childRows = append(childRows, row)
+		}
 		for _, row := range item.all {
 			for _, child := range childrenOf[row.ID] {
 				child.Name = support.NormalizeSubCategoryName(sourceID, child.Name)
@@ -107,20 +111,29 @@ func groupTypeRows(rows []sourceTypeRow) []publicTypeGroup {
 }
 
 func makePublicGroup(name string, members []sourceTypeRow) publicTypeGroup {
+	rep := members[0]
 	group := publicTypeGroup{
-		ID: members[0].ID, Name: name, Sort: members[0].Sort, Show: members[0].Show,
+		Name:    name,
 		Members: make([]int64, 0, len(members)),
 	}
 	for _, row := range members {
 		group.Members = append(group.Members, row.ID)
-		if row.ID < group.ID {
-			group.ID = row.ID
-			group.Sort = row.Sort
-			group.Show = row.Show
+		if preferGroupRepresentative(row, rep) {
+			rep = row
 		}
 	}
+	group.ID = rep.ID
+	group.Sort = rep.Sort
+	group.Show = rep.Show
 	sort.Slice(group.Members, func(i, j int) bool { return group.Members[i] < group.Members[j] })
 	return group
+}
+
+func preferGroupRepresentative(candidate, current sourceTypeRow) bool {
+	if candidate.Show != current.Show {
+		return candidate.Show
+	}
+	return candidate.ID < current.ID
 }
 
 func sortPublicGroups(groups []publicTypeGroup) {

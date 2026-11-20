@@ -401,6 +401,38 @@ func TestMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
 	}
 }
 
+func TestMappingRule_ListCategoryAllIncludesRootAndSub(t *testing.T) {
+	setupManageConfigDB(t)
+	gdb := db.Mdb
+	rules := []model.MappingRule{
+		{SourceId: "src_cat", Group: "CategoryRoot", Raw: "电影", Target: "电影", MatchType: "exact"},
+		{SourceId: "src_cat", Group: "CategorySub", Raw: "动作片", Target: "动作", MatchType: "exact"},
+		{SourceId: "src_other", Group: "CategorySub", Raw: "他站子类", Target: "动作", MatchType: "exact"},
+		{SourceId: "", Group: "Area", Raw: "中国大陆", Target: "大陆", MatchType: "exact"},
+	}
+	if err := gdb.Create(&rules).Error; err != nil {
+		t.Fatalf("seed rules: %v", err)
+	}
+
+	h := &ManageHandler{}
+	c, w := testContext(http.MethodGet, "/api/manage/mapping/rule/list?group=CategoryAll&sourceId=src_cat")
+	h.MappingRuleList(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("MappingRuleList failed: %+v", resp)
+	}
+	raw, _ := json.Marshal(resp.Data)
+	var data struct {
+		List []model.MappingRule `json:"list"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if len(data.List) != 2 || data.List[0].Group != "CategoryRoot" || data.List[1].Group != "CategorySub" {
+		t.Fatalf("CategoryAll list = %+v, want root + sub for src_cat only", data.List)
+	}
+}
+
 func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
 	// 1. 无凭证调用 UserSave -> Failed
 	c, w := testJSONContext(http.MethodPost, "/api/manage/user/save", `{"userName":"test"}`)

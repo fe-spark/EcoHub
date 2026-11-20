@@ -101,23 +101,30 @@ type MappingRuleQuery struct {
 func buildMappingRuleQuery(query MappingRuleQuery) *gorm.DB {
 	dbQuery := db.Mdb.Unscoped().Model(&model.MappingRule{}).Where("deleted_at IS NULL")
 	group := strings.TrimSpace(query.Group)
-	if group != "" {
-		dbQuery = dbQuery.Where("`group` = ?", group)
-	}
 	sourceID := strings.TrimSpace(query.SourceId)
-	if IsCategoryMappingGroup(group) {
+	if group == "CategoryAll" {
 		if sourceID == "" {
-			dbQuery = dbQuery.Where("1 = 0")
-		} else {
+			return dbQuery.Where("1 = 0")
+		}
+		dbQuery = dbQuery.Where("`group` IN ? AND source_id = ?", []string{"CategoryRoot", "CategorySub"}, sourceID)
+	} else {
+		if group != "" {
+			dbQuery = dbQuery.Where("`group` = ?", group)
+		}
+		if IsCategoryMappingGroup(group) {
+			if sourceID == "" {
+				dbQuery = dbQuery.Where("1 = 0")
+			} else {
+				dbQuery = dbQuery.Where("source_id = ?", sourceID)
+			}
+		} else if sourceID != "" {
 			dbQuery = dbQuery.Where("source_id = ?", sourceID)
 		}
-	} else if sourceID != "" {
-		dbQuery = dbQuery.Where("source_id = ?", sourceID)
 	}
 	keyword := strings.TrimSpace(query.Keyword)
 	if keyword != "" {
 		like := "%" + keyword + "%"
-		dbQuery = dbQuery.Where("raw LIKE ? OR target LIKE ? OR remarks LIKE ?", like, like, like)
+		dbQuery = dbQuery.Where("(raw LIKE ? OR target LIKE ? OR remarks LIKE ?)", like, like, like)
 	}
 	return dbQuery
 }

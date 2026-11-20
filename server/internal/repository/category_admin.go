@@ -37,7 +37,7 @@ func flattenCategoryPlacements(nodes []*model.CategoryTree, parentId int64, dept
 	})
 }
 
-func expandSourceOrderPlacements(placements []categoryPlacement) []categoryPlacement {
+func expandSourceOrderPlacements(placements []categoryPlacement, oldMap map[int64]model.Category) []categoryPlacement {
 	out := make([]categoryPlacement, 0, len(placements))
 	for _, placement := range placements {
 		ids := []int64{placement.Id}
@@ -52,12 +52,22 @@ func expandSourceOrderPlacements(placements []categoryPlacement) []categoryPlace
 			seen[id] = struct{}{}
 			ids = append(ids, id)
 		}
+		repWasShown := false
+		if rep, ok := oldMap[placement.Id]; ok {
+			repWasShown = rep.Show
+		}
 		for _, id := range ids {
+			show := placement.Show
+			if id != placement.Id && placement.Show && repWasShown {
+				if prev, ok := oldMap[id]; ok {
+					show = prev.Show
+				}
+			}
 			out = append(out, categoryPlacement{
 				Id:    id,
 				Pid:   placement.Pid,
 				Sort:  placement.Sort,
-				Show:  placement.Show,
+				Show:  show,
 				Depth: placement.Depth,
 			})
 		}
@@ -139,7 +149,6 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 	if err := flattenCategoryPlacements(nodes, 0, 0, &placements); err != nil {
 		return err
 	}
-	placements = expandSourceOrderPlacements(placements)
 
 	allowed := sourceMappedCategoryIDs(sourceID)
 	if len(allowed) == 0 {
@@ -157,6 +166,7 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 	for _, item := range categories {
 		oldMap[item.Id] = item
 	}
+	placements = expandSourceOrderPlacements(placements, oldMap)
 
 	seen := make(map[int64]struct{}, len(placements))
 	for _, placement := range placements {

@@ -187,3 +187,84 @@ func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 		t.Fatalf("admin 男人帮 children = %v", gotAdmin)
 	}
 }
+
+func TestSourceTypeTree_PartiallyHiddenCascadingMergedChildStaysVisible(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() {
+		db.Rdb = origRdb
+		support.StoreMappingSnapshotForTest(prev)
+	})
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	categories := []model.Category{
+		{Id: 19, Pid: 0, Name: "伦理片", Show: true, Sort: 1, StableKey: "src1:19"},
+		{Id: 44, Pid: 0, Name: "预告片", Show: true, Sort: 2, StableKey: "src1:44"},
+	}
+	if err := gdb.Create(&categories).Error; err != nil {
+		t.Fatalf("create categories: %v", err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 19).Update("show", false).Error; err != nil {
+		t.Fatalf("hide 伦理片: %v", err)
+	}
+	mappings := []model.CategoryMapping{
+		{SourceId: "src1", SourceTypeId: 19, CategoryId: 19},
+		{SourceId: "src1", SourceTypeId: 44, CategoryId: 44},
+	}
+	if err := gdb.Create(&mappings).Error; err != nil {
+		t.Fatalf("create mappings: %v", err)
+	}
+	rows := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 19, ParentSourceTypeId: 0, RawName: "伦理片", Sort: 1, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 44, ParentSourceTypeId: 0, RawName: "预告片", Sort: 2, Depth: 0},
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+	rules := []model.MappingRule{
+		{SourceId: "src1", Group: "CategoryRoot", Raw: "片$", Target: "11212121", MatchType: "regex"},
+		{SourceId: "src1", Group: "CategorySub", Raw: "片$", Target: "测试", MatchType: "regex"},
+	}
+	if err := gdb.Create(&rules).Error; err != nil {
+		t.Fatalf("create rules: %v", err)
+	}
+	ReloadMappingRules()
+
+	tree, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree.Children) != 1 || tree.Children[0].Name != "11212121" {
+		t.Fatalf("public roots = %v, want 11212121", rootNames(tree))
+	}
+	root := tree.Children[0]
+	if len(root.Children) != 1 || root.Children[0].Name != "测试" || root.Children[0].Id != 44 || !root.Children[0].Show {
+		t.Fatalf("11212121 children = %v, want shown 测试#44", childNames(root))
+	}
+	if got := PublicSourceTypeIDs("src1", "pid", root.Id); len(got) != 1 || got[0] != 44 {
+		t.Fatalf("pid members = %v, want [44]", got)
+	}
+	if got := PublicSourceTypeIDs("src1", "cid", root.Children[0].Id); len(got) != 1 || got[0] != 44 {
+		t.Fatalf("cid members = %v, want [44]", got)
+	}
+
+	admin := GetSourceBoundCategoryTree("src1")
+	if len(admin.Children) != 1 || len(admin.Children[0].Children) != 1 {
+		t.Fatalf("admin tree = %+v", admin.Children)
+	}
+	adminChild := admin.Children[0].Children[0]
+	if adminChild.Name != "测试" || !adminChild.Show || adminChild.Id != 44 {
+		t.Fatalf("admin child = %+v, want shown 测试#44", adminChild)
+	}
+
+	if err := SaveSourceCategoryOrder("src1", admin.Children); err != nil {
+		t.Fatalf("save order without toggling show: %v", err)
+	}
+	if got := PublicSourceTypeIDs("src1", "cid", adminChild.Id); len(got) != 1 || got[0] != 44 {
+		t.Fatalf("cid members after save = %v, want [44] (19 stays hidden)", got)
+	}
+}

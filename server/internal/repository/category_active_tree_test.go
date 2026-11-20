@@ -417,8 +417,8 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	for _, child := range testRoot.Children {
 		testChildren = append(testChildren, fmt.Sprintf("%s#%d", child.Name, child.Id))
 	}
-	if len(testRoot.Children) != 2 || testRoot.Children[0].Name != "纪录片" || testRoot.Children[0].Id != 21 || testRoot.Children[1].Name != "动画片" || testRoot.Children[1].Id != 30 {
-		t.Fatalf("测试 children = %v, want 纪录片#21 and 动画片#30", testChildren)
+	if len(testRoot.Children) != 1 || testRoot.Children[0].Name != "影片" || testRoot.Children[0].Id != 21 {
+		t.Fatalf("测试 children = %v, want二次合并后的 影片#21", testChildren)
 	}
 
 	merged := LookupRootSourceType("src1", 30)
@@ -448,8 +448,8 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 		t.Fatalf("child 12 lookup = %+v, want nil", got)
 	}
 	promotedIDs := PublicSourceTypeIDs("src1", "cid", 30)
-	if len(promotedIDs) != 1 || promotedIDs[0] != 30 {
-		t.Fatalf("动画片 cid = %v, want [30]", promotedIDs)
+	if len(promotedIDs) != 2 || promotedIDs[0] != 21 || promotedIDs[1] != 30 {
+		t.Fatalf("二次合并后 影片 cid(30) = %v, want [21 30]", promotedIDs)
 	}
 }
 
