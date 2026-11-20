@@ -43,12 +43,10 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 
 ## 主要功能
 
-| 模块 | 核心能力 |
-| --- | --- |
-| 多站采集 | JSON / XML 接口，全量与增量定时采集 |
-| 主站与检索 | 全局主站、内存拼音/分词检索、TMDB 刮削 |
-| 观影网站 | 轮播筛选、观看历史、Artplayer 弹幕播放、私有访问 |
-| 管理后台 | 采集与片库管理、分类规则、统计、代理、Telegram 通知、在线升级 |
+- **多站采集**：支持 JSON / XML 接口，全量与增量定时采集。
+- **主站与检索**：后台显式指定全局主站，内存拼音/分词检索，TMDB 刮削。
+- **观影网站**：轮播筛选、观看历史、Artplayer 弹幕播放与私有访问控制。
+- **管理后台**：采集与片库管理、分类规则、统计、代理与 Telegram 通知。
 
 ### 订阅接口
 
@@ -60,12 +58,10 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 
 ### 客户端
 
-客户端为独立仓库，以 git submodule 形式包含在本仓库中：
+独立仓库，以 git submodule 形式包含在本仓库中：
 
-| 平台 | 仓库 | 目录 |
-| --- | --- | --- |
-| Android | [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) | `app-for-android/` |
-| OHOS | [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) | `app-for-ohos/` |
+- [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)（`app-for-android/`）
+- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`）
 
 功能细节见 [常见问题](./docs/README-FAQ.md)。
 

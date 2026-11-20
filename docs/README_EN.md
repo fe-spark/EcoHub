@@ -43,12 +43,10 @@ EcoHub neither provides nor stores any media files; all sources come from collec
 
 ## Main features
 
-| Module | Capabilities |
-| --- | --- |
-| Multi-source collect | JSON / XML APIs, scheduled full and incremental collects |
-| Main source and search | Explicit global main source, in-memory pinyin/word search, TMDB scraping |
-| Viewing site | Banners, filters, watch history, Artplayer + danmaku, private access |
-| Admin panel | Collect and library management, category rules, analytics, proxy, Telegram, online upgrade |
+- **Multi-source collect**: JSON / XML APIs with scheduled full and incremental collects.
+- **Main source and search**: explicit global main source, in-memory pinyin/word search, and TMDB scraping.
+- **Viewing site**: banners, filters, watch history, Artplayer with danmaku, and private access control.
+- **Admin panel**: collect and library management, category rules, analytics, proxy, and Telegram notifications.
 
 ### Subscription endpoints
 
@@ -60,12 +58,10 @@ EcoHub neither provides nor stores any media files; all sources come from collec
 
 ### Clients
 
-The clients are separate repositories, included as git submodules:
+Separate repositories, included as git submodules:
 
-| Platform | Repository | Directory |
-| --- | --- | --- |
-| Android | [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) | `app-for-android/` |
-| OHOS | [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) | `app-for-ohos/` |
+- [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) (`app-for-android/`)
+- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (`app-for-ohos/`)
 
 For behavioral details, see the [FAQ](./README-FAQ_EN.md).
 
