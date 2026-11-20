@@ -336,3 +336,57 @@ func TestTriggerDelFilmSourceBatch_CancelPreservesPrimaryWhenConfirmClear(t *tes
 		deleteSourceJobs.Done()
 	}
 }
+
+func TestSwitchPrimary_RejectsWhenAnySourceCollectingOrSealing(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	s1 := model.FilmSource{Id: "src_p1", Name: "主站1", Uri: "http://p1", Sort: 0, State: true}
+	s2 := model.FilmSource{Id: "src_p2", Name: "备站2", Uri: "http://p2", Sort: 1, State: true}
+	s3 := model.FilmSource{Id: "src_p3", Name: "备站3", Uri: "http://p3", Sort: 2, State: true}
+	for _, s := range []*model.FilmSource{&s1, &s2, &s3} {
+		if err := gdb.Create(s).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = repository.RefreshCollectSourceCatalog()
+
+	srv := &CollectService{}
+	if p := srv.CurrentPrimary(); p == nil || p.Id != "src_p1" {
+		t.Fatalf("expected initial primary src_p1, got %#v", p)
+	}
+
+	// 1) 目标站正在采集时禁止切为主站
+	progress.MarkSourcesCollectStarting([]model.FilmSource{s2}, "q-switch-1")
+	t.Cleanup(func() { progress.MarkStopped(s2.Id) })
+	if err := srv.SwitchPrimary(s2.Id); err == nil || err.Error() != ErrPrimarySwitchCollectBusy.Error() {
+		t.Fatalf("expected ErrPrimarySwitchCollectBusy when target collecting, got %v", err)
+	}
+
+	// 2) 其他站正在采集时，即使目标站空闲也禁止切换主站
+	if err := srv.SwitchPrimary(s3.Id); err == nil || err.Error() != ErrPrimarySwitchCollectBusy.Error() {
+		t.Fatalf("expected ErrPrimarySwitchCollectBusy when another source collecting, got %v", err)
+	}
+
+	// 3) 停用主站交接给其他站时，若有任意站正在采集也应拒绝
+	s1Disabled := s1
+	s1Disabled.State = false
+	if err := srv.UpdateFilmSource(s1Disabled, s3.Id, false); err == nil || err.Error() != ErrPrimarySwitchCollectBusy.Error() {
+		t.Fatalf("expected ErrPrimarySwitchCollectBusy on handover during collect, got %v", err)
+	}
+	progress.MarkStopped(s2.Id)
+
+	// 4) 站点处于待检索封口中（sealing）时同样禁止切换主站
+	markSourceSealing(t, s2.Id, s2.Name)
+	if err := srv.SwitchPrimary(s2.Id); err == nil || err.Error() != ErrPrimarySwitchCollectBusy.Error() {
+		t.Fatalf("expected ErrPrimarySwitchCollectBusy during sealing, got %v", err)
+	}
+	if p := srv.CurrentPrimary(); p == nil || p.Id != "src_p1" {
+		t.Fatalf("rejected switches must preserve primary src_p1, got %#v", p)
+	}
+
+	// 5) 封口完成后恢复可切换
+	progress.MarkSealed([]string{s2.Id})
+	if err := srv.SwitchPrimary(s2.Id); err != nil {
+		t.Fatalf("expected SwitchPrimary to succeed after sealing done, got %v", err)
+	}
+	waitSearchWorkIdle(t)
+}

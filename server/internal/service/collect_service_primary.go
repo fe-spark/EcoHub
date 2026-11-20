@@ -20,6 +20,9 @@ var ErrPrimaryMismatch = errors.New("主站已变更，请刷新后重试")
 // ErrPrimarySwitchForbidden 非超级管理员尝试执行或触发主站切换/交接（D4）。
 var ErrPrimarySwitchForbidden = errors.New("权限不足，仅超级管理员可执行主站切换")
 
+// ErrPrimarySwitchCollectBusy 全站存在采集或待检索封口任务时，禁止切换或交接主站。
+var ErrPrimarySwitchCollectBusy = errors.New("当前有采集或待检索任务正在进行，暂不可切换主站，请等待完成或先停止采集")
+
 // CurrentPrimary 当前主站。没有主站时返回 nil。
 func (s *CollectService) CurrentPrimary() *model.FilmSource {
 	return repository.CurrentPrimarySource()
@@ -51,6 +54,9 @@ func (s *CollectService) SwitchPrimary(id string) error {
 		}
 		if searchBusy {
 			return filmsnapshot.ErrSearchIndexBusy
+		}
+		if progress.IsAnyTaskRunning() {
+			return ErrPrimarySwitchCollectBusy
 		}
 		if err := validateNewPrimary(id, ""); err != nil {
 			return err
@@ -103,6 +109,9 @@ func planPrimaryHandover(searchBusy bool, leavingID, newPrimaryID string, confir
 func planPrimaryHandoverExcluding(searchBusy bool, excludeIDs map[string]struct{}, leavingID, newPrimaryID string, confirmClearPrimary bool) error {
 	if searchBusy {
 		return filmsnapshot.ErrSearchIndexBusy
+	}
+	if progress.IsAnyTaskRunning() {
+		return ErrPrimarySwitchCollectBusy
 	}
 	if strings.TrimSpace(newPrimaryID) != "" {
 		if _, excluded := excludeIDs[newPrimaryID]; excluded {
