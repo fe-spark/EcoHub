@@ -6,7 +6,12 @@ import (
 	"time"
 
 	"server/internal/model"
+	"server/internal/repository/support"
 )
+
+func init() {
+	support.RegisterSourceDeletingChecker(IsSourceDeleting)
+}
 
 // CategorySyncEvent 采集站分类同步状态事件
 type CategorySyncEvent struct {

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -79,11 +78,12 @@ func (h *DanmakuHandler) GetDanmaku(c *gin.Context) {
 
 	items := make([]model.DanmakuItem, 0)
 
-	// 1. 读取本地数据库用户发送的弹幕
+	// 1. 读取本地数据库用户发送的弹幕（限制单集最多 2000 条防全量拉取与 OOM）
 	if db.Mdb != nil && mid > 0 {
 		var locals []model.DanmakuRecord
 		if err := db.Mdb.Where("mid = ? AND episode = ?", mid, episode).
 			Order("time ASC").
+			Limit(2000).
 			Find(&locals).Error; err == nil {
 			for _, r := range locals {
 				items = append(items, model.DanmakuItem{
@@ -106,6 +106,9 @@ func (h *DanmakuHandler) GetDanmaku(c *gin.Context) {
 	case title == "":
 		meta.NetworkStatus = networkEmpty
 		meta.NetworkReason = "缺少片名，无法匹配"
+	case len([]rune(title)) > 120 || episode > 10000:
+		meta.NetworkStatus = networkEmpty
+		meta.NetworkReason = "片名或集数超出匹配范围"
 	default:
 		res := fetchSniffedDanmaku(basic.Danmaku, title, episode, true)
 		items = append(items, res.Items...)
@@ -171,15 +174,22 @@ func (h *DanmakuHandler) PostDanmaku(c *gin.Context) {
 		return
 	}
 	req.Text = strings.TrimSpace(req.Text)
-	if req.Text == "" || len(req.Text) > 200 {
+	if req.Text == "" || len([]rune(req.Text)) > 200 {
 		dto.Failed("弹幕内容不能为空且不能超过200字", c)
 		return
 	}
-	if req.Color == "" {
-		req.Color = "#ffffff"
+	color, valErr := validateDanmakuPostInput(req.Mid, req.Time, req.Color, req.Mode)
+	if valErr != "" {
+		dto.Failed(valErr, c)
+		return
 	}
-	if req.Episode <= 0 {
+	req.Color = color
+	if req.Episode <= 0 || req.Episode > 10000 {
 		req.Episode = 1
+	}
+	if !allowDanmakuPost(c.ClientIP()) {
+		dto.Failed("发送弹幕过于频繁，请稍后再试", c)
+		return
 	}
 
 	if db.Mdb == nil {
@@ -196,7 +206,8 @@ func (h *DanmakuHandler) PostDanmaku(c *gin.Context) {
 		IP:      c.ClientIP(),
 	}
 	if err := db.Mdb.Create(&record).Error; err != nil {
-		dto.Failed("保存弹幕失败: "+err.Error(), c)
+		log.Printf("[Danmaku] 保存弹幕失败 mid=%d err=%v", req.Mid, err)
+		dto.Failed("保存弹幕失败", c)
 		return
 	}
 	dto.Success(nil, "发送成功", c)
@@ -273,31 +284,34 @@ func fetchSniffedDanmaku(cfg model.DanmakuConfig, title string, episode int, use
 		}
 	}
 
-	match, err := searchDandanplayEpisode(cfg, baseURL, title, episode)
-	if err != nil {
-		return sniffResult{Status: networkError, Reason: upstreamReason(err)}
-	}
-	if match.EpisodeID <= 0 {
-		return sniffResult{Status: networkEmpty, Reason: "没有匹配到这部片"}
-	}
-
-	items, err := loadDandanplayComments(cfg, baseURL, match.EpisodeID)
-	res := sniffResult{AnimeTitle: match.AnimeTitle, EpisodeTitle: match.EpisodeTitle}
-	if err != nil {
-		res.Status, res.Reason = networkError, upstreamReason(err)
-		return res
-	}
-	if len(items) == 0 {
-		res.Status, res.Reason = networkEmpty, "匹配到了这部片，但这一集没有弹幕"
-		return res
-	}
-	if useCache && db.Rdb != nil {
-		if data, err := json.Marshal(items); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), 7*24*time.Hour)
+	val, _, _ := danmakuSniffSF.Do(cacheKey, func() (any, error) {
+		match, err := searchDandanplayEpisode(cfg, baseURL, title, episode)
+		if err != nil {
+			return sniffResult{Status: networkError, Reason: upstreamReason(err)}, nil
 		}
-	}
-	res.Items, res.Status = items, networkOK
-	return res
+		if match.EpisodeID <= 0 {
+			return sniffResult{Status: networkEmpty, Reason: "没有匹配到这部片"}, nil
+		}
+
+		items, err := loadDandanplayComments(cfg, baseURL, match.EpisodeID)
+		res := sniffResult{AnimeTitle: match.AnimeTitle, EpisodeTitle: match.EpisodeTitle}
+		if err != nil {
+			res.Status, res.Reason = networkError, upstreamReason(err)
+			return res, nil
+		}
+		if len(items) == 0 {
+			res.Status, res.Reason = networkEmpty, "匹配到了这部片，但这一集没有弹幕"
+			return res, nil
+		}
+		if useCache && db.Rdb != nil {
+			if data, err := json.Marshal(items); err == nil {
+				db.Rdb.Set(db.Cxt, cacheKey, string(data), 7*24*time.Hour)
+			}
+		}
+		res.Items, res.Status = items, networkOK
+		return res, nil
+	})
+	return val.(sniffResult)
 }
 
 // dandanMatch 搜索匹配到的分集
@@ -391,7 +405,7 @@ func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, 
 		return dandanMatch{}, statusFailure(resp.StatusCode, strings.TrimSpace(cfg.ApiURL) == "")
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimitedDanmakuBody(resp.Body)
 	if err != nil {
 		return dandanMatch{}, requestFailure(err)
 	}
@@ -471,7 +485,7 @@ func loadDandanplayComments(cfg model.DanmakuConfig, baseURL string, episodeID i
 		return nil, statusFailure(resp.StatusCode, strings.TrimSpace(cfg.ApiURL) == "")
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimitedDanmakuBody(resp.Body)
 	if err != nil {
 		return nil, requestFailure(err)
 	}

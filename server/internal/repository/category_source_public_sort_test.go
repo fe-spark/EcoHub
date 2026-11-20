@@ -62,8 +62,8 @@ func TestSourceTypeTree_UsesMappedSort(t *testing.T) {
 	if len(tree.Children) != 2 {
 		t.Fatalf("roots = %v, want 男人帮 then 电影", rootNames(tree))
 	}
-	if tree.Children[0].Name != "男人帮" || tree.Children[0].Id != 5 || tree.Children[0].Sort != 1 {
-		t.Fatalf("first root = %+v, want 男人帮#5 sort 1", tree.Children[0])
+	if tree.Children[0].Name != "男人帮" || tree.Children[0].Id < syntheticRootTypeOffset || tree.Children[0].Sort != 1 {
+		t.Fatalf("first root = %+v, want synthetic 男人帮 sort 1", tree.Children[0])
 	}
 	if tree.Children[1].Name != "电影" || tree.Children[1].Id != 1 || tree.Children[1].Sort != 3 {
 		t.Fatalf("second root = %+v, want 电影#1 sort 3", tree.Children[1])
@@ -74,14 +74,14 @@ func TestSourceTypeTree_UsesMappedSort(t *testing.T) {
 	}
 
 	admin := GetSourceBoundCategoryTree("src1")
-	if len(admin.Children) != 2 || admin.Children[0].Name != "男人帮" || admin.Children[0].Id != 547 || admin.Children[0].Sort != 1 {
-		t.Fatalf("admin first = %+v, want 男人帮#547 sort 1", admin.Children[0])
+	if len(admin.Children) != 2 || admin.Children[0].Name != "男人帮" || admin.Children[0].Id == 547 || admin.Children[0].Sort != 1 {
+		t.Fatalf("admin first = %+v, want dedicated 男人帮 sort 1", admin.Children[0])
 	}
 	if admin.Children[1].Name != "电影" || admin.Children[1].Id != 9 || admin.Children[1].Sort != 3 {
 		t.Fatalf("admin second = %+v, want 电影#9 sort 3", admin.Children[1])
 	}
 	adminKids := childNames(admin.Children[0])
-	if len(admin.Children[0].Children) != 2 || adminKids[0] != "海外抖音#550" || adminKids[1] != "网红主播#549" {
-		t.Fatalf("admin 男人帮 children = %v, want 海外抖音#550 网红主播#549", adminKids)
+	if len(admin.Children[0].Children) != 3 || adminKids[0] != "福利视频#547" || adminKids[1] != "海外抖音#550" || adminKids[2] != "网红主播#549" {
+		t.Fatalf("admin 男人帮 children = %v, want 福利视频#547 海外抖音#550 网红主播#549", adminKids)
 	}
 }

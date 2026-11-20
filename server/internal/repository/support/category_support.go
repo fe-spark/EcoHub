@@ -62,7 +62,14 @@ func GetCategoryStableKeyByID(id int64) string {
 	if k, ok := GetCategoryStableKeyFromCache(id); ok {
 		return k
 	}
-	if catInitialized || db.Mdb == nil {
+	catMu.RLock()
+	if k, ok := GetCategoryStableKeyFromCache(id); ok {
+		catMu.RUnlock()
+		return k
+	}
+	initialized := catInitialized
+	catMu.RUnlock()
+	if initialized || db.Mdb == nil {
 		return ""
 	}
 	var category model.Category
@@ -101,7 +108,11 @@ func GetCategoryVersion() string {
 		return version
 	}
 	version = fmt.Sprintf("%d", time.Now().UnixNano())
-	db.Rdb.Set(db.Cxt, config.CategoryVersionKey, version, 0)
+	if set, _ := db.Rdb.SetNX(db.Cxt, config.CategoryVersionKey, version, 0).Result(); !set {
+		if cur, err := db.Rdb.Get(db.Cxt, config.CategoryVersionKey).Result(); err == nil && cur != "" {
+			return cur
+		}
+	}
 	return version
 }
 
@@ -109,14 +120,34 @@ func GetVersionedIndexPageCacheKey() string {
 	return fmt.Sprintf("%s:v%s", config.IndexPageCacheKey, GetCategoryVersion())
 }
 
+// IndexPageGeneration 返回首页缓存世代，防止并发读在缓存失效后把旧首页结果写回 Redis。
+func IndexPageGeneration() uint64 {
+	return indexPageGen.Load()
+}
+
+// BumpIndexPageGeneration 递增首页缓存世代。
+func BumpIndexPageGeneration() {
+	indexPageGen.Add(1)
+}
+
 func ClearIndexPageCache() {
+	BumpIndexPageGeneration()
 	rdb := db.Rdb
 	if rdb == nil {
 		return
 	}
+	const batchSize = 500
+	batch := make([]string, 0, batchSize)
 	iter := rdb.Scan(db.Cxt, 0, config.IndexPageCacheKey+"*", config.MaxScanCount).Iterator()
 	for iter.Next(db.Cxt) {
-		rdb.Del(db.Cxt, iter.Val())
+		batch = append(batch, iter.Val())
+		if len(batch) >= batchSize {
+			_ = rdb.Unlink(db.Cxt, batch...).Err()
+			batch = batch[:0]
+		}
+	}
+	if len(batch) > 0 {
+		_ = rdb.Unlink(db.Cxt, batch...).Err()
 	}
 }
 
@@ -125,27 +156,30 @@ func RefreshCategoryCache() {
 		return
 	}
 	var all []model.Category
-	db.Mdb.Find(&all)
+	if err := db.Mdb.Find(&all).Error; err != nil {
+		return
+	}
 
-	newPidMap := make(map[int64]int64)
-	newShowMap := make(map[int64]bool)
-	ResetCategoryNameCache()
-	ResetCategoryStableKeyCache()
+	newPidMap := make(map[int64]int64, len(all))
+	newShowMap := make(map[int64]bool, len(all))
 	for _, c := range all {
-		item := c
-		newPidMap[item.Id] = item.Pid
-		newShowMap[item.Id] = item.Show
-		SetCategoryNameCache(item.Id, item.Name)
-		SetCategoryStableKeyCache(item.Id, item.StableKey)
+		newPidMap[c.Id] = c.Pid
+		newShowMap[c.Id] = c.Show
 	}
 
 	catMu.Lock()
+	catSnapVer.Add(1)
+	ResetCategoryNameCache()
+	ResetCategoryStableKeyCache()
+	for _, c := range all {
+		SetCategoryNameCache(c.Id, c.Name)
+		SetCategoryStableKeyCache(c.Id, c.StableKey)
+	}
 	idToPid = newPidMap
 	categoryShowMap = newShowMap
 	catInitialized = true
-	catMu.Unlock()
-
 	ClearRootCategoryCNameCache()
+	catMu.Unlock()
 }
 
 func GetRootId(id int64) int64 {
@@ -325,8 +359,9 @@ func ResolveRootCategoryIDByCName(cName string) int64 {
 		RefreshCategoryCache()
 	}
 
+	ver := catSnapVer.Load()
 	var matchedId int64
-	// sync.Map 自带并发安全，遍历无需持有 catMu 锁，彻底杜绝与写锁并发时的重入死锁
+	catMu.RLock()
 	categoryNameCache.Range(func(key, val any) bool {
 		id, ok1 := key.(int64)
 		name, ok2 := val.(string)
@@ -336,36 +371,68 @@ func ResolveRootCategoryIDByCName(cName string) int64 {
 		}
 		return true
 	})
+	catMu.RUnlock()
 
 	var rootId int64
 	if matchedId > 0 {
 		rootId = GetRootId(matchedId)
 	}
 
-	// 内存遍历未命中即代表库内无此正规分类，不进行盲猜，直接记录 0
-	rootCategoryCNameCache.Store(cName, rootId)
+	// 仅在分类缓存世代未发生刷新时写入结果，且限制负缓存上限避免异常参数驻留过多
+	if catSnapVer.Load() == ver {
+		if rootId == 0 {
+			const maxRootCNameNegativeCache = 512
+			count := 0
+			rootCategoryCNameCache.Range(func(_, _ any) bool {
+				count++
+				return count <= maxRootCNameNegativeCache
+			})
+			if count > maxRootCNameNegativeCache {
+				ClearRootCategoryCNameCache()
+			}
+		}
+		rootCategoryCNameCache.Store(cName, rootId)
+	}
 	return rootId
 }
 
-// PickPrimarySourceForCategory 选取当前基准源站点（首位即基准原则）。
-// 仅从已启用的站点中按顺序选取首位；全部站点停用或无站点时返回 nil。
-func PickPrimarySourceForCategory() *model.FilmSource {
+var (
+	sourceDeletingCheckerMu sync.RWMutex
+	sourceDeletingChecker   func(string) bool
+)
+
+// RegisterSourceDeletingChecker 注册站点删除运行态检查器，供选主站跳过正在删除的站点。
+func RegisterSourceDeletingChecker(fn func(string) bool) {
+	sourceDeletingCheckerMu.Lock()
+	sourceDeletingChecker = fn
+	sourceDeletingCheckerMu.Unlock()
+}
+
+func isSourceDeleting(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	sourceDeletingCheckerMu.RLock()
+	fn := sourceDeletingChecker
+	sourceDeletingCheckerMu.RUnlock()
+	return fn != nil && fn(id)
+}
+
+// pickEnabledCollectSource 返回排序最前且未在删除中的启用站（主站为空时的懒初始化来源）。
+func pickEnabledCollectSource() *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
-	var primary model.FilmSource
-	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
-		return &primary
+	var list []model.FilmSource
+	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+		return nil
+	}
+	for i := range list {
+		if list[i].Id == "" || isSourceDeleting(list[i].Id) {
+			continue
+		}
+		return &list[i]
 	}
 	return nil
-}
-
-// IsBaselineCollectSource 判断指定采集站是否为当前首位基准源。
-func IsBaselineCollectSource(sourceID string) bool {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return false
-	}
-	primary := PickPrimarySourceForCategory()
-	return primary != nil && strings.TrimSpace(primary.Id) == sourceID
 }

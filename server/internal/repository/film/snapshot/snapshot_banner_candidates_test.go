@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"server/internal/model"
+	"server/internal/repository/support"
 )
 
 func bannerCandidateFilm(mid, pid, hits int64, score float64, updateStamp int64, name string) model.FilmIndex {
@@ -66,6 +67,49 @@ func TestGetSnapshotBannerCandidates_TopNExcludeAndScoreFill(t *testing.T) {
 	}
 }
 
+func TestGetSnapshotBannerCandidates_SourceUsesCategoryKeyAndPlayLine(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	const sourceID = "banner_src"
+	key := "source:banner_src:1"
+	other := "source:banner_src:2"
+	rows := []model.FilmIndex{
+		bannerCandidateFilm(1, 1, 10, 9.0, 100, "高分有线路"),
+		bannerCandidateFilm(2, 1, 80, 4.0, 200, "最热无线路"),
+		bannerCandidateFilm(3, 1, 40, 4.0, 300, "次热有线路"),
+		bannerCandidateFilm(4, 2, 100, 9.5, 400, "他类更热"),
+	}
+	rows[0].CategoryKey = key
+	rows[1].CategoryKey = key
+	rows[2].CategoryKey = key
+	rows[3].CategoryKey = other
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	lines := []model.FilmSourcePlaylist{
+		{Mid: 1, SourceId: sourceID, LineKind: model.LineKindPlay},
+		{Mid: 3, SourceId: sourceID, LineKind: model.LineKindPlay},
+		{Mid: 4, SourceId: sourceID, LineKind: model.LineKindPlay},
+	}
+	if err := gdb.Create(&lines).Error; err != nil {
+		t.Fatalf("seed playlist: %v", err)
+	}
+
+	hot, err := GetSnapshotBannerCandidates(context.Background(), "live", "hot_random", sourceID, []int64{1}, 2, nil)
+	if err != nil {
+		t.Fatalf("hot: %v", err)
+	}
+	if got := bannerCandidateMids(hot); len(got) != 2 || got[0] != 3 || got[1] != 1 {
+		t.Fatalf("hot got %v", got)
+	}
+	score, err := GetSnapshotBannerCandidates(context.Background(), "live", "score_random", sourceID, []int64{1}, 2, nil)
+	if err != nil {
+		t.Fatalf("score: %v", err)
+	}
+	if got := bannerCandidateMids(score); len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("score got %v", got)
+	}
+}
+
 func TestGetSnapshotBannerCandidates_CanceledContext(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	if err := gdb.Create(&[]model.FilmIndex{bannerCandidateFilm(1, 1, 10, 9.0, 100, "影片")}).Error; err != nil {
@@ -75,5 +119,39 @@ func TestGetSnapshotBannerCandidates_CanceledContext(t *testing.T) {
 	cancel()
 	if _, err := GetSnapshotBannerCandidates(ctx, "live", "hot_random", "", []int64{1}, 2, nil); err == nil {
 		t.Fatalf("canceled context should return an error")
+	}
+}
+
+func TestGetSnapshotBannerCandidates_ExcludesHiddenSubcategory(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{1: 0, 10: 1, 19: 1}, map[int64]string{1: "电影", 10: "动作片", 19: "伦理片"})
+	support.SetCategoryShowForTest(map[int64]bool{1: true, 10: true, 19: false})
+	t.Cleanup(func() {
+		support.SetCategoryShowForTest(nil)
+		support.SetCategoryTreeForTest(nil, nil)
+	})
+
+	visible := bannerCandidateFilm(1, 1, 50, 8.0, 200, "公开动作")
+	visible.Cid = 10
+	hidden := bannerCandidateFilm(2, 1, 999, 9.5, 999, "隐藏伦理")
+	hidden.Cid = 19
+	if err := gdb.Create(&[]model.FilmIndex{visible, hidden}).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	gotSelected, err := GetSnapshotBannerCandidates(context.Background(), "live", "hot_random", "", []int64{1}, 5, nil)
+	if err != nil {
+		t.Fatalf("selected candidates: %v", err)
+	}
+	if mids := bannerCandidateMids(gotSelected); len(mids) != 1 || mids[0] != 1 {
+		t.Fatalf("selected banner leaked hidden subcategory: %v", mids)
+	}
+
+	gotAll, err := GetSnapshotBannerCandidates(context.Background(), "live", "hot_random", "", nil, 5, nil)
+	if err != nil {
+		t.Fatalf("all candidates: %v", err)
+	}
+	if mids := bannerCandidateMids(gotAll); len(mids) != 1 || mids[0] != 1 {
+		t.Fatalf("unbounded banner leaked hidden subcategory: %v", mids)
 	}
 }

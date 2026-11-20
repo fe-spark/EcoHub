@@ -8,6 +8,18 @@ import (
 	"server/internal/infra/db"
 )
 
+const cacheUnlinkBatchSize = 500
+
+func unlinkKeyBatch(tag string, batch []string) []string {
+	if len(batch) == 0 {
+		return batch
+	}
+	if err := db.Rdb.Unlink(db.Cxt, batch...).Err(); err != nil {
+		log.Printf("%s Unlink Error: count=%d err=%v", tag, len(batch), err)
+	}
+	return batch[:0]
+}
+
 // ClearPatterns 批量清除匹配的 Redis 缓存键。
 // 只要模式数量 > 1，统一合并为单次 SCAN 遍历，客户端内存过滤，坚决避免串行发起 N 轮全库扫描。
 func ClearPatterns(patterns ...string) {
@@ -41,24 +53,17 @@ func ClearPatterns(patterns ...string) {
 	}
 
 	iter := db.Rdb.Scan(db.Cxt, 0, scanPattern, 1000).Iterator()
-	var batch []string
+	batch := make([]string, 0, cacheUnlinkBatchSize)
 	for iter.Next(db.Cxt) {
 		key := iter.Val()
 		if matchAnyPattern(key, validPatterns) {
 			batch = append(batch, key)
-			if len(batch) >= 100 {
-				if err := db.Rdb.Del(db.Cxt, batch...).Err(); err != nil {
-					log.Printf("clearCachePatterns Batch Del Error: count=%d err=%v", len(batch), err)
-				}
-				batch = batch[:0]
+			if len(batch) >= cacheUnlinkBatchSize {
+				batch = unlinkKeyBatch("clearCachePatterns Batch", batch)
 			}
 		}
 	}
-	if len(batch) > 0 {
-		if err := db.Rdb.Del(db.Cxt, batch...).Err(); err != nil {
-			log.Printf("clearCachePatterns Final Batch Del Error: count=%d err=%v", len(batch), err)
-		}
-	}
+	unlinkKeyBatch("clearCachePatterns Final Batch", batch)
 	if err := iter.Err(); err != nil {
 		log.Printf("clearCachePatterns Scan Error: pattern=%s err=%v", scanPattern, err)
 	}
@@ -66,21 +71,14 @@ func ClearPatterns(patterns ...string) {
 
 func scanAndDelPattern(pattern string) {
 	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
-	var batch []string
+	batch := make([]string, 0, cacheUnlinkBatchSize)
 	for iter.Next(db.Cxt) {
 		batch = append(batch, iter.Val())
-		if len(batch) >= 100 {
-			if err := db.Rdb.Del(db.Cxt, batch...).Err(); err != nil {
-				log.Printf("scanAndDelPattern Batch Del Error: count=%d err=%v", len(batch), err)
-			}
-			batch = batch[:0]
+		if len(batch) >= cacheUnlinkBatchSize {
+			batch = unlinkKeyBatch("scanAndDelPattern Batch", batch)
 		}
 	}
-	if len(batch) > 0 {
-		if err := db.Rdb.Del(db.Cxt, batch...).Err(); err != nil {
-			log.Printf("scanAndDelPattern Final Batch Del Error: count=%d err=%v", len(batch), err)
-		}
-	}
+	unlinkKeyBatch("scanAndDelPattern Final Batch", batch)
 	if err := iter.Err(); err != nil {
 		log.Printf("scanAndDelPattern Scan Error: pattern=%s err=%v", pattern, err)
 	}

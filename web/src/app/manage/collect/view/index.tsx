@@ -7,10 +7,9 @@ import { useRouter } from "next/navigation";
 import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission, ManagePermissionProvider } from "@/lib/manage-permission";
+import { usePrimarySource } from "@/lib/manage-primary";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import BatchCollectDrawer from "./batch-collect-drawer";
-import CategoryChangeModal from "./category-change-modal";
-import CleanupInvalidModal from "./cleanup-invalid-modal";
+import CollectModals from "./collect-modals";
 import CollectQueueBars from "./collect-queue-bars";
 import DeleteQueueBar from "./delete-queue-bar";
 import CollectSourceGrid from "./collect-source-grid";
@@ -20,6 +19,7 @@ import { useCollectProgressStream } from "./use-collect-progress-stream";
 import { useCollectStream, type CategoryTreeChange, type SearchIndexProgress } from "./use-collect-stream";
 import { useCollectSourceEvents } from "./use-collect-source-events";
 import { useCategoryChangeConfirm } from "./use-category-change-confirm";
+import { usePrimaryHandover } from "./use-primary-handover";
 import { useCollectCleanup } from "./use-collect-cleanup";
 import { useCollectBatchActions } from "./use-collect-batch-actions";
 import { useCollectBatchRunner } from "./use-collect-batch-runner";
@@ -41,8 +41,34 @@ export default function CollectManagePageView() {
   const router = useRouter();
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
+  const { primary, loading: primaryLoading, refresh: refreshPrimary } = usePrimarySource();
   const canOperate = canWrite;
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
+  const siteListRef = useRef<FilmSource[]>([]);
+  siteListRef.current = siteList;
+  const prevPrimaryIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (primaryLoading) return;
+    const nextPrimaryId = primary?.id ?? "";
+    if (prevPrimaryIdRef.current === undefined) {
+      prevPrimaryIdRef.current = nextPrimaryId;
+      return;
+    }
+    if (prevPrimaryIdRef.current === nextPrimaryId) return;
+    prevPrimaryIdRef.current = nextPrimaryId;
+    setSiteList((current) => {
+      let changed = false;
+      const next = current.map((item) => {
+        if (item.deleting && !nextPrimaryId) return item;
+        const shouldBePrimary = Boolean(nextPrimaryId && item.id === nextPrimaryId);
+        if (item.isPrimary === shouldBePrimary) return item;
+        changed = true;
+        return { ...item, isPrimary: shouldBePrimary };
+      });
+      return changed ? next : current;
+    });
+  }, [primary?.id, primaryLoading]);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
   const collectListRequestRef = useRef(0);
@@ -57,7 +83,7 @@ export default function CollectManagePageView() {
     handleCategoryStatus,
     handleSourceDelete,
     handleDeleteSnapshot,
-  } = useCollectSourceEvents({ setSiteList, message });
+  } = useCollectSourceEvents({ setSiteList, message, reloadList: () => void getCollectList() });
 
   const getCollectList = useCallback(
     async (createdId?: string) => {
@@ -149,6 +175,8 @@ export default function CollectManagePageView() {
 
   const {
     deleteQueueItems,
+    stoppingDelete,
+    stopDeleteQueue,
     enqueueDeletingSources,
     handleSourceDeleteEvent,
     handleDeleteSnapshot: handleDeleteSnapshotQueue,
@@ -168,15 +196,18 @@ export default function CollectManagePageView() {
       setSearchIndexProgress(p);
     },
     onSourceDelete: (evt) => {
+      if (
+        (evt.status === "deleted" || evt.status === "canceled" || evt.status === "failed") &&
+        siteListRef.current.some((s) => s.id === evt.sourceId && s.isPrimary)
+      ) {
+        void refreshPrimary();
+      }
       handleSourceDelete(evt);
       handleSourceDeleteEvent(evt);
     },
     onDeleteSnapshot: (ids) => {
       handleDeleteSnapshot(ids);
-      setSiteList((current) => {
-        handleDeleteSnapshotQueue(ids, current);
-        return current;
-      });
+      handleDeleteSnapshotQueue(ids, siteListRef.current);
     },
     onReconnect: () => {
       void getCollectList();
@@ -195,10 +226,13 @@ export default function CollectManagePageView() {
 
   const categoryConfirm = useCategoryChangeConfirm(getCollectList);
 
+  const primaryHandover = usePrimaryHandover();
+
   const {
     selectedSourceIds,
     batchStateUpdating,
     batchDeleting,
+    hasBusySelected,
     deleteConfirmTitle,
     deleteConfirmDescription,
     handleSelectSource,
@@ -207,7 +241,9 @@ export default function CollectManagePageView() {
     clearSelection,
     batchChangeSourceState,
     batchDeleteSources,
-  } = useCollectBatchActions(siteList, setSiteList, getCollectList, enqueueDeletingSources);
+  } = useCollectBatchActions(
+    siteList, setSiteList, getCollectList, enqueueDeletingSources, primaryHandover.ask, isAdmin, refreshPrimary,
+  );
 
   const {
     batchOpen,
@@ -285,6 +321,9 @@ export default function CollectManagePageView() {
     getCollectList,
     onDeleteSubmitted: enqueueDeletingSources,
     searchIndex: searchIndexProgress,
+    isAdmin,
+    refreshPrimary,
+    askPrimaryHandover: primaryHandover.ask,
   });
 
   const {
@@ -382,6 +421,7 @@ export default function CollectManagePageView() {
           canWrite={canOperate}
           batchStateUpdating={batchStateUpdating}
           batchDeleting={batchDeleting}
+          hasBusySelected={hasBusySelected}
           isIndexing={searchIndexProgress?.status === "indexing"}
           deleteConfirmTitle={deleteConfirmTitle}
           deleteConfirmDescription={deleteConfirmDescription}
@@ -398,6 +438,8 @@ export default function CollectManagePageView() {
           <DeleteQueueBar
             items={deleteQueueItems}
             onDismiss={dismissDeleteQueue}
+            onStop={() => void stopDeleteQueue()}
+            stopping={stoppingDelete}
           />
         ) : null}
 
@@ -462,34 +504,15 @@ export default function CollectManagePageView() {
         onTest={testApi}
       />
 
-      <BatchCollectDrawer
-        open={batchOpen}
-        rows={batchRows}
-        batchTime={batchTime}
+      <CollectModals
+        batchOpen={batchOpen} batchRows={batchRows} batchTime={batchTime}
         isIndexing={searchIndexProgress?.status === "indexing"}
-        onCancel={() => setBatchOpen(false)}
-        onSubmit={() => void startBatchCollect()}
+        onCancelBatch={() => setBatchOpen(false)} onSubmitBatch={() => void startBatchCollect()}
         onBatchTimeChange={setBatchTime}
-      />
-
-      <CleanupInvalidModal
-        open={cleanupOpen}
-        scanning={cleanupScanning}
-        deleting={cleanupDeleting}
-        invalidSources={invalidSources}
-        skipped={cleanupSkipped}
-        onCancel={cancelCleanup}
-        onConfirm={() => void confirmCleanup()}
-      />
-
-      <CategoryChangeModal
-        open={categoryConfirm.open}
-        sourceName={categoryConfirm.sourceName}
-        changes={categoryConfirm.changes}
-        loading={categoryConfirm.loading}
-        onCancel={categoryConfirm.closeConfirm}
-        onKeep={() => void categoryConfirm.handleKeep()}
-        onClear={() => void categoryConfirm.handleClear()}
+        cleanupOpen={cleanupOpen} cleanupScanning={cleanupScanning} cleanupDeleting={cleanupDeleting}
+        invalidSources={invalidSources} cleanupSkipped={cleanupSkipped}
+        onCancelCleanup={cancelCleanup} onConfirmCleanup={() => void confirmCleanup()}
+        categoryConfirm={categoryConfirm} primaryHandoverNode={primaryHandover.modalNode}
       />
       </div>
     </ManagePermissionProvider>

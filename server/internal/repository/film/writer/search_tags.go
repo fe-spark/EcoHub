@@ -26,6 +26,12 @@ var (
 	rebuildPidSf        singleflight.Group
 )
 
+// ResetSearchTagMemoryCaches 重置内存中的静态/动态标签初始化标记（清库、主站切换重置后调用）。
+func ResetSearchTagMemoryCaches() {
+	initializedPids.Clear()
+	filledSearchTagPids.Clear()
+}
+
 func init() {
 	filmsnapshot.SetSearchTagBackfill(fillSearchTagsForPid)
 }
@@ -49,9 +55,8 @@ func UpsertDynamicSearchTags(infos ...model.FilmIndex) error {
 	}); err != nil {
 		return err
 	}
-	for _, pid := range collectSearchTagPidList(infos) {
-		cache.ClearSearchTagsCache(pid)
-	}
+	filmsnapshot.BumpSearchCacheVersion()
+	cache.ClearAllSearchTagsCache()
 	return nil
 }
 
@@ -107,9 +112,8 @@ func RefreshSearchTagsByPids(pids ...int64) error {
 			pid, idx+1, len(orderedPids), films, time.Since(pidStart), time.Since(start))
 	}
 
-	for _, pid := range orderedPids {
-		cache.ClearSearchTagsCache(pid)
-	}
+	filmsnapshot.BumpSearchCacheVersion()
+	cache.ClearAllSearchTagsCache()
 	log.Printf("[SearchTags] 标签重建完成 pids=%d films=%d cost=%s",
 		len(orderedPids), totalFilms, time.Since(start))
 	return nil
@@ -189,6 +193,9 @@ func deleteUnseenDynamicSearchTags(pid int64, seen map[searchTagKey]struct{}) er
 			continue
 		}
 		ids = append(ids, row.ID)
+	}
+	if len(seen) == 0 {
+		filledSearchTagPids.Delete(pid)
 	}
 	if len(ids) == 0 {
 		return nil

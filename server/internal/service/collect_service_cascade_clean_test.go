@@ -1,10 +1,14 @@
 package service
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
 	"server/internal/testutil"
 
@@ -12,6 +16,95 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func TestEnqueueDelFilmSources_ConcurrentBatchesAreAtomic(t *testing.T) {
+	if !WaitAsyncWork(5 * time.Second) {
+		t.Fatal("previous async work did not finish")
+	}
+	batches := [][]*model.FilmSource{
+		{
+			{Id: "src_atomic_a1", Name: "站点A1"},
+			{Id: "src_atomic_a2", Name: "站点A2"},
+		},
+		{
+			{Id: "src_atomic_b1", Name: "站点B1"},
+			{Id: "src_atomic_b2", Name: "站点B2"},
+		},
+	}
+	queue := make(chan deleteSourceJob, 2)
+	t.Cleanup(func() {
+		for len(queue) > 0 {
+			<-queue
+			deleteSourceJobs.Done()
+		}
+		for _, batch := range batches {
+			for _, src := range batch {
+				progress.SetSourceDeleting(src.Id, false)
+			}
+		}
+	})
+
+	start := make(chan struct{})
+	results := make([]error, len(batches))
+	var wg sync.WaitGroup
+	for i, batch := range batches {
+		wg.Add(1)
+		go func(i int, batch []*model.FilmSource) {
+			defer wg.Done()
+			<-start
+			results[i] = enqueueDelFilmSources(queue, batch)
+		}(i, batch)
+	}
+	close(start)
+	wg.Wait()
+
+	success := -1
+	for i, err := range results {
+		if err == nil {
+			if success >= 0 {
+				t.Fatal("both batches unexpectedly succeeded")
+			}
+			success = i
+		}
+	}
+	if success < 0 {
+		t.Fatal("neither batch succeeded")
+	}
+	if len(queue) != len(batches[success]) {
+		t.Fatalf("queued %d sources, want whole batch of %d", len(queue), len(batches[success]))
+	}
+	queued := make(map[string]struct{}, len(batches[success]))
+	drained := make([]deleteSourceJob, 0, len(batches[success]))
+	for len(queue) > 0 {
+		job := <-queue
+		queued[job.id] = struct{}{}
+		drained = append(drained, job)
+	}
+	for _, job := range drained {
+		queue <- job
+	}
+	for _, src := range batches[success] {
+		if _, ok := queued[src.Id]; !ok {
+			t.Fatalf("queued batch does not contain %s", src.Id)
+		}
+		if !progress.IsSourceDeleting(src.Id) {
+			t.Fatalf("accepted source %s was not marked deleting", src.Id)
+		}
+	}
+	for i, batch := range batches {
+		if i == success {
+			continue
+		}
+		if results[i] == nil {
+			t.Fatal("rejected batch unexpectedly succeeded")
+		}
+		for _, src := range batch {
+			if progress.IsSourceDeleting(src.Id) {
+				t.Fatalf("rejected source %s was marked deleting", src.Id)
+			}
+		}
+	}
+}
 
 func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -37,6 +130,7 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.CollectRecord{},
 		&model.CollectRecordFilmItem{},
 		&model.CollectSourceStats{},
+		&model.PrimaryState{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -219,7 +313,7 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 		Uri:   "http://new-src.com",
 		State: true,
 	}
-	if err := srv.UpdateFilmSource(updateReq); err != nil {
+	if err := srv.UpdateFilmSource(updateReq, "", false); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
@@ -256,5 +350,317 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 	var shared model.Category
 	if err := gdb.First(&shared, 9).Error; err != nil {
 		t.Fatalf("category used by another source was deleted: %v", err)
+	}
+}
+
+func TestCurrentPrimarySource_SkipsDeletingSource(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true, Sort: 1})
+	gdb.Create(&model.FilmSource{Id: "src3", Name: "源3", Uri: "http://src3.com", State: true, Sort: 2})
+
+	progress.SetSourceDeleting("src1", true)
+	progress.SetSourceDeleting("src2", true)
+	t.Cleanup(func() {
+		progress.SetSourceDeleting("src1", false)
+		progress.SetSourceDeleting("src2", false)
+	})
+
+	// 主站为空时懒初始化会跳过删除中的站
+	primary := repository.CurrentPrimarySource()
+	if primary == nil || primary.Id != "src3" {
+		t.Fatalf("expected primary to skip deleting sources and pick src3, got %#v", primary)
+	}
+
+	progress.SetSourceDeleting("src1", false)
+	progress.SetSourceDeleting("src2", false)
+	// 主站已持久化：排序首位恢复可用也不改变主站
+	primary = repository.CurrentPrimarySource()
+	if primary == nil || primary.Id != "src3" {
+		t.Fatalf("expected primary to stick to src3 after deleting flags cleared, got %#v", primary)
+	}
+}
+
+func TestCollectService_TriggerDelFilmSourceBatch_SupportsPrimaryAndDeletesCleanly(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true, Sort: 1})
+	gdb.Create(&model.FilmSource{Id: "src3", Name: "源3", Uri: "http://src3.com", State: true, Sort: 2})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片1"},
+	})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片2"},
+	})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src3"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片3"},
+	})
+	if err := repository.RefreshCollectSourceCatalog(); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := new(CollectService)
+	// 批量删除包含当前主站 src1：自动交接至未删除的启用站 src3，src1 排在最后删除
+	if err := srv.TriggerDelFilmSourceBatch([]string{"src1", "src2"}, "src3", false); err != nil {
+		t.Fatalf("TriggerDelFilmSourceBatch failed: %v", err)
+	}
+
+	// 入队后主站已交接至 src3
+	if curPrimary := repository.CurrentPrimarySource(); curPrimary == nil || curPrimary.Id != "src3" {
+		t.Fatalf("expected primary src3 while deleting, got %#v", curPrimary)
+	}
+
+	waitSearchWorkIdle(t)
+
+	var leftSources int64
+	gdb.Model(&model.FilmSource{}).Where("id IN ?", []string{"src1", "src2"}).Count(&leftSources)
+	if leftSources != 0 {
+		t.Fatalf("expected src1 and src2 deleted, remaining=%d", leftSources)
+	}
+	var leftFilms int64
+	gdb.Model(&model.FilmIndex{}).Where("mid IN ?", []int64{1, 2}).Count(&leftFilms)
+	if leftFilms != 0 {
+		t.Fatalf("expected films 1 and 2 deleted, remaining=%d", leftFilms)
+	}
+	if curPrimary := repository.CurrentPrimarySource(); curPrimary == nil || curPrimary.Id != "src3" {
+		t.Fatalf("expected final primary src3, got %#v", curPrimary)
+	}
+}
+
+func TestCollectService_RejectsUpdateAndStateChangeWhileDeleting(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	src := model.FilmSource{Id: "src_del_guard", Name: "删除中站", Uri: "http://del.example/api", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress.SetSourceDeleting(src.Id, true)
+	t.Cleanup(func() { progress.SetSourceDeleting(src.Id, false) })
+
+	srv := new(CollectService)
+	next := src
+	next.Name = "改名"
+	if err := srv.UpdateFilmSource(next, "", false); err == nil || err.Error() != "该站正在删除" {
+		t.Fatalf("UpdateFilmSource err = %v, want 该站正在删除", err)
+	}
+	if err := srv.BatchUpdateFilmSourceState([]string{src.Id}, false); err == nil || err.Error() != "该站正在删除" {
+		t.Fatalf("BatchUpdateFilmSourceState err = %v, want 该站正在删除", err)
+	}
+	var saved model.FilmSource
+	if err := gdb.First(&saved, "id = ?", src.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Name != src.Name || !saved.State {
+		t.Fatalf("source should remain untouched while deleting, got %+v", saved)
+	}
+}
+
+func TestCollectService_BatchUpdateFilmSourceState_RejectsBusySource(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	srcIdle := model.FilmSource{Id: "src_idle_batch", Name: "空闲站", Uri: "http://idle.example/api", State: true}
+	srcBusy := model.FilmSource{Id: "src_busy_batch", Name: "采集站", Uri: "http://busy.example/api", State: true}
+	if err := gdb.Create(&srcIdle).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&srcBusy).Error; err != nil {
+		t.Fatal(err)
+	}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{srcBusy}, "q-busy-state")
+	if _, err := progress.TryRegisterTask(srcBusy.Id, "req-busy-state", nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		progress.UnregisterTask(srcBusy.Id, "req-busy-state")
+		progress.MarkStopped(srcBusy.Id)
+	})
+
+	srv := new(CollectService)
+	if err := srv.BatchUpdateFilmSourceState([]string{srcIdle.Id, srcBusy.Id}, false); err == nil {
+		t.Fatal("expected busy batch state update to be rejected")
+	}
+
+	var idleSaved, busySaved model.FilmSource
+	if err := gdb.First(&idleSaved, "id = ?", srcIdle.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.First(&busySaved, "id = ?", srcBusy.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !idleSaved.State || !busySaved.State {
+		t.Fatalf("expected atomic rejection leaving both enabled, idle=%v busy=%v", idleSaved.State, busySaved.State)
+	}
+
+	// 验证分类采集中同样拒绝批量操作
+	progress.UnregisterTask(srcBusy.Id, "req-busy-state")
+	progress.MarkStopped(srcBusy.Id)
+	progress.BroadcastCategoryStatus(srcBusy.Id, "syncing")
+	t.Cleanup(func() { progress.BroadcastCategoryStatus(srcBusy.Id, "idle") })
+	if err := srv.BatchUpdateFilmSourceState([]string{srcBusy.Id}, false); err == nil {
+		t.Fatal("expected category-syncing batch state update to be rejected")
+	}
+}
+
+func TestCollectService_TriggerDelFilmSourceBatch_RejectsBusyAtomically(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	srcIdle := model.FilmSource{Id: "src_idle_del_b", Name: "空闲站", Uri: "http://idle-del.example/api", State: true}
+	srcBusy := model.FilmSource{Id: "src_busy_del_b", Name: "采集中站", Uri: "http://busy-del.example/api", State: true}
+	if err := gdb.Create(&srcIdle).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&srcBusy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RefreshCollectSourceCatalog(); err != nil {
+		t.Fatal(err)
+	}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{srcBusy}, "q-busy-del")
+	if _, err := progress.TryRegisterTask(srcBusy.Id, "req-busy-del", nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		progress.UnregisterTask(srcBusy.Id, "req-busy-del")
+		progress.MarkStopped(srcBusy.Id)
+	})
+
+	srv := new(CollectService)
+	if err := srv.TriggerDelFilmSourceBatch([]string{srcIdle.Id, srcBusy.Id}, "", false); err == nil {
+		t.Fatal("expected batch delete to reject when a source is busy")
+	}
+	if progress.IsSourceDeleting(srcIdle.Id) {
+		t.Fatal("rejected batch delete should not enqueue idle source")
+	}
+	var count int64
+	gdb.Model(&model.FilmSource{}).Where("id = ?", srcIdle.Id).Count(&count)
+	if count != 1 {
+		t.Fatalf("expected idle source to remain untouched, count=%d", count)
+	}
+}
+
+func TestCollectService_UpdateFilmSource_RejectsUriChangeAtomicallyWhenSearchBusy(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	src := model.FilmSource{Id: "src_uri_busy", Name: "原站", Uri: "http://old.example/api", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 100, FirstSourceId: src.Id},
+		FilmIndexContent:  model.FilmIndexContent{Name: "原站影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{Mid: 100, SourceId: src.Id, LineKind: "play", Content: "[]"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 8}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	filmsnapshot.NotifySearchIndexProgress(1, 0, "indexing")
+	t.Cleanup(func() { filmsnapshot.NotifySearchIndexProgress(0, 0, "idle") })
+
+	srv := new(CollectService)
+	next := src
+	next.Uri = "http://new.example/api"
+	err := srv.UpdateFilmSource(next, "", false)
+	if err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("UpdateFilmSource err = %v, want %v", err, filmsnapshot.ErrSearchIndexBusy)
+	}
+
+	var saved model.FilmSource
+	if err := gdb.First(&saved, "id = ?", src.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Uri != src.Uri {
+		t.Fatalf("source uri changed despite rejection: got %s want %s", saved.Uri, src.Uri)
+	}
+	var filmCount, lineCount, mapCount int64
+	gdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", src.Id).Count(&filmCount)
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", src.Id).Count(&lineCount)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", src.Id).Count(&mapCount)
+	if filmCount != 1 || lineCount != 1 || mapCount != 1 {
+		t.Fatalf("data should remain intact when UpdateFilmSource rejected, films=%d lines=%d maps=%d", filmCount, lineCount, mapCount)
+	}
+}
+
+func TestCollectService_UpdateFilmSource_RejectsUriAndStateChangeWhenCategorySyncing(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	src := model.FilmSource{Id: "src_cat_sync_edit", Name: "同步中站", Uri: "http://old.example/api", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: src.Id},
+		FilmIndexContent:  model.FilmIndexContent{Name: "保留影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{Mid: 101, SourceId: src.Id, LineKind: "play", Content: "[]"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 8}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	progress.BroadcastCategoryStatus(src.Id, "syncing")
+	t.Cleanup(func() { progress.BroadcastCategoryStatus(src.Id, "idle") })
+
+	srv := new(CollectService)
+	next := src
+	next.Uri = "http://new.example/api"
+	next.State = false
+	if err := srv.UpdateFilmSource(next, "", false); err == nil {
+		t.Fatal("expected UpdateFilmSource to reject while category syncing")
+	}
+
+	var saved model.FilmSource
+	if err := gdb.First(&saved, "id = ?", src.Id).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Uri != src.Uri || !saved.State {
+		t.Fatalf("source changed despite rejection: got uri=%s state=%v", saved.Uri, saved.State)
+	}
+	var filmCount, lineCount, mapCount int64
+	gdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", src.Id).Count(&filmCount)
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", src.Id).Count(&lineCount)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", src.Id).Count(&mapCount)
+	if filmCount != 1 || lineCount != 1 || mapCount != 1 {
+		t.Fatalf("data must not be wiped when UpdateFilmSource fails validation, films=%d lines=%d maps=%d", filmCount, lineCount, mapCount)
+	}
+}
+
+func TestCollectService_UpdateFilmSource_RejectsDuplicateUriBeforeClean(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	src1 := model.FilmSource{Id: "src_dup_1", Name: "站1", Uri: "http://dup1.example/api", State: true, Sort: 0}
+	src2 := model.FilmSource{Id: "src_dup_2", Name: "站2", Uri: "http://dup2.example/api", State: true, Sort: 1}
+	if err := gdb.Create(&src1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&src2).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 888, FirstSourceId: src1.Id},
+		FilmIndexContent:  model.FilmIndexContent{Name: "站1宝贵影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{Mid: 888, SourceId: src1.Id, LineKind: "play", Content: "[]"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	srv := new(CollectService)
+	next := src1
+	next.Uri = src2.Uri
+	if err := srv.UpdateFilmSource(next, "", false); err == nil {
+		t.Fatal("expected duplicate URI error")
+	}
+
+	var filmCount, lineCount int64
+	gdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", src1.Id).Count(&filmCount)
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", src1.Id).Count(&lineCount)
+	if filmCount != 1 || lineCount != 1 {
+		t.Fatalf("source data must NOT be cleaned when URI conflicts, films=%d lines=%d", filmCount, lineCount)
 	}
 }

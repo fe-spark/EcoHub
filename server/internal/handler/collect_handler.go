@@ -3,12 +3,16 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -21,6 +25,26 @@ import (
 type CollectHandler struct{}
 
 var CollectHd = new(CollectHandler)
+
+func collectAdminStatus(c *gin.Context) (isAdmin bool, hasClaims bool) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		return false, false
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		return false, false
+	}
+	return model.IsAdmin(uc.UserID, uc.Role), true
+}
+
+func respondPrimarySwitchAuthError(c *gin.Context, hasClaims bool) {
+	if !hasClaims {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, service.ErrPrimarySwitchForbidden.Error(), c)
+}
 
 func (h *CollectHandler) FilmSourceList(c *gin.Context) {
 	start := time.Now()
@@ -76,7 +100,20 @@ func (h *CollectHandler) FilmSourceSave(c *gin.Context) {
 			}
 			isUriChanged := fs.Uri != s.Uri
 			isFormatChanged := fs.ResolveFormat() != s.ResolveFormat()
-			if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
+			isAdmin, hasClaims := collectAdminStatus(c)
+			curPrimary := service.CollectSvc.CurrentPrimary()
+			touchesPrimary := strings.TrimSpace(body.NewPrimaryId) != "" ||
+				body.ConfirmClearPrimary ||
+				(curPrimary != nil && curPrimary.Id == s.Id && fs.State && !s.State)
+			if touchesPrimary && !isAdmin {
+				respondPrimarySwitchAuthError(c, hasClaims)
+				return
+			}
+			if err := service.CollectSvc.UpdateFilmSourceWithAuth(s, body.NewPrimaryId, body.ConfirmClearPrimary, isAdmin); err != nil {
+				if errors.Is(err, service.ErrPrimarySwitchForbidden) {
+					respondPrimarySwitchAuthError(c, hasClaims)
+					return
+				}
 				dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 				return
 			}
@@ -156,6 +193,11 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
+	primary := service.CollectSvc.CurrentPrimary()
+	primaryID := ""
+	if primary != nil {
+		primaryID = primary.Id
+	}
 
 	const concurrency = 10
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
@@ -181,6 +223,13 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 				Uri:   src.Uri,
 				Sort:  src.Sort,
 				State: src.State,
+			}
+			if primaryID != "" && src.Id == primaryID {
+				item.Reason = "当前主站不参与检测"
+				mu.Lock()
+				skipped = append(skipped, item)
+				mu.Unlock()
+				return
 			}
 			if spider.IsTaskRunning(src.Id) {
 				item.Reason = "站点正在采集，已跳过检测"
@@ -237,12 +286,52 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 		return
 	}
 
-	if err := service.CollectSvc.TriggerDelFilmSourceBatch(ids); err != nil {
+	isAdmin, hasClaims := collectAdminStatus(c)
+	curPrimary := service.CollectSvc.CurrentPrimary()
+	touchesPrimary := strings.TrimSpace(req.NewPrimaryId) != "" || req.ConfirmClearPrimary
+	if !touchesPrimary && curPrimary != nil {
+		if _, ok := seen[curPrimary.Id]; ok {
+			touchesPrimary = true
+		}
+	}
+	if touchesPrimary && !isAdmin {
+		respondPrimarySwitchAuthError(c, hasClaims)
+		return
+	}
+
+	if err := service.CollectSvc.TriggerDelFilmSourceBatchWithAuth(ids, req.NewPrimaryId, req.ConfirmClearPrimary, isAdmin); err != nil {
+		if errors.Is(err, service.ErrPrimarySwitchForbidden) {
+			respondPrimarySwitchAuthError(c, hasClaims)
+			return
+		}
 		dto.Failed(err.Error(), c)
 		return
 	}
 
 	dto.SuccessOnlyMsg("已提交批量删除", c)
+}
+
+// FilmSourceDelCancel 撤回排队中尚未开始删除的采集站
+func (h *CollectHandler) FilmSourceDelCancel(c *gin.Context) {
+	var req struct {
+		Ids []string `json:"ids"`
+	}
+	if c.Request != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			dto.Failed("请求参数异常", c)
+			return
+		}
+	}
+
+	canceled := service.CollectSvc.CancelDelFilmSources(req.Ids)
+	msg := "已终止后续排队删除"
+	if len(canceled) == 0 {
+		msg = "当前无排队中的待取消站点"
+	}
+	dto.Success(gin.H{
+		"canceled": canceled,
+		"count":    len(canceled),
+	}, msg, c)
 }
 
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
@@ -319,7 +408,9 @@ func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
 
 type filmSourceBody struct {
 	model.FilmSource
-	UseProxy *bool `json:"useProxy"`
+	UseProxy            *bool  `json:"useProxy"`
+	NewPrimaryId        string `json:"newPrimaryId"`
+	ConfirmClearPrimary bool   `json:"confirmClearPrimary"`
 }
 
 func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {
@@ -332,13 +423,54 @@ func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {
 		return filmSourceBody{}, err
 	}
 	var extra struct {
-		UseProxy *bool `json:"useProxy"`
+		UseProxy            *bool  `json:"useProxy"`
+		NewPrimaryId        string `json:"newPrimaryId"`
+		ConfirmClearPrimary bool   `json:"confirmClearPrimary"`
 	}
 	if err := json.Unmarshal(raw, &extra); err != nil {
 		return filmSourceBody{}, err
 	}
 	body.UseProxy = extra.UseProxy
+	body.NewPrimaryId = extra.NewPrimaryId
+	body.ConfirmClearPrimary = extra.ConfirmClearPrimary
 	return body, nil
+}
+
+// PrimaryState GET /manage/primary 当前主站。无主站时 data 为 null；主站删除中附带 deletingSource。
+func (h *CollectHandler) PrimaryState(c *gin.Context) {
+	primary := service.CollectSvc.CurrentPrimary()
+	if primary != nil {
+		dto.Success(gin.H{"id": primary.Id, "name": primary.Name, "state": primary.State}, "获取主站成功", c)
+		return
+	}
+	if deleting := service.CollectSvc.DeletingPrimary(); deleting != nil {
+		dto.Success(gin.H{
+			"deletingSource": gin.H{"id": deleting.Id, "name": deleting.Name},
+		}, "主站删除中", c)
+		return
+	}
+	dto.Success(nil, "暂无主站", c)
+}
+
+// SwitchPrimary PUT /manage/primary 切换主站（仅超管，D4）。
+func (h *CollectHandler) SwitchPrimary(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if err := service.CollectSvc.SwitchPrimary(req.Id); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	primary := service.CollectSvc.CurrentPrimary()
+	if primary == nil {
+		dto.Success(nil, "主站已置空", c)
+		return
+	}
+	dto.Success(gin.H{"id": primary.Id, "name": primary.Name, "state": primary.State}, "主站已切换", c)
 }
 
 func testFilmSourceAPI(s model.FilmSource, useProxy *bool) error {

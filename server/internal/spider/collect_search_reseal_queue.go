@@ -18,10 +18,11 @@ const sealWaitLogGap = 15 * time.Second
 // 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
 // 全部采集队列都结束后再封一次。按编号增量更新内存索引。
 type searchResealQueue struct {
-	mu      sync.Mutex
-	pending map[int64]struct{}
-	sealing map[string]struct{}
-	running bool
+	mu        sync.Mutex
+	pending   map[int64]struct{}
+	sealing   map[string]struct{}
+	running   bool
+	retryWait time.Duration
 	// awaitDone 停等本轮触发的整表重建终态。只有这时才响应 done/idle。
 	awaitDone bool
 }
@@ -37,6 +38,11 @@ var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 
 // sealSearchIndex 按编号封口。仅在内存索引不可用时改走整表重建。
 var sealSearchIndex = filmsnapshot.ResealSearchIndex
+
+// sealRetryWait 所属站查询失败时，编号放回队列后隔一会儿再封。
+var sealRetryWait = 2 * time.Second
+
+const maxSealRetryWait = time.Minute
 
 // collectQueueCount 正在跑的采集队列。封口要等每一条队列结束，不能只看当前没有站在抓页。
 // frozen 只在本轮已经没有队列、准备落地封口时置位。还有队列时新队列可以加入这一轮。
@@ -254,6 +260,18 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	}
 }
 
+// schedulePrimarySearchReseal 只把当前主站的编号放进封口队列。
+// 所属站查询失败时编号先入队，封口时再查。查失败会把编号放回队列重试。
+func schedulePrimarySearchReseal(mids []int64) {
+	owned, err := filmsnapshot.PrimarySearchMIDs(mids)
+	if err != nil {
+		log.Printf("[Spider] 所属站查询失败，编号留在封口队列稍后重试 mids=%d err=%v", len(mids), err)
+		scheduleSearchReseal(mids)
+		return
+	}
+	scheduleSearchReseal(owned)
+}
+
 func scheduleSearchReseal(mids []int64) {
 	q := searchReseal
 	q.mu.Lock()
@@ -293,6 +311,7 @@ func (q *searchResealQueue) run() {
 		q.mu.Lock()
 		if len(q.pending) == 0 && len(q.sealing) == 0 {
 			q.running = false
+			q.retryWait = 0
 			q.mu.Unlock()
 			return
 		}
@@ -318,6 +337,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	q.mu.Lock()
 	if len(q.pending) == 0 && len(q.sealing) == 0 {
 		q.running = false
+		q.retryWait = 0
 		q.mu.Unlock()
 		log.Printf("[Spider] 封口轮次为空，不重建检索索引")
 		return true
@@ -327,14 +347,17 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	q.mu.Unlock()
 	log.Printf("[Spider] 开始封口检索索引 pending=%d sealing=%d", pendingN, sealingN)
 
+	sealed := true
+	rebuildGenBefore := filmsnapshot.SearchRebuildGen()
+	progressBefore := filmsnapshot.SearchIndexProgressToken()
 	if len(mids) > 0 {
 		searchSealRunning.Store(true)
-		sealSearchIndex(mids)
-		searchSealRunning.Store(false)
+		sealed = sealSearchIndex(mids)
 	}
 	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。
 	// 重建期间新进来的编号还在 pending，继续封。
 	if filmsnapshot.IsSearchIndexBuilding() || filmsnapshot.SearchRebuildScheduled() {
+		searchSealRunning.Store(false)
 		parked := false
 		// 先拿重建锁再拿 q.mu，和重建收尾通知监听的顺序一致。
 		filmsnapshot.WithSearchRebuildScheduled(func(scheduled bool) {
@@ -344,11 +367,36 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 				return
 			}
 			q.running = false
+			q.retryWait = 0
 			q.awaitDone = true
 			parked = true
 		})
+		q.resetSealRetryWait()
 		return parked
 	}
+	if !sealed {
+		tok := filmsnapshot.SearchIndexProgressToken()
+		// 仅当真正发起了全量重建，或外部进度已进入实质构建/终态（排除 waiting 占位）时，才认为重建已接管。
+		handedOff := filmsnapshot.SearchRebuildGen() != rebuildGenBefore ||
+			(tok != progressBefore && tok != nil && tok.Status != "waiting")
+		if handedOff {
+			searchSealRunning.Store(false)
+			q.resetSealRetryWait()
+			log.Printf("[Spider] 封口未写入检索索引，进度已变化，编号交给重建 mids=%d", len(mids))
+			return false
+		}
+		q.restorePending(mids)
+		searchSealRunning.Store(false)
+		retryWait := q.nextSealRetryWait()
+		log.Printf("[Spider] 封口未写入检索索引，编号留在队列稍后重试 mids=%d retry_in=%s", len(mids), retryWait)
+		unfreezeCollectQueues()
+		if retryWait > 0 {
+			time.Sleep(retryWait)
+		}
+		return false
+	}
+	searchSealRunning.Store(false)
+	q.resetSealRetryWait()
 	// 按编号封口成功时 ResealSearchIndex 已发过 done；这里只收口 sealing，不再依赖全局监听。
 	q.complete()
 	if len(mids) == 0 {
@@ -356,6 +404,39 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
 	}
 	return false
+}
+
+func (q *searchResealQueue) nextSealRetryWait() time.Duration {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	wait := q.retryWait
+	if wait <= 0 {
+		wait = sealRetryWait
+	}
+	if wait <= 0 {
+		return 0
+	}
+	if wait > maxSealRetryWait {
+		wait = maxSealRetryWait
+	}
+	q.retryWait = min(wait*2, maxSealRetryWait)
+	return wait
+}
+
+func (q *searchResealQueue) resetSealRetryWait() {
+	q.mu.Lock()
+	q.retryWait = 0
+	q.mu.Unlock()
+}
+
+func (q *searchResealQueue) restorePending(mids []int64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, mid := range mids {
+		if mid > 0 {
+			q.pending[mid] = struct{}{}
+		}
+	}
 }
 
 func (q *searchResealQueue) takePendingLocked() []int64 {

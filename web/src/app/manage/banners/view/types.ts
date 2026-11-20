@@ -54,6 +54,7 @@ export type BannerFields = {
 
 export type BannerListView = {
   sourceId: string;
+  primarySourceId: string;
   revision: string;
   items: BannerRecord[];
 };
@@ -66,6 +67,7 @@ export type BannerSkipped = {
 };
 
 export type BannerGenerateResult = {
+  primarySourceId: string;
   revision: string;
   items: BannerRecord[];
   skipped: BannerSkipped[];

@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -13,12 +14,15 @@ import (
 )
 
 // tagPageFromIndex 分类筛选在内存索引上计数并取一页。只按主键回表取当前页。
-func tagPageFromIndex(version string, st model.SearchTagsVO, page *dto.Page) (tagSearchCacheItem, error) {
-	if st.Cid > 0 && !support.IsCategoryVisible(st.Cid, st.Pid) {
-		return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-	}
-	if st.Pid > 0 && !support.IsCategoryVisible(0, st.Pid) {
-		return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+func tagPageFromIndex(version string, st model.SearchTagsVO, page *dto.Page, keyword string, recentHours int) (tagSearchCacheItem, error) {
+	// 带了采集站时 pid/cid 是该站 type_id。可见性在 tagMetaMatch 里按分类键判断。
+	if strings.TrimSpace(st.SourceId) == "" {
+		if st.Cid > 0 && !support.IsCategoryVisible(st.Cid, st.Pid) {
+			return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+		if st.Pid > 0 && !support.IsCategoryVisible(0, st.Pid) {
+			return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
 	}
 	idx, err := loadFilmSearchMetaIndex(version)
 	if err != nil {
@@ -27,6 +31,16 @@ func tagPageFromIndex(version string, st model.SearchTagsVO, page *dto.Page) (ta
 	match, err := tagMetaMatch(version, st)
 	if err != nil {
 		return tagSearchCacheItem{}, err
+	}
+	if recentHours > 0 {
+		minStamp := time.Now().Add(-time.Duration(recentHours) * time.Hour).Unix()
+		inner := match
+		match = func(item *FilmSearchMeta) bool {
+			return item != nil && item.Item.UpdateStamp >= minStamp && inner(item)
+		}
+	}
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		return tagPageKeyword(idx, match, st, keyword, page)
 	}
 	limit := page.PageSize
 	if limit <= 0 {
@@ -46,6 +60,28 @@ func tagPageFromIndex(version string, st model.SearchTagsVO, page *dto.Page) (ta
 		pageCount = (total + limit - 1) / limit
 	}
 	return tagSearchCacheItem{Total: total, PageCount: pageCount, Snapshots: snaps}, nil
+}
+
+// tagPageKeyword 先按片名打分排序，再套上分类和筛选。总数是筛完之后的数量。
+func tagPageKeyword(idx *filmSearchMetaIndex, match func(*FilmSearchMeta) bool, st model.SearchTagsVO, keyword string, page *dto.Page) (tagSearchCacheItem, error) {
+	hits := searchFilmMetas(idx, keyword, st.Sort, strings.TrimSpace(st.SourceId), 0, 0)
+	kept := hits[:0]
+	for _, hit := range hits {
+		pos, ok := idx.Pos[hit.mid]
+		if !ok || pos < 0 || pos >= len(idx.Items) || !match(idx.Items[pos]) {
+			continue
+		}
+		kept = append(kept, hit)
+	}
+	mids := pageMidsFromMetaHits(kept, page)
+	snaps, err := GetSnapshotsByMidsOrdered("", mids)
+	if err != nil {
+		return tagSearchCacheItem{}, err
+	}
+	if snaps == nil {
+		snaps = []model.FilmListSnapshot{}
+	}
+	return tagSearchCacheItem{Total: page.Total, PageCount: page.PageCount, Snapshots: snaps}, nil
 }
 
 func tagMetaMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta) bool, error) {
@@ -77,8 +113,16 @@ func tagMetaMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta) 
 		if !categoryVisible(item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
 			return false
 		}
+		if !support.IsCategoryVisible(item.Cid, item.Pid) {
+			return false
+		}
 		if sourceID != "" {
-			if _, ok := keys[item.CategoryKey]; !ok || !item.HasPlaySource(sourceID) {
+			if st.Cid > 0 || st.Pid > 0 {
+				if _, ok := keys[item.CategoryKey]; !ok {
+					return false
+				}
+			}
+			if !item.HasPlaySource(sourceID) {
 				return false
 			}
 		} else if st.Cid > 0 {
@@ -217,7 +261,7 @@ func classTagHitsAny(classTag string, visible map[string]struct{}) bool {
 
 func categoryPositions(idx *filmSearchMetaIndex, st model.SearchTagsVO) ([]int, bool) {
 	sourceID := strings.TrimSpace(st.SourceId)
-	if sourceID == "" || idx == nil || len(idx.ByCategory) == 0 {
+	if sourceID == "" || idx == nil || len(idx.ByCategory) == 0 || (st.Cid <= 0 && st.Pid <= 0) {
 		return nil, false
 	}
 	field := "pid"

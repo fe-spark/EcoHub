@@ -162,8 +162,8 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	}
 	defer func() {
 		originalErr := retErr
-		// 用户停止也走待检索：先等本次收尾，封口周期结束再落成已停止。
-		if collectCtx != nil && progress.IsStopping(s.Id) {
+		// 只有真正落盘写入过的停止任务才需要进入待检索封口；0 页被中断直接标记已停止避免统计为完成。
+		if collectCtx != nil && progress.IsStopping(s.Id) && (hadWrites || originalErr == nil) {
 			defer func() {
 				if progress.MarkStoppedAsSealing(collectCtx, s.Id) {
 					searchReseal.addSealing(s.Id)

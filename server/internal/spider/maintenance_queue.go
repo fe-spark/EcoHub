@@ -2,9 +2,11 @@ package spider
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -170,4 +172,33 @@ func waitMaintenanceQueueIdle() {
 	for q.working {
 		q.idle.Wait()
 	}
+}
+
+// clearAndWaitMaintenanceQueue 清空尚在排队的维护任务，并等待当前正在执行的维护任务结束。
+func clearAndWaitMaintenanceQueue(timeout time.Duration) error {
+	q := maintenanceQueue
+	q.mu.Lock()
+	q.pending = nil
+	clear(q.queued)
+	if !q.working {
+		q.mu.Unlock()
+		return nil
+	}
+	timer := time.AfterFunc(timeout, func() {
+		q.mu.Lock()
+		q.idle.Broadcast()
+		q.mu.Unlock()
+	})
+	defer timer.Stop()
+	deadline := time.Now().Add(timeout)
+	for q.working {
+		if !time.Now().Before(deadline) {
+			cur := q.current
+			q.mu.Unlock()
+			return fmt.Errorf("等待维护任务结束超时: %s", cur)
+		}
+		q.idle.Wait()
+	}
+	q.mu.Unlock()
+	return nil
 }

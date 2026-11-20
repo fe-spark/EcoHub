@@ -17,13 +17,21 @@ import (
 	"server/internal/utils"
 )
 
+// likeNeedle 用 ! 转义通配符。连接串开了 interpolateParams，ESCAPE '\' 会被 MySQL 把引号吃掉。
+func likeNeedle(s string) string {
+	s = strings.ReplaceAll(s, "!", "!!")
+	s = strings.ReplaceAll(s, "%", "!%")
+	s = strings.ReplaceAll(s, "_", "!_")
+	return "%" + s + "%"
+}
+
 func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	tokens := utils.ExtractSearchTokens(keyword)
 	if len(tokens) == 0 {
-		return query.Where("name LIKE ?", "%"+escapeLikePattern(keyword)+"%")
+		return query.Where("name LIKE ? ESCAPE '!'", likeNeedle(keyword))
 	}
 	for _, tok := range tokens {
-		query = query.Where("name LIKE ?", "%"+escapeLikePattern(tok)+"%")
+		query = query.Where("name LIKE ? ESCAPE '!'", likeNeedle(tok))
 	}
 	return query
 }
@@ -50,11 +58,12 @@ func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 	startedAt := time.Now()
 	page := shared.EnsurePage(s.Paging)
+	sourceID := currentPrimarySourceID()
 	idx, err := loadCurrentSearchIndex()
 	if err != nil {
 		return nil, err
 	}
-	matched, total, err := pageManageMetas(idx, s, page)
+	matched, total, err := pageManageMetas(idx, s, page, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,14 +87,14 @@ func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 		return nil, err
 	}
 	list := convertSnapshotsToFilmIndexes(snaps)
-	if err := fillFilmSourceMids(strings.TrimSpace(s.SourceId), list); err != nil {
+	if err := fillFilmSourceMids(sourceID, list); err != nil {
 		return nil, err
 	}
-	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q source=%s pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), strings.TrimSpace(s.SourceId), s.Pid, s.Cid, page.Total, page.Current, len(list), time.Since(startedAt))
+	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q source=%s pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), sourceID, s.Pid, s.Cid, page.Total, page.Current, len(list), time.Since(startedAt))
 	return list, nil
 }
 
-// fillFilmSourceMids 把当前来源的源站编号写到列表上。库内 mid 是入库序号，不给后台当 ID 展示。
+// fillFilmSourceMids 把当前主站的源站编号写到列表上。库内 mid 是入库序号，不给后台当 ID 展示。
 func fillFilmSourceMids(sourceID string, list []model.FilmIndex) error {
 	if sourceID == "" || len(list) == 0 {
 		return nil
@@ -107,14 +116,14 @@ func fillFilmSourceMids(sourceID string, list []model.FilmIndex) error {
 }
 
 // pageManageMetas 无关键词时只拷贝当前页；有关键词时先打分再切页。
-func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page) ([]FilmSearchMeta, int, error) {
+func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page, sourceID string) ([]FilmSearchMeta, int, error) {
 	if idx == nil {
 		return nil, 0, ErrSearchIndexMissing
 	}
 	if len(idx.ByUpdate) != len(idx.Items) {
 		return nil, 0, fmt.Errorf("检索索引损坏")
 	}
-	filterCtx, ok := newManageFilterContext(s)
+	filterCtx, ok := newManageFilterContext(s, sourceID)
 	if !ok {
 		return nil, 0, nil
 	}
@@ -173,9 +182,9 @@ type manageFilterContext struct {
 	plot              string
 }
 
-func newManageFilterContext(s model.SearchVo) (*manageFilterContext, bool) {
+func newManageFilterContext(s model.SearchVo, sourceID string) (*manageFilterContext, bool) {
 	ctx := &manageFilterContext{
-		sourceID:  strings.TrimSpace(s.SourceId),
+		sourceID:  strings.TrimSpace(sourceID),
 		cid:       s.Cid,
 		pid:       s.Pid,
 		year:      s.Year,
@@ -221,6 +230,13 @@ func (f *manageFilterContext) pass(meta *FilmSearchMeta) bool {
 		return false
 	}
 	if f.sourceID != "" && !meta.HasPlaySource(f.sourceID) {
+		return false
+	}
+	return f.passOwnedMeta(meta)
+}
+
+func (f *manageFilterContext) passOwnedMeta(meta *FilmSearchMeta) bool {
+	if meta == nil {
 		return false
 	}
 	switch f.categoryCheckMode {
@@ -366,11 +382,4 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 		}
 	}
 	return result
-}
-
-func escapeLikePattern(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "%", "\\%")
-	s = strings.ReplaceAll(s, "_", "\\_")
-	return s
 }

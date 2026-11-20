@@ -4,6 +4,7 @@ import { DeleteOutlined, WarningOutlined } from "@ant-design/icons";
 import { fetchEventStream } from "@/lib/sse-client";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { usePrimarySource } from "@/lib/manage-primary";
 import styles from "./index.module.less";
 
 interface ResetProgress {
@@ -32,10 +33,13 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
   });
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
+  const { refresh: refreshPrimary } = usePrimarySource();
   const messageRef = useRef(message);
+  const refreshPrimaryRef = useRef(refreshPrimary);
   const onResetCompleteRef = useRef(onResetComplete);
   const applyProgressRef = useRef<(data: ResetProgress) => void>(() => undefined);
   messageRef.current = message;
+  refreshPrimaryRef.current = refreshPrimary;
   onResetCompleteRef.current = onResetComplete;
 
   const applyProgress = (data: ResetProgress) => {
@@ -57,6 +61,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
       messageRef.current.error(`数据重置失败：${data.error}`);
     } else {
       messageRef.current.success("数据重置完成");
+      void refreshPrimaryRef.current();
       onResetCompleteRef.current?.();
     }
     if (hideTimerRef.current !== null) {
@@ -215,7 +220,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             <Flex vertical gap={4} className={styles.dangerText}>
               <Typography.Text type="danger" strong>数据重置</Typography.Text>
               <Typography.Text type="secondary">
-                清空影片档案、播放线路、失败记录和轮播。账号、采集站、分类结构与排片规则保留。
+                清空全部业务与配置数据并恢复初始状态，账号保留。
               </Typography.Text>
             </Flex>
             <Button
@@ -264,7 +269,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             showIcon
             type="error"
             title="该操作不可逆"
-            description="清空片库与分类。采集站和账号保留。"
+            description="将清空全部业务与配置数据并恢复初始状态，账号保留。"
           />
           <Input.Password
             placeholder="请输入管理密码"

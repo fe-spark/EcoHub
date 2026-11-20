@@ -8,11 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
+	"server/internal/spider/progress"
 	"server/internal/testutil"
+	"server/internal/utils"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -29,17 +33,7 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open sqlite: %v", err)
 	}
 
-	if err := gdb.AutoMigrate(
-		&model.FilmSource{},
-		&model.FilmSourcePlaylist{},
-		&model.CollectSourceStats{},
-		&model.Category{},
-		&model.SourceCategory{},
-		&model.CategoryMapping{},
-		&model.MovieSourceMapping{},
-		&model.FilmIndex{},
-		&model.BannerSlot{},
-	); err != nil {
+	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -226,5 +220,157 @@ func TestCollectHandler_StateBatchAndRecordOperations(t *testing.T) {
 	gdb.First(&s1, "id = ?", "src_s1")
 	if !s1.State {
 		t.Fatalf("expected src_s1 state to be true")
+	}
+}
+
+func TestCollectHandler_FilmSourceDelCancel_ValidatesJSONAndEmptyResult(t *testing.T) {
+	_ = setupCollectHandlerTestDB(t)
+	h := &CollectHandler{}
+
+	// 1. 畸形 JSON 应报错拒绝，不能静默退化为全量取消
+	c1, w1 := testContext(http.MethodPost, "/api/manage/collect/delete/cancel")
+	c1.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/delete/cancel", bytes.NewReader([]byte(`{"ids":"invalid"}`)))
+	c1.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceDelCancel(c1)
+	resp1 := decodeResponse(t, w1)
+	if resp1.Code == dto.SUCCESS {
+		t.Fatalf("expected failure for invalid JSON body, got success: %+v", resp1)
+	}
+
+	// 2. 空对象传参且当前无排队站时，返回明确提示文案
+	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/delete/cancel")
+	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/delete/cancel", bytes.NewReader([]byte(`{}`)))
+	c2.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceDelCancel(c2)
+	resp2 := decodeResponse(t, w2)
+	if resp2.Code != dto.SUCCESS || resp2.Msg != "当前无排队中的待取消站点" {
+		t.Fatalf("unexpected response for empty cancel queue: %+v", resp2)
+	}
+}
+
+func TestCollectHandler_PrimaryHandoverRequiresAdminAndCheckAllSkipsPrimary(t *testing.T) {
+	gdb := setupCollectHandlerTestDB(t)
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_p",
+		Name:  "主站",
+		Uri:   "http://127.0.0.1:59995/p",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_s",
+		Name:  "备选站",
+		Uri:   "http://127.0.0.1:59996/s",
+		State: true,
+		Sort:  1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_ = repository.RefreshCollectSourceCatalog()
+	if cur := service.CollectSvc.CurrentPrimary(); cur == nil || cur.Id != "src_p" {
+		t.Fatalf("expected primary src_p, got %+v", cur)
+	}
+
+	h := &CollectHandler{}
+
+	// 1. 普通管理员尝试停用当前主站并交接，必须被 403 拒绝
+	saveBody, _ := json.Marshal(map[string]any{
+		"id":           "src_p",
+		"name":         "主站",
+		"uri":          "http://127.0.0.1:59995/p",
+		"state":        false,
+		"newPrimaryId": "src_s",
+	})
+	c1, w1 := testContext(http.MethodPost, "/api/manage/collect/save")
+	c1.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleNormal})
+	c1.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(saveBody))
+	c1.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceSave(c1)
+	if w1.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin disabling primary, got %d body=%s", w1.Code, w1.Body.String())
+	}
+
+	// 2. 普通管理员尝试删除当前主站并交接，必须被 403 拒绝
+	delBody, _ := json.Marshal(map[string]any{
+		"ids":          []string{"src_p"},
+		"newPrimaryId": "src_s",
+	})
+	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/delete")
+	c2.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleNormal})
+	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/delete", bytes.NewReader(delBody))
+	c2.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceDelBatch(c2)
+	if w2.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin deleting primary, got %d body=%s", w2.Code, w2.Body.String())
+	}
+
+	// 3. FilmSourceCheckAll 必须跳过当前主站，只检测其他站点
+	c3, w3 := testContext(http.MethodPost, "/api/manage/collect/check/all")
+	h.FilmSourceCheckAll(c3)
+	resp3 := decodeResponse(t, w3)
+	if resp3.Code != dto.SUCCESS {
+		t.Fatalf("FilmSourceCheckAll failed: %+v", resp3)
+	}
+	rawData, _ := json.Marshal(resp3.Data)
+	var checkRes struct {
+		Skipped []model.SourceHealthItem `json:"skipped"`
+		Failed  []model.SourceHealthItem `json:"failed"`
+	}
+	_ = json.Unmarshal(rawData, &checkRes)
+	foundPrimarySkipped := false
+	for _, item := range checkRes.Skipped {
+		if item.Id == "src_p" {
+			foundPrimarySkipped = true
+		}
+	}
+	if !foundPrimarySkipped {
+		t.Fatalf("expected primary src_p in skipped, got skipped=%+v failed=%+v", checkRes.Skipped, checkRes.Failed)
+	}
+}
+
+func TestCollectHandler_PrimaryStateReportsDeletingPrimary(t *testing.T) {
+	gdb := setupCollectHandlerTestDB(t)
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_del_p",
+		Name:  "待删主站",
+		Uri:   "http://127.0.0.1:59994/p",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_ = repository.RefreshCollectSourceCatalog()
+	if cur := service.CollectSvc.CurrentPrimary(); cur == nil || cur.Id != "src_del_p" {
+		t.Fatalf("expected primary src_del_p, got %+v", cur)
+	}
+
+	h := &CollectHandler{}
+	progress.SetSourceDeleting("src_del_p", true)
+	defer progress.SetSourceDeleting("src_del_p", false)
+
+	c1, w1 := testContext(http.MethodGet, "/api/manage/primary")
+	h.PrimaryState(c1)
+	resp1 := decodeResponse(t, w1)
+	if resp1.Code != dto.SUCCESS {
+		t.Fatalf("PrimaryState failed: %+v", resp1)
+	}
+	dataMap, ok := resp1.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data while deleting, got %T (%+v)", resp1.Data, resp1.Data)
+	}
+	ds, ok := dataMap["deletingSource"].(map[string]any)
+	if !ok || ds["id"] != "src_del_p" || ds["name"] != "待删主站" {
+		t.Fatalf("unexpected deletingSource: %+v", dataMap)
+	}
+
+	progress.SetSourceDeleting("src_del_p", false)
+	c2, w2 := testContext(http.MethodGet, "/api/manage/primary")
+	h.PrimaryState(c2)
+	resp2 := decodeResponse(t, w2)
+	dataMap2, ok := resp2.Data.(map[string]any)
+	if !ok || dataMap2["id"] != "src_del_p" {
+		t.Fatalf("expected restored primary after clearing deleting, got %+v", resp2.Data)
 	}
 }

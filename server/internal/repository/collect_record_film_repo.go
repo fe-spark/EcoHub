@@ -287,11 +287,11 @@ func QueryCollectRecordFilms(q model.CollectRecordFilmQuery) (model.CollectRecor
 
 func searchCollectRecordFilms(batchID, sourceID, keyword string, q model.CollectRecordFilmQuery, pageSize int) (model.CollectRecordFilmPage, error) {
 	page := model.CollectRecordFilmPage{List: []model.CollectRecordFilm{}}
-	pattern := escapeLikePattern(keyword) + "%"
+	pattern := likePrefix(keyword)
 	base := func() *gorm.DB {
 		tx := db.Mdb.Table(model.TableCollectRecordFilm+" AS f").
 			Joins("INNER JOIN "+model.TableFilmIndex+" AS i ON i.mid = f.mid").
-			Where("f.batch_id = ? AND i.name LIKE ? ESCAPE '\\'", batchID, pattern)
+			Where("f.batch_id = ? AND i.name LIKE ? ESCAPE '!'", batchID, pattern)
 		if sourceID != "" {
 			tx = tx.Where("f.source_id = ?", sourceID)
 		}

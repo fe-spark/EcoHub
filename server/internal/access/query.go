@@ -40,6 +40,14 @@ func loadOverviewCache(key string) (*Overview, bool) {
 
 const overviewCacheMax = 64
 
+func ClearOverviewCache() {
+	overviewCache.Clear()
+}
+
+func isValidOverviewFilterValue(v string) bool {
+	return len(v) <= 24
+}
+
 func storeOverviewCache(key string, ov *Overview) {
 	if ov == nil {
 		return
@@ -111,7 +119,7 @@ type TopItem struct {
 func QueryOverviewScope(day, module, platform string) (*Overview, error) {
 	now := time.Now().In(time.Local)
 	target, err := parseDay(day, now)
-	cacheLive := err == nil && isLocalToday(target, now)
+	cacheLive := err == nil && isLocalToday(target, now) && isValidOverviewFilterValue(module) && isValidOverviewFilterValue(platform)
 	cacheKey := overviewCacheKey(day, module, platform)
 	if cacheLive {
 		if ov, ok := loadOverviewCache(cacheKey); ok {

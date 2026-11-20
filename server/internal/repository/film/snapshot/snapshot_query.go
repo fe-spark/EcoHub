@@ -16,6 +16,7 @@ import (
 	"server/internal/repository"
 	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 )
 
 func GetSnapshotByMid(version string, mid int64) (*model.FilmListSnapshot, error) {
@@ -182,6 +183,9 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if strings.TrimSpace(sourceID) != "" {
+		return bannerCandidatesForSource(ctx, strategy, strings.TrimSpace(sourceID), categoryPids, limit, exclude)
+	}
 
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
 		switch strategy {
@@ -254,14 +258,23 @@ func GetSnapshotHDBackdropCandidates(version string, sourceID string, categoryPi
 	return results
 }
 
-// applyBannerCategories 有采集站时按该站 type_id 匹配分类键。没有采集站时仍按展示分类 pid。
+// applyBannerCategories 有采集站时按该站 type_id 匹配分类键。没有采集站时仍按展示分类 pid，并过滤隐藏分类。
 func applyBannerCategories(query *gorm.DB, sourceID string, categoryIDs []int64) *gorm.DB {
-	if query == nil || len(categoryIDs) == 0 {
-		return query
+	if query == nil {
+		return nil
 	}
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
+		if disabledIDs := support.GetDisabledCategoryIDs(); len(disabledIDs) > 0 {
+			query = query.Where("pid NOT IN ? AND cid NOT IN ?", disabledIDs, disabledIDs)
+		}
+		if len(categoryIDs) == 0 {
+			return query
+		}
 		return query.Where("pid IN ?", categoryIDs)
+	}
+	if len(categoryIDs) == 0 {
+		return query
 	}
 	typeIDs := make([]int64, 0, len(categoryIDs))
 	seen := make(map[int64]struct{}, len(categoryIDs))

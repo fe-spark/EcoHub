@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"server/internal/infra/syslog"
+	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
@@ -17,7 +18,7 @@ const deleteIndexWait = 30 * time.Minute
 
 func deleteIdleReason() string {
 	reason := spider.SearchWorkBusyReason()
-	if !isPrimaryWarming.Load() {
+	if primaryWarmCount.Load() <= 0 {
 		return reason
 	}
 	if reason == "" {
@@ -53,47 +54,14 @@ func waitDeleteIdle(id string, timeout time.Duration) error {
 	}
 }
 
-var deleteSourceQueue = make(chan string, 1000)
-
-func init() {
-	go runDeleteSourceWorker()
-}
-
-func runDeleteSourceWorker() {
-	for id := range deleteSourceQueue {
-		processAsyncDeleteSource(id)
-	}
-}
-
-func processAsyncDeleteSource(id string) {
-	defer progress.SetSourceDeleting(id, false)
-	src := repository.FindCollectSourceForDelete(id)
-	name := id
-	if src != nil && src.Name != "" {
-		name = src.Name
-	}
-	syslog.Infof("[Collect] 异步删除站点开始 id=%s name=%s", id, name)
-	started := time.Now()
-	progress.BroadcastSourceDeleteStatus(id, name, "deleting", "", 0)
-	deletedFilms, err := CollectSvc.DelFilmSource(id)
-	if err != nil {
-		syslog.Errorf("[Collect] 异步删除站点失败 id=%s name=%s 耗时=%s err=%v", id, name, time.Since(started).Round(time.Millisecond), err)
-		progress.BroadcastSourceDeleteStatus(id, name, "failed", err.Error(), 0)
-		return
-	}
-	syslog.Infof("[Collect] 异步删除站点完成 id=%s name=%s 删除影片=%d 耗时=%s", id, name, deletedFilms, time.Since(started).Round(time.Millisecond))
-	progress.BroadcastSourceDeleteStatus(id, name, "deleted", "", deletedFilms)
-}
-
-// TriggerDelFilmSource 异步触发采集站删除：广播 deleting 状态并毫秒级返回，后台串行队列安全停工与级联清理
-func (s *CollectService) TriggerDelFilmSource(id string) error {
+func validateSourceForDelete(id string) (*model.FilmSource, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return errors.New("采集站ID不能为空")
+		return nil, errors.New("采集站ID不能为空")
 	}
 	src := repository.FindCollectSourceForDelete(id)
 	if src == nil {
-		return errors.New("当前资源站信息不存在, 请勿重复操作")
+		return nil, errors.New("当前资源站信息不存在, 请勿重复操作")
 	}
 	if progress.IsTaskRunning(id) {
 		status := ""
@@ -101,36 +69,195 @@ func (s *CollectService) TriggerDelFilmSource(id string) error {
 			status = snap.Status
 		}
 		syslog.Infof("[Collect] 拒绝删除，站点采集中 id=%s name=%s status=%s", id, src.Name, status)
-		return errors.New("采集中，暂不可删除")
+		return nil, errors.New("采集中，暂不可删除")
 	}
 	if progress.IsSourceDeleting(id) {
-		return errors.New("该站正在删除")
+		return nil, errors.New("该站正在删除")
 	}
-
-	select {
-	case deleteSourceQueue <- id:
-		progress.BroadcastSourceDeleteStatus(id, src.Name, "deleting", "", 0)
-		return nil
-	default:
-		return errors.New("删除队列已满")
+	if progress.IsCategorySyncing(id) {
+		return nil, errors.New("分类采集中，暂不可删除")
 	}
+	return src, nil
 }
 
-// TriggerDelFilmSourceBatch 异步批量触发采集站删除。有一站失败就返回错误。
-func (s *CollectService) TriggerDelFilmSourceBatch(ids []string) error {
-	var failed []string
-	for _, id := range ids {
-		if err := s.TriggerDelFilmSource(id); err != nil {
-			failed = append(failed, err.Error())
+// TriggerDelFilmSource 异步触发采集站删除：广播 deleting 状态并毫秒级返回，后台串行队列安全停工与级联清理。
+// 删除当前主站必须携带 newPrimaryID，或无其他启用站时 confirmClearPrimary 置空（D6）。
+func (s *CollectService) TriggerDelFilmSource(id, newPrimaryID string, confirmClearPrimary bool) error {
+	return s.TriggerDelFilmSourceWithAuth(id, newPrimaryID, confirmClearPrimary, true)
+}
+
+// TriggerDelFilmSourceWithAuth 异步触发单个采集站删除，并按 allowPrimaryHandover 校验删除主站的权限（D4）。
+func (s *CollectService) TriggerDelFilmSourceWithAuth(id, newPrimaryID string, confirmClearPrimary, allowPrimaryHandover bool) error {
+	if !allowPrimaryHandover && (strings.TrimSpace(newPrimaryID) != "" || confirmClearPrimary) {
+		return ErrPrimarySwitchForbidden
+	}
+	// D6：删除当前主站，在准入锁内完成校验与主站交接，消除并发切主与删除竞态
+	return withPrimaryMutation(func(searchBusy bool) error {
+		src, err := validateSourceForDelete(id)
+		if err != nil {
+			return err
 		}
+
+		// 必须在 reserveDelFilmSources 置位 deleting 之前读取当前主站，避免缓存冷态时被误判为 nil
+		oldPrimary := repository.CurrentPrimarySource()
+		isPrimaryTarget := oldPrimary != nil && oldPrimary.Id == src.Id
+		targetNewPrimary := strings.TrimSpace(newPrimaryID)
+		if isPrimaryTarget {
+			if !allowPrimaryHandover {
+				return ErrPrimarySwitchForbidden
+			}
+			if err := planPrimaryHandover(searchBusy, src.Id, targetNewPrimary, confirmClearPrimary); err != nil {
+				return err
+			}
+		}
+
+		res, err := reserveDelFilmSources(deleteSourceQueue, []*model.FilmSource{src})
+		if err != nil {
+			return err
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				res.rollback()
+			}
+		}()
+
+		clearPrimarySourceID := ""
+		if isPrimaryTarget {
+			if targetNewPrimary != "" {
+				if err := applyPrimaryHandover(oldPrimary, src.Id, targetNewPrimary, false); err != nil {
+					return err
+				}
+			} else if confirmClearPrimary {
+				// 无其他启用站需置空主站时，推迟到真正出队删除前再清空，防止排队被撤回后导致索引与主站状态撕裂
+				clearPrimarySourceID = src.Id
+			}
+		}
+		res.commit(nil, clearPrimarySourceID)
+		committed = true
+		return nil
+	})
+}
+
+// TriggerDelFilmSourceBatch 异步批量触发采集站删除。任一站校验不通过时整批拒绝，不触发部分删除。
+// 批量包含当前主站时：将主站平滑交接并排在队列最后一位删除。
+func (s *CollectService) TriggerDelFilmSourceBatch(ids []string, newPrimaryID string, confirmClearPrimary bool) error {
+	return s.TriggerDelFilmSourceBatchWithAuth(ids, newPrimaryID, confirmClearPrimary, true)
+}
+
+// TriggerDelFilmSourceBatchWithAuth 异步批量触发采集站删除，并按 allowPrimaryHandover 校验删除主站的权限（D4）。
+func (s *CollectService) TriggerDelFilmSourceBatchWithAuth(ids []string, newPrimaryID string, confirmClearPrimary, allowPrimaryHandover bool) error {
+	if len(ids) == 1 {
+		return s.TriggerDelFilmSourceWithAuth(ids[0], newPrimaryID, confirmClearPrimary, allowPrimaryHandover)
 	}
-	if len(failed) > 0 {
-		return errors.New(strings.Join(failed, "；"))
+	if !allowPrimaryHandover && (strings.TrimSpace(newPrimaryID) != "" || confirmClearPrimary) {
+		return ErrPrimarySwitchForbidden
 	}
-	return nil
+	return withPrimaryMutation(func(searchBusy bool) error {
+		targets := make([]*model.FilmSource, 0, len(ids))
+		seen := make(map[string]struct{}, len(ids))
+		var failed []string
+		for _, raw := range ids {
+			id := strings.TrimSpace(raw)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			src, err := validateSourceForDelete(id)
+			if err != nil {
+				failed = append(failed, err.Error())
+				continue
+			}
+			targets = append(targets, src)
+		}
+		if len(failed) > 0 {
+			return errors.New(strings.Join(failed, "；"))
+		}
+		if len(targets) == 0 {
+			return errors.New("采集站ID不能为空")
+		}
+
+		// 必须在 reserveDelFilmSources 置位 deleting 之前读取当前主站，避免缓存冷态时被误判为 nil
+		oldPrimary := repository.CurrentPrimarySource()
+		var primaryTarget *model.FilmSource
+		if oldPrimary != nil {
+			for _, target := range targets {
+				if target.Id == oldPrimary.Id {
+					primaryTarget = target
+					break
+				}
+			}
+		}
+
+		targetNewPrimary := strings.TrimSpace(newPrimaryID)
+		if primaryTarget != nil {
+			if !allowPrimaryHandover {
+				return ErrPrimarySwitchForbidden
+			}
+			otherEnabled := repository.FindOtherEnabledCollectSourcesExcluding(seen)
+			if targetNewPrimary != "" {
+				if err := planPrimaryHandoverExcluding(searchBusy, seen, primaryTarget.Id, targetNewPrimary, false); err != nil {
+					return err
+				}
+			} else if len(otherEnabled) > 0 {
+				return errors.New("仍有其他启用站，请指定新主站")
+			} else {
+				if err := planPrimaryHandoverExcluding(searchBusy, seen, primaryTarget.Id, "", confirmClearPrimary); err != nil {
+					return err
+				}
+			}
+		}
+
+		res, err := reserveDelFilmSources(deleteSourceQueue, targets)
+		if err != nil {
+			return err
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				res.rollback()
+			}
+		}()
+
+		clearPrimarySourceID := ""
+		if primaryTarget != nil {
+			if targetNewPrimary != "" {
+				if err := applyPrimaryHandover(oldPrimary, primaryTarget.Id, targetNewPrimary, false); err != nil {
+					return err
+				}
+			} else if confirmClearPrimary {
+				// 推迟到队尾主站出队开始清理时再清空主站与丢弃检索索引，避免撤回队列时撕裂主站状态
+				clearPrimarySourceID = primaryTarget.Id
+			}
+
+			// 核心：非主站先删，当前主站排在队列最后一位删除
+			nonPrimaryTargets := make([]*model.FilmSource, 0, len(targets))
+			for _, target := range targets {
+				if target.Id != primaryTarget.Id {
+					nonPrimaryTargets = append(nonPrimaryTargets, target)
+				}
+			}
+			targets = append(nonPrimaryTargets, primaryTarget)
+		}
+
+		res.commit(targets, clearPrimarySourceID)
+		committed = true
+		return nil
+	})
 }
 
 func (s *CollectService) DelFilmSource(id string) (int, error) {
+	return s.delFilmSource(id)
+}
+
+func (s *CollectService) delFilmSource(id string) (int, error) {
+	if !progress.IsSourceDeleting(id) {
+		progress.SetSourceDeleting(id, true)
+		defer progress.SetSourceDeleting(id, false)
+	}
 	if err := waitDeleteIdle(id, deleteIndexWait); err != nil {
 		return 0, err
 	}
@@ -140,6 +267,7 @@ func (s *CollectService) DelFilmSource(id string) (int, error) {
 		if src == nil {
 			return errors.New("当前资源站信息不存在, 请勿重复操作")
 		}
+		defer spider.ClearCMSSearchUnsupported(src.Uri)
 		if progress.IsTaskRunning(id) {
 			status := ""
 			if snap, ok := progress.Snapshot(id); ok {
@@ -153,7 +281,6 @@ func (s *CollectService) DelFilmSource(id string) (int, error) {
 			return err
 		}
 		defer release()
-		oldPrimary := repository.PickPrimarySourceForCategory()
 		var orphanMids []int64
 		err = spider.PauseActiveBatchRecords(id, func() error {
 			var purgeErr error
@@ -162,21 +289,19 @@ func (s *CollectService) DelFilmSource(id string) (int, error) {
 		})
 		if err != nil {
 			if len(orphanMids) > 0 {
-				filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
+				filmsnapshot.InvalidateCachesAfterSourceDelete(id)
 			}
 			return err
 		}
 		deletedCount = len(orphanMids)
+		filmsnapshot.InvalidateCachesAfterSourceDelete(id)
 		if len(orphanMids) > 0 {
-			filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
 			syslog.Infof("[Collect] 删除采集源 %s(%s)，已删除该站档案 %d 部", src.Name, id, len(orphanMids))
 		}
 		spider.ClearLimiter(id)
 		clearProvideNetworkConfigCache()
-		filmsnapshot.ClearDynamicPlayCaches()
 		repository.MarkCategoryChanged()
 		progress.BroadcastCategoryStatus(id, "idle")
-		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 		return nil
 	})
 	if err != nil {

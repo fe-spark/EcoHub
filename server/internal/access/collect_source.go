@@ -2,7 +2,6 @@ package access
 
 import (
 	"context"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,7 +17,7 @@ import (
 // 采集站归属在请求写入前决定。页面埋点的 source 是客户端类型，不能当作采集站。
 var (
 	lookupActiveCollectSourceID = func() string {
-		active := repository.GetActiveCollectSource()
+		active := repository.CurrentPrimarySource()
 		if active == nil {
 			return ""
 		}
@@ -53,15 +52,11 @@ func validCollectSourceID(id string) bool {
 	return true
 }
 
-func provideCollectSource(path string, query url.Values) string {
-	if !strings.HasPrefix(path, "/api/provide/vod") || query == nil {
+func provideCollectSource(path string) string {
+	if !strings.HasPrefix(path, "/api/provide/vod") {
 		return ""
 	}
-	raw := strings.TrimSpace(query.Get("source"))
-	if raw != "" && validCollectSourceID(raw) {
-		return raw
-	}
-	return ""
+	return activeCollectSourceID()
 }
 
 func pageCollectSource(action, collectSource, resource string) string {

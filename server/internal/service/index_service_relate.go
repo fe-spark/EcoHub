@@ -32,7 +32,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 		sourceID = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceID == "" {
-		sourceID = i.BaselineSourceID()
+		sourceID = support.CurrentPrimaryID()
 	}
 
 	snapshotStartedAt := time.Now()

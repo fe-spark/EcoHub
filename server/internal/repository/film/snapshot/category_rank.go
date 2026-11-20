@@ -145,16 +145,18 @@ func categoryRankMids(version, sourceID, field string, categoryID int64, sortTyp
 	if limit > categoryRankCap {
 		return scanSourceRanks(idx, sourceID, field, categoryID, sortType, limit), nil
 	}
-	if res := mergeRankPools(idx, rankPools(idx, sortType), sourceID, field, categoryID, sortType, limit); len(res) > 0 {
+	if res, skippedHidden := mergeRankPools(idx, rankPools(idx, sortType), sourceID, field, categoryID, sortType, limit); len(res) > 0 && !(skippedHidden && len(res) < limit) {
 		return res, nil
 	}
 	return scanSourceRanks(idx, sourceID, field, categoryID, sortType, limit), nil
 }
 
-func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID, field string, categoryID int64, sortType, limit int) []int64 {
+func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID, field string, categoryID int64, sortType, limit int) ([]int64, bool) {
 	typeIDs := repository.PublicSourceTypeIDs(sourceID, field, categoryID)
+	categoryVisible := SourceCategoryVisibility(sourceID)
 	seen := make(map[int64]struct{})
 	cands := make([]rankCand, 0, limit)
+	skippedHidden := false
 	for _, typeID := range typeIDs {
 		key := support.BuildSourceCategoryKey(sourceID, typeID)
 		for _, mid := range pools[hotPoolMapKey(sourceID, key)] {
@@ -169,16 +171,25 @@ func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID
 			if !ok || pos < 0 || pos >= len(idx.Items) {
 				continue
 			}
-			cands = append(cands, rankFromMeta(idx.Items[pos]))
+			meta := idx.Items[pos]
+			// 榜单池在构建时会把子分类影片同步记入父级 RootCategoryKey 池；父级汇总取池时必须复核子分类可见性。
+			if !categoryVisible(meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
+				skippedHidden = true
+				continue
+			}
+			cands = append(cands, rankFromMeta(meta))
 		}
 	}
-	return midsOf(cands, sortType, limit)
+	return midsOf(cands, sortType, limit), skippedHidden
 }
 
 func scanLocalRanks(idx *filmSearchMetaIndex, field string, categoryID int64, sortType, limit int) []int64 {
 	pools := map[string][]rankCand{}
 	for i := range idx.Items {
 		item := idx.Items[i]
+		if !support.IsCategoryVisible(item.Cid, item.Pid) {
+			continue
+		}
 		match := item.Pid == categoryID
 		if field == "cid" {
 			match = item.Cid == categoryID

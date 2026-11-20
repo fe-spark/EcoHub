@@ -7,6 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 )
 
 type MappingRulePreviewHit struct {
@@ -58,15 +59,30 @@ func PreviewMappingRule(sourceID, group, raw, matchType, target string) (Mapping
 	}
 	empty.SourceName = strings.TrimSpace(source.Name)
 
-	query := db.Mdb.Where("source_id = ?", sourceID)
-	if group == "CategoryRoot" {
-		query = query.Where("parent_source_type_id = 0")
-	} else {
-		query = query.Where("parent_source_type_id > 0")
-	}
-	var rows []model.SourceCategory
-	if err := query.Order("sort ASC, source_type_id ASC").Find(&rows).Error; err != nil {
+	var allRows []model.SourceCategory
+	if err := db.Mdb.Where("source_id = ?", sourceID).Order("sort ASC, source_type_id ASC").Find(&allRows).Error; err != nil {
 		return empty, err
+	}
+	rows := make([]model.SourceCategory, 0, len(allRows))
+	for _, row := range allRows {
+		name := strings.TrimSpace(row.RawName)
+		if name == "" {
+			continue
+		}
+		if group == "CategoryRoot" {
+			if row.ParentSourceTypeId == 0 {
+				rows = append(rows, row)
+			}
+			continue
+		}
+		// 二级规则同时作用于原生二级分类，以及已被一级规则改名下沉为二级展示的原一级分类。
+		if row.ParentSourceTypeId > 0 {
+			rows = append(rows, row)
+			continue
+		}
+		if mapped := strings.TrimSpace(support.NormalizeRootCategoryName(sourceID, name)); mapped != "" && mapped != name {
+			rows = append(rows, row)
+		}
 	}
 
 	hits := make([]MappingRulePreviewHit, 0)

@@ -7,7 +7,6 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/repository/film/query"
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
@@ -41,25 +40,12 @@ func probeCategorySourceList(conn *gorm.DB, sourceID, field string, categoryID i
 		return nil, false, nil
 	}
 	need := offset + limit
-	if sourceKeys := sourceTypeKeysForProbe(sourceID, field, categoryID); len(sourceKeys) > 0 {
-		ranks, err := scanProbeBranches(conn, sourceTypeProbeBranches(sourceKeys), sourceID, need)
-		if err != nil {
-			return nil, true, err
-		}
-		mids := pageProbeMids(ranks, offset, limit)
-		snaps, err := listSnapshotsByMIDs(conn, mids)
-		if err != nil {
-			return nil, true, err
-		}
-		return snaps, true, nil
+	sourceKeys := sourceTypeKeysForProbe(sourceID, field, categoryID)
+	if len(sourceKeys) == 0 {
+		// 已明确绑定采集站但该分类在公开分类中不存在/已隐藏时直接返回空，禁止回退查本地分类 ID
+		return []model.FilmListSnapshot{}, true, nil
 	}
-	idColumn, id, categoryKeys, rootKeys := query.LiveCategoryProbeKeys(field, categoryID)
-	branches := buildProbeBranches(idColumn, id, categoryKeys, rootKeys)
-	if len(branches) == 0 || len(branches) > categoryProbeMaxKeys {
-		return nil, false, nil
-	}
-
-	ranks, err := scanProbeBranches(conn, branches, sourceID, need)
+	ranks, err := scanProbeBranches(conn, sourceTypeProbeBranches(sourceKeys), sourceID, need)
 	if err != nil {
 		return nil, true, err
 	}

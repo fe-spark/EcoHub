@@ -36,10 +36,11 @@ func FilmNamesByIDs(ids []int64) (map[int64]string, error) {
 	return out, nil
 }
 
-// escapeLikePattern 转义 LIKE 通配符。查询须带 ESCAPE '\\'，SQLite 和 MySQL 才都按字面量匹配。
-func escapeLikePattern(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "%", "\\%")
-	s = strings.ReplaceAll(s, "_", "\\_")
-	return s
+// likePrefix 转义 LIKE 通配符，只匹配前缀。查询须带 ESCAPE '!'。
+// 连接串开了 interpolateParams，ESCAPE '\' 会把后面的引号吃掉。
+func likePrefix(s string) string {
+	s = strings.ReplaceAll(s, "!", "!!")
+	s = strings.ReplaceAll(s, "%", "!%")
+	s = strings.ReplaceAll(s, "_", "!_")
+	return s + "%"
 }

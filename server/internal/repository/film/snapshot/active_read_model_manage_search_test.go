@@ -7,12 +7,13 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/utils"
 )
 
 func TestManageMetaCategory_SourceKey(t *testing.T) {
 	detachGlobalDB(t)
-	s := model.SearchVo{SourceId: "1208629981", Pid: 57}
-	ctx, ok := newManageFilterContext(s)
+	s := model.SearchVo{SourceId: "other", Pid: 57}
+	ctx, ok := newManageFilterContext(s, "1208629981")
 	if !ok {
 		t.Fatal("expected filter context to be created")
 	}
@@ -26,8 +27,8 @@ func TestManageMetaCategory_SourceKey(t *testing.T) {
 		t.Fatal("local pid must not match another source key")
 	}
 
-	sCid := model.SearchVo{SourceId: "1208629981", Cid: 58}
-	ctxCid, ok := newManageFilterContext(sCid)
+	sCid := model.SearchVo{SourceId: "other", Cid: 58}
+	ctxCid, ok := newManageFilterContext(sCid, "1208629981")
 	if !ok {
 		t.Fatal("expected cid filter context to be created")
 	}
@@ -71,7 +72,7 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 
 	// 50,000 条数据内存切页应在 50ms 内完成，绝对不能出现 18s 级卡顿
 	start := time.Now()
-	res, total, err := pageManageMetas(idx, s, page)
+	res, total, err := pageManageMetas(idx, s, page, "3370810636")
 	cost := time.Since(start)
 	if err != nil {
 		t.Fatalf("pageManageMetas error: %v", err)
@@ -87,9 +88,41 @@ func TestPageManageMetas_ScalePerformance(t *testing.T) {
 	}
 }
 
-// detachGlobalDB 让用例在"未连接数据库"的前提下运行，结束后还原。
-// 这些用例只测纯内存逻辑，但被测函数会读全局 db.Mdb；包内其他用例可能把 db.Mdb 留成已关闭/缺表的库，
-// -count>1 时第二轮起就会读到它而失败。
+func TestOtherSourceUpsertDoesNotResealPrimaryIndex(t *testing.T) {
+	prevDB := db.Mdb
+	prevIdx := activeFilmSearchMetas.Load()
+	t.Cleanup(func() {
+		db.Mdb = prevDB
+		activeFilmSearchMetas.Store(prevIdx)
+	})
+	gdb := setupSearchSourceTestDB(t)
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 9, FirstSourceId: "hd"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "其他站影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	item := FilmSearchMeta{Mid: 1, FirstSourceId: "uku", Item: utils.FilmSearchItem{Mid: 1, Name: "主站片"}}
+	idx := sealSearchMetaIndex("v-keep", []FilmSearchMeta{item})
+	idx.PrimaryID = "uku"
+	activeFilmSearchMetas.Store(idx)
+
+	UpsertMidsToActiveFilmSearchIndex("v-keep", []int64{9})
+	if got := activeFilmSearchMetas.Load(); got != idx {
+		t.Fatal("non-primary save resealed the resident index")
+	}
+
+	prevModel := activeFilmReadModel.Load()
+	activeFilmReadModel.Store(&FilmReadModel{Version: "v-keep"})
+	t.Cleanup(func() { activeFilmReadModel.Store(prevModel) })
+	if _, _, err := UpsertActiveSnapshotsByMids(9); err != nil {
+		t.Fatal(err)
+	}
+	if got := activeFilmSearchMetas.Load(); got != idx {
+		t.Fatal("non-primary snapshot save wrote the search index")
+	}
+}
+
 func detachGlobalDB(t *testing.T) {
 	t.Helper()
 	prev := db.Mdb

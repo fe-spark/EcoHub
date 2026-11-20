@@ -27,6 +27,43 @@ func TestFilmDetailAcceptsNumericStringFields(t *testing.T) {
 	}
 }
 
+func TestFilmDetail_OmitsEmptyRedundantFields(t *testing.T) {
+	detail := FilmDetail{
+		VodID:       11439,
+		VodName:     "凡人修仙传",
+		TypeID:      36,
+		TypeName:    "中国动漫",
+		VodPic:      "https://example.com/cover.jpg",
+		VodPlayFrom: "红牛(HN)",
+		VodPlayURL:  "第01集$https://example.com/1.m3u8",
+	}
+	b, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("Marshal 失败: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("Unmarshal 失败: %v", err)
+	}
+	// 验证未赋值的冗余字段（如 vod_pwd, vod_points, vod_plot 等）不出现在 JSON 中
+	redundantKeys := []string{
+		"vod_pwd", "vod_pwd_url", "vod_points", "vod_points_play", "vod_plot",
+		"vod_tpl", "vod_down_url", "vod_pic_thumb", "vod_author", "vod_jumpurl",
+	}
+	for _, key := range redundantKeys {
+		if _, exists := m[key]; exists {
+			t.Errorf("字段 %q 应被 omitempty 剔除，但出现在了 JSON 中: %s", key, string(b))
+		}
+	}
+	// 验证核心字段正常存在
+	coreKeys := []string{"vod_id", "vod_name", "type_id", "type_name", "vod_pic", "vod_play_from", "vod_play_url"}
+	for _, key := range coreKeys {
+		if _, exists := m[key]; !exists {
+			t.Errorf("核心字段 %q 缺失", key)
+		}
+	}
+}
+
 func TestFilmDetailKeepsStringFields(t *testing.T) {
 	raw := []byte(`{"vod_serial":"更新至90集","vod_year":"2020","vod_score":null}`)
 	var detail FilmDetail

@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"server/internal/infra/db"
-
-	"golang.org/x/sync/errgroup"
 )
 
 const defaultSearchRebuildDebounce = 500 * time.Millisecond
@@ -35,7 +33,13 @@ var (
 		running bool
 		timer   *time.Timer
 	}{}
+	// primaryAdmitMu 把「开始重建」和「改主站」做成同一段互斥。
+	// 检查和写入都在锁里，重建开始前不能把主站换掉。
+	primaryAdmitMu sync.Mutex
 )
+
+// ErrSearchIndexBusy 检索索引正在重建或已排队，此时不能切换主站。
+var ErrSearchIndexBusy = errors.New("检索索引正在构建中，暂不可切换主站，请稍候")
 
 // AddSearchIndexProgressListener 注册检索索引重建进度监听回调
 func AddSearchIndexProgressListener(fn func(SearchIndexProgress)) {
@@ -45,6 +49,18 @@ func AddSearchIndexProgressListener(fn func(SearchIndexProgress)) {
 	searchIndexProgressListenerMu.Lock()
 	defer searchIndexProgressListenerMu.Unlock()
 	searchIndexProgressListeners = append(searchIndexProgressListeners, fn)
+}
+
+// SearchIndexProgressToken 当前进度对象。封口期间变了，说明这一轮已经发过进度。
+func SearchIndexProgressToken() *SearchIndexProgress {
+	return latestSearchIndexProgress.Load()
+}
+
+// SearchRebuildGen 返回已请求的检索索引全量重建序号。
+func SearchRebuildGen() uint64 {
+	searchRebuild.mu.Lock()
+	defer searchRebuild.mu.Unlock()
+	return searchRebuild.gen
 }
 
 // GetLatestSearchIndexProgress 获取最新检索索引进度快照
@@ -93,8 +109,10 @@ func NotifySearchIndexProgress(total, current int64, status string) {
 	}
 }
 
-// RequestActiveFilmSearchIndexRebuild 整表顺序加载检索索引。采集结束先走 ResealSearchIndex，由它决定要不要扫全表。
+// RequestActiveFilmSearchIndexRebuild 按当前主站顺序加载检索索引。采集结束先走 ResealSearchIndex，由它决定要不要扫描主站。
 func RequestActiveFilmSearchIndexRebuild() {
+	primaryAdmitMu.Lock()
+	defer primaryAdmitMu.Unlock()
 	searchRebuild.mu.Lock()
 	searchRebuild.gen++
 	NotifySearchIndexProgress(0, 0, "indexing")
@@ -107,6 +125,30 @@ func RequestActiveFilmSearchIndexRebuild() {
 	}
 	searchRebuild.timer = time.AfterFunc(searchRebuildDebounce, startSearchRebuild)
 	searchRebuild.mu.Unlock()
+}
+
+// WithPrimarySwitchLock 在同一把锁里检查索引状态并执行采集站变更。
+// fn 里不能再调用 RequestActiveFilmSearchIndexRebuild，否则死锁。
+func WithPrimarySwitchLock(fn func(searchBusy bool) error) error {
+	if fn == nil {
+		return nil
+	}
+	primaryAdmitMu.Lock()
+	defer primaryAdmitMu.Unlock()
+	return fn(IsSearchIndexBuilding() || SearchRebuildScheduled())
+}
+
+// WithPrimaryAdmitted 重建已开始或已排队时拒绝可能切换主站的变更。
+func WithPrimaryAdmitted(fn func() error) error {
+	if fn == nil {
+		return nil
+	}
+	return WithPrimarySwitchLock(func(searchBusy bool) error {
+		if searchBusy {
+			return ErrSearchIndexBusy
+		}
+		return fn()
+	})
 }
 
 // IsSearchIndexRebuilding 检索索引是否正在全量重建中。
@@ -178,11 +220,11 @@ func runSearchRebuild() {
 	}
 }
 
-// notifySearchIndexIfCurrent 只在代数未变时发终态。旧一轮完成不能把新一轮的构建标记清掉。
+// notifySearchIndexIfCurrent 只在代数未变且无后台重建运行中时发终态。旧一轮完成不能把新一轮或正在跑的后台重建标记清掉。
 func notifySearchIndexIfCurrent(seen uint64, total, current int64, status string) {
 	searchRebuild.mu.Lock()
 	defer searchRebuild.mu.Unlock()
-	if searchRebuild.gen != seen {
+	if searchRebuild.gen != seen || searchRebuild.running {
 		return
 	}
 	NotifySearchIndexProgress(total, current, status)
@@ -191,26 +233,32 @@ func notifySearchIndexIfCurrent(seen uint64, total, current int64, status string
 // errSearchRebuildSkipped 没有版本或没有数据库，不扫库，终态记 idle。
 var errSearchRebuildSkipped = errors.New("检索索引重建跳过：无版本或数据库")
 
-// scanAndStoreActiveFilmSearchIndex 全库扫描并换上新索引，返回影片数。终态由 runSearchRebuild 发。
+// scanAndStoreActiveFilmSearchIndex 只扫描当前主站并换上新索引，返回影片数。终态由 runSearchRebuild 发。
 func scanAndStoreActiveFilmSearchIndex() (int64, error) {
 	version := currentSearchIndexVersion()
 	if version == "" || db.Mdb == nil {
 		return 0, errSearchRebuildSkipped
 	}
+	primary := currentPrimarySourceID()
 	activeFilmSearchMetasMu.Lock()
 	defer activeFilmSearchMetasMu.Unlock()
+	activeFilmSearchMetas.Store(nil)
 
 	started := time.Now()
-	items, plays, err := loadSearchIndexParts(version)
+	items, plays, err := loadSearchIndexParts(version, primary)
 	if err != nil {
 		return 0, err
+	}
+	if currentPrimarySourceID() != primary {
+		return 0, errors.New("主站已变更")
 	}
 	attachPlaySources(items, plays)
 	plays = nil
 	idx := sealSearchMetaIndex(version, items)
+	idx.PrimaryID = primary
 	activeFilmSearchMetas.Store(idx)
 	cost := time.Since(started).Round(time.Millisecond)
-	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s count=%d cost=%s", version, len(items), cost)
+	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s primary=%s count=%d cost=%s", version, primary, len(items), cost)
 	return int64(len(items)), nil
 }
 
@@ -222,23 +270,17 @@ func currentSearchIndexVersion() string {
 	return version
 }
 
-func loadSearchIndexParts(version string) ([]FilmSearchMeta, map[int64][]string, error) {
-	g, gctx := errgroup.WithContext(context.Background())
-	var (
-		items []FilmSearchMeta
-		plays map[int64][]string
-	)
-	g.Go(func() error {
-		var err error
-		items, err = loadFilmSearchMetaItems(gctx, version)
-		return err
-	})
-	g.Go(func() error {
-		var err error
-		plays, err = loadPlaySources(nil)
-		return err
-	})
-	if err := g.Wait(); err != nil {
+func loadSearchIndexParts(version, primary string) ([]FilmSearchMeta, map[int64][]string, error) {
+	items, err := loadFilmSearchMetaItems(context.Background(), version, primary)
+	if err != nil {
+		return nil, nil, err
+	}
+	mids := make([]int64, len(items))
+	for i := range items {
+		mids[i] = items[i].Mid
+	}
+	plays, err := loadPlaySources(mids)
+	if err != nil {
 		return nil, nil, err
 	}
 	return items, plays, nil

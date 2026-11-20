@@ -98,42 +98,6 @@ func TestSealSearchMetaIndexSharesSinglePlaySource(t *testing.T) {
 	}
 }
 
-func TestSealSearchMetaIndex_MultiSourceCounts(t *testing.T) {
-	idx := sealSearchMetaIndex("v", []FilmSearchMeta{
-		{Mid: 1, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
-		{Mid: 2, FirstSourceId: "src-b", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
-		{Mid: 3, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "独家影片"}},
-		{Mid: 4, FirstSourceId: "src-a", PlaySources: []string{"src-a", "src-c"}, Item: utils.FilmSearchItem{CleanName: "多线路影片"}},
-	})
-	if idx.MultiSourceBySource["src-a"] != 2 {
-		t.Fatalf("src-a multiSource=%d, want 2", idx.MultiSourceBySource["src-a"])
-	}
-	if idx.MultiSourceBySource["src-b"] != 1 {
-		t.Fatalf("src-b multiSource=%d, want 1", idx.MultiSourceBySource["src-b"])
-	}
-}
-
-func TestIncrementalSeal_RefreshesMultiSourceCounts(t *testing.T) {
-	cur := sealSearchMetaIndex("v", []FilmSearchMeta{
-		{Mid: 1, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
-		{Mid: 3, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "独家影片"}},
-	})
-	if cur.MultiSourceBySource["src-a"] != 0 {
-		t.Fatalf("封口前 src-a 多源 = %d", cur.MultiSourceBySource["src-a"])
-	}
-
-	next := updateSearchMetaIndexIncremental(cur, "v", map[int64]FilmSearchMeta{
-		2: {Mid: 2, FirstSourceId: "src-b", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
-		3: {Mid: 3, FirstSourceId: "src-a", PlaySources: []string{"src-a", "src-c"}, Item: utils.FilmSearchItem{CleanName: "独家影片"}},
-	})
-	if next.MultiSourceBySource["src-a"] != 2 {
-		t.Fatalf("src-a 多源 = %d，want 2", next.MultiSourceBySource["src-a"])
-	}
-	if next.MultiSourceBySource["src-b"] != 1 {
-		t.Fatalf("src-b 多源 = %d，want 1", next.MultiSourceBySource["src-b"])
-	}
-}
-
 func TestLoadFilmSearchMetaIndex_DedupesPlayLines(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	createTestFilm(t, gdb, 7, "慶餘年", 10, "")
@@ -283,9 +247,6 @@ func TestIncrementalSeal_ReusesUnchangedObjects(t *testing.T) {
 	if next.Pos != nil && fmtPos(next.Pos) != fmtPos(cur.Pos) {
 		t.Fatal("只更新已有影片时不应复制 Pos")
 	}
-	if fmtFilmCounts(next.FilmsBySource) != fmtFilmCounts(cur.FilmsBySource) {
-		t.Fatal("只更新已有影片时不应复制来源计数")
-	}
 	if fmtCategory(next.ByCategory) != fmtCategory(cur.ByCategory) {
 		t.Fatal("只更新已有影片时不应复制分类列表")
 	}
@@ -314,9 +275,6 @@ func TestIncrementalSeal_ReusesUnchangedObjects(t *testing.T) {
 	if grown.Items[1] != kept {
 		t.Fatal("新增时未变更条目应继续共用对象")
 	}
-	if grown.FilmsBySource["src-b"] != 1 || next.FilmsBySource["src-b"] != 0 {
-		t.Fatalf("来源计数 old=%d new=%d", next.FilmsBySource["src-b"], grown.FilmsBySource["src-b"])
-	}
 }
 
 func TestIncrementalSeal_MovesCategoryAndSource(t *testing.T) {
@@ -343,9 +301,6 @@ func TestIncrementalSeal_MovesCategoryAndSource(t *testing.T) {
 	})
 	if fmtPos(moved.Pos) != fmtPos(cur.Pos) {
 		t.Fatal("只改分类不应复制 Pos")
-	}
-	if fmtFilmCounts(moved.FilmsBySource) != fmtFilmCounts(cur.FilmsBySource) {
-		t.Fatal("分类变化不应复制来源计数")
 	}
 	if fmtCategory(moved.ByCategory) == fmtCategory(cur.ByCategory) {
 		t.Fatal("分类变化应复制分类列表")
@@ -382,15 +337,6 @@ func TestIncrementalSeal_MovesCategoryAndSource(t *testing.T) {
 	})
 	if fmtCategory(sourced.ByCategory) != fmtCategory(moved.ByCategory) {
 		t.Fatal("只改来源不应复制分类列表")
-	}
-	if fmtFilmCounts(sourced.FilmsBySource) == fmtFilmCounts(moved.FilmsBySource) {
-		t.Fatal("来源变化应复制来源计数")
-	}
-	if moved.FilmsBySource["src-a"] != 2 {
-		t.Fatalf("旧来源计数被改写 %d", moved.FilmsBySource["src-a"])
-	}
-	if sourced.FilmsBySource["src-a"] != 1 || sourced.FilmsBySource["src-b"] != 1 {
-		t.Fatalf("来源计数 a=%d b=%d", sourced.FilmsBySource["src-a"], sourced.FilmsBySource["src-b"])
 	}
 	if midsContain(sourced.SourceHot["src-a"], 1) || !midsContain(sourced.SourceHot["src-b"], 1) {
 		t.Fatalf("来源热榜未搬家 a=%v b=%v", sourced.SourceHot["src-a"], sourced.SourceHot["src-b"])
@@ -443,10 +389,6 @@ func midsContain(list []int64, v int64) bool {
 }
 
 func fmtPos(m map[int64]int) string {
-	return fmt.Sprintf("%p", m)
-}
-
-func fmtFilmCounts(m map[string]int64) string {
 	return fmt.Sprintf("%p", m)
 }
 

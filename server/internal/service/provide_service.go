@@ -22,7 +22,6 @@ import (
 	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/repository/support"
 )
 
 type ProvideService struct{}
@@ -32,13 +31,9 @@ var (
 	tvboxListSfGroup singleflight.Group
 )
 
-// GetClassList 获取格式化的分类列表和筛选条件
-func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass, map[string][]map[string]any, error) {
-	var sourceId string
-	if len(sourceIdOpt) > 0 {
-		sourceId = sourceIdOpt[0]
-	}
-	sourceId = resolveProvideSourceID(sourceId)
+// GetClassList 获取当前主站的分类列表和筛选条件。
+func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[string]any, error) {
+	sourceId := primaryProvideSourceID()
 	// 1. 尝试从 Redis 获取缓存 (TVBox 配置缓存 5 分钟)
 	categoryVersion := repository.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s", config.TVBoxConfigCacheKey, categoryVersion)
@@ -217,25 +212,21 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 	return classList, filters, nil
 }
 
-// GetVodList 获取视频列表 (支持多维度筛选与采集源隔离)
-func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList, error) {
+// GetVodList 获取当前主站的视频列表。
+func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	wd = strings.TrimSpace(wd)
-	sourceId = resolveProvideSourceID(sourceId)
+	sourceId := primaryProvideSourceID()
+	if sourceId == "" {
+		return 1, 1, 0, []model.FilmList{}, nil
+	}
 	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
 	if len([]rune(wd)) > 64 || strings.HasPrefix(wd, "http://") || strings.HasPrefix(wd, "https://") {
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
 
-	pid := int64(t)
-	if pid > 0 && !support.IsCategoryVisible(0, pid) {
-		return 1, 1, 0, []model.FilmList{}, nil
-	}
-	if cid > 0 && !support.IsCategoryVisible(cid, pid) {
-		return 1, 1, 0, []model.FilmList{}, nil
-	}
 	version := filmsnapshot.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
 	categoryVersion := repository.GetCategoryVersion()
@@ -298,9 +289,6 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 
 		var vodList []model.FilmList
 		for _, s := range sl {
-			if !support.IsCategoryVisible(s.Cid, s.Pid) {
-				continue
-			}
 			typeID, typeName, err := resolveProvideListedType(s, sourceId)
 			if err != nil {
 				return tvboxListResult{}, err
@@ -364,10 +352,24 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 	return res.Current, res.PageCount, res.Total, res.VodList, err
 }
 
-// GetTVBoxConfig 获取 TVBox 网络配置（sites 源站列表，支持缓存）
+// displaySiteName 网站设置里的名称。没填时用 EcoHub。
+func displaySiteName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "EcoHub"
+	}
+	return name
+}
+
+// GetTVBoxConfig 获取 TVBox 订阅。只放当前主站，名字用网站设置。播放线路在详情里已经带上其他站。
 func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		return nil, err
+	}
+	siteName := displaySiteName(basic.SiteName)
+	cacheKey := config.TVBoxNetworkConfigCacheKey + ":site:" + url.QueryEscape(baseURL) + ":" + url.QueryEscape(siteName)
 	if key != "" {
 		sum := sha256.Sum256([]byte(key))
 		cacheKey += ":" + hex.EncodeToString(sum[:])
@@ -382,24 +384,24 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 	}
 
 	apiPath := baseURL + "/api/provide/vod"
-	sites := make([]map[string]any, 0)
-	enabledSources, err := repository.GetEnabledCollectSourceList()
-	if err != nil {
-		return nil, err
-	}
-	for _, source := range enabledSources {
-		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
+	sites := make([]map[string]any, 0, 1)
+	primary := repository.CurrentPrimarySource()
+	if primary != nil {
+		sourceApi := apiPath
 		if key != "" {
-			sourceApi += "&key=" + url.QueryEscape(key)
+			sourceApi += "?key=" + url.QueryEscape(key)
 		}
 		sites = append(sites, map[string]any{
-			"key":         "source_" + source.Id,
-			"name":        "📡 " + source.Name,
+			"key":         "source_" + primary.Id,
+			"name":        siteName,
 			"type":        1,
 			"api":         sourceApi,
 			"searchable":  1,
 			"quickSearch": 1,
 			"filterable":  1,
+			"header": map[string]string{
+				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+			},
 		})
 	}
 
@@ -425,10 +427,7 @@ func (p *ProvideService) GetAppSourceConfig(baseURL string) (map[string]any, err
 	if err != nil {
 		return nil, err
 	}
-	siteName := strings.TrimSpace(basic.SiteName)
-	if siteName == "" {
-		siteName = "EcoHub"
-	}
+	siteName := displaySiteName(basic.SiteName)
 
 	return map[string]any{
 		"code": 1,

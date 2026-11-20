@@ -269,8 +269,9 @@ func (s *NotifyService) PublishCronFailed(taskID, remark, reason string) {
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
 }
 
-// PublishSourceOrderChange 发送采集站排序更新或首选站切换通知
-func (s *NotifyService) PublishSourceOrderChange(oldPrimary, newPrimary *model.FilmSource, enabledSources []model.FilmSource) {
+// PublishPrimaryChange 发送主站切换通知。
+// 配置字段沿用 SourceOrderChange 命名，保证已保存的通知配置兼容（D7）。
+func (s *NotifyService) PublishPrimaryChange(oldPrimary, newPrimary *model.FilmSource, enabledSources []model.FilmSource) {
 	cfg, err := repository.GetNotifyConfig()
 	if err != nil {
 		syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
@@ -285,21 +286,19 @@ func (s *NotifyService) PublishSourceOrderChange(oldPrimary, newPrimary *model.F
 		return
 	}
 	siteName := basic.SiteName
-	text := formatSourceOrderChangeHTML(siteName, oldPrimary, newPrimary, enabledSources)
+	text := formatPrimaryChangeHTML(siteName, oldPrimary, newPrimary, enabledSources)
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
 }
 
-func formatSourceOrderChangeHTML(siteName string, oldPrimary, newPrimary *model.FilmSource, enabledSources []model.FilmSource) string {
-	oldID, oldName := "", "无"
+func formatPrimaryChangeHTML(siteName string, oldPrimary, newPrimary *model.FilmSource, enabledSources []model.FilmSource) string {
+	oldName := "无"
 	if oldPrimary != nil {
-		oldID = oldPrimary.Id
 		if name := strings.TrimSpace(oldPrimary.Name); name != "" {
 			oldName = name
 		}
 	}
-	newID, newName := "", "无"
+	newName := "无"
 	if newPrimary != nil {
-		newID = newPrimary.Id
 		if name := strings.TrimSpace(newPrimary.Name); name != "" {
 			newName = name
 		}
@@ -323,12 +322,12 @@ func formatSourceOrderChangeHTML(siteName string, oldPrimary, newPrimary *model.
 	}
 
 	var b strings.Builder
-	if oldID != newID {
+	if newPrimary == nil {
+		fmt.Fprintf(&b, "<b>%s 主站已置空</b>\n", formatTitlePrefix(siteName))
+		fmt.Fprintf(&b, "⚠️ 主站：<b>%s</b> → 无\n", html.EscapeString(oldName))
+	} else {
 		fmt.Fprintf(&b, "<b>%s 主站已切换</b>\n", formatTitlePrefix(siteName))
 		fmt.Fprintf(&b, "🔄 主站：<b>%s</b> → <b>%s</b>\n", html.EscapeString(oldName), html.EscapeString(newName))
-	} else {
-		fmt.Fprintf(&b, "<b>%s 采集站排序已更新</b>\n", formatTitlePrefix(siteName))
-		fmt.Fprintf(&b, "⭐ 主站：<b>%s</b>\n", html.EscapeString(newName))
 	}
 	fmt.Fprintf(&b, "📋 启用顺序：%s\n", orderLine)
 	fmt.Fprintf(&b, "🕒 时间：<code>%s</code>", time.Now().Format("2006-01-02 15:04:05"))
@@ -381,7 +380,7 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 	}
 
 	var activeSourceID string
-	if active := repository.GetActiveCollectSource(); active != nil {
+	if active := repository.CurrentPrimarySource(); active != nil {
 		activeSourceID = strings.TrimSpace(active.Id)
 	}
 	nav, err := film.NavTopCategories(activeSourceID)

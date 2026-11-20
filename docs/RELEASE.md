@@ -1,3 +1,23 @@
+正式版 **v3.1.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- v3.0.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。已运行过 `v3.1.0-beta.x` 的库可直接平滑升级。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.0 更新内容
+
+- **全局主站与检索索引**：内存索引仅常驻当前主站，切主站立即切换并丢弃旧索引；完善全局主站切换、停用/删站交接校验、管理员权限隔离、批量删除排队撤回与删除期间顶栏状态提示，修复全选批量删除触发整页闪烁的问题（#98）。
+- **分类规则与隐藏过滤（#106）**：一级分类规则合并出的新父组改用独立分类行与公开 ID；支持分类规则「全部分组」筛选、一级降级后二级二次合并，以及部分成员隐藏时保持合并组可见；修复首页推荐、大类三路榜单及轮播候选透出隐藏子分类的问题。
+- **开放接口、TVBox 与工作台**：开放接口、分类列表与 TVBox 订阅仅提供当前主站并优化线路清洗排序；工作台展示当前主站及各站片库、分类与当天失败页统计。
+- **搜索、筛选与排片**：支持非主站简繁/全半角匹配与字面量通配符转义；优化排片候选索引查询并过滤无播放线路影片。
+- **数据重置与服务端加固**：优化百万级数据重置与初始化重建；统一加固弹幕限流与入参校验、SSRF 与解压体积上限防护、敏感配置脱敏及多处并发缓存安全。
+
+---
+
 正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

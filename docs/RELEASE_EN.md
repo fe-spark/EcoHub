@@ -1,3 +1,23 @@
+Release **v3.1.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- **The first startup builds the banner score index** `idx_film_index_cat_score`. If the film-list index `idx_film_index_source_updated` is missing, the same startup builds it and recounts each source's film total. A large catalog can make these steps slow. If the recount fails, the previous totals stay. Film rows and collect records are left unchanged. Instances already running `v3.1.0-beta.x` upgrade smoothly.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.0 changes
+
+- **Global primary source & search index**: in-memory search index keeps only the current primary source and drops the previous index on switch; completed global primary switching, disable/delete handover validation, admin access enforcement, batch-delete queue cancellation, primary deleting indicator in header selector, and fixed full-page remount flicker on batch delete (#98).
+- **Category rules & hidden-category filtering (#106)**: synthetic root groups created by `CategoryRoot` rules use dedicated `film_category` rows and non-colliding public IDs; added "All Groups" rule filter, cascading `CategorySub` merging on demoted root categories, and visible representative selection for partially hidden merged groups; filtered hidden subcategories out of homepage recommendations, category rank pools, and banner candidates.
+- **Provide API, TVBox & workbench**: public APIs, lists, and TVBox subscriptions expose only the current primary source with cleaner line sorting; workbench shows primary and per-source film, category, and today's failed page stats.
+- **Search, filters & banners**: added simplified/traditional and fullwidth/halfwidth matching plus literal `%`/`_` escaping on non-primary queries; optimized banner candidate queries and skipped films without play lines.
+- **Reset & server hardening**: improved large-catalog reset/seed rebuild; added danmaku validation and IP rate limits, SSRF and bounded decompression guards, config redaction, and concurrency/cache safety fixes.
+
+---
+
 Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

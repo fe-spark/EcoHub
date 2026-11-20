@@ -12,6 +12,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/service/upgrade"
 	"server/internal/utils"
 )
 
@@ -66,6 +67,7 @@ func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) er
 	}
 	filmsnapshot.ClearDynamicPlayCaches()
 	NotifySvc.EnsureBotPoller()
+	upgrade.TriggerReleasePoll()
 	return nil
 }
 

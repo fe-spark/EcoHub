@@ -59,7 +59,7 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) (
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
-			if json.Unmarshal([]byte(data), &cached) == nil && cachedFilterHasDynamicTags(cached) {
+			if json.Unmarshal([]byte(data), &cached) == nil {
 				return cached, nil
 			}
 		}
@@ -158,7 +158,11 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) (
 	}
 
 	if raw, err := json.Marshal(res); err == nil {
-		writeListCache(cacheKey, raw, 10*time.Minute, listGen)
+		ttl := 10 * time.Minute
+		if !rawFilterHasDynamicTags(tagRows) {
+			ttl = emptyListCacheTTL
+		}
+		writeListCache(cacheKey, raw, ttl, listGen)
 	}
 	return res, nil
 }
@@ -184,11 +188,11 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) (map[string
 	if key == "" {
 		return emptyFilterOptionResponse(), nil
 	}
-	cacheKey := fmt.Sprintf("%s:ck3:src_%s:v%s:r%s:%d", config.FilmFilterOptionKey, sourceId, version, support.GetRuleVersion(), typeID)
+	cacheKey := fmt.Sprintf("%s:ck4:src_%s:v%s:r%s:c%s:%d", config.FilmFilterOptionKey, sourceId, version, support.GetRuleVersion(), support.GetCategoryVersion(), typeID)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
-			if json.Unmarshal([]byte(data), &cached) == nil && cachedFilterHasDynamicTags(cached) {
+			if json.Unmarshal([]byte(data), &cached) == nil {
 				return cached, nil
 			}
 		}
@@ -230,9 +234,11 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) (map[string
 		titles["Category"] = titleNames["Category"]
 		sortList = append(sortList, "Category")
 	}
+	hasDynamic := false
 	for _, tagType := range filterOptionTagTypes {
 		items := shared.FormatSearchTagItems(tagType, sourceTypeTagItems(tagType, counts[tagType]), "", false)
 		if len(items) > 1 {
+			hasDynamic = true
 			tags[tagType] = items
 			titles[tagType] = titleNames[tagType]
 			sortList = append(sortList, tagType)
@@ -249,7 +255,11 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) (map[string
 		"tags":     tags,
 	}
 	if raw, err := json.Marshal(res); err == nil {
-		writeListCache(cacheKey, raw, 10*time.Minute, listGen)
+		ttl := 10 * time.Minute
+		if len(catItems) <= 1 && !hasDynamic {
+			ttl = emptyListCacheTTL
+		}
+		writeListCache(cacheKey, raw, ttl, listGen)
 	}
 	return res, nil
 }
@@ -279,29 +289,6 @@ func rawFilterHasDynamicTags(rows []model.SearchTagItem) bool {
 	for _, row := range rows {
 		if isDynamicFilterType(row.TagType) {
 			return true
-		}
-	}
-	return false
-}
-
-func cachedFilterHasDynamicTags(cached map[string]any) bool {
-	raw, ok := cached["sortList"]
-	if !ok {
-		return false
-	}
-	switch list := raw.(type) {
-	case []string:
-		for _, item := range list {
-			if isDynamicFilterType(item) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range list {
-			name, _ := item.(string)
-			if isDynamicFilterType(name) {
-				return true
-			}
 		}
 	}
 	return false

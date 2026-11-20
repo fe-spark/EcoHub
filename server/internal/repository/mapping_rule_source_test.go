@@ -90,4 +90,25 @@ func TestPreviewMappingRule_HitsRealSourceCategories(t *testing.T) {
 	if len(sub.Hits) != 1 || sub.Hits[0].Name != "动作片" {
 		t.Fatalf("sub preview = %+v, want 动作片", sub)
 	}
+
+	// 一级分类被一级规则下沉为二级后，也应可被二级分类规则预览并二次合并
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { support.StoreMappingSnapshotForTest(prev) })
+	if err := gdb.AutoMigrate(&model.MappingRule{}); err != nil {
+		t.Fatalf("migrate rules: %v", err)
+	}
+	if err := gdb.Create(&model.MappingRule{
+		SourceId: "src1", Group: "CategoryRoot", Raw: "福利视频|海外抖音", Target: "男人帮", MatchType: "regex",
+	}).Error; err != nil {
+		t.Fatalf("create root rule: %v", err)
+	}
+	ReloadMappingRules()
+
+	subPromoted, err := PreviewMappingRule("src1", "CategorySub", "视频|动作片", "regex", "短片")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subPromoted.Hits) != 2 || subPromoted.Hits[0].Name != "福利视频" || subPromoted.Hits[1].Name != "动作片" {
+		t.Fatalf("sub preview with promoted root = %+v, want 福利视频 and 动作片", subPromoted)
+	}
 }

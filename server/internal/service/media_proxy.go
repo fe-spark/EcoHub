@@ -9,6 +9,8 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type mediaProxyRuntime struct {
@@ -16,10 +18,15 @@ type mediaProxyRuntime struct {
 	siteURL string
 }
 
-var cachedRuntime atomic.Pointer[mediaProxyRuntime]
+var (
+	cachedRuntime  atomic.Pointer[mediaProxyRuntime]
+	runtimeVersion atomic.Uint64
+	runtimeSF      singleflight.Group
+)
 
 // UpdateMediaProxyRuntime 同步刷新反代策略及本站域名的内存无锁运行时上下文
 func UpdateMediaProxyRuntime(cfg model.MediaProxyConfig, rawSiteURL string) {
+	runtimeVersion.Add(1)
 	norm := strings.TrimRight(strings.ToLower(strings.TrimSpace(rawSiteURL)), "/")
 	rt := mediaProxyRuntime{
 		config:  cfg,
@@ -36,6 +43,7 @@ func UpdateMediaProxyMemoryCache(cfg model.MediaProxyConfig) {
 
 // InvalidateMediaProxyMemoryCache 废弃内存反代缓存
 func InvalidateMediaProxyMemoryCache() {
+	runtimeVersion.Add(1)
 	cachedRuntime.Store(nil)
 }
 
@@ -43,19 +51,27 @@ func getActiveRuntime() mediaProxyRuntime {
 	if p := cachedRuntime.Load(); p != nil {
 		return *p
 	}
-	basic, err := repository.GetSiteBasic()
-	if err != nil {
-		rt := mediaProxyRuntime{config: model.DefaultMediaProxyConfig()}
-		cachedRuntime.Store(&rt)
-		return rt
-	}
-	norm := strings.TrimRight(strings.ToLower(strings.TrimSpace(basic.SiteURL)), "/")
-	rt := mediaProxyRuntime{
-		config:  basic.MediaProxy,
-		siteURL: norm,
-	}
-	cachedRuntime.Store(&rt)
-	return rt
+	val, _, _ := runtimeSF.Do("media-proxy-runtime", func() (any, error) {
+		if p := cachedRuntime.Load(); p != nil {
+			return *p, nil
+		}
+		ver := runtimeVersion.Load()
+		basic, err := repository.GetSiteBasic()
+		if err != nil {
+			// 读取瞬时失败时只返回兜底默认配置，绝不写入 cachedRuntime 毒化后续请求
+			return mediaProxyRuntime{config: model.DefaultMediaProxyConfig()}, nil
+		}
+		norm := strings.TrimRight(strings.ToLower(strings.TrimSpace(basic.SiteURL)), "/")
+		rt := mediaProxyRuntime{
+			config:  basic.MediaProxy,
+			siteURL: norm,
+		}
+		if runtimeVersion.Load() == ver {
+			cachedRuntime.Store(&rt)
+		}
+		return rt, nil
+	})
+	return val.(mediaProxyRuntime)
 }
 
 // GetActiveMediaProxyConfig 获取当前有效的媒体反代配置（微秒级内存无锁读取）

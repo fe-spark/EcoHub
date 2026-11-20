@@ -15,6 +15,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 )
@@ -142,6 +143,9 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	appendUnique := func(src []model.FilmListSnapshot) {
 		for _, item := range src {
 			if _, ok := seen[item.Mid]; ok {
+				continue
+			}
+			if !support.IsCategoryVisible(item.Cid, item.Pid) {
 				continue
 			}
 			seen[item.Mid] = struct{}{}

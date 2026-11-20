@@ -119,22 +119,22 @@ func TestGetSourceBoundCategoryTree_AppliesCategoryRules(t *testing.T) {
 	for _, child := range tree.Children {
 		byName[child.Name] = child
 	}
-	if byName["男人帮"] == nil || byName["男人帮"].Id != 547 || byName["福利视频"] != nil || byName["网红主播"] != nil {
-		t.Fatalf("roots = %v, want 男人帮#547", rootNames(tree))
+	if byName["男人帮"] == nil || byName["男人帮"].Id == 547 || byName["男人帮"].Id == 549 || byName["男人帮"].Id == 550 || byName["福利视频"] != nil || byName["网红主播"] != nil {
+		t.Fatalf("roots = %v, want dedicated 男人帮", rootNames(tree))
 	}
-	if byName["伦理剧"] == nil || byName["伦理剧"].Id != 548 || byName["三级伦理"] != nil {
-		t.Fatalf("roots = %v, want 伦理剧#548", rootNames(tree))
+	if byName["伦理剧"] == nil || byName["伦理剧"].Id == 548 || byName["伦理剧"].Id == 560 || byName["三级伦理"] != nil {
+		t.Fatalf("roots = %v, want dedicated 伦理剧", rootNames(tree))
 	}
 	if byName["电影"] == nil || byName["电影"].Id != 9 {
 		t.Fatalf("roots = %v, want 电影#9", rootNames(tree))
 	}
 	got := childNames(byName["男人帮"])
-	if len(byName["男人帮"].Children) != 2 || got[0] != "网红主播#549" || got[1] != "海外抖音#550" {
-		t.Fatalf("男人帮 children = %v, want 网红主播#549 海外抖音#550", got)
+	if len(byName["男人帮"].Children) != 3 || got[0] != "福利视频#547" || got[1] != "网红主播#549" || got[2] != "海外抖音#550" {
+		t.Fatalf("男人帮 children = %v, want 福利视频#547 网红主播#549 海外抖音#550", got)
 	}
 	ethic := childNames(byName["伦理剧"])
-	if len(byName["伦理剧"].Children) != 1 || ethic[0] != "韩国伦理#560" {
-		t.Fatalf("伦理剧 children = %v, want 韩国伦理#560", ethic)
+	if len(byName["伦理剧"].Children) != 2 || ethic[0] != "韩国伦理#560" || ethic[1] != "三级伦理#548" {
+		t.Fatalf("伦理剧 children = %v, want 韩国伦理#560 三级伦理#548", ethic)
 	}
 	movieKids := byName["电影"].Children
 	if len(movieKids) != 1 || movieKids[0].Name != "动作" || movieKids[0].Id != 10 {
@@ -149,16 +149,17 @@ func TestGetSourceBoundCategoryTree_AppliesCategoryRules(t *testing.T) {
 	if err := SaveSourceCategoryOrder("src_a", tree.Children); err != nil {
 		t.Fatalf("save grouped tree: %v", err)
 	}
-	var welfare, anchor, action, comedy model.Category
+	var syntheticGroup, welfare, anchor, action, comedy model.Category
+	gdb.First(&syntheticGroup, byName["男人帮"].Id)
 	gdb.First(&welfare, 547)
 	gdb.First(&anchor, 549)
 	gdb.First(&action, 10)
 	gdb.First(&comedy, 11)
-	if welfare.Show {
-		t.Fatalf("男人帮 representative should be hidden")
+	if syntheticGroup.Show {
+		t.Fatalf("男人帮 synthetic row should be hidden")
 	}
-	if !anchor.Show {
-		t.Fatalf("网红主播 stays independently visible")
+	if !welfare.Show || !anchor.Show {
+		t.Fatalf("children welfare=%v anchor=%v should stay independently visible", welfare.Show, anchor.Show)
 	}
 	if action.Show || comedy.Show {
 		t.Fatalf("merged 动作 members show action=%v comedy=%v", action.Show, comedy.Show)

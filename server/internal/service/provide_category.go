@@ -49,13 +49,9 @@ func resolveProvideListedRootType(snapshot model.FilmListSnapshot, sourceID stri
 	return resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot)
 }
 
-// resolveProvideSourceID 未指定订阅源时用当前主站。TVBox 没有全量入口。
-func resolveProvideSourceID(sourceID string) string {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID != "" {
-		return sourceID
-	}
-	if active := repository.GetActiveCollectSource(); active != nil {
+// primaryProvideSourceID 订阅只服务当前主站。
+func primaryProvideSourceID() string {
+	if active := repository.CurrentPrimarySource(); active != nil {
 		return strings.TrimSpace(active.Id)
 	}
 	return ""

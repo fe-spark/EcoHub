@@ -439,7 +439,11 @@ func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error 
 	if _, err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
-	scheduleSearchReseal(b.takeSourceMIDs(source.Id))
+	mids := b.takeSourceMIDs(source.Id)
+	if !isPreferredCollectSource(source.Id) {
+		mids = nil
+	}
+	schedulePrimarySearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
 	b.warmPrimaryHome(source.Id)
 	return nil

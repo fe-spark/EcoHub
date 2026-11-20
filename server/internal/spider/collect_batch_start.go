@@ -11,14 +11,18 @@ import (
 // PrepareBatchCollectStart 挑出这次能开的站并占用。跳过的站带原因返回，不占队列。
 // 手动批量采集与计划任务定时采集均复用此逻辑。
 func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchResult) {
-	if reason := collectPauseReason(); reason != "" {
+	pauseReason := collectPauseReason()
+	if IsSiteResetRunning() {
+		pauseReason = "片库正在重置"
+	}
+	if pauseReason != "" {
 		skipped := make([]model.CollectBatchSkip, 0, len(ids))
 		for _, raw := range ids {
 			id := strings.TrimSpace(raw)
 			if id == "" {
 				continue
 			}
-			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: reason})
+			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: pauseReason})
 		}
 		return CollectClaim{}, model.CollectBatchResult{Skipped: skipped}
 	}
@@ -86,11 +90,17 @@ func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchRes
 var beforeCollectQueueAdmit func()
 
 func batchCollectBlockReason(fs model.FilmSource) string {
+	if IsSiteResetRunning() {
+		return "片库正在重置"
+	}
 	if isMaintenanceRunning() {
 		return "维护任务执行中（" + maintenanceRunningDetail() + "），已跳过"
 	}
 	if reason := collectPauseReason(); reason != "" {
 		return reason
+	}
+	if progress.IsSourceDeleting(fs.Id) {
+		return "删除中"
 	}
 	if progress.IsCategorySyncing(fs.Id) {
 		return "分类采集中"

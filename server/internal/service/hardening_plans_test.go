@@ -17,6 +17,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
 )
@@ -62,8 +63,34 @@ func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
 
 func seedLiveSnaps(t *testing.T, snaps ...model.FilmListSnapshot) {
 	t.Helper()
+	for i := range snaps {
+		if snaps[i].SourceId == "" {
+			snaps[i].SourceId = "source_master"
+		}
+	}
+	if err := db.Mdb.Where("id = ?", "source_master").First(&model.FilmSource{}).Error; err != nil {
+		if err := db.Mdb.Create(&model.FilmSource{
+			Id: "source_master", Name: "主站", Uri: "https://example.com/source_master", State: true,
+		}).Error; err != nil {
+			t.Fatalf("create primary: %v", err)
+		}
+	}
 	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(snaps); err != nil {
 		t.Fatalf("seed live films: %v", err)
+	}
+	for _, snap := range snaps {
+		if snap.Pid <= 0 {
+			continue
+		}
+		src := snap.SourceId
+		if src == "" {
+			src = "source_master"
+		}
+		if err := db.Mdb.Create(&model.FilmSourcePlaylist{
+			Mid: snap.Mid, SourceId: src, LineKind: model.LineKindPlay, GroupIndex: 0,
+		}).Error; err != nil {
+			t.Fatalf("seed playlist mid=%d: %v", snap.Mid, err)
+		}
 	}
 }
 
@@ -99,7 +126,7 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 	}
 
 	// 2. 验证 Redis 缓存已写入
-	cacheKey := fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s", config.FilmHotKeywordsKey, version, "source_master")
 	val, err := mr.Get(cacheKey)
 	if err != nil || val == "" {
 		t.Fatalf("expected redis key %s to exist, err: %v", cacheKey, err)
@@ -289,14 +316,14 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 		},
 	}
 	raw201, _ := json.Marshal(vo201)
-	_ = mr.Set(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 201), string(raw201))
+	_ = mr.Set(fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, 201), string(raw201))
 
 	// 将 9999 写入哨兵 "{}"
-	_ = mr.Set(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 9999), "{}")
+	_ = mr.Set(fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, 9999), "{}")
 
 	// 请求批量详情：包含命中的 201、未命中的 202 和 203、哨兵 9999、完全不存在的 8888
 	ids := []string{"201", "202", "203", "9999", "8888"}
-	details, err := ProvideSvc.GetVodDetail(ids, "")
+	details, err := ProvideSvc.GetVodDetail(ids)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,11 +335,14 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 		t.Fatalf("unexpected vod detail ids: %+v", details)
 	}
 
-	// 验证未命中的 202 与 203 是否在 GetVodDetail 后被补齐写入了 Redis
+	// 验证未命中的 202 与 203 是否在 GetVodDetail 后被补齐写入了独立 vod 缓存，且不污染 Web 详情键
 	for _, mid := range []int64{202, 203} {
-		val, err := mr.Get(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
+		val, err := mr.Get(fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, mid))
 		if err != nil || val == "" || val == "{}" {
-			t.Fatalf("expected film %d to be cached after call, got %q, err: %v", mid, val, err)
+			t.Fatalf("expected film %d vod cache to be populated after call, got %q, err: %v", mid, val, err)
+		}
+		if mr.Exists(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid)) {
+			t.Fatalf("expected GetVodDetail not to populate web FilmPlayInfoKey for %d", mid)
 		}
 	}
 }
@@ -325,11 +355,22 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	const pid = int64(1)
 	// 插入几条数据，分别赋予不同 hits, year, update_stamp
 	items := []model.FilmListSnapshot{
-		{SnapshotVersion: version, Mid: 301, Pid: pid, Name: "影片A", Hits: 100, Year: 2021, UpdateStamp: 1000, ClassTag: "科幻", Area: "香港", Score: 7.5, Actor: "刘德华", Blurb: "精彩科幻"},
-		{SnapshotVersion: version, Mid: 302, Pid: pid, Name: "影片B", Hits: 900, Year: 2020, UpdateStamp: 2000, ClassTag: "悬疑", Area: "大陆", Score: 8.0, Actor: "葛优", Blurb: "悬疑大案"},
-		{SnapshotVersion: version, Mid: 303, Pid: pid, Name: "影片C", Hits: 500, Year: 2023, UpdateStamp: 500, ClassTag: "动作", Area: "大陆", Score: 9.1, Actor: "吴京", Blurb: "火爆动作"},
+		{SnapshotVersion: version, Mid: 301, Pid: pid, SourceId: "source_master", CategoryKey: "source:source_master:1", RootCategoryKey: "source:source_master:1", Name: "影片A", Hits: 100, Year: 2021, UpdateStamp: 1000, ClassTag: "科幻", Area: "香港", Score: 7.5, Actor: "刘德华", Blurb: "精彩科幻"},
+		{SnapshotVersion: version, Mid: 302, Pid: pid, SourceId: "source_master", CategoryKey: "source:source_master:1", RootCategoryKey: "source:source_master:1", Name: "影片B", Hits: 900, Year: 2020, UpdateStamp: 2000, ClassTag: "悬疑", Area: "大陆", Score: 8.0, Actor: "葛优", Blurb: "悬疑大案"},
+		{SnapshotVersion: version, Mid: 303, Pid: pid, SourceId: "source_master", CategoryKey: "source:source_master:1", RootCategoryKey: "source:source_master:1", Name: "影片C", Hits: 500, Year: 2023, UpdateStamp: 500, ClassTag: "动作", Area: "大陆", Score: 9.1, Actor: "吴京", Blurb: "火爆动作"},
 	}
 	seedLiveSnaps(t, items...)
+
+	if err := db.Mdb.Create(&model.Category{Id: pid, Pid: 0, Name: "电影", Show: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Mdb.Create(&model.CategoryMapping{SourceId: "source_master", SourceTypeId: 1, CategoryId: pid}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Mdb.Create(&model.SourceCategory{SourceId: "source_master", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	repository.ReloadMappingRules()
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -387,7 +428,7 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	}
 
 	// 确认顶层分类缓存已生成
-	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
+	cacheKey := fmt.Sprintf("%s:src_%s:st3", filmsnapshot.SnapshotClassifyCacheKey(version, pid, page), "source_master")
 	if val, err := mr.Get(cacheKey); err != nil || val == "" {
 		t.Fatalf("expected classify cache key %s to be set", cacheKey)
 	}
@@ -619,7 +660,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		manyIDs[i] = fmt.Sprintf("%d", 601+i)
 	}
-	res, err := ProvideSvc.GetVodDetail(manyIDs, "")
+	res, err := ProvideSvc.GetVodDetail(manyIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,7 +673,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	db.Rdb = nil
 	defer func() { db.Rdb = origRdb }()
 
-	resNilRedis, err := ProvideSvc.GetVodDetail([]string{"601"}, "")
+	resNilRedis, err := ProvideSvc.GetVodDetail([]string{"601"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -647,10 +688,23 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 	const version = "v_plan4_fallback"
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
+	if err := db.Mdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Mdb.Create(&model.CategoryMapping{SourceId: "source_master", SourceTypeId: 1, CategoryId: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Mdb.Create(&model.SourceCategory{SourceId: "source_master", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	repository.ReloadMappingRules()
 	s := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             701,
 		Pid:             1,
+		SourceId:        "source_master",
+		CategoryKey:     "source:source_master:1",
+		RootCategoryKey: "source:source_master:1",
 		Name:            "回退影片",
 		Hits:            888,
 		Year:            2025,

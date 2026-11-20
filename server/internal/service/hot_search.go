@@ -11,6 +11,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -54,7 +55,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) ([
 		sourceID = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceID == "" {
-		sourceID = i.BaselineSourceID()
+		sourceID = repository.CurrentPrimaryID()
 	}
 
 	version := filmsnapshot.GetActiveReadModelVersion()

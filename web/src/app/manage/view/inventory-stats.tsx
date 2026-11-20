@@ -9,7 +9,7 @@ import styles from "./inventory-stats.module.less";
 
 interface LibraryInventory {
   films: number;
-  multiSource: number;
+  categories: number;
   failures: number;
 }
 
@@ -19,7 +19,6 @@ interface SourceInventory {
   enabled: boolean;
   isPrimary: boolean;
   films: number;
-  multiSource?: number;
   categories: number;
   failures: number;
 }
@@ -31,7 +30,7 @@ interface InventoryStatsData {
 
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
   { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
-  { key: "multiSource", label: "多源聚合", hint: "多源覆盖档案" },
+  { key: "categories", label: "分类", hint: "已映射且分类还在" },
   { key: "failures", label: "采集失败页数", hint: "当天" },
 ];
 
@@ -52,11 +51,7 @@ function placePrimaryFirst(sources: SourceInventory[], id: string) {
   return [chosen, ...next];
 }
 
-interface InventoryStatsProps {
-  primaryId?: string;
-}
-
-export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) {
+export default function InventoryStats({ primaryId, pending = false }: { primaryId?: string; pending?: boolean }) {
   const [library, setLibrary] = useState<LibraryInventory | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [libraryFailed, setLibraryFailed] = useState(false);
@@ -69,36 +64,25 @@ export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) 
   const [libraryVersion, setLibraryVersion] = useState(0);
 
   useEffect(() => {
+    if (pending) {
+      return;
+    }
     if (primaryId && primaryId !== primaryIdRef.current) {
       primaryIdRef.current = primaryId;
       setSources((prev) => (prev ? placePrimaryFirst(prev, primaryId) : prev));
       sourcesLoadedRef.current = false;
-      setLibraryVersion((v) => v + 1);
-    }
-  }, [primaryId]);
-
-  useEffect(() => {
-    const onPrimary = (event: Event) => {
-      const id = (event as CustomEvent<string>).detail;
-      if (!id) {
-        return;
-      }
-      primaryIdRef.current = id;
-      setSources((prev) => (prev ? placePrimaryFirst(prev, id) : prev));
-      sourcesLoadedRef.current = false;
       setLibraryVersion((version) => version + 1);
-    };
-    window.addEventListener("ecohub:primary-source", onPrimary);
-    return () => window.removeEventListener("ecohub:primary-source", onPrimary);
-  }, []);
+    }
+  }, [primaryId, pending]);
 
   useEffect(() => {
-    let active = true;
-    if (libraryVersion > 0) {
-      setLibraryLoading(true);
-      setLibraryFailed(false);
+    if (pending) {
+      return;
     }
-    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=library", undefined, 10000)
+    let active = true;
+    setLibraryLoading(true);
+    setLibraryFailed(false);
+    ApiGet<InventoryStatsData>("/manage/spider/clear/stats", { scope: "library" }, 10000)
       .then((resp) => {
         if (!active) {
           return;
@@ -122,16 +106,16 @@ export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) 
     return () => {
       active = false;
     };
-  }, [libraryVersion]);
+  }, [libraryVersion, pending]);
 
   useEffect(() => {
-    if (!sourcesOpen || sourcesLoadedRef.current) {
+    if (pending || !sourcesOpen || sourcesLoadedRef.current) {
       return;
     }
     let active = true;
     setSourcesLoading(true);
     setSourcesFailed(false);
-    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=sources", undefined, 10000)
+    ApiGet<InventoryStatsData>("/manage/spider/clear/stats", { scope: "sources" }, 10000)
       .then((resp) => {
         if (!active) {
           return;
@@ -158,7 +142,7 @@ export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) 
     return () => {
       active = false;
     };
-  }, [sourcesOpen, libraryVersion]);
+  }, [sourcesOpen, libraryVersion, pending]);
 
   return (
     <Card
@@ -171,17 +155,17 @@ export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) 
         </Link>
       }
     >
-      {libraryLoading ? (
+      {libraryLoading || pending ? (
         <div className={styles.loading} role="status" aria-busy="true">
           <Spin />
         </div>
       ) : libraryFailed || library === null ? (
-        <div className={styles.stationEmpty}>统计失败</div>
+        <div className={styles.empty}>统计失败</div>
       ) : (
         <div className={styles.metrics}>
           {metricItems.map((item) => (
             <div key={item.key} className={`${styles.metric} ${item.lead ? styles.metricLead : ""}`}>
-              <div className={styles.metricValue}>{formatCount(library?.[item.key])}</div>
+              <div className={styles.metricValue}>{formatCount(library[item.key])}</div>
               <div className={styles.metricLabel}>{item.label}</div>
               <div className={styles.metricHint}>{item.hint}</div>
             </div>
@@ -212,14 +196,14 @@ export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) 
             <span className={styles.stationCopy}>
               <span className={styles.stationTitle}>各采集站</span>
               <span className={styles.stationHint}>
-                {sourcesOpen ? "已展开各站当天采集失败页" : "展开后查看各站当天采集失败页"}
+                {sourcesOpen ? "各站片库影片、分类和当天失败页" : "展开后查看各站片库影片、分类和当天失败页"}
               </span>
             </span>
           </span>
           <span className={styles.stationAction}>{sourcesOpen ? "收起" : "展开"}</span>
         </button>
         {sourcesOpen ? (
-          sourcesLoading ? (
+          sourcesLoading || pending ? (
             <div className={styles.loading} role="status" aria-busy="true">
               <Spin />
             </div>
@@ -230,36 +214,36 @@ export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) 
           ) : (
             <div className={styles.stationGrid}>
               {sources.map((row) => (
-                  <article
-                    key={row.id}
-                    className={`${styles.stationCard} ${row.isPrimary ? styles.stationPrimary : ""} ${row.enabled ? "" : styles.stationOff}`}
-                  >
-                    <div className={styles.identity}>
-                      <span className={styles.sourceName}>{row.name}</span>
-                      {row.isPrimary ? <Tag color="gold">主站</Tag> : null}
-                      {!row.enabled ? <Tag>已停用</Tag> : null}
+                <article
+                  key={row.id}
+                  className={`${styles.stationCard} ${row.isPrimary ? styles.stationPrimary : ""} ${row.enabled ? "" : styles.stationOff}`}
+                >
+                  <div className={styles.identity}>
+                    <span className={styles.sourceName}>{row.name}</span>
+                    {row.isPrimary ? <Tag color="gold">主站</Tag> : null}
+                    {!row.enabled ? <Tag>已停用</Tag> : null}
+                  </div>
+                  <div className={styles.stationStats}>
+                    <div className={styles.stationStat}>
+                      <span className={styles.stationStatLabel}>片库影片</span>
+                      <span className={styles.stationStatValue}>{formatCount(row.films)}</span>
                     </div>
-                    <div className={styles.stationStats}>
-                      <div className={styles.stationStat}>
-                        <span className={styles.stationStatLabel}>影片</span>
-                        <span className={styles.stationStatValue}>{formatCount(row.films)}</span>
-                      </div>
-                      <div className={styles.stationStat}>
-                        <span className={styles.stationStatLabel}>分类</span>
-                        <span className={styles.stationStatValue}>
-                          {row.categories === 0 ? <Tag color="warning">缺分类</Tag> : formatCount(row.categories)}
-                        </span>
-                      </div>
-                      <div className={styles.stationStat}>
-                        <span className={styles.stationStatLabel}>失败页</span>
-                        <span className={`${styles.stationStatValue} ${row.failures > 0 ? styles.figureWarn : styles.figureQuiet}`}>
-                          {formatCount(row.failures)}
-                        </span>
-                      </div>
+                    <div className={styles.stationStat}>
+                      <span className={styles.stationStatLabel}>分类</span>
+                      <span className={styles.stationStatValue}>
+                        {row.categories === 0 ? <Tag color="warning">缺分类</Tag> : formatCount(row.categories)}
+                      </span>
                     </div>
-                  </article>
-                ))}
-              </div>
+                    <div className={styles.stationStat}>
+                      <span className={styles.stationStatLabel}>失败页</span>
+                      <span className={`${styles.stationStatValue} ${row.failures > 0 ? styles.figureWarn : styles.figureQuiet}`}>
+                        {formatCount(row.failures)}
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
           )
         ) : null}
       </section>

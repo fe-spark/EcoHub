@@ -262,18 +262,23 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					}
 					return
 				}
+				abandonStreak := func() {
+					if streak.abandon() {
+						stopForStreak()
+					}
+				}
 				select {
 				case <-ctx.Done():
-					streak.abandon()
+					abandonStreak()
 					markStopped()
 					return
 				case pg, ok := <-pages.ch:
 					if !ok {
-						streak.abandon()
+						abandonStreak()
 						return
 					}
 					if ctx.Err() != nil {
-						streak.abandon()
+						abandonStreak()
 						markStopped()
 						return
 					}
@@ -295,14 +300,14 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 					}
 					if err != nil {
 						if ctx.Err() != nil {
-							streak.abandon()
+							abandonStreak()
 							markStopped()
 							return
 						}
 						// 限流取消的 HTTP 会被收成普通字符串，不能只认 context.Canceled。
 						if fetchCtx != nil && fetchCtx.Err() != nil {
 							pages.putBack(pg)
-							streak.abandon()
+							abandonStreak()
 							continue
 						}
 						recordPageFailure(pg, "fetch", err)

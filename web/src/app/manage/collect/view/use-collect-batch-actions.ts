@@ -4,14 +4,29 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import {
   formatSkipSummary,
   isSourceSelectable,
+  siteBusyReason,
 } from "./collect-selection";
-import { isCollectingStatus, type DelBatchResult, type FilmSource } from "./types";
+import type { FilmSource } from "./types";
+import type { HandoverChoice } from "./use-primary-handover";
+
+function collectBusySelected(sources: FilmSource[]) {
+  return sources
+    .map((item) => ({ name: item.name, reason: siteBusyReason(item) }))
+    .filter((item) => item.reason);
+}
 
 export function useCollectBatchActions(
   siteList: FilmSource[],
   setSiteList: React.Dispatch<React.SetStateAction<FilmSource[]>>,
   reloadList: () => Promise<void>,
   onDeleteSubmitted?: (sources: { id: string; name: string }[]) => void,
+  askPrimaryHandover?: (req: {
+    title: string;
+    leavingName: string;
+    otherEnabled: FilmSource[];
+  }) => Promise<HandoverChoice | null>,
+  isAdmin = false,
+  refreshPrimary?: () => Promise<void> | void,
 ) {
   const { message } = useAppMessage();
   const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
@@ -31,6 +46,10 @@ export function useCollectBatchActions(
   const selectedSources = useMemo(
     () => siteList.filter((item) => selectedSourceIds.includes(item.id)),
     [selectedSourceIds, siteList],
+  );
+  const hasBusySelected = useMemo(
+    () => selectedSources.some((item) => siteBusyReason(item) !== ""),
+    [selectedSources],
   );
 
   const handleSelectSource = useCallback((id: string, checked: boolean) => {
@@ -59,6 +78,16 @@ export function useCollectBatchActions(
     async (state: boolean) => {
       if (selectedSources.length === 0) {
         message.warning("请先选择采集站");
+        return;
+      }
+      // D6：批量停用不允许包含当前主站
+      if (!state && selectedSources.some((item) => item.isPrimary)) {
+        message.warning("选中包含当前主站，请单独停用并指定新主站");
+        return;
+      }
+      const busy = collectBusySelected(selectedSources);
+      if (busy.length > 0) {
+        message.warning(formatSkipSummary(busy));
         return;
       }
       const sourceIdsToUpdate = selectedSources
@@ -96,27 +125,56 @@ export function useCollectBatchActions(
       message.warning("请先选择采集站");
       return;
     }
-    const skipped = selectedSources
-      .filter((item) => isCollectingStatus(item.progress?.status))
-      .map((item) => ({ name: item.name, reason: "采集中" }));
-    const targets = selectedSources.filter((item) => !isCollectingStatus(item.progress?.status));
-    if (targets.length === 0) {
-      message.warning(`没有可删除的站点：${formatSkipSummary(skipped)}`);
+    const busy = collectBusySelected(selectedSources);
+    if (busy.length > 0) {
+      message.warning(formatSkipSummary(busy));
       return;
     }
+    const targets = selectedSources;
     const ids = targets.map((item) => item.id);
     const idSet = new Set(ids);
+
+    let extra: { newPrimaryId?: string; confirmClearPrimary?: boolean } = {};
+    const primarySrc = targets.find((item) => item.isPrimary);
+    if (primarySrc) {
+      if (!isAdmin) {
+        message.error("权限不足，仅超级管理员可执行主站切换");
+        return;
+      }
+      const otherEnabled = siteList.filter((s) => s.state && !idSet.has(s.id));
+      if (otherEnabled.length > 0) {
+        if (askPrimaryHandover) {
+          const choice = await askPrimaryHandover({
+            title: "指定新主站",
+            leavingName: primarySrc.name || primarySrc.id,
+            otherEnabled,
+          });
+          if (!choice) {
+            return;
+          }
+          extra = {
+            newPrimaryId: choice.newPrimaryId || undefined,
+            confirmClearPrimary: choice.confirmClear || undefined,
+          };
+        }
+      } else {
+        extra = { confirmClearPrimary: true };
+      }
+    }
+
     setSiteList((current) =>
       current.map((item) => (idSet.has(item.id) ? { ...item, deleting: true } : item)),
     );
     setSelectedSourceIds((current) => current.filter((id) => !idSet.has(String(id))));
     setBatchDeleting(true);
     try {
-      const resp = await ApiPost("/manage/collect/delete", { ids });
+      const resp = await ApiPost("/manage/collect/delete", { ids, ...extra });
       if (resp.code === 0) {
         onDeleteSubmitted?.(targets.map((s) => ({ id: s.id, name: s.name })));
-        const skipText = skipped.length > 0 ? `，跳过：${formatSkipSummary(skipped)}` : "";
-        message.success(`已提交批量删除${skipText}`);
+        message.success("已提交批量删除");
+        if (primarySrc) {
+          void refreshPrimary?.();
+        }
         return;
       }
       setSiteList((current) =>
@@ -133,7 +191,7 @@ export function useCollectBatchActions(
     } finally {
       setBatchDeleting(false);
     }
-  }, [message, onDeleteSubmitted, reloadList, selectedSources, setSiteList]);
+  }, [askPrimaryHandover, isAdmin, message, onDeleteSubmitted, refreshPrimary, reloadList, selectedSources, setSiteList, siteList]);
 
   const deleteConfirmTitle = `删除 ${selectedSources.length} 个采集站？`;
   const deleteConfirmDescription = "";
@@ -143,6 +201,7 @@ export function useCollectBatchActions(
     setSelectedSourceIds,
     batchStateUpdating,
     batchDeleting,
+    hasBusySelected,
     deleteConfirmTitle,
     deleteConfirmDescription,
     handleSelectSource,

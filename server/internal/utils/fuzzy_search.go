@@ -254,6 +254,68 @@ type QueryContext struct {
 	IsAsciiOnly bool
 }
 
+// NameLikeNeedles 把中文搜索收成片名里必须出现的字。每组内部是或，组与组之间是与。
+// 子序列和包含匹配都满足这些字；纯字母数字要靠拼音，收不成 LIKE。
+func NameLikeNeedles(q QueryContext) [][]string {
+	if q.IsAsciiOnly || q.CleanKey == "" {
+		return nil
+	}
+	groups := make([][]string, 0, len([]rune(q.CleanKey)))
+	seen := make(map[string]struct{})
+	for _, r := range q.CleanKey {
+		needle := string(r)
+		if _, ok := seen[needle]; ok {
+			continue
+		}
+		seen[needle] = struct{}{}
+		base := []string{needle}
+		if aliases, ok := numberAliases[needle]; ok {
+			base = aliases
+		}
+		groups = append(groups, nameLikeForms(base))
+	}
+	return groups
+}
+
+// nameLikeForms 给每个针补上繁体和全角数字。片名库里两种写法都能进打分。
+func nameLikeForms(needles []string) []string {
+	seen := make(map[string]struct{}, len(needles))
+	out := make([]string, 0, len(needles))
+	add := func(s string) {
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, n := range needles {
+		add(n)
+		add(SimplifiedToTraditional(n))
+		add(fullwidthDigits(n))
+	}
+	return out
+}
+
+func fullwidthDigits(s string) string {
+	var b strings.Builder
+	changed := false
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r + 0xFEE0)
+			changed = true
+			continue
+		}
+		b.WriteRune(r)
+	}
+	if !changed {
+		return ""
+	}
+	return b.String()
+}
+
 // BuildQueryContext 预解析搜索词上下文，避免在循环匹配中重复计算
 func BuildQueryContext(keyword string) QueryContext {
 	raw := strings.TrimSpace(keyword)

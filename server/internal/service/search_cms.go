@@ -5,6 +5,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
@@ -25,7 +26,7 @@ func (i *IndexService) SearchFilm(keyword, _ string, sortField string, page *dto
 	if page.Current <= 0 {
 		page.Current = 1
 	}
-	sourceID := i.BaselineSourceID()
+	sourceID := repository.CurrentPrimaryID()
 	out := SearchFilmResult{
 		List:    []model.MovieBasicInfo{},
 		Sources: []model.SearchSourceTab{},

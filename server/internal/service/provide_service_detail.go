@@ -19,22 +19,30 @@ import (
 const maxProvideVodDetailBatch = 100
 
 // GetVodDetail 获取视频详情（带播放列表）
-func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.FilmDetail, error) {
+func (p *ProvideService) GetVodDetail(ids []string) ([]model.FilmDetail, error) {
 	if len(ids) == 0 {
 		return []model.FilmDetail{}, nil
 	}
-	mids := make([]int64, 0, len(ids))
+	mids := make([]int64, 0, min(len(ids), maxProvideVodDetailBatch))
+	seen := make(map[int64]struct{}, min(len(ids), maxProvideVodDetailBatch))
 	for _, idStr := range ids {
 		idInt, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
 		if err != nil || idInt <= 0 {
 			continue
 		}
+		if _, dup := seen[idInt]; dup {
+			continue
+		}
+		seen[idInt] = struct{}{}
 		mids = append(mids, idInt)
+		if len(mids) >= maxProvideVodDetailBatch {
+			break
+		}
 	}
 	if len(mids) == 0 {
 		return []model.FilmDetail{}, nil
 	}
-	sourceId = resolveProvideSourceID(sourceId)
+	sourceId := primaryProvideSourceID()
 	all := make([]model.FilmDetail, 0, len(mids))
 	for start := 0; start < len(mids); start += maxProvideVodDetailBatch {
 		end := start + maxProvideVodDetailBatch
@@ -51,6 +59,7 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.Fi
 }
 
 func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]model.FilmDetail, error) {
+	playGen := filmsnapshot.PlayInfoGeneration()
 	version := filmsnapshot.GetActiveReadModelVersion()
 	snapshots, err := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
 	if err != nil {
@@ -58,6 +67,10 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 	}
 	if len(snapshots) == 0 {
 		return []model.FilmDetail{}, nil
+	}
+
+	vodCacheKey := func(mid int64) string {
+		return fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, mid)
 	}
 
 	cachedVos := make(map[int64]*model.MovieDetailVo, len(snapshots))
@@ -70,7 +83,7 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 				continue
 			}
 			seenPiped[s.Mid] = struct{}{}
-			cmds[s.Mid] = pipe.Get(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, s.Mid))
+			cmds[s.Mid] = pipe.Get(db.Cxt, vodCacheKey(s.Mid))
 		}
 		_, _ = pipe.Exec(db.Cxt)
 
@@ -145,10 +158,9 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 	}
 
 	if len(toCacheVo) > 0 && db.Rdb != nil {
-		gen := filmsnapshot.PlayInfoGeneration()
 		for mid, v := range toCacheVo {
 			if b, err := json.Marshal(v); err == nil {
-				storeFilmPlayInfoCache(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid), string(b), 12*time.Hour, gen)
+				storeFilmPlayInfoCache(vodCacheKey(mid), string(b), 12*time.Hour, playGen)
 			}
 		}
 	}
@@ -166,18 +178,7 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		return model.FilmDetail{}, err
 	}
 
-	var playFromList []string
-	var playUrlList []string
-
-	for _, source := range movieDetailVo.List {
-		playFromList = append(playFromList, strings.TrimSpace(source.Name))
-
-		var linkStrs []string
-		for _, link := range source.LinkList {
-			linkStrs = append(linkStrs, providePlayItem(link.Episode, link.Link))
-		}
-		playUrlList = append(playUrlList, strings.Join(linkStrs, "#"))
-	}
+	vodPlayFrom, vodPlayURL := formatProvidePlayLists(movieDetailVo.List)
 
 	vodPic := movieDetailVo.Picture
 	if vodPic == "" {
@@ -203,8 +204,8 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		VodEn:       snapshot.Initial,
 		VodTime:     resolveProvideSnapshotVodTime(snapshot),
 		VodRemarks:  vodRemarks,
-		VodPlayFrom: strings.Join(playFromList, "$$$"),
-		VodPlayURL:  strings.Join(playUrlList, "$$$"),
+		VodPlayFrom: vodPlayFrom,
+		VodPlayURL:  vodPlayURL,
 		VodPic:      vodPic,
 		VodSub:      movieDetailVo.SubTitle,
 		VodClass:    movieDetailVo.ClassTag,
@@ -221,6 +222,36 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		VodScore:    movieDetailVo.DbScore,
 		VodContent:  movieDetailVo.Content,
 	}, nil
+}
+
+// formatProvidePlayLists 组装电视端 vod_play_from 与 vod_play_url：手动线路置顶，全量下发所有线路。
+func formatProvidePlayLists(sources []model.PlayLinkVo) (string, string) {
+	if len(sources) == 0 {
+		return "", ""
+	}
+	var manualFrom, manualURL []string
+	var normalFrom, normalURL []string
+
+	for _, source := range sources {
+		isManual := source.IsManual || source.SourceId == "manual"
+		var linkStrs []string
+		for _, link := range source.LinkList {
+			linkStrs = append(linkStrs, providePlayItem(link.Episode, link.Link))
+		}
+		name := strings.TrimSpace(source.Name)
+		joined := strings.Join(linkStrs, "#")
+		if isManual {
+			manualFrom = append(manualFrom, name)
+			manualURL = append(manualURL, joined)
+		} else {
+			normalFrom = append(normalFrom, name)
+			normalURL = append(normalURL, joined)
+		}
+	}
+	allFrom := append(manualFrom, normalFrom...)
+	allURL := append(manualURL, normalURL...)
+
+	return strings.Join(allFrom, "$$$"), strings.Join(allURL, "$$$")
 }
 
 // providePlayItem 把一集拼成电视端的「集名$地址」。集名里的分隔符改成全角，地址里的分隔符改成百分号编码。

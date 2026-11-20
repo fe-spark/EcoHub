@@ -34,6 +34,14 @@ func ClearLimiter(sourceID string) {
 	requestGates.Delete(sourceID)
 }
 
+// ClearAllLimiters 清空全部采集站限流冷却状态。
+func ClearAllLimiters() {
+	requestGates.Range(func(key, _ any) bool {
+		requestGates.Delete(key)
+		return true
+	})
+}
+
 // DropSourceRuntime 采集站删除后丢掉运行时条目。
 func DropSourceRuntime(sourceID string) {
 	sourceID = strings.TrimSpace(sourceID)

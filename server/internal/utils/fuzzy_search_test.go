@@ -240,3 +240,41 @@ func TestScoreFilmMatchAndRanking(t *testing.T) {
 		t.Errorf("expected 'xian' NOT to match '想你了' (xiang != xian), got score %d", ScoreFilmMatch(filmXiangNi, qXian))
 	}
 }
+
+func TestNameLikeNeedlesKeepsSubsequenceAndSkipsPinyin(t *testing.T) {
+	sub := NameLikeNeedles(BuildQueryContext("凡人传"))
+	if len(sub) != 3 || sub[0][0] != "凡" || sub[1][0] != "人" || sub[2][0] != "传" {
+		t.Fatalf("needles = %#v", sub)
+	}
+	if !needleGroupHas(sub[2], "傳") {
+		t.Fatalf("传 needles = %#v", sub[2])
+	}
+	if NameLikeNeedles(BuildQueryContext("fanren")) != nil {
+		t.Fatal("pinyin search must not become a name LIKE")
+	}
+}
+
+func TestNameLikeNeedlesCoversTraditionalAndFullwidth(t *testing.T) {
+	groups := NameLikeNeedles(BuildQueryContext("庆余年2"))
+	if len(groups) != 4 {
+		t.Fatalf("groups = %#v", groups)
+	}
+	if !needleGroupHas(groups[0], "庆") || !needleGroupHas(groups[0], "慶") {
+		t.Fatalf("庆 = %#v", groups[0])
+	}
+	if !needleGroupHas(groups[1], "余") || !needleGroupHas(groups[1], "餘") {
+		t.Fatalf("余 = %#v", groups[1])
+	}
+	if !needleGroupHas(groups[3], "2") || !needleGroupHas(groups[3], "２") {
+		t.Fatalf("2 = %#v", groups[3])
+	}
+}
+
+func needleGroupHas(group []string, want string) bool {
+	for _, s := range group {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}

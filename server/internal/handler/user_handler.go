@@ -3,6 +3,9 @@ package handler
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"server/internal/config"
 	"server/internal/middleware"
@@ -18,6 +21,61 @@ type UserHandler struct{}
 
 var UserHd = new(UserHandler)
 
+type loginAttemptState struct {
+	fails     int
+	lockUntil time.Time
+	lastSeen  time.Time
+}
+
+var (
+	loginFailMu    sync.Mutex
+	loginFailState = map[string]loginAttemptState{}
+)
+
+func loginLimiterKey(c *gin.Context, username string) string {
+	return c.ClientIP() + "|" + strings.ToLower(strings.TrimSpace(username))
+}
+
+func checkLoginAllowed(key string) bool {
+	now := time.Now()
+	loginFailMu.Lock()
+	defer loginFailMu.Unlock()
+	if st, ok := loginFailState[key]; ok {
+		if now.Before(st.lockUntil) {
+			return false
+		}
+		if now.Sub(st.lastSeen) > 10*time.Minute {
+			delete(loginFailState, key)
+		}
+	}
+	return true
+}
+
+func recordLoginResult(key string, ok bool) {
+	now := time.Now()
+	loginFailMu.Lock()
+	defer loginFailMu.Unlock()
+	if ok {
+		delete(loginFailState, key)
+		return
+	}
+	if len(loginFailState) > 4096 {
+		cutoff := now.Add(-10 * time.Minute)
+		for k, st := range loginFailState {
+			if st.lastSeen.Before(cutoff) {
+				delete(loginFailState, k)
+			}
+		}
+	}
+	st := loginFailState[key]
+	st.fails++
+	st.lastSeen = now
+	if st.fails >= 5 {
+		st.lockUntil = now.Add(30 * time.Second)
+	}
+	loginFailState[key] = st
+}
+
 // Login 管理员登录接口
 func (h *UserHandler) Login(c *gin.Context) {
 	var u model.User
@@ -29,11 +87,18 @@ func (h *UserHandler) Login(c *gin.Context) {
 		dto.Failed("用户名和密码信息不能为空", c)
 		return
 	}
+	limitKey := loginLimiterKey(c, u.UserName)
+	if !checkLoginAllowed(limitKey) {
+		dto.Failed("登录尝试过于频繁，请 30 秒后再试", c)
+		return
+	}
 	token, err := service.UserSvc.UserLogin(u.UserName, u.Password)
 	if err != nil {
+		recordLoginResult(limitKey, false)
 		dto.Failed(err.Error(), c)
 		return
 	}
+	recordLoginResult(limitKey, true)
 	middleware.SetAuthCookie(c, token)
 	dto.SuccessOnlyMsg("登录成功!!!", c)
 }

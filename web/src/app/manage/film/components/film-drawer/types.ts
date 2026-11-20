@@ -13,7 +13,6 @@ export interface PlayLine {
 export interface FilmDrawerProps {
   open: boolean;
   filmId?: number | null;
-  defaultSourceId?: string;
   defaultCid?: number;
   onClose: () => void;
   onSuccess: () => void;

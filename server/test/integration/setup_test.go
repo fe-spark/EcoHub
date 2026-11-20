@@ -7,6 +7,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	"server/internal/infra/db"
@@ -97,12 +98,34 @@ func activateVersion(t *testing.T, version string) {
 	})
 }
 
+const integrationPrimarySourceID = "src_it_primary"
+
+// ensureIntegrationPrimary 保证已有一个启用采集站。已有启用站时沿用它，避免抢走用例自己的主站。
+func ensureIntegrationPrimary(t *testing.T, gdb *gorm.DB) string {
+	t.Helper()
+	var existing model.FilmSource
+	err := gdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&existing).Error
+	if err == nil && strings.TrimSpace(existing.Id) != "" {
+		return existing.Id
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: integrationPrimarySourceID, Name: "主站", Uri: "https://example.com/src_it_primary", State: true, Sort: 0,
+	}).Error; err != nil {
+		t.Fatalf("写入测试主站失败: %v", err)
+	}
+	return integrationPrimarySourceID
+}
+
 // seedSnapshots 把列表结构写入 film_index。version 只用于激活读模型，不落快照表。
+// 未标明所属站的影片记到当前主站，检索索引才能装入。
 func seedSnapshots(t *testing.T, gdb *gorm.DB, version string, rows ...model.FilmListSnapshot) {
 	t.Helper()
-	_ = gdb
+	primary := ensureIntegrationPrimary(t, gdb)
 	for i := range rows {
 		rows[i].SnapshotVersion = version
+		if strings.TrimSpace(rows[i].SourceId) == "" {
+			rows[i].SourceId = primary
+		}
 	}
 	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(rows); err != nil {
 		t.Fatalf("写入影片失败: %v", err)

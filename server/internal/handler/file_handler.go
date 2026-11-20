@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -23,6 +24,8 @@ func isAllowedImage(filename string) bool {
 	return utils.IsGalleryImage(filename)
 }
 
+const maxUploadImageBytes = 20 << 20 // 20MB
+
 // Upload 统一文件上传接口（支持图片上传）
 func (h *FileHandler) Upload(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
@@ -30,9 +33,19 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		dto.Failed("上传失败, 当前用户信息异常", c)
 		return
 	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		dto.Failed("上传失败, 当前用户信息异常", c)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadImageBytes+1024*1024)
 	file, err := c.FormFile("file")
 	if err != nil {
 		dto.Failed(err.Error(), c)
+		return
+	}
+	if file.Size <= 0 || file.Size > maxUploadImageBytes {
+		dto.Failed("图片大小须在 1 字节到 20MB 之间", c)
 		return
 	}
 	if !isAllowedImage(file.Filename) {
@@ -52,7 +65,6 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	uc := v.(*utils.UserClaims)
 	name := strings.TrimSpace(c.PostForm("name"))
 	if name == "" {
 		name = strings.TrimSuffix(file.Filename, filepath.Ext(file.Filename))

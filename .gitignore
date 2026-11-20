@@ -33,6 +33,8 @@ dist/
 .vscode/
 # 文件保留路径
 static/
+# Go 编译产物
+server/server
 # 服务端日志目录：单测在子包 cwd 执行时不得就地生成 logs/，统一落在 server/logs
 server/**/logs/
 *.log

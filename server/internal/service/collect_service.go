@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
@@ -11,8 +10,6 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/spider/progress"
-	"server/internal/utils"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,19 +20,22 @@ type CollectService struct{}
 var CollectSvc = new(CollectService)
 
 var (
-	primarySwitchEpoch atomic.Uint64
-	primarySwitchMu    sync.Mutex
-	isPrimaryWarming   atomic.Bool
+	primarySwitchMu sync.Mutex
+	// primaryWarmCount 在途的主站切换预热数量，大于 0 即视为切换中（预热闸门）。
+	primaryWarmCount atomic.Int64
 	// primaryWarmups 记录切换主站后异步预热的协程，测试用来等它们结束。
 	primaryWarmups sync.WaitGroup
 	// categorySyncs 记录异步同步分类的协程，测试用来等它们结束。
 	categorySyncs sync.WaitGroup
+	// deleteSourceJobs 记录已入队待处理的异步删站任务，保证 WaitAsyncWork 不与 Add 竞态。
+	deleteSourceJobs sync.WaitGroup
 )
 
-// WaitAsyncWork 等本包启动的后台协程（切主站预热、异步同步分类）全部结束，超时返回 false。测试用。
+// WaitAsyncWork 等本包启动的后台协程（异步删站、切主站预热、异步同步分类）全部结束，超时返回 false。测试用。
 func WaitAsyncWork(timeout time.Duration) bool {
 	done := make(chan struct{})
 	go func() {
+		deleteSourceJobs.Wait()
 		primaryWarmups.Wait()
 		categorySyncs.Wait()
 		close(done)
@@ -50,7 +50,7 @@ func WaitAsyncWork(timeout time.Duration) bool {
 
 // IsPrimarySiteSwitching 返回当前是否正在构建检索索引或预热主站缓存
 func IsPrimarySiteSwitching() bool {
-	return filmsnapshot.IsSearchIndexBuilding() || isPrimaryWarming.Load()
+	return filmsnapshot.IsSearchIndexBuilding() || primaryWarmCount.Load() > 0
 }
 
 func (s *CollectService) SearchIndexProgress() filmsnapshot.SearchIndexProgress {
@@ -86,7 +86,7 @@ func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error)
 		}
 	}
 	categoryReady := repository.SourceIDsWithCategory(sourceIDs)
-	primarySource := repository.GetActiveCollectSource()
+	primarySource := repository.CurrentPrimarySource()
 	primaryID := ""
 	if primarySource != nil {
 		primaryID = primarySource.Id
@@ -173,7 +173,9 @@ func (s *CollectService) GetCategoryReadyMap() (map[string]bool, error) {
 	return result, nil
 }
 
-func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool {
+// applyPrimaryChanged 主站实际发生变化时调用：失效相关缓存并异步预热新主站检索索引。
+// old 与 new 相同时为无操作。调用方保证仅在主站切换/交接/懒初始化生效时调用。
+func applyPrimaryChanged(oldPrimary, newPrimary *model.FilmSource) bool {
 	oldID := ""
 	if oldPrimary != nil {
 		oldID = oldPrimary.Id
@@ -185,59 +187,51 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	if oldID == newID {
 		return false
 	}
-	epoch := primarySwitchEpoch.Add(1)
 	repository.MarkCategoryChanged()
 	repository.ClearIndexPageCache()
 	filmsnapshot.BumpSearchCacheVersion()
 	filmsnapshot.RefreshAccessDataCaches()
 	filmsnapshot.ClearSearchCache()
+	filmsnapshot.ClearDynamicPlayCaches()
+	clearProvideNetworkConfigCache()
 	enabled, err := repository.GetEnabledCollectSourceList()
 	if err != nil {
 		syslog.Errorf("[Collect] 读取启用采集站失败: %v", err)
 	} else {
-		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
+		NotifySvc.PublishPrimaryChange(oldPrimary, newPrimary, enabled)
 	}
+	// 先占住切换状态再丢掉上一站索引，不让旧索引继续常驻，也不让这段时间再切一次。
+	primaryWarmCount.Add(1)
+	filmsnapshot.DropPrimarySearchIndex()
 	primaryWarmups.Add(1)
-	go func(targetSourceID string, currentEpoch uint64) {
+	go func(targetSourceID string) {
 		defer primaryWarmups.Done()
+		defer primaryWarmCount.Add(-1)
 		defer func() {
 			if r := recover(); r != nil {
 				syslog.Errorf("[Collect] 切换主站后异步预热索引发生异常: %v", r)
 			}
 		}()
 
-		// 150ms 防抖：如果连续快速拖拽切换主站，直接跳过旧代数，避免短时间内多次并发全库扫描
-		time.Sleep(150 * time.Millisecond)
-		if primarySwitchEpoch.Load() != currentEpoch {
-			syslog.Infof("[Collect] 检测到更新的主站切换，跳过历史代数预热 epoch=%d targetSource=%s", currentEpoch, targetSourceID)
-			return
-		}
-
-		// 互斥排队串行化构建，杜绝多线程重叠全表扫描导致 DB 负载过高
+		// 连续切换时旧协程在这里排队；轮到自己时目标已不是当前主站就直接退出。
 		primarySwitchMu.Lock()
 		defer primarySwitchMu.Unlock()
-		isPrimaryWarming.Store(true)
-		defer isPrimaryWarming.Store(false)
 
-		// 获取锁后再次检查代数与当前最新主站：如果中途有更新切换，立即退出
-		if primarySwitchEpoch.Load() != currentEpoch {
-			syslog.Infof("[Collect] 排队期间主站再次变更，放弃本代构建 epoch=%d", currentEpoch)
-			return
-		}
-		latestPrimary := repository.PickPrimarySourceForCategory()
+		latestPrimary := repository.CurrentPrimarySource()
 		if latestPrimary == nil || latestPrimary.Id != targetSourceID {
-			syslog.Infof("[Collect] 实际主站已非目标站，跳过预热 targetSource=%s", targetSourceID)
+			syslog.Infof("[Collect] 实际主站已非目标站，改为补建当前主站索引 targetSource=%s", targetSourceID)
+			if err := filmsnapshot.EnsurePrimarySearchIndex(); err != nil {
+				syslog.Errorf("[Collect] 补建当前主站索引失败: %v", err)
+			}
 			return
 		}
 
-		syslog.Infof("[Collect] 开始预热主站首页缓存 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
-		if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
-			syslog.Errorf("[Collect] 切换主站后确认检索索引失败: %v", err)
-			return
-		}
-
-		if primarySwitchEpoch.Load() != currentEpoch {
-			syslog.Infof("[Collect] 索引已就绪，但主站代数已失效，跳过首页缓存写入 epoch=%d", currentEpoch)
+		syslog.Infof("[Collect] 开始重建主站检索索引 (targetSource=%s)...", targetSourceID)
+		if err := filmsnapshot.RebuildPrimarySearchIndex(); err != nil {
+			syslog.Errorf("[Collect] 切换主站后重建检索索引失败: %v", err)
+			if err := filmsnapshot.EnsurePrimarySearchIndex(); err != nil {
+				syslog.Errorf("[Collect] 补建当前主站索引失败: %v", err)
+			}
 			return
 		}
 
@@ -245,35 +239,11 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			if _, err := IndexSvc.IndexPage(targetSourceID); err != nil {
 				syslog.Errorf("[Collect] 切换主站后预热首页数据失败: %v", err)
 			} else {
-				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
+				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (targetSource=%s)", targetSourceID)
 			}
 		}
-	}(newID, epoch)
+	}(newID)
 	return true
-}
-
-func (s *CollectService) SortFilmSources(ids []string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	if IsPrimarySiteSwitching() {
-		return errors.New("检索索引正在构建中，暂不可切换主站，请稍候")
-	}
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	if err := repository.SortCollectSources(ids); err != nil {
-		return err
-	}
-	filmsnapshot.ClearDynamicPlayCaches()
-	clearProvideNetworkConfigCache()
-	newPrimary := repository.PickPrimarySourceForCategory()
-	if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
-		enabled, err := repository.GetEnabledCollectSourceList()
-		if err != nil {
-			return err
-		}
-		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
-	}
-	return nil
 }
 
 func getRunStatsBySource(sources []model.FilmSource) map[string]repository.CollectSourceRunStat {
@@ -311,133 +281,4 @@ func (s *CollectService) GetEnabledFilmSources() ([]model.FilmSource, error) {
 
 func (s *CollectService) GetAllFilmSources() ([]model.FilmSource, error) {
 	return repository.GetCollectSourceList()
-}
-
-// UpdateFilmSource 编辑采集源配置（单源）。
-// 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
-func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	if IsPrimarySiteSwitching() {
-		return errors.New("检索索引正在构建中，暂不可修改站点配置，请稍候")
-	}
-	if err := s.updateFilmSourceCore(source); err != nil {
-		return err
-	}
-	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
-	return nil
-}
-
-func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
-	old := repository.FindCollectSourceById(source.Id)
-	if old == nil {
-		return errors.New("采集站信息不存在")
-	}
-	if source.CreatedAt.IsZero() && !old.CreatedAt.IsZero() {
-		source.CreatedAt = old.CreatedAt
-	}
-	// 排序只走排序接口。编辑请求不带 sort，不能写成 0 把别的站顶成主站。
-	source.Sort = old.Sort
-
-	// 拉页、停止中、待检索都不许改地址或协议。待检索时清空数据会和封口抢同一批影片。
-	isUriChanged := old.Uri != source.Uri
-	isFormatChanged := old.ResolveFormat() != source.ResolveFormat()
-	if isUriChanged || isFormatChanged {
-		name := strings.TrimSpace(source.Name)
-		if name == "" {
-			name = old.Name
-		}
-		if progress.IsSealing(source.Id) {
-			return fmt.Errorf("采集站「%s」待检索，暂不可修改地址或协议", name)
-		}
-		if spider.IsTaskRunning(source.Id) {
-			return fmt.Errorf("采集站「%s」当前有采集任务正在运行或正在停止退出中，请稍候几秒后再修改地址或协议", name)
-		}
-	}
-
-	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged)
-	if len(orphanMids) > 0 {
-		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
-	}
-	if err != nil {
-		return err
-	}
-
-	if isUriChanged {
-		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据和分类，删除档案 %d 部", source.Name, source.Id, len(orphanMids))
-		repository.MarkCategoryChanged()
-		progress.BroadcastCategoryReady(source.Id, false)
-	}
-
-	spider.ClearLimiter(source.Id)
-	if old.State && !source.State {
-		spider.StopCollectSource(source.Id, "采集站已停用")
-	}
-
-	clearProvideNetworkConfigCache()
-	filmsnapshot.ClearDynamicPlayCaches()
-	if old.IsPosterSource != source.IsPosterSource {
-		filmsnapshot.BumpSearchCacheVersion()
-		filmsnapshot.ClearDerivedFilmListCaches()
-		filmsnapshot.RefreshAccessDataCaches()
-		filmsnapshot.ClearSearchCache()
-	}
-	return repository.RefreshCollectSourceCatalog()
-}
-
-func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
-	if IsPrimarySiteSwitching() {
-		return errors.New("检索索引正在构建中，暂不可切换站点状态，请稍候")
-	}
-	planned := make(map[string]bool)
-	for _, id := range ids {
-		source := repository.FindCollectSourceById(id)
-		if source == nil {
-			return errors.New("采集站信息不存在")
-		}
-		if source.State != state {
-			planned[id] = state
-		}
-	}
-	if len(planned) == 0 {
-		return nil
-	}
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	var firstErr error
-	changed := false
-	for _, id := range ids {
-		source := repository.FindCollectSourceById(id)
-		if source == nil {
-			firstErr = errors.New("采集站信息不存在")
-			break
-		}
-		if source.State == state {
-			continue
-		}
-		next := *source
-		next.State = state
-		if err := s.updateFilmSourceCore(next); err != nil {
-			firstErr = err
-			break
-		}
-		changed = true
-	}
-	if changed {
-		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
-	}
-	return firstErr
-}
-
-func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	if source.Id == "" {
-		source.Id = utils.GenerateHashKey(source.Uri)
-	}
-	if err := repository.AddCollectSource(source); err != nil {
-		return err
-	}
-	spider.ClearLimiter(source.Id)
-	clearProvideNetworkConfigCache()
-	filmsnapshot.ClearDynamicPlayCaches()
-	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
-	return nil
 }

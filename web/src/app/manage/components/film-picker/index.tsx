@@ -16,6 +16,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { VideoCameraOutlined } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
+import { usePrimarySource } from "@/lib/manage-primary";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { FilmOption } from "@/app/manage/banners/view/types";
 import styles from "./index.module.less";
@@ -26,8 +27,8 @@ interface FilmPickerProps {
   open: boolean;
   title?: string;
   selectedMid?: number;
-  /** 只列这个采集站有播放线路的影片。 */
-  sourceId?: string;
+  /** 当前全局主站上下文；不是可切换项。 */
+  primarySourceId?: string;
   onCancel: () => void;
   onSelect: (film: FilmOption) => void;
 }
@@ -36,7 +37,7 @@ export default function FilmPicker({
   open,
   title = "选择影片",
   selectedMid,
-  sourceId,
+  primarySourceId,
   onCancel,
   onSelect,
 }: FilmPickerProps) {
@@ -47,6 +48,7 @@ export default function FilmPicker({
   const [inputValue, setInputValue] = useState("");
   const [sortField, setSortField] = useState<string>("");
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
+  const { refresh: refreshPrimary } = usePrimarySource();
 
   const fetchList = useCallback(
     async (current = 1, query = "", sort = "") => {
@@ -58,49 +60,34 @@ export default function FilmPicker({
         let curPage = current;
         const pSize = 10;
 
-        if (!trimmed || sourceId) {
-          // 无关键词或限定站点时，走片库管理检索
-          const resp = await ApiGet("/manage/film/search/list", {
-            name: trimmed || undefined,
-            sourceId: sourceId || undefined,
-            current,
-            pageSize: pSize,
-          });
-          if (resp?.code === 0 && resp.data) {
-            rawList = resp.data.list || [];
-            if (resp.data.params?.paging) {
-              curPage = resp.data.params.paging.current || current;
-              total = resp.data.params.paging.total || 0;
-            }
+        if (!primarySourceId) {
+          setList([]);
+          setPage({ current: 1, pageSize: pSize, total: 0 });
+          return;
+        }
+
+        // 管理端选片始终使用主站片库；不走前台跨来源搜索。
+        const resp = await ApiGet("/manage/film/search/list", {
+          name: trimmed || undefined,
+          sourceId: primarySourceId,
+          current,
+          pageSize: pSize,
+          sort: sort || undefined,
+        });
+        if (resp?.code === 0 && resp.data) {
+          if (
+            typeof resp.data.primarySourceId === "string" &&
+            resp.data.primarySourceId !== primarySourceId
+          ) {
+            void refreshPrimary();
+            setList([]);
+            setPage({ current: 1, pageSize: pSize, total: 0 });
+            return;
           }
-        } else {
-          // 有关键词时，优先使用全局智能模糊检索
-          const resp = await ApiGet("/films/search", {
-            keyword: trimmed,
-            current,
-            pageSize: pSize,
-            sort: sort || undefined,
-          });
-          if (resp?.code === 0 && resp.data && (resp.data.list || []).length > 0) {
-            rawList = resp.data.list || [];
-            if (resp.data.page) {
-              curPage = resp.data.page.current || current;
-              total = resp.data.page.total || 0;
-            }
-          } else {
-            // 兜底查片库管理检索接口
-            const manageResp = await ApiGet("/manage/film/search/list", {
-              name: trimmed,
-              current,
-              pageSize: pSize,
-            });
-            if (manageResp?.code === 0 && manageResp.data) {
-              rawList = manageResp.data.list || [];
-              if (manageResp.data.params?.paging) {
-                curPage = manageResp.data.params.paging.current || current;
-                total = manageResp.data.params.paging.total || 0;
-              }
-            }
+          rawList = resp.data.list || [];
+          if (resp.data.params?.paging) {
+            curPage = resp.data.params.paging.current || current;
+            total = resp.data.params.paging.total || 0;
           }
         }
 
@@ -131,7 +118,7 @@ export default function FilmPicker({
         setLoading(false);
       }
     },
-    [sourceId],
+    [primarySourceId, refreshPrimary],
   );
 
   useEffect(() => {

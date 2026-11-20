@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { ApiGet } from "@/lib/client-api";
 import { decideFilmPageUpdate, isCurrentFilmRequest } from "./film-list-request";
 
@@ -23,8 +23,8 @@ interface UseFilmListOptions {
   setLoading: (loading: boolean) => void;
   setList: (list: any[]) => void;
   setPage: (page: any) => void;
-  setParams: Dispatch<SetStateAction<any>>;
-  setTableSourceId: (id: string) => void;
+  primarySourceId: string;
+  onPrimaryMismatch: () => void;
   setIndexing: (indexing: boolean) => void;
   setIndexingProgress: (progress: IndexingProgress | null) => void;
   notifyError: (text: string) => void;
@@ -36,8 +36,8 @@ export function useFilmList({
   setLoading,
   setList,
   setPage,
-  setParams,
-  setTableSourceId,
+  primarySourceId,
+  onPrimaryMismatch,
   setIndexing,
   setIndexingProgress,
   notifyError,
@@ -79,6 +79,15 @@ export function useFilmList({
           pageSize: pg.pageSize,
         });
         if (!current()) return;
+        if (
+          typeof resp.data?.primarySourceId === "string" &&
+          resp.data.primarySourceId !== primarySourceId
+        ) {
+          setList([]);
+          setPage((current) => ({ ...current, total: 0 }));
+          onPrimaryMismatch();
+          return;
+        }
         const decision = decideFilmPageUpdate({
           silent,
           ok: resp.code === 0,
@@ -104,13 +113,6 @@ export function useFilmList({
             })) || [],
           );
           setPage(resp.data.params.paging);
-          const activeSource = reqParams.sourceId || resp.data.params?.sourceId || "";
-          if (activeSource) {
-            setTableSourceId(activeSource);
-            if (!reqParams.sourceId) {
-              setParams((prev: any) => ({ ...prev, sourceId: activeSource }));
-            }
-          }
         }
         if (!aliveRef.current || !current()) return;
         if (decision.schedulePoll) {
@@ -130,7 +132,7 @@ export function useFilmList({
         if (current() && !silent) setLoading(false);
       }
     },
-    [notifyError, page, params, setIndexing, setIndexingProgress, setList, setLoading, setPage, setParams, setTableSourceId],
+    [notifyError, onPrimaryMismatch, page, params, primarySourceId, setIndexing, setIndexingProgress, setList, setLoading, setPage],
   );
 
   return getFilmPage;

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -87,18 +88,34 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 			return
 		}
 	}
-	for i := range detail.List {
+	var playableList []model.PlayLinkVo
+	for _, src := range detail.List {
 		var valid []model.MovieUrlInfo
-		for _, ep := range detail.List[i].LinkList {
-			if ep.Link != "" {
+		for _, ep := range src.LinkList {
+			if isWebPlayableVideo(ep.Link) {
 				valid = append(valid, ep)
 			}
 		}
-		detail.List[i].LinkList = valid
+		if len(valid) > 0 {
+			src.LinkList = valid
+			playableList = append(playableList, src)
+		}
+	}
+	detail.List = playableList
+	if len(detail.List) > 0 {
+		detail.PlayList = make([][]model.MovieUrlInfo, len(detail.List))
+		detail.PlayFrom = make([]string, len(detail.List))
+		for i, v := range detail.List {
+			detail.PlayList[i] = v.LinkList
+			detail.PlayFrom[i] = v.Name
+		}
+	} else {
+		detail.PlayList = nil
+		detail.PlayFrom = nil
 	}
 	if len(detail.List) > 0 {
 		primarySourceID := ""
-		if primary := repository.GetActiveCollectSource(); primary != nil {
+		if primary := repository.CurrentPrimarySource(); primary != nil {
 			primarySourceID = primary.Id
 		}
 		playFrom = resolvePlayableSourceID(detail.List, playFrom, primarySourceID)
@@ -159,4 +176,26 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 	}
 	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
 	dto.Success(service.WrapMovieBasicInfos(relateMovie), "相关推荐获取成功", c)
+}
+
+func isWebPlayableVideo(link string) bool {
+	raw := strings.TrimSpace(link)
+	if raw == "" {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "" {
+		scheme := strings.ToLower(u.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return false
+		}
+	}
+	path := strings.ToLower(u.Path)
+	return strings.HasSuffix(path, ".m3u8") ||
+		strings.HasSuffix(path, ".mp4") ||
+		strings.HasSuffix(path, ".flv") ||
+		strings.HasSuffix(path, ".webm")
 }

@@ -4,9 +4,15 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func resetSearchReseal() {
@@ -14,6 +20,7 @@ func resetSearchReseal() {
 	searchReseal.pending = map[int64]struct{}{}
 	searchReseal.sealing = map[string]struct{}{}
 	searchReseal.running = false
+	searchReseal.retryWait = 0
 	searchReseal.awaitDone = false
 	searchReseal.mu.Unlock()
 	searchSealRunning.Store(false)
@@ -22,6 +29,56 @@ func resetSearchReseal() {
 		endCollectQueue()
 	}
 	filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
+}
+
+func TestSchedulePrimarySearchReseal_RetriesMidsOnQueryError(t *testing.T) {
+	resetSearchReseal()
+	prevSeal := sealSearchIndex
+	t.Cleanup(func() {
+		sealSearchIndex = prevSeal
+		resetSearchReseal()
+	})
+
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "uku", Name: "主站", Uri: "https://example.com/uku", State: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	sealed := make(chan []int64, 1)
+	sealSearchIndex = func(mids []int64) bool {
+		sealed <- append([]int64(nil), mids...)
+		return true
+	}
+
+	schedulePrimarySearchReseal([]int64{1, 2, 3})
+
+	select {
+	case got := <-sealed:
+		seen := make(map[int64]struct{}, len(got))
+		for _, mid := range got {
+			seen[mid] = struct{}{}
+		}
+		for _, mid := range []int64{1, 2, 3} {
+			if _, ok := seen[mid]; !ok {
+				t.Fatalf("sealed %v, missing %d", got, mid)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("query error dropped mids")
+	}
 }
 
 func TestSearchResealRun_WaitsThenSealsOnce(t *testing.T) {

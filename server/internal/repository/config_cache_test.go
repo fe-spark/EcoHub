@@ -88,3 +88,43 @@ func TestFillCache_SetFailureKeepsReadResult(t *testing.T) {
 		t.Fatal("回填失败不应写成新值")
 	}
 }
+
+func TestLoadCachedConfig_FallsBackToDBAndFencesConcurrentWrite(t *testing.T) {
+	_ = useCacheRedis(t)
+	db.Rdb.AddHook(redisCmdHook{fail: map[string]bool{"get": true}})
+
+	got, err := loadCachedConfig(
+		"cfg_fallback",
+		func(s string) (string, error) { return s, nil },
+		func() (string, string, bool, error) { return "from-db", "from-db", false, nil },
+	)
+	if err != nil || got != "from-db" {
+		t.Fatalf("expected DB fallback on Redis get error, got=%q err=%v", got, err)
+	}
+
+	mr2 := useCacheRedis(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan string, 1)
+	go func() {
+		v, _ := loadCachedConfig(
+			"cfg_fence",
+			func(s string) (string, error) { return s, nil },
+			func() (string, string, bool, error) {
+				close(started)
+				<-release
+				return "stale-db", "stale-db", true, nil
+			},
+		)
+		done <- v
+	}()
+	<-started
+	if err := writeCache("cfg_fence", "fresh-write"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+	if val, _ := mr2.Get("cfg_fence"); val != "fresh-write" {
+		t.Fatalf("expected fresh-write not overwritten by stale-db, got %q", val)
+	}
+}

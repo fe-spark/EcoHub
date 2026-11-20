@@ -408,6 +408,9 @@ func categoryFilmQuery(conn *gorm.DB, sourceID, field string, categoryID int64, 
 		return q.Where("mid IN (SELECT mid FROM ("+memberSQL+") AS cat_members)", args...)
 	}
 	q = applyCategorySnapshotSourceFilter(q, "", sourceID)
+	if disabledIDs := support.GetDisabledCategoryIDs(); len(disabledIDs) > 0 {
+		q = q.Where("pid NOT IN ? AND cid NOT IN ?", disabledIDs, disabledIDs)
+	}
 	q = applyCategoryUpdateIndexHint(q, field)
 	if field == "pid" {
 		return q.Where("pid = ?", categoryID)

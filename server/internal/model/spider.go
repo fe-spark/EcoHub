@@ -74,6 +74,7 @@ type FilmSource struct {
 	ProxyCollect       bool      `json:"proxyCollect" gorm:"default:false"`    // 采集接口是否走代理
 	SkipTLSVerify      bool      `json:"skipTlsVerify" gorm:"default:false"`   // 仅自签名源站跳过证书校验
 	CollectIntervalMs  int       `json:"collectIntervalMs" gorm:"default:200"` // 同一站相邻两次取页的最小间隔，毫秒。0 为不等待
+	FilmCount          int64     `json:"filmCount" gorm:"not null;default:0"`  // 该站未删除档案数。工作台直接读，不扫影片表
 	CreatedAt          time.Time `json:"createdAt" gorm:"autoCreateTime;<-:create;index"`
 }
 
@@ -160,9 +161,12 @@ type SourceHealthItem struct {
 	Reason string `json:"reason"`
 }
 
-// FilmSourceDelBatchRequest 批量删除采集站请求
+// FilmSourceDelBatchRequest 批量删除采集站请求。
+// 删除当前主站时必须单站提交，并携带 NewPrimaryId（或 ConfirmClearPrimary 置空，D6）。
 type FilmSourceDelBatchRequest struct {
-	Ids []string `json:"ids"`
+	Ids                 []string `json:"ids"`
+	NewPrimaryId        string   `json:"newPrimaryId"`
+	ConfirmClearPrimary bool     `json:"confirmClearPrimary"`
 }
 
 type CollectProgress struct {
@@ -174,7 +178,7 @@ type CollectProgress struct {
 	Failed      int    `json:"failed"`
 	Status      string `json:"status"`
 	QueueId     string `json:"queueId,omitempty"`
-	FailedPages []int `json:"failedPages,omitempty"`
+	FailedPages []int  `json:"failedPages,omitempty"`
 	// Sealed 本轮的检索索引封口已完成。
 	Sealed bool `json:"sealed,omitempty"`
 }

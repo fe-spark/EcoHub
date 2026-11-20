@@ -22,6 +22,13 @@ export async function getFilmClassTree(sourceId = "") {
     sources: sources as { id: string; name: string; state?: boolean }[],
     defaultSourceId: String(resp.data?.defaultSourceId || ""),
     currentSourceId: String(resp.data?.currentSourceId || sourceId || ""),
+    primarySourceId: String(
+      resp.data?.primarySourceId ??
+        resp.data?.currentSourceId ??
+        resp.data?.defaultSourceId ??
+        sourceId ??
+        "",
+    ),
   };
 }
 

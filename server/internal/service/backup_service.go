@@ -15,6 +15,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/service/upgrade"
 	"server/internal/spider"
 	"server/internal/utils"
 )
@@ -114,11 +115,18 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		return err
 	}
 
-	// 2. 导入采集站前停掉采集。未开写的页直接丢掉，只等正在写的事务。
+	// 2. 导入采集站前停掉采集与排队删站，且禁止与数据重置并发执行。
+	if SpiderSvc.SiteResetRunning() {
+		return errors.New("站点数据正在重置中，请稍后再导入配置")
+	}
+	var oldPrimaryBeforeImport *model.FilmSource
 	if req.Modules.FilmSources {
 		if err := spider.StopAllTasksAndWait(0, "导入采集站配置，停止采集"); err != nil {
 			return fmt.Errorf("停止进行中的采集失败: %w", err)
 		}
+		CollectSvc.CancelDelFilmSources(nil)
+		deleteSourceJobs.Wait()
+		oldPrimaryBeforeImport = repository.CurrentPrimarySource()
 	}
 
 	needCategoryRefresh := false
@@ -128,25 +136,40 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			return fmt.Errorf("导入网站配置失败: %w", err)
 		}
 		InvalidateMediaProxyMemoryCache()
+		filmsnapshot.BumpSearchCacheVersion()
 	}
 
 	if req.Modules.FilmSources {
 		list := backup.FilmSources
-		// 导入前清理旧站限流器
-		oldSources, err := repository.GetCollectSourceList()
-		if err != nil {
-			return err
+		var replaceErr error
+		if err := withPrimaryMutation(func(_ bool) error {
+			// 导入前清理旧站限流器
+			oldSources, err := repository.GetCollectSourceList()
+			if err != nil {
+				return err
+			}
+			for _, src := range oldSources {
+				spider.ClearLimiter(src.Id)
+			}
+			if err := repository.ReplaceCollectSources(list); err != nil {
+				return fmt.Errorf("导入采集站失败: %w", err)
+			}
+			for _, src := range list {
+				spider.ClearLimiter(src.Id)
+			}
+			return nil
+		}); err != nil {
+			replaceErr = err
 		}
-		for _, src := range oldSources {
-			spider.ClearLimiter(src.Id)
+		if replaceErr != nil {
+			return replaceErr
 		}
-		if err := repository.ReplaceCollectSources(list); err != nil {
-			return fmt.Errorf("导入采集站失败: %w", err)
-		}
-		for _, src := range list {
-			spider.ClearLimiter(src.Id)
-		}
+		applyPrimaryChanged(oldPrimaryBeforeImport, repository.CurrentPrimarySource())
+		spider.ClearAllCMSSearchUnsupported()
 		clearProvideNetworkConfigCache()
+		filmsnapshot.BumpSearchCacheVersion()
+		filmsnapshot.ClearDynamicPlayCaches()
+		filmsnapshot.ClearDerivedFilmListCaches()
 		repository.ClearIndexPageCache()
 		needCategoryRefresh = true
 	}
@@ -174,6 +197,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			return fmt.Errorf("导入网络代理配置失败: %w", err)
 		}
 		NotifySvc.EnsureBotPoller()
+		upgrade.TriggerReleasePoll()
 	}
 
 	if req.Modules.TMDB {
@@ -216,8 +240,24 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 	if req.Modules.Site && b.Site == nil {
 		return errors.New("备份中缺少网站配置数据")
 	}
-	if req.Modules.FilmSources && b.FilmSources == nil {
-		return errors.New("备份中缺少采集站")
+	if req.Modules.FilmSources {
+		if b.FilmSources == nil {
+			return errors.New("备份中缺少采集站")
+		}
+		seenID := make(map[string]struct{}, len(b.FilmSources))
+		for _, src := range b.FilmSources {
+			if !utils.ValidURL(src.Uri) {
+				return fmt.Errorf("采集站 %q 接口地址无效", src.Name)
+			}
+			id := strings.TrimSpace(src.Id)
+			if id == "" {
+				id = utils.GenerateHashKey(src.Uri)
+			}
+			if _, dup := seenID[id]; dup {
+				return fmt.Errorf("备份中包含重复采集站 ID: %s", id)
+			}
+			seenID[id] = struct{}{}
+		}
 	}
 	if req.Modules.Banners && b.BannerSlots == nil && b.Banners == nil {
 		return errors.New("备份中缺少首页轮播")

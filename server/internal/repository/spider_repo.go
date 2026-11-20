@@ -8,6 +8,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -60,26 +61,48 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	if err != nil {
 		return err
 	}
+	// 备份导入整体替换站点：存储的主站不在新列表时清空，由懒初始化按新列表重选
+	support.ReconcilePrimaryAfterSourceReplace(list)
+	InvalidatePublicSourceCache()
 	return RefreshCollectSourceCatalog()
 }
 
-// PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前基准源）。
-// 统一原则：首位即基准（Sort-as-Master）。
-// 仅从已启用的站点中按顺序选取首位（sort ASC, created_at ASC）；
-// 若所有站点均停用或无站点，返回 nil，严禁无视停用开关进行静默兜底。
-func PickPrimarySourceForCategory() *model.FilmSource {
-	if db.Mdb == nil {
-		return nil
-	}
-	var primary model.FilmSource
-	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
-		return &primary
-	}
-	return nil
+// CurrentPrimarySource 当前主站。没有主站时返回 nil。
+func CurrentPrimarySource() *model.FilmSource {
+	return support.CurrentPrimarySource()
 }
 
-func GetActiveCollectSource() *model.FilmSource {
-	return PickPrimarySourceForCategory()
+// CurrentPrimaryID 当前主站 ID。没有主站或主站不可用时返回空。
+func CurrentPrimaryID() string {
+	return support.CurrentPrimaryID()
+}
+
+// SetPrimarySourceID 写入主站状态（切换与交接的持久化入口）。
+func SetPrimarySourceID(id string) error {
+	if err := support.SetPrimarySourceID(id); err != nil {
+		return err
+	}
+	return RefreshCollectSourceCatalog()
+}
+
+// ClearPrimarySourceState 置空主站状态（停用/删除最后一个启用站时的例外路径）。
+func ClearPrimarySourceState() error {
+	return support.ClearPrimarySourceState()
+}
+
+// StoredPrimarySourceID 读取持久化的主站 ID（不校验删除态）。
+func StoredPrimarySourceID() string {
+	return support.StoredPrimarySourceID()
+}
+
+// FindOtherEnabledCollectSource 返回除 excludeID 外排序最前的可用启用站；不存在时返回 nil。
+func FindOtherEnabledCollectSource(excludeID string) *model.FilmSource {
+	return support.FindOtherEnabledCollectSource(excludeID)
+}
+
+// FindOtherEnabledCollectSourcesExcluding 返回除 excludeIDs 外排序靠前的可用启用站列表。
+func FindOtherEnabledCollectSourcesExcluding(excludeIDs map[string]struct{}) []*model.FilmSource {
+	return support.FindOtherEnabledCollectSourcesExcluding(excludeIDs)
 }
 
 // GetEnabledCollectSourceList 获取已启用采集站列表。
@@ -183,54 +206,29 @@ func FindCollectSourceById(id string) *model.FilmSource {
 	return &fs
 }
 
-// CascadeCleanSourceDataTx 删除该站自己的档案和挂载数据。有没有播放线路都删。
-// 返回被删除的档案 mid。其他站的档案不删。
-func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil, nil
-	}
-	var owned []int64
-	if err := tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-		return nil, err
-	}
-	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
-		return nil, err
-	}
-	return owned, nil
-}
-
-func deleteOwnedFilmsTx(tx *gorm.DB, mids []int64) error {
-	for i := 0; i < len(mids); i += 1000 {
-		if err := deleteOwnedFilmChunk(tx, mids[i:min(i+1000, len(mids))]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// DelCollectResource 删除采集站。档案、失败记录、分类和站点行在同一个事务里提交。
+// DelCollectResource 删除采集站。
+// 重型数据按短事务分批清理避免长事务锁库，最后在同一事务里收口分类、历史批次与站点配置行。
 func DelCollectResource(id string) ([]int64, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("database not available")
 	}
-	var orphanMids []int64
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		var err error
-		orphanMids, err = cascadeCleanSourceDataTx(tx, id)
-		if err != nil {
-			return err
-		}
+	_ = EnsureFilmSourceDeletedIndex()
+	_ = EnsureCollectRecordFilmSourceIndex()
+	orphanMids, err := cleanSourceDataBatched(id)
+	if err != nil {
+		return orphanMids, err
+	}
+	if err := deleteBySourceBatched(&model.CollectRecordFilmItem{}, model.TableCollectRecordFilm, "source_id", id); err != nil {
+		return orphanMids, err
+	}
+	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := ClearSourceCategoryDataTx(tx, id); err != nil {
 			return err
 		}
 		if err := purgeSourceCollectHistoryTx(tx, id); err != nil {
+			return err
+		}
+		if err := AssertSourceDataCleanedTx(tx, id); err != nil {
 			return err
 		}
 		if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
@@ -239,10 +237,11 @@ func DelCollectResource(id string) ([]int64, error) {
 		return EnsureDefaultPosterSourceTx(tx)
 	})
 	if err != nil {
-		return nil, err
+		return orphanMids, err
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
+	InvalidatePublicSourceCache(id)
 	if err := RefreshCollectSourceCatalog(); err != nil {
 		forgetCollectSource(id)
 		return orphanMids, err
@@ -250,19 +249,13 @@ func DelCollectResource(id string) ([]int64, error) {
 	return orphanMids, nil
 }
 
-// UpdateCollectSourceReplacingData 更换地址或协议时，清数据和更新配置在同一个事务里提交。
-func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData bool) ([]int64, error) {
+// UpdateCollectSourceUpdatingState 更新站点配置；换地址时同步清理该站分类，重型影片清理已提前分批完成。
+func UpdateCollectSourceReplacingData(source model.FilmSource, clearCategories bool) error {
 	if db.Mdb == nil {
-		return nil, errors.New("数据库未连接")
+		return errors.New("数据库未连接")
 	}
-	var owned []int64
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if cleanData {
-			var err error
-			owned, err = cascadeCleanSourceDataTx(tx, source.Id)
-			if err != nil {
-				return err
-			}
+		if clearCategories {
 			if err := ClearSourceCategoryDataTx(tx, source.Id); err != nil {
 				return err
 			}
@@ -270,12 +263,9 @@ func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData bool) (
 		return UpdateCollectSourceTx(tx, source)
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := RefreshCollectSourceCatalog(); err != nil {
-		return owned, err
-	}
-	return owned, nil
+	return RefreshCollectSourceCatalog()
 }
 
 // CleanCollectSourceData 清空该站已采集数据（保留采集站配置本身）。
@@ -367,6 +357,23 @@ func SortCollectSources(ids []string) error {
 	return RefreshCollectSourceCatalog()
 }
 
+// BatchUpdateCollectSourceState 批量更新采集源启用状态（原子事务提交）
+func BatchUpdateCollectSourceState(ids []string, state bool) error {
+	if db.Mdb == nil {
+		return errors.New("database not available")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return tx.Model(&model.FilmSource{}).Where("id IN ?", ids).Update("state", state).Error
+	})
+	if err != nil {
+		return err
+	}
+	return RefreshCollectSourceCatalog()
+}
+
 // BatchAddCollectSource 批量添加采集站信息
 func BatchAddCollectSource(list []model.FilmSource) error {
 	now := time.Now()
@@ -393,6 +400,21 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 	return RefreshCollectSourceCatalog()
 }
 
+// ValidateCollectSourceUpdate 在执行破坏性清库或写库前预检采集站更新的唯一性等约束。
+func ValidateCollectSourceUpdate(s model.FilmSource) error {
+	if db.Mdb == nil {
+		return errors.New("database not available")
+	}
+	var count int64
+	if err := db.Mdb.Model(&model.FilmSource{}).Where("id != ? AND uri = ?", s.Id, s.Uri).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("当前采集站链接已存在其他站点中，请勿重复添加")
+	}
+	return nil
+}
+
 func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	if tx == nil {
 		return errors.New("database transaction is nil")
@@ -416,7 +438,8 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 			return err
 		}
 	}
-	if err := tx.Save(&s).Error; err != nil {
+	// 影片数只由入库和删除维护。整行保存不能把请求里缺省的 0 写回去。
+	if err := tx.Omit("FilmCount").Save(&s).Error; err != nil {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)

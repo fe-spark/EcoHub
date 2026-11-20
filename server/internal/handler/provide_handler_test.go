@@ -195,6 +195,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	snap201 := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             201,
+		SourceId:        "src_default",
 		Name:            "流浪地球",
 		Pid:             1,
 		Cid:             10,
@@ -249,6 +250,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	snap202 := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             202,
+		SourceId:        "src_default",
 		Name:            "星际穿越",
 		Pid:             1,
 		Cid:             10,
@@ -329,7 +331,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected primary site key, got %v", firstSite["key"])
 		}
 		api, _ := firstSite["api"].(string)
-		if !strings.Contains(api, "source=src_default") {
+		if !strings.Contains(api, "/api/provide/vod") || strings.Contains(api, "source=") {
 			t.Fatalf("primary api = %v", api)
 		}
 		for _, item := range sites {
@@ -436,16 +438,24 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		}
 
 		var res struct {
-			Code  int                `json:"code"`
-			Msg   string             `json:"msg"`
-			Total int                `json:"total"`
-			List  []model.FilmDetail `json:"list"`
+			Code    int                `json:"code"`
+			Msg     string             `json:"msg"`
+			Total   int                `json:"total"`
+			List    []model.FilmDetail `json:"list"`
+			Class   any                `json:"class"`
+			Filters any                `json:"filters"`
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
 		if res.Code != 1 || len(res.List) != 2 {
 			t.Fatalf("expected code=1 and 2 details, got code=%d, count=%d", res.Code, len(res.List))
+		}
+		if res.Class != nil {
+			t.Fatalf("expected class to be omitted in detail response, got: %v", res.Class)
+		}
+		if res.Filters != nil {
+			t.Fatalf("expected filters to be omitted in detail response, got: %v", res.Filters)
 		}
 
 		// 验证 TVBox 标准格式：
@@ -472,10 +482,10 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected normalized VodPic, got %q", detail201Res.VodPic)
 		}
 
-		// 验证缓存命中：执行完毕后 Redis 中应有缓存
-		cachedVal, err := mr.Get(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 201))
+		// 验证缓存命中：执行完毕后 Redis 中应有独立 vod 详情缓存（不污染 Web 详情缓存）
+		cachedVal, err := mr.Get(fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, 201))
 		if err != nil || cachedVal == "" {
-			t.Fatalf("expected Redis cache to be populated for film 201")
+			t.Fatalf("expected Redis vod cache to be populated for film 201")
 		}
 	})
 
@@ -532,6 +542,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	// 验证分类停用全链路拦截：当根分类 1 或子分类 10 停用时，详情与列表均应阻断
 	t.Run("ProvideVodCategoryVisibilityInterception", func(t *testing.T) {
 		support.SetCategoryShowForTest(map[int64]bool{1: false, 10: true})
+		support.TouchCategoryVersion()
 		defer support.SetCategoryShowForTest(map[int64]bool{})
 
 		// 验证 ids 详情拉取被拦截（返回空列表）
@@ -652,18 +663,27 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 }
 
 func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
-	_, mr := setupProvideTestDB(t)
+	gdb, mr := setupProvideTestDB(t)
 	const version = "v_tvbox_jitter"
+
+	_ = gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true, Sort: 1, StableKey: "movie"}).Error
+	_ = gdb.Create(&model.FilmSource{Id: "src_default", Name: "默认主源", State: true, Sort: 0}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: "src_default", SourceTypeId: 1, RawName: "电影"}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: "src_default", SourceTypeId: 1, CategoryId: 1}).Error
 
 	snap := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             301,
+		SourceId:        "src_default",
 		Name:            "黑客帝国",
 		Pid:             1,
 		Cid:             10,
+		CategoryKey:     "source:src_default:1",
+		RootCategoryKey: "source:src_default:1",
 		Hits:            100,
 	}
 	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap})
+	_ = gdb.Create(&model.FilmSourcePlaylist{Mid: 301, SourceId: "src_default", LineKind: "play", Content: "[]"}).Error
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
@@ -680,7 +700,7 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 	// 检查 Redis 是否缓存了该分页，且 TTL 带有 >= 12h 的随机 Jitter
 	ruleVersion := repository.GetRuleVersion()
 	categoryVersion := repository.GetCategoryVersion()
-	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:T1:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion)
+	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:src_%s:T1:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion, "src_default")
 
 	ttl := mr.TTL(cacheKey)
 	if ttl < 12*time.Hour {
@@ -692,9 +712,10 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 }
 
 func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
-	_, mr := setupProvideTestDB(t)
+	gdb, mr := setupProvideTestDB(t)
 	const version = "v_tvbox_empty"
 
+	_ = gdb.Create(&model.FilmSource{Id: "src_default", Name: "默认主源", State: true, Sort: 0}).Error
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
@@ -711,7 +732,7 @@ func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
 
 	ruleVersion := repository.GetRuleVersion()
 	categoryVersion := repository.GetCategoryVersion()
-	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:T999:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion)
+	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:src_%s:T999:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion, "src_default")
 
 	ttl := mr.TTL(cacheKey)
 	if ttl <= 0 || ttl > 65*time.Second {
@@ -720,19 +741,28 @@ func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
 }
 
 func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
-	_, _ = setupProvideTestDB(t)
+	gdb, _ := setupProvideTestDB(t)
 	const version = "v_tvbox_race_test"
+
+	_ = gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true, Sort: 1, StableKey: "movie"}).Error
+	_ = gdb.Create(&model.FilmSource{Id: "src_default", Name: "默认主源", State: true, Sort: 0}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: "src_default", SourceTypeId: 1, RawName: "电影"}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: "src_default", SourceTypeId: 1, CategoryId: 1}).Error
 
 	snap := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             501,
+		SourceId:        "src_default",
 		Name:            "并发竞态电影",
 		Pid:             1,
 		Cid:             10,
+		CategoryKey:     "source:src_default:1",
+		RootCategoryKey: "source:src_default:1",
 		Picture:         "/static/poster.jpg", // 相对路径，依赖 baseURL 归一化
 		Hits:            500,
 	}
 	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap})
+	_ = gdb.Create(&model.FilmSourcePlaylist{Mid: 501, SourceId: "src_default", LineKind: "play", Content: "[]"}).Error
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()

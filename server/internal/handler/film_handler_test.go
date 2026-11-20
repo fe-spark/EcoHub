@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"server/internal/model"
 	"server/internal/model/dto"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
@@ -19,6 +20,26 @@ func TestFilmSearchOptions_Success(t *testing.T) {
 	resp := decodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("code=%d want %d", resp.Code, dto.SUCCESS)
+	}
+}
+
+func TestFilmDelete_NonPrimarySourceReturnsMismatch(t *testing.T) {
+	gdb := setupCollectHandlerTestDB(t)
+	if err := gdb.Create(&[]model.FilmSource{
+		{Id: "src1", Name: "主站", Uri: "http://src1.test", State: true, Sort: 0},
+		{Id: "src2", Name: "副站", Uri: "http://src2.test", State: true, Sort: 1},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	c, w := testJSONContext(http.MethodPost, "/api/manage/film/delete", `{"ids":[201],"sourceId":"src2"}`)
+	FilmHd.FilmDelete(c)
+	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
+		t.Fatalf("non-primary delete want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
+	}
+	c, w = testJSONContext(http.MethodPost, "/api/manage/film/refresh", `{"ids":[201],"sourceId":"src2"}`)
+	FilmHd.FilmRefresh(c)
+	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
+		t.Fatalf("non-primary refresh want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

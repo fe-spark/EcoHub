@@ -8,6 +8,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,19 +22,25 @@ func resolveProvideBaseURL(c *gin.Context) (string, error) {
 	if c.Request.TLS != nil {
 		scheme = "https"
 	}
-	if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
-		if i := strings.Index(forwardedProto, ","); i >= 0 {
-			forwardedProto = strings.TrimSpace(forwardedProto[:i])
+	trustedPeer := utils.IsTrustedForwardedPeer(c.Request.RemoteAddr)
+	if trustedPeer {
+		if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
+			if i := strings.Index(forwardedProto, ","); i >= 0 {
+				forwardedProto = strings.TrimSpace(forwardedProto[:i])
+			}
+			if forwardedProto != "http" && forwardedProto != "https" {
+				return "", errors.New("无法解析当前请求协议")
+			}
+			scheme = forwardedProto
 		}
-		if forwardedProto != "http" && forwardedProto != "https" {
-			return "", errors.New("无法解析当前请求协议")
-		}
-		scheme = forwardedProto
 	}
 
-	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
-	if host != "" {
-		host = strings.TrimSpace(strings.Split(host, ",")[0])
+	var host string
+	if trustedPeer {
+		host = strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+		if host != "" {
+			host = strings.TrimSpace(strings.Split(host, ",")[0])
+		}
 	}
 	if host == "" {
 		host = strings.TrimSpace(c.Request.Host)
@@ -75,7 +82,6 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	wd := c.Query("wd")
 	h_param, _ := strconv.Atoi(c.DefaultQuery("h", "0"))
 	ids := c.Query("ids")
-	sourceId := c.Query("source")
 
 	tid, err := strconv.Atoi(c.Query("tid"))
 	if err == nil && tid > 0 {
@@ -92,22 +98,13 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	plot := c.Query("plot")
 	sort := c.Query("sort")
 
-	classList, filters, classErr := service.ProvideSvc.GetClassList(sourceId)
-	if classErr != nil {
-		c.JSON(200, gin.H{"code": 0, "msg": classErr.Error()})
-		return
-	}
-	if classList == nil {
-		classList = []model.FilmClass{}
-	}
-
 	baseURL, err := resolveProvideBaseURL(c)
 	if err != nil {
 		c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 		return
 	}
 
-	writeProvide := func(page, pagecount, total int, list any, withRecord bool) {
+	writeProvide := func(page, pagecount, total int, list any, withRecord bool, withMeta bool) {
 		body := gin.H{
 			"code":      1,
 			"msg":       "数据列表",
@@ -116,11 +113,21 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			"limit":     strconv.Itoa(limit),
 			"total":     total,
 			"list":      list,
-			"class":     classList,
-			"filters":   filters,
 		}
 		if withRecord {
 			body["recordcount"] = total
+		}
+		if withMeta {
+			classList, filters, classErr := service.ProvideSvc.GetClassList()
+			if classErr != nil {
+				c.JSON(200, gin.H{"code": 0, "msg": classErr.Error()})
+				return
+			}
+			if classList == nil {
+				classList = []model.FilmClass{}
+			}
+			body["class"] = classList
+			body["filters"] = filters
 		}
 		c.JSON(200, body)
 	}
@@ -128,15 +135,20 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	switch ac {
 	case "videolist", "detail":
 		if ids != "" {
-			vodList, err := service.ProvideSvc.GetVodDetail(strings.Split(ids, ","), sourceId)
+			idList := strings.Split(ids, ",")
+			if len(idList) > 100 {
+				c.JSON(200, gin.H{"code": 0, "msg": "单次请求 ids 不能超过 100 个"})
+				return
+			}
+			vodList, err := service.ProvideSvc.GetVodDetail(idList)
 			if err != nil {
 				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 				return
 			}
-			writeProvide(1, 1, len(vodList), prefixDetailPics(vodList, baseURL), false)
+			writeProvide(1, 1, len(vodList), prefixDetailPics(vodList, baseURL), false, false)
 			return
 		}
-		page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
@@ -145,19 +157,19 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		for _, v := range vodListSimple {
 			idList = append(idList, strconv.FormatInt(v.VodID, 10))
 		}
-		detailList, err := service.ProvideSvc.GetVodDetail(idList, sourceId)
+		detailList, err := service.ProvideSvc.GetVodDetail(idList)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
-		writeProvide(page, pagecount, total, prefixDetailPics(detailList, baseURL), true)
+		writeProvide(page, pagecount, total, prefixDetailPics(detailList, baseURL), true, wd == "")
 	default:
-		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
-		writeProvide(page, pagecount, total, prefixListPics(vodList, baseURL), true)
+		writeProvide(page, pagecount, total, prefixListPics(vodList, baseURL), true, wd == "")
 	}
 }
 

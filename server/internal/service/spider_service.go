@@ -8,11 +8,13 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"server/internal/access"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmcache "server/internal/repository/film/cache"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/spider/progress"
 )
@@ -60,23 +62,69 @@ func (s *SpiderService) AutoCollect(time int) {
 }
 
 // resetSiteDataRunning 防止并发重复触发站点数据重置。
-var resetSiteDataRunning atomic.Bool
+var (
+	resetSiteDataRunning atomic.Bool
+	resetSiteLifecycle   atomic.Bool
+)
 
-// ClearFilms 重置站点业务数据：清空影视/采集派生数据。
-// 清空会连分类一起清掉，随后按每个采集站重新拉取分类副本。
-// 注意：不重置任何账号与密码，也不改网站配置、映射规则、采集源和采集计划任务。线上轮播清空，排片规则保留。
+func init() {
+	spider.RegisterSiteResetChecker(func() bool {
+		return resetSiteDataRunning.Load() || resetSiteLifecycle.Load()
+	})
+}
+
+// triggerResetCategorySync 数据重置后异步回补默认站分类，测试可替换避免访问外网。
+var triggerResetCategorySync = func() {
+	go SpiderSvc.SyncMissingSourceCategories()
+}
+
+// ClearFilms 重置站点数据：清空业务与配置数据表（保留账号表 user 与迁移版本表 schema_migrations），
+// 同步清空图库与全部缓存，并重新写入初始化数据与启动默认定时任务。
 // 全程按关键节点上报真实进度，由 SSE 推给页面。
 func (s *SpiderService) ClearFilms() (retErr error) {
+	resetSiteLifecycle.Store(true)
+	defer resetSiteLifecycle.Store(false)
+
 	filmrepo.StartResetProgress()
+	clearedDB := false
 	defer func() {
 		if retErr != nil {
+			// 清库前置阶段失败或半途失败时尽力恢复访问统计开关与定时任务，避免系统停摆
+			_ = InitSvc.AnalyticsConfigInit()
+			if clearedDB {
+				_ = InitSvc.CollectCrontabInit()
+			}
 			filmrepo.FinishResetProgress(retErr)
 		}
 	}()
+
+	filmrepo.ReportResetProgress(2, "正在停止后台任务")
+	access.SetEnabled(false)
+	spider.StopAllCollect("数据重置，停止采集")
+	CollectSvc.CancelDelFilmSources(nil)
+	deleteSourceJobs.Wait()
+	primaryWarmups.Wait()
+	categorySyncs.Wait()
+
 	if err := spider.ClearSpider(); err != nil {
 		return err
 	}
-	filmrepo.ReportResetProgress(100, "重置完成，片库与业务数据已清空")
+	clearedDB = true
+	if _, err := access.ClearAccessData(0); err != nil {
+		return err
+	}
+
+	filmrepo.ReportResetProgress(85, "正在写入初始化数据")
+	if err := InitSvc.ReinitAfterReset(); err != nil {
+		return err
+	}
+
+	filmrepo.ReportResetProgress(95, "正在同步默认分类")
+	if triggerResetCategorySync != nil {
+		triggerResetCategorySync()
+	}
+
+	filmrepo.ReportResetProgress(100, "数据重置完成，已恢复初始状态")
 	filmrepo.FinishResetProgress(nil)
 	return nil
 }
@@ -186,7 +234,7 @@ func (s *SpiderService) FollowSiteReset(ctx context.Context, onEvent func(any) e
 	}
 }
 
-// InventoryStats 返回工作台片库规模。scope=sources 只算各采集站，其余只算整库。
+// InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
 func (s *SpiderService) InventoryStats(scope string) (filmrepo.InventoryStats, error) {
 	stats := filmrepo.InventoryStats{Sources: []filmrepo.SourceInventory{}}
 	if scope == "sources" {
@@ -261,6 +309,7 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 		progress.BroadcastCategoryReadyMessage(source.Id, "分类获取成功", false, pageCount)
 	}
 	finalizeCategorySync()
+	_ = filmsnapshot.RefreshActiveProjectedReadModel()
 	if failed == 0 {
 		return nil
 	}
@@ -270,38 +319,90 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 	return fmt.Errorf("有 %d 个采集站分类获取失败，首个错误: %w", failed, first)
 }
 
-// SyncMissingSourceCategories 只给还没有分类副本的采集站补拉一次。已有副本的站不覆盖。
+// SyncMissingSourceCategories 只给还没有分类副本的已启用采集站补拉一次。已有副本或已停用的站不处理。
 func (s *SpiderService) SyncMissingSourceCategories() {
-	sources, err := repository.GetCollectSourceList()
+	categorySyncs.Add(1)
+	defer categorySyncs.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			syslog.Errorf("[SpiderService] 启动补拉分类发生异常: %v", r)
+		}
+	}()
+
+	sources, err := repository.GetEnabledCollectSourceList()
 	if err != nil {
-		log.Printf("[SpiderService] 读取采集站失败: %v", err)
+		log.Printf("[SpiderService] 读取已启用采集站失败: %v", err)
 		return
 	}
+	if len(sources) == 0 {
+		return
+	}
+
+	ids := make([]string, 0, len(sources))
+	for _, src := range sources {
+		if strings.TrimSpace(src.Uri) != "" && !progress.IsSourceDeleting(src.Id) {
+			ids = append(ids, src.Id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	readyIDs := repository.SourceIDsWithCategory(ids)
 	var missing []model.FilmSource
-	for i := range sources {
-		if !repository.SourceHasCategoryMapping(sources[i].Id) {
-			missing = append(missing, sources[i])
-			progress.BroadcastCategoryStatus(sources[i].Id, "syncing")
+	for _, src := range sources {
+		if _, ok := readyIDs[src.Id]; !ok && strings.TrimSpace(src.Uri) != "" && !progress.IsSourceDeleting(src.Id) {
+			missing = append(missing, src)
 		}
 	}
 	if len(missing) == 0 {
 		return
 	}
+
+	primary := repository.CurrentPrimarySource()
+	primaryID := ""
+	if primary != nil {
+		primaryID = primary.Id
+	}
+
 	synced := 0
+	primarySynced := false
+
 	for i := range missing {
 		source := missing[i]
-		log.Printf("[SpiderService] 采集站还没有分类副本，补拉: name=%s id=%s", source.Name, source.Id)
+		if progress.IsSourceDeleting(source.Id) {
+			continue
+		}
+		// 真正开始当前站点拉取时，才广播 syncing 状态，避免全局提前虚挂
+		progress.BroadcastCategoryStatus(source.Id, "syncing")
+		log.Printf("[SpiderService] 采集站还没有分类副本，开始补拉: name=%s id=%s", source.Name, source.Id)
+
 		pageCount, err := spider.CollectCategory(&source)
 		if err != nil {
 			log.Printf("[SpiderService] 补拉采集站分类失败: name=%s id=%s err=%v", source.Name, source.Id, err)
-			progress.BroadcastCategoryStatus(source.Id, "failed")
+			if repository.FindCollectSourceById(source.Id) == nil {
+				progress.BroadcastCategoryStatus(source.Id, "idle")
+			} else {
+				progress.BroadcastCategoryStatus(source.Id, "failed")
+			}
 			continue
 		}
+
 		progress.BroadcastCategoryReadyMessage(source.Id, "分类获取成功", false, pageCount)
 		synced++
+		if source.Id == primaryID {
+			primarySynced = true
+		}
 	}
+
 	if synced > 0 {
 		finalizeCategorySync()
+	_ = filmsnapshot.RefreshActiveProjectedReadModel()
+		if primarySynced {
+			_ = filmsnapshot.RefreshActiveProjectedReadModel()
+			repository.ClearIndexPageCache()
+			log.Printf("[SpiderService] 主站分类补拉完成，已刷新前台投影读模型")
+		}
 	}
 }
 

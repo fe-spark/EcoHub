@@ -275,7 +275,8 @@ func (p *searchPostings) lookup(q utils.QueryContext) ([]int32, bool) {
 			return nil, true
 		}
 		if len(key) == 1 {
-			return p.ascii[key], true
+			// 多字符 ASCII/拼音串按 2-gram 建索引，单字符查询不走索引窄化，交由 ScoreFilmMatch 全匹配避免漏召回
+			return nil, false
 		}
 		lists := make([][]int32, 0, len(key)-1)
 		for i := 0; i+1 < len(key); i++ {

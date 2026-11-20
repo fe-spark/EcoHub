@@ -34,11 +34,12 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 		{Id: "busy", Name: "在采", Uri: "http://example.invalid/busy", State: true},
 		{Id: "sync", Name: "拉类", Uri: "http://example.invalid/sync", State: true},
 		{Id: "halt", Name: "收尾", Uri: "http://example.invalid/halt", State: true},
+		{Id: "del", Name: "删中", Uri: "http://example.invalid/del", State: true},
 	}
 	if err := gdb.Create(&rows).Error; err != nil {
 		t.Fatalf("seed sources: %v", err)
 	}
-	for _, id := range []string{"ready", "off", "busy", "sync", "halt"} {
+	for _, id := range []string{"ready", "off", "busy", "sync", "halt", "del"} {
 		if err := gdb.Create(&model.CategoryMapping{SourceId: id, SourceTypeId: 1, CategoryId: 9}).Error; err != nil {
 			t.Fatalf("seed mapping %s: %v", id, err)
 		}
@@ -51,8 +52,10 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "halt", Name: "收尾"}}, "q-test-halt")
 	progress.Update("halt", func(p *model.CollectProgress) { p.Status = progress.StatusStopping })
 	progress.BroadcastCategoryStatus("sync", "syncing")
+	progress.SetSourceDeleting("del", true)
 	t.Cleanup(func() {
 		endCollectQueue()
+		progress.SetSourceDeleting("del", false)
 		progress.UnregisterTask("busy", "req-busy")
 		for _, id := range []string{"ready", "busy", "halt", "sync"} {
 			releaseCollectSourceIDs(id)
@@ -62,7 +65,7 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	})
 
 	started, result := PrepareBatchCollectStart([]string{
-		"ready", "off", "bare", "both", "busy", "sync", "halt", "missing", "ready", "  ",
+		"ready", "off", "bare", "both", "busy", "sync", "halt", "del", "missing", "ready", "  ",
 	})
 	if len(started.Sources) != 1 || started.Sources[0].Id != "ready" {
 		t.Fatalf("started = %+v", started)
@@ -70,7 +73,7 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 	if !isOccupiedCollectSource("ready") {
 		t.Fatal("ready source must be occupied")
 	}
-	if isOccupiedCollectSource("busy") || isOccupiedCollectSource("off") || isOccupiedCollectSource("bare") {
+	if isOccupiedCollectSource("busy") || isOccupiedCollectSource("off") || isOccupiedCollectSource("bare") || isOccupiedCollectSource("del") {
 		t.Fatal("skipped sources must not be occupied")
 	}
 
@@ -85,6 +88,7 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 		"busy":    "采集中",
 		"sync":    "分类采集中",
 		"halt":    "停止中",
+		"del":     "删除中",
 		"missing": "采集站不存在",
 	}
 	if len(got) != len(want) {

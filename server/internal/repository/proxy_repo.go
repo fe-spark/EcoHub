@@ -47,36 +47,33 @@ func NormalizeProxyConfig(cfg model.ProxyConfig) model.ProxyConfig {
 
 // GetProxyConfig 读取代理配置。没有记录时返回默认关闭，不写入缓存。
 func GetProxyConfig() (model.ProxyConfig, error) {
-	if data, ok, err := readCache(config.ProxyConfigKey); err != nil {
-		return model.ProxyConfig{}, err
-	} else if ok && data != "" {
-		cfg, err := decodeProxyConfig([]byte(data))
-		if err != nil {
-			if delErr := dropCache(config.ProxyConfigKey); delErr != nil {
-				return model.ProxyConfig{}, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
+	return loadCachedConfig(
+		config.ProxyConfigKey,
+		func(data string) (model.ProxyConfig, error) {
+			return decodeProxyConfig([]byte(data))
+		},
+		func() (model.ProxyConfig, string, bool, error) {
+			if db.Mdb == nil {
+				return model.ProxyConfig{}, "", false, errors.New("数据库未连接")
 			}
-		} else {
-			return cfg, nil
-		}
-	}
-	if db.Mdb == nil {
-		return model.ProxyConfig{}, errors.New("数据库未连接")
-	}
-	var rec model.ProxyConfigRecord
-	if err := db.Mdb.Order("id desc").First(&rec).Error; err != nil {
-		if recordNotFound(err) {
-			return DefaultProxyConfig(), nil
-		}
-		return model.ProxyConfig{}, err
-	}
-	cfg, err := decodeProxyConfig([]byte(rec.Payload))
-	if err != nil {
-		return model.ProxyConfig{}, err
-	}
-	if err := cacheProxyConfig(cfg); err != nil {
-		return model.ProxyConfig{}, err
-	}
-	return cfg, nil
+			var rec model.ProxyConfigRecord
+			if err := db.Mdb.Order("id desc").First(&rec).Error; err != nil {
+				if recordNotFound(err) {
+					return DefaultProxyConfig(), "", false, nil
+				}
+				return model.ProxyConfig{}, "", false, err
+			}
+			cfg, err := decodeProxyConfig([]byte(rec.Payload))
+			if err != nil {
+				return model.ProxyConfig{}, "", false, err
+			}
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				return model.ProxyConfig{}, "", false, err
+			}
+			return cfg, string(data), true, nil
+		},
+	)
 }
 
 func decodeProxyConfig(raw []byte) (model.ProxyConfig, error) {
@@ -95,6 +92,9 @@ func decodeProxyConfig(raw []byte) (model.ProxyConfig, error) {
 
 // SaveProxyConfig 保存代理配置并刷新缓存
 func SaveProxyConfig(cfg model.ProxyConfig) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
 	cfg = NormalizeProxyConfig(cfg)
 	raw, err := json.Marshal(cfg)
 	if err != nil {

@@ -156,7 +156,7 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 		Resource:        res,
 		DeviceId:        TruncateRunes(did, 64),
 		Query:           TruncateRunes(accessQuery(query), 500),
-		CollectSourceId: provideCollectSource(path, query),
+		CollectSourceId: provideCollectSource(path),
 		playMember:      playRankMember(path, query),
 		uvMember:        HashIP(clientIP + "|" + ua),
 	}

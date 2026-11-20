@@ -84,7 +84,7 @@ export default function RuleEditorDrawer(props: RuleEditorDrawerProps) {
               <Space direction="vertical" size={4}>
                 {conflictRules.map((item) => (
                   <div key={item.id}>
-                    #{item.id} {item.group}/{item.raw} · 目标值：{item.target || "-"} · {item.matchType === "regex" ? "正则" : "精确"}
+                    #{item.id} {resolveGroupLabel(item.group)}/{item.raw} · 目标值：{item.target || "-"} · {item.matchType === "regex" ? "正则" : "精确"}
                   </div>
                 ))}
               </Space>

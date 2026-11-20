@@ -23,8 +23,11 @@ var CronCollect *cron.Cron = CreateCron()
 
 // taskCidMap 运行时内存注册表：task.Id → cron.EntryID
 // Cid 是内存值，不持久化到 DB，每次重启重新注册
-var taskCidMap = make(map[string]cron.EntryID)
-var taskCidLock sync.RWMutex
+var (
+	taskCidMap   = make(map[string]cron.EntryID)
+	taskCidLock  sync.RWMutex
+	cronReloadMu sync.Mutex
+)
 
 // runningCronTasks 记录当前正在执行的定时任务 ID,用于前端展示"执行中"以及禁用编辑操作。
 var runningCronTasks sync.Map
@@ -55,6 +58,20 @@ func RemoveCronByTaskId(taskId string) {
 		CronCollect.Remove(cid)
 		delete(taskCidMap, taskId)
 	}
+}
+
+// ClearAllCrons 注销运行时注册的全部定时任务并清空触发记录。
+func ClearAllCrons() {
+	taskCidLock.Lock()
+	for taskID, cid := range taskCidMap {
+		CronCollect.Remove(cid)
+		delete(taskCidMap, taskID)
+	}
+	taskCidLock.Unlock()
+	taskRanAt.Range(func(key, _ any) bool {
+		taskRanAt.Delete(key)
+		return true
+	})
 }
 
 // CreateCron 创建定时任务
@@ -109,6 +126,9 @@ func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
 
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
 func ReloadCronTask(id string) error {
+	cronReloadMu.Lock()
+	defer cronReloadMu.Unlock()
+
 	// 1. 获取最新配置
 	ft, err := repository.GetFilmTaskById(id)
 	if err != nil {

@@ -147,7 +147,11 @@ func GetRuleVersion() string {
 		return version
 	}
 	version = fmt.Sprintf("%d", time.Now().UnixNano())
-	db.Rdb.Set(db.Cxt, config.RuleVersionKey, version, 0)
+	if set, _ := db.Rdb.SetNX(db.Cxt, config.RuleVersionKey, version, 0).Result(); !set {
+		if cur, err := db.Rdb.Get(db.Cxt, config.RuleVersionKey).Result(); err == nil && cur != "" {
+			return cur
+		}
+	}
 	return version
 }
 
@@ -268,7 +272,14 @@ func GetMainCategoryName(pid int64) string {
 	if name, ok := GetCategoryNameFromCache(pid); ok {
 		return name
 	}
-	if catInitialized || db.Mdb == nil {
+	catMu.RLock()
+	if name, ok := GetCategoryNameFromCache(pid); ok {
+		catMu.RUnlock()
+		return name
+	}
+	initialized := catInitialized
+	catMu.RUnlock()
+	if initialized || db.Mdb == nil {
 		return ""
 	}
 
@@ -288,7 +299,14 @@ func GetCategoryNameById(id int64) string {
 	if name, ok := GetCategoryNameFromCache(id); ok {
 		return name
 	}
-	if catInitialized || db.Mdb == nil {
+	catMu.RLock()
+	if name, ok := GetCategoryNameFromCache(id); ok {
+		catMu.RUnlock()
+		return name
+	}
+	initialized := catInitialized
+	catMu.RUnlock()
+	if initialized || db.Mdb == nil {
 		return ""
 	}
 

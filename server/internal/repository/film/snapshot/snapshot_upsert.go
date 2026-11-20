@@ -1,7 +1,6 @@
 package snapshot
 
 import (
-	"log"
 	"strings"
 
 	"server/internal/infra/db"
@@ -77,21 +76,21 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 	RefreshAccessDataCaches()
 }
 
-func rebuildActiveFilterOptions(version string) {
-	if err := LoadActiveFilmReadModel(version); err != nil {
-		log.Printf("LoadActiveFilmReadModel Error: %v", err)
+// InvalidateCachesAfterSourceDelete 删站后的缓存与检索索引清理：
+// 内存索引属于被删站或主站已变时直接整盘丢掉，跳过十万级 mid 遍历与逐 key Redis Pipeline 删除。
+func InvalidateCachesAfterSourceDelete(deletedSourceID string) {
+	deletedSourceID = strings.TrimSpace(deletedSourceID)
+	cur := activeFilmSearchMetas.Load()
+	if cur != nil && (cur.PrimaryID == deletedSourceID || cur.PrimaryID != currentPrimarySourceID()) {
+		DropPrimarySearchIndex()
 	}
-}
-
-func RefreshActiveReadModelArtifacts() error {
-	version := GetActiveReadModelVersion()
-	if strings.TrimSpace(version) == "" {
-		return nil
+	version := GetActiveSnapshotVersion()
+	if version != "" {
+		applyBroadSnapshotCacheInvalidation(version, nil)
+	} else {
+		RefreshAccessDataCaches()
 	}
-	if err := LoadActiveFilmReadModel(version); err != nil {
-		return err
-	}
-	return nil
+	ClearDynamicPlayCaches()
 }
 
 func UpsertActiveSnapshotByMid(mid int64) error {
@@ -125,17 +124,37 @@ func upsertActiveSnapshots(mids []int64, refreshSearch bool) (string, int, error
 		return version, 0, nil
 	}
 
-	var existing []int64
-	if err := db.Mdb.Model(&model.FilmIndex{}).Where("mid IN ?", ids).Pluck("mid", &existing).Error; err != nil {
+	var rows []struct {
+		Mid           int64
+		FirstSourceId string
+	}
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("mid, first_source_id").
+		Where("mid IN ?", ids).
+		Find(&rows).Error; err != nil {
 		return "", 0, err
+	}
+	primary := currentPrimarySourceID()
+	existing := make([]int64, 0, len(rows))
+	primaryMids := make([]int64, 0, len(rows))
+	otherMids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		existing = append(existing, row.Mid)
+		src := strings.TrimSpace(row.FirstSourceId)
+		if primary != "" && src == primary {
+			primaryMids = append(primaryMids, row.Mid)
+			continue
+		}
+		otherMids = append(otherMids, row.Mid)
 	}
 	deletedMIDs := diffMIDs(ids, existing)
 	if refreshSearch {
-		if len(deletedMIDs) > 0 {
-			RemoveMidsFromActiveFilmSearchIndex(version, deletedMIDs)
+		remove := indexedMIDs(append(append([]int64{}, deletedMIDs...), otherMids...))
+		if len(remove) > 0 {
+			RemoveMidsFromActiveFilmSearchIndex(version, remove)
 		}
-		if len(existing) > 0 {
-			UpsertMidsToActiveFilmSearchIndex(version, existing)
+		if len(primaryMids) > 0 {
+			UpsertMidsToActiveFilmSearchIndex(version, primaryMids)
 		}
 	}
 	scheduleSnapshotCacheInvalidation(version, ids)

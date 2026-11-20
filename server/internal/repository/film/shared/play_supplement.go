@@ -116,7 +116,13 @@ func peerKeyRanks(infos []model.FilmIndex) (map[int64]map[string]int, []string) 
 	return ranks, keys
 }
 
-func filmOwnersTx(tx *gorm.DB, rows []model.MovieMatchKey) (map[int64]string, error) {
+type filmOwnerMeta struct {
+	sourceID string
+	pid      int64
+	dbID     int64
+}
+
+func filmOwnersTx(tx *gorm.DB, rows []model.MovieMatchKey) (map[int64]filmOwnerMeta, error) {
 	seen := make(map[int64]struct{}, len(rows))
 	mids := make([]int64, 0, len(rows))
 	for _, row := range rows {
@@ -129,36 +135,46 @@ func filmOwnersTx(tx *gorm.DB, rows []model.MovieMatchKey) (map[int64]string, er
 		seen[row.Mid] = struct{}{}
 		mids = append(mids, row.Mid)
 	}
-	ownerOf := make(map[int64]string, len(mids))
+	ownerOf := make(map[int64]filmOwnerMeta, len(mids))
 	if len(mids) == 0 {
 		return ownerOf, nil
 	}
 	var films []model.FilmIndex
-	if err := tx.Select("mid", "first_source_id").Where("mid IN ?", mids).Find(&films).Error; err != nil {
+	if err := tx.Select("mid", "first_source_id", "pid", "db_id").Where("mid IN ?", mids).Find(&films).Error; err != nil {
 		return nil, err
 	}
 	for _, film := range films {
-		ownerOf[film.Mid] = strings.TrimSpace(film.FirstSourceId)
+		ownerOf[film.Mid] = filmOwnerMeta{
+			sourceID: strings.TrimSpace(film.FirstSourceId),
+			pid:      film.Pid,
+			dbID:     film.DbId,
+		}
 	}
 	return ownerOf, nil
 }
 
-func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, rows []model.MovieMatchKey, ownerOf map[int64]string, enabled map[string]struct{}) map[int64]map[string]peerPick {
-	originSource := make(map[int64]string, len(infos))
+func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, rows []model.MovieMatchKey, ownerOf map[int64]filmOwnerMeta, enabled map[string]struct{}) map[int64]map[string]peerPick {
+	originInfo := make(map[int64]model.FilmIndex, len(infos))
 	for _, info := range infos {
-		originSource[info.Mid] = strings.TrimSpace(info.FirstSourceId)
+		originInfo[info.Mid] = info
 	}
 	chosen := make(map[int64]map[string]peerPick)
 	for _, row := range rows {
 		owner := ownerOf[row.Mid]
-		if owner == "" {
+		if owner.sourceID == "" {
 			continue
 		}
-		if _, ok := enabled[owner]; !ok {
+		if _, ok := enabled[owner.sourceID]; !ok {
 			continue
 		}
 		for origin, keyRank := range ranks {
-			if row.Mid == origin || owner == originSource[origin] {
+			originFilm := originInfo[origin]
+			if row.Mid == origin || owner.sourceID == strings.TrimSpace(originFilm.FirstSourceId) {
+				continue
+			}
+			// 跨分类防混拼：无相同有效豆瓣 ID 时，大类 Pid 冲突则禁止关联
+			hasSameDbID := originFilm.DbId > 0 && owner.dbID > 0 && originFilm.DbId == owner.dbID
+			if !hasSameDbID && originFilm.Pid > 0 && owner.pid > 0 && originFilm.Pid != owner.pid {
 				continue
 			}
 			rank, ok := keyRank[row.MatchKey]
@@ -170,16 +186,16 @@ func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, ro
 				bySource = make(map[string]peerPick)
 				chosen[origin] = bySource
 			}
-			current, exists := bySource[owner]
+			current, exists := bySource[owner.sourceID]
 			if !exists || rank < current.rank || (rank == current.rank && row.Mid < current.mid) {
-				bySource[owner] = peerPick{mid: row.Mid, rank: rank}
+				bySource[owner.sourceID] = peerPick{mid: row.Mid, rank: rank}
 			}
 		}
 	}
 	return chosen
 }
 
-func peerPlayLinesTx(tx *gorm.DB, chosen map[int64]map[string]peerPick, ownerOf map[int64]string) (map[int64][]model.FilmSourcePlaylist, error) {
+func peerPlayLinesTx(tx *gorm.DB, chosen map[int64]map[string]peerPick, ownerOf map[int64]filmOwnerMeta) (map[int64][]model.FilmSourcePlaylist, error) {
 	seen := make(map[int64]struct{})
 	mids := make([]int64, 0)
 	for _, bySource := range chosen {
@@ -200,7 +216,7 @@ func peerPlayLinesTx(tx *gorm.DB, chosen map[int64]map[string]peerPick, ownerOf 
 		return nil, err
 	}
 	for _, line := range lines {
-		if ownerOf[line.Mid] != line.SourceId {
+		if ownerOf[line.Mid].sourceID != line.SourceId {
 			continue
 		}
 		linesByMid[line.Mid] = append(linesByMid[line.Mid], line)

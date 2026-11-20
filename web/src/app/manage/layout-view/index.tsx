@@ -37,6 +37,8 @@ import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import type { ThemeMode } from "@/components/theme/ThemeDock";
 import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
 import { ManagePermissionProvider } from "@/lib/manage-permission";
+import { ManagePrimaryProvider } from "@/lib/manage-primary";
+import PrimarySelector from "./primary-selector";
 import ManageTour, { replayManageTour } from "@/app/manage/components/manage-tour";
 import SiderVersion from "@/app/manage/components/sider-version";
 import {
@@ -58,7 +60,7 @@ type AdminNotice = {
 const { Sider, Header, Content } = Layout;
 const { useBreakpoint } = Grid;
 
-export default function ManageLayoutView({
+function ManageLayoutInner({
   children,
 }: {
   children: React.ReactNode;
@@ -293,7 +295,7 @@ export default function ManageLayoutView({
       ) : null}
       <Layout className={styles.mainLayout}>
         <Header className={styles.header}>
-          <Space size="middle">
+          <Space size="small" split={<span className={styles.headerDivider} />}>
             <Button
               type="text"
               icon={
@@ -314,7 +316,7 @@ export default function ManageLayoutView({
               }}
               className={styles.headerIconBtn}
              />
-             <span className={styles.headerTitle}>管理后台</span>
+             <PrimarySelector isAdmin={userInfo ? Boolean(userInfo.isAdmin) : undefined} />
            </Space>
 
           <Space size="small" className={styles.userArea}>
@@ -450,5 +452,17 @@ export default function ManageLayoutView({
         <div className={styles.drawerInner}>{menuNode}</div>
       </Drawer>
     </Layout>
+  );
+}
+
+export default function ManageLayoutView({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <ManagePrimaryProvider>
+      <ManageLayoutInner>{children}</ManageLayoutInner>
+    </ManagePrimaryProvider>
   );
 }

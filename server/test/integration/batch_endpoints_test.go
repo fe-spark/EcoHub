@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -14,6 +15,7 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	"server/internal/router"
+	"server/internal/service"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -259,20 +261,29 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 
 	// 5. 采集中心模块（/collect/save 统一保存 + /collect/state + /collect/delete 批量操作）
 	t.Run("CollectEndpoints", func(t *testing.T) {
+		apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"code":1,"class":[{"type_id":1,"type_name":"电影"}]}`))
+		}))
+		defer apiSrv.Close()
+
 		srcID := "src_it_001"
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/save", token, map[string]any{
 			"id":      srcID,
 			"name":    "测试采集站点",
-			"uri":     "http://test.api.com/inc/api.json",
+			"uri":     apiSrv.URL,
 			"bindPid": 1,
 			"state":   true,
 			"opt":     1,
 		}), "POST collect save add")
+		if !service.WaitAsyncWork(5 * time.Second) {
+			t.Fatal("等待采集站初始分类同步超时")
+		}
 
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/save", token, map[string]any{
 			"id":      srcID,
 			"name":    "测试采集站(改)",
-			"uri":     "http://test.api.com/inc/api.json",
+			"uri":     apiSrv.URL,
 			"bindPid": 1,
 			"state":   true,
 			"opt":     1,
@@ -286,6 +297,9 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/delete", token, map[string]any{
 			"ids": []string{srcID},
 		}), "POST collect delete batch")
+		if !service.WaitAsyncWork(5 * time.Second) {
+			t.Fatal("等待采集站异步删除超时")
+		}
 
 		assertSuccess(t, doJSONRequest(r, http.MethodGet, "/api/manage/collect/history/list", token, nil), "GET collect history list")
 

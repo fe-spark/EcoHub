@@ -40,6 +40,7 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 		&model.NotifyConfigRecord{},
 		&model.BannerSlot{},
 		&model.SiteConfigRecord{},
+		&model.PrimaryState{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -57,7 +58,7 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 // waitSearchWorkIdle 等后台的检索重建（含防抖定时器）和主站预热结束，避免用例之间互相影响。
 func waitSearchWorkIdle(t *testing.T) {
 	t.Helper()
-	// 先等切主站的预热协程（它会先睡 150ms 才置 isPrimaryWarming，光看标志会漏掉）。
+	// 先等切主站的预热协程。切换一开始就会占住预热闸门，结束时才放开。
 	if !WaitAsyncWork(15 * time.Second) {
 		t.Fatal("primary warmup / category sync did not finish")
 	}
@@ -127,9 +128,17 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 		Uri:   ts.URL + "/2",
 		State: true,
 	}
+	thirdSrc := model.FilmSource{
+		Id:    "src_3",
+		Name:  "站3",
+		Uri:   ts.URL + "/3",
+		State: true,
+	}
 
-	err := srv.SaveFilmSource(newSrc)
-	if err != nil {
+	if err := srv.SaveFilmSource(newSrc); err != nil {
+		t.Fatalf("SaveFilmSource failed: %v", err)
+	}
+	if err := srv.SaveFilmSource(thirdSrc); err != nil {
 		t.Fatalf("SaveFilmSource failed: %v", err)
 	}
 
@@ -137,26 +146,34 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) < 2 {
-		t.Fatalf("expected at least 2 sources, got %d", len(list))
+	if len(list) < 3 {
+		t.Fatalf("expected at least 3 sources, got %d", len(list))
 	}
-	if list[0].Id != "src_1" {
-		t.Fatalf("expected src_1 to be first, got %s", list[0].Id)
+	if list[0].Id != "src_1" || !list[0].IsPrimary {
+		t.Fatalf("expected primary src_1 to be first, got %+v", list[0])
 	}
-	if list[1].Id != "src_2" {
-		t.Fatalf("expected src_2 (added at end) to be second, got %s", list[1].Id)
+	if list[1].Id != "src_2" || list[2].Id != "src_3" {
+		t.Fatalf("expected src_2, src_3 after src_1, got %+v", list)
 	}
 
-	// 测试拖拽排序
-	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
+	// 禁止把非主站排在主站前面替下首位
+	if err := srv.SortFilmSources([]string{"src_2", "src_1", "src_3"}); err == nil {
+		t.Fatal("expected error when attempting to move non-primary before primary")
+	}
+
+	// 保持主站在首位，仅调整非主站顺序应成功
+	if err := srv.SortFilmSources([]string{"src_1", "src_3", "src_2"}); err != nil {
 		t.Fatalf("SortFilmSources failed: %v", err)
 	}
 	sortedList, err := srv.GetFilmSourceList()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sortedList[0].Id != "src_2" || sortedList[1].Id != "src_1" {
-		t.Fatalf("expected src_2 to be first after sorting, got %+v", sortedList)
+	if sortedList[0].Id != "src_1" || sortedList[1].Id != "src_3" || sortedList[2].Id != "src_2" {
+		t.Fatalf("expected [src_1, src_3, src_2] after sorting, got %+v", sortedList)
+	}
+	if !sortedList[0].IsPrimary {
+		t.Fatalf("sorting must keep primary at first, got %+v", sortedList[0])
 	}
 	var categoryCount int64
 	gdb.Model(&model.CategoryMapping{}).Count(&categoryCount)
@@ -165,13 +182,99 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	}
 }
 
-func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
+func TestSourceMutationsWhileSearchRebuilding(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", Sort: 2, State: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", Sort: 3, State: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	filmsnapshot.NotifySearchIndexProgress(1, 0, "indexing")
+	t.Cleanup(func() { filmsnapshot.NotifySearchIndexProgress(0, 0, "idle") })
+	// 这里用预热闸门模拟重建/预热占位；Notify 的 indexing 状态可能被
+	// 上面异步重建的 done/idle 终态覆盖，导致 searchBusy 变 false、断言失效。
+	primaryWarmCount.Add(1)
+	t.Cleanup(func() { primaryWarmCount.Add(-1) })
+
+	err := (&CollectService{}).SortFilmSources([]string{"src_2", "src_1"})
+	if err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("err=%v", err)
+	}
+	list, err := (&CollectService{}).GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) == 0 || list[0].Id != "src_1" {
+		t.Fatalf("primary changed during rebuild: %+v", list)
+	}
+	if err := (&CollectService{}).UpdateFilmSource(model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", State: false}, "", false); err == nil || err.Error() != filmsnapshot.ErrSearchIndexBusy.Error() {
+		t.Fatalf("UpdateFilmSource err=%v", err)
+	}
+	if err := (&CollectService{}).BatchUpdateFilmSourceState([]string{"src_1"}, false); err == nil || err.Error() != "批量停用包含当前主站，请单独停用并指定新主站" {
+		t.Fatalf("BatchUpdateFilmSourceState err=%v", err)
+	}
+	if err := (&CollectService{}).UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "副站改名", Uri: "http://2", Sort: 1, State: true}, "", false); err != nil {
+		t.Fatalf("renaming non-primary source err=%v", err)
+	}
+	if err := (&CollectService{}).BatchUpdateFilmSourceState([]string{"src_2"}, false); err != nil {
+		t.Fatalf("disabling non-primary source err=%v", err)
+	}
+	if err := (&CollectService{}).SaveFilmSource(model.FilmSource{Id: "src_3", Name: "站3", Uri: "http://3", State: true}); err != nil {
+		t.Fatalf("adding source at the end err=%v", err)
+	}
+	// 启用排在前面的停用站、以更靠前的排序新增启用站，都不再改变主站（主站为持久化状态）。
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "src_2").Update("sort", -1).Error; err != nil {
+		t.Fatal(err)
+	}
+	var disabledBefore int64
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ? AND state = ?", "src_2", false).Count(&disabledBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	if disabledBefore != 1 {
+		t.Fatalf("expected src_2 disabled before enabling, got %d", disabledBefore)
+	}
+	if err := (&CollectService{}).BatchUpdateFilmSourceState([]string{"src_2"}, true); err != nil {
+		t.Fatalf("enabling an earlier disabled source err=%v", err)
+	}
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "src_2").Update("sort", 3).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := (&CollectService{}).SaveFilmSource(model.FilmSource{Id: "src_4", Name: "站4", Uri: "http://4", Sort: 1, State: true}); err != nil {
+		t.Fatalf("adding an enabled source with an earlier sort err=%v", err)
+	}
+	list, err = (&CollectService{}).GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 4 {
+		t.Fatalf("expected 4 sources, got %+v", list)
+	}
+	primaryID := ""
+	for _, item := range list {
+		if item.IsPrimary {
+			primaryID = item.Id
+		}
+	}
+	if primaryID != "src_1" {
+		t.Fatalf("safe edits must keep primary src_1, got %s", primaryID)
+	}
+}
+
+func TestSortFilmSources_ReorderKeepsPrimaryDuringCollecting(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", Sort: 0, State: true}).Error; err != nil {
 		t.Fatalf("create src_1: %v", err)
 	}
 	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", Sort: 1, State: true}).Error; err != nil {
 		t.Fatalf("create src_2: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_3", Name: "站3", Uri: "http://3", Sort: 2, State: true}).Error; err != nil {
+		t.Fatalf("create src_3: %v", err)
+	}
+	// 先建立主站（懒初始化取 src_1），排序不得改变主站或将其替出首位
+	if _, err := (&CollectService{}).GetFilmSourceList(); err != nil {
+		t.Fatal(err)
 	}
 	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "src_1", Name: "站1"}}, "q-test")
 	// 真实的采集在跑时会登记任务；只有进度、没有任务也没有占用的排队会被当成残留当场清掉，
@@ -185,37 +288,58 @@ func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 	})
 
 	srv := &CollectService{}
-	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
-		t.Fatalf("switch while collecting: %v", err)
+	if err := srv.SortFilmSources([]string{"src_2", "src_1", "src_3"}); err == nil {
+		t.Fatal("expected error when moving non-primary before primary")
+	}
+	if err := srv.SortFilmSources([]string{"src_1", "src_3", "src_2"}); err != nil {
+		t.Fatalf("sort non-primary while primary collecting: %v", err)
 	}
 	list, err := srv.GetFilmSourceList()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) == 0 || list[0].Id != "src_2" || !list[0].IsPrimary {
-		t.Fatalf("primary should be src_2, got %+v", list)
+	if len(list) < 3 || list[0].Id != "src_1" || list[1].Id != "src_3" || list[2].Id != "src_2" {
+		t.Fatalf("expected [src_1, src_3, src_2], got %+v", list)
+	}
+	if !list[0].IsPrimary {
+		t.Fatalf("primary must stay src_1 at first, got %+v", list[0])
 	}
 	if !progress.IsTaskRunning("src_1") {
 		t.Fatal("the running collect should stay running")
 	}
-	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
-		t.Fatalf("reordering without changing primary should pass: %v", err)
+
+	// 停用非主站不受影响
+	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", State: false}, "", false); err != nil {
+		t.Fatalf("disabling non-primary should pass: %v", err)
 	}
-	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", State: false}); err != nil {
-		t.Fatalf("disabling primary while collecting should pass: %v", err)
+
+	// D6：停用当前主站必须同时交接
+	progress.UnregisterTask("src_1", "req-test")
+	progress.MarkStopped("src_1")
+	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", State: false}, "", false); err == nil ||
+		err.Error() != "停用或删除主站前需指定新主站，或确认置空" {
+		t.Fatalf("disabling primary without handover err=%v", err)
 	}
+	// 交接目标必须是启用站：src_2 已停用，先重新启用
+	if err := srv.BatchUpdateFilmSourceState([]string{"src_2"}, true); err != nil {
+		t.Fatalf("re-enable src_2 err=%v", err)
+	}
+	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", State: false}, "src_2", false); err != nil {
+		t.Fatalf("disabling primary with handover should pass: %v", err)
+	}
+	waitSearchWorkIdle(t)
 	list, err = srv.GetFilmSourceList()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var primaryID string
+	primaryID := ""
 	for _, item := range list {
 		if item.IsPrimary {
 			primaryID = item.Id
 		}
 	}
-	if primaryID != "src_1" {
-		t.Fatalf("primary should fall back to src_1, got %+v", list)
+	if primaryID != "src_2" {
+		t.Fatalf("primary should hand over to src_2, got %s", primaryID)
 	}
 }
 
@@ -269,7 +393,7 @@ func TestCollectService_UpdateFilmSource_NameChange(t *testing.T) {
 	srv := &CollectService{}
 	sUpdate := s
 	sUpdate.Name = "新名称"
-	if err := srv.UpdateFilmSource(sUpdate); err != nil {
+	if err := srv.UpdateFilmSource(sUpdate, "", false); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
@@ -298,7 +422,7 @@ func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 
 	sUpdate := s
 	sUpdate.Format = model.SourceFormatXML
-	if err := srv.UpdateFilmSource(sUpdate); err != nil {
+	if err := srv.UpdateFilmSource(sUpdate, "", false); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 	var updated model.FilmSource
@@ -388,7 +512,7 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 	updateSlave1 := slave1
 	updateSlave1.Name = "附属站1重命名"
 	updateSlave1.CreatedAt = time.Time{} // 前端提交通常无 CreatedAt
-	if err := srv.UpdateFilmSource(updateSlave1); err != nil {
+	if err := srv.UpdateFilmSource(updateSlave1, "", false); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
@@ -463,7 +587,7 @@ func TestUpdateFilmSource_RejectsAddressChangeWhileSealing(t *testing.T) {
 
 	next := src
 	next.Uri = "https://new.example/api"
-	err := (&CollectService{}).UpdateFilmSource(next)
+	err := (&CollectService{}).UpdateFilmSource(next, "", false)
 	if err == nil || !strings.Contains(err.Error(), "待检索") {
 		t.Fatalf("err = %v", err)
 	}
@@ -477,7 +601,7 @@ func TestUpdateFilmSource_RejectsAddressChangeWhileSealing(t *testing.T) {
 
 	next = src
 	next.Name = "新名称"
-	if err := (&CollectService{}).UpdateFilmSource(next); err != nil {
+	if err := (&CollectService{}).UpdateFilmSource(next, "", false); err != nil {
 		t.Fatalf("改名应放行: %v", err)
 	}
 }
@@ -493,7 +617,7 @@ func TestTriggerDelFilmSource_RejectsWhileCollecting(t *testing.T) {
 	}
 	markSourceSealing(t, src.Id, src.Name)
 
-	err := (&CollectService{}).TriggerDelFilmSource(src.Id)
+	err := (&CollectService{}).TriggerDelFilmSource(src.Id, "", false)
 	if err == nil || err.Error() != "采集中，暂不可删除" {
 		t.Fatalf("err = %v", err)
 	}
@@ -506,5 +630,64 @@ func TestTriggerDelFilmSource_RejectsWhileCollecting(t *testing.T) {
 	}
 	if progress.IsSourceDeleting(src.Id) {
 		t.Fatal("拒绝后不应进入删除中")
+	}
+}
+
+// 验证启动缺分类补拉逻辑：只拉取已启用站点，跳过停用站，补拉成功后生成分类映射
+func TestSyncMissingSourceCategories_OnlyEnabledSources(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+
+	ts := mockCollectServer()
+	defer ts.Close()
+
+	// 1. 已停用站（缺分类）
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_disabled",
+		Name:  "停用站",
+		Uri:   ts.URL + "/disabled",
+		State: false,
+		Sort:  2,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. 已有分类的启用站
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_ready",
+		Name:  "已有分类站",
+		Uri:   ts.URL + "/ready",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_ready", SourceTypeId: 1, CategoryId: 10}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. 缺分类的启用站
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_missing_enabled",
+		Name:  "缺分类启用站",
+		Uri:   ts.URL + "/missing",
+		State: true,
+		Sort:  1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_ = repository.RefreshCollectSourceCatalog()
+
+	// 执行启动补拉
+	SpiderSvc.SyncMissingSourceCategories()
+
+	// 断言：启用站成功补齐了分类
+	if !repository.SourceHasCategoryMapping("src_missing_enabled") {
+		t.Fatal("missing enabled source should have category mapping after sync")
+	}
+
+	// 断言：停用站被完全跳过，不会被补拉
+	if repository.SourceHasCategoryMapping("src_disabled") {
+		t.Fatal("disabled source should NOT be synced")
 	}
 }

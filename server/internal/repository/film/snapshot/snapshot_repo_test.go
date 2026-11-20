@@ -12,8 +12,8 @@ import (
 	"server/internal/repository/film/cache"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -40,6 +40,16 @@ func setupSnapshotRepoTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate schema: %v", err)
 	}
 
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "source_master",
+		Name:  "主站",
+		Uri:   "https://example.com/source_master",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatalf("create primary source: %v", err)
+	}
+
 	origMdb := db.Mdb
 	origRdb := db.Rdb
 	db.Mdb = gdb
@@ -56,6 +66,42 @@ func setupSnapshotRepoTestDB(t *testing.T) *gorm.DB {
 	})
 
 	return gdb
+}
+
+func usePrimarySource(t *testing.T, gdb *gorm.DB, id string) {
+	t.Helper()
+	if err := gdb.Model(&model.FilmSource{}).Where("1 = 1").Update("sort", 100).Error; err != nil {
+		t.Fatalf("demote sources: %v", err)
+	}
+	if err := gdb.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
+		t.Fatalf("delete source: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id:    id,
+		Name:  id,
+		Uri:   "https://example.com/primary-" + id,
+		State: true,
+		Sort:  -1,
+	}).Error; err != nil {
+		t.Fatalf("create primary %s: %v", id, err)
+	}
+}
+
+func seedPrimaryOwned(t *testing.T, gdb *gorm.DB, mids []int64) {
+	t.Helper()
+	rows := make([]model.FilmIndex, 0, len(mids))
+	for _, mid := range mids {
+		rows = append(rows, model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid, FirstSourceId: "source_master"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "片"},
+		})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if err := gdb.CreateInBatches(rows, 500).Error; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func createTestFilm(t *testing.T, gdb *gorm.DB, mid int64, name string, updateStamp int64, playSummary string) {

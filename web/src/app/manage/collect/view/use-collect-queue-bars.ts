@@ -16,19 +16,30 @@ import type { FilmSource } from "./types";
 export function useCollectQueueBars(sites: FilmSource[], searchIndex?: SearchIndexProgress) {
   const { message } = useAppMessage();
   const [stoppingQueueId, setStoppingQueueId] = useState<string | null>(null);
-  const seqRef = useRef(new Map<string, number>());
-  const nextSeqRef = useRef(1);
+  const [queueSeqs, setQueueSeqs] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const groups = groupCollectQueues(sites);
+    setQueueSeqs((prev) => {
+      let nextSeq = Object.values(prev).reduce((max, s) => Math.max(max, s), 0) + 1;
+      let changed = false;
+      const next = { ...prev };
+      for (const group of groups) {
+        if (next[group.queueId] == null) {
+          next[group.queueId] = nextSeq++;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [sites]);
 
   const allBars = useMemo<CollectQueueBarItem[]>(
     () =>
-      groupCollectQueues(sites).flatMap((group) => {
+      groupCollectQueues(sites).flatMap((group, index) => {
         const view = computeCollectQueueProgress(group.sourceIds, sites);
         if (!view) return [];
-        let seq = seqRef.current.get(group.queueId);
-        if (seq == null) {
-          seq = nextSeqRef.current++;
-          seqRef.current.set(group.queueId, seq);
-        }
+        const seq = queueSeqs[group.queueId] ?? (index + 1);
         return [
           {
             queueId: group.queueId,
@@ -39,7 +50,7 @@ export function useCollectQueueBars(sites: FilmSource[], searchIndex?: SearchInd
           },
         ];
       }),
-    [sites],
+    [sites, queueSeqs],
   );
   const collectQueuesRunning = allBars.some((bar) => bar.view.running);
   const sealBar = useMemo(

@@ -92,7 +92,9 @@ export default function ManagePageView() {
 
       <CollectOverview onPrimaryChange={setPrimarySource} />
 
-      {Boolean(primarySource) && <InventoryStats primaryId={primarySource?.id} />}
+      {primarySource?.id ? (
+        <InventoryStats key={primarySource.id} primaryId={primarySource.id} />
+      ) : null}
 
       <Card
         className={styles.panelCard}

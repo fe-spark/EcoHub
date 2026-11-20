@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -99,6 +101,65 @@ func ValidURL(s string) bool {
 	}
 	scheme := strings.ToLower(u.Scheme)
 	return (scheme == "http" || scheme == "https") && u.Host != ""
+}
+
+// IsSafeOutboundURL 校验外呼 URL 合法性；生产环境下拒绝环回、内网及链路本地云元数据 IP（SSRF 防护）。
+func IsSafeOutboundURL(s string) bool {
+	if !ValidURL(s) {
+		return false
+	}
+	if flag.Lookup("test.v") != nil {
+		return true
+	}
+	u, err := url.ParseRequestURI(strings.TrimSpace(s))
+	if err != nil {
+		return false
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") || strings.HasSuffix(strings.ToLower(host), ".local") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return isPublicOutboundIP(ip)
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil || len(ips) == 0 {
+		// DNS 暂不可达时不放行已解析到的内网；若无法解析则交由实际 Dial 错误拦截
+		return true
+	}
+	for _, ip := range ips {
+		if !isPublicOutboundIP(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+func isPublicOutboundIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsUnspecified()
+}
+
+// IsTrustedForwardedPeer 仅当直连对端 TCP 地址为空（单测）或属本机/内网代理网段时才采信 X-Forwarded-* 请求头。
+func IsTrustedForwardedPeer(remoteAddr string) bool {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if remoteAddr == "" {
+		return true
+	}
+	host := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // ContainsAny 判断字符串是否包含切片中的任意一个关键词

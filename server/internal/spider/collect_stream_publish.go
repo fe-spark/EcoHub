@@ -49,7 +49,7 @@ func newStreamPublishBuffer() *streamPublishBuffer {
 }
 
 func lookupPreferredSourceID() string {
-	src := repository.GetActiveCollectSource()
+	src := repository.CurrentPrimarySource()
 	if src == nil {
 		return ""
 	}
@@ -301,7 +301,7 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	if takeMIDs != nil {
 		mids = takeMIDs()
 	}
-	scheduleSearchReseal(mids)
+	schedulePrimarySearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {

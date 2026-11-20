@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Table, Pagination, Alert, Spin } from "antd";
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { API_PRIMARY_MISMATCH, ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { usePrimarySource } from "@/lib/manage-primary";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import { useFilmColumns, type FilmItem } from "./film-columns";
 import { FilmFilterBar } from "./film-filter-bar";
@@ -30,8 +31,12 @@ function flattenCategoryNodes(nodes: any[]): any[] {
 
 export default function FilmListPageView() {
   const { canWrite } = useManagePermission();
+  const { primary, loading: primaryLoading, refresh: refreshPrimary } = usePrimarySource();
+  const primaryId = primary?.id || "";
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const urlSourceId = searchParams.get("sourceId")?.trim() || "";
+  const searchQuery = searchParams.toString();
   const [list, setList] = useState<FilmItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
@@ -41,30 +46,24 @@ export default function FilmListPageView() {
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
   const [params, setParams] = useState<any>({
     name: "",
-    sourceId: "",
     pid: 0,
     cid: 0,
     beginTime: "",
     endTime: "",
   });
-  const [tableSourceId, setTableSourceId] = useState<string>("");
   const [options, setOptions] = useState<any>({
-    sources: [],
-    defaultSourceId: "",
-    currentSourceId: "",
+    primarySourceId: "",
     class: [],
     categoryTree: [],
   });
   const [classId, setClassId] = useState<number>(0);
   const [categoryLoading, setCategoryLoading] = useState(false);
   const [treeExpandedKeys, setTreeExpandedKeys] = useState<(string | number)[]>([]);
-  const sourceReqSeqRef = useRef(0);
   const [dateRange, setDateRange] = useState<any>(null);
   const { message } = useAppMessage();
 
   const [filmDrawerOpen, setFilmDrawerOpen] = useState(false);
   const [editingFilmId, setEditingFilmId] = useState<number | null>(null);
-  const [modalDefaultSourceId, setModalDefaultSourceId] = useState<string>("");
   const [modalDefaultCid, setModalDefaultCid] = useState<number | undefined>(undefined);
   const [indexing, setIndexing] = useState(false);
   const [indexingProgress, setIndexingProgress] = useState<{
@@ -93,28 +92,58 @@ export default function FilmListPageView() {
   const notifyFilmError = useCallback((text: string) => {
     message.error(text);
   }, [message]);
+  const handlePrimaryMismatch = useCallback(() => {
+    message.warning("主站已变更，正在刷新影片列表");
+    void refreshPrimary();
+  }, [message, refreshPrimary]);
   const getFilmPage = useFilmList({
     page,
     params,
     setLoading,
     setList,
     setPage,
-    setParams,
-    setTableSourceId,
+    primarySourceId: primaryId,
+    onPrimaryMismatch: handlePrimaryMismatch,
     setIndexing,
     setIndexingProgress,
     notifyError: notifyFilmError,
   });
 
   useEffect(() => {
+    if (!searchQuery) return;
+    const query = new URLSearchParams(searchQuery);
+    if (!query.has("sourceId")) return;
+    query.delete("sourceId");
+    const next = query.toString();
+    router.replace(`${pathname}${next ? `?${next}` : ""}`);
+  }, [pathname, router, searchQuery]);
+
+  useEffect(() => {
+    if (primaryLoading) return;
     let cancelled = false;
     (async () => {
+      if (!primaryId) {
+        setList([]);
+        setSelectedRowKeys([]);
+        setClassId(0);
+        setDateRange(null);
+        setPage((prev) => ({ ...prev, current: 1, total: 0 }));
+        setOptions({ primarySourceId: "", class: [], categoryTree: [] });
+        setCategoryLoading(false);
+        return;
+      }
+      setSelectedRowKeys([]);
+      setClassId(0);
+      setDateRange(null);
+      setIndexing(false);
+      setIndexingProgress(null);
+      setList([]);
+      setOptions({ primarySourceId: primaryId, class: [], categoryTree: [] });
       setCategoryLoading(true);
       try {
-        const resp = await ApiGet("/manage/film/search/options", { sourceId: urlSourceId });
+        const resp = await ApiGet("/manage/film/search/options");
         const nextParams = {
           name: "",
-          sourceId: urlSourceId,
           pid: 0,
           cid: 0,
           beginTime: "",
@@ -125,11 +154,15 @@ export default function FilmListPageView() {
           message.error(resp.msg || "筛选项获取失败");
           return;
         }
+        if (
+          typeof resp.data.primarySourceId === "string" &&
+          resp.data.primarySourceId !== primaryId
+        ) {
+          void refreshPrimary();
+          return;
+        }
         setOptions(resp.data);
-        const resolvedSourceId = resp.data.currentSourceId || urlSourceId || resp.data.defaultSourceId || "";
-        nextParams.sourceId = resolvedSourceId;
         setParams(nextParams);
-        setTableSourceId(resolvedSourceId);
         await getFilmPage({ current: 1, pageSize: page.pageSize || 10, total: 0 }, nextParams);
       } finally {
         if (!cancelled) setCategoryLoading(false);
@@ -139,42 +172,7 @@ export default function FilmListPageView() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlSourceId]);
-
-  const handleSourceChange = async (value?: string) => {
-    setSelectedRowKeys([]);
-    const nextSourceId = value || "";
-    setParams((prev: any) => ({
-      ...prev,
-      sourceId: nextSourceId,
-      pid: 0,
-      cid: 0,
-    }));
-    setClassId(0);
-    setCategoryLoading(true);
-    const seq = ++sourceReqSeqRef.current;
-
-    try {
-      const resp = await ApiGet("/manage/film/search/options", {
-        sourceId: nextSourceId,
-      });
-      if (seq !== sourceReqSeqRef.current) return;
-      if (resp.code !== 0 || !resp.data) {
-        message.error(resp.msg || "筛选项获取失败");
-        return;
-      }
-      setOptions((prev: any) => ({
-        ...prev,
-        ...resp.data,
-      }));
-    } catch {
-      if (seq === sourceReqSeqRef.current) message.error("筛选项获取失败");
-    } finally {
-      if (seq === sourceReqSeqRef.current) {
-        setCategoryLoading(false);
-      }
-    }
-  };
+  }, [primaryId, primaryLoading]);
 
   const handleClassChange = (value?: number) => {
     const val = value || 0;
@@ -214,13 +212,8 @@ export default function FilmListPageView() {
 
   const onReset = () => {
     setSelectedRowKeys([]);
-    const defaultSrc =
-      options.defaultSourceId ||
-      options.sources?.[0]?.id ||
-      "";
     const emptyParams = {
       name: "",
-      sourceId: defaultSrc,
       pid: 0,
       cid: 0,
       beginTime: "",
@@ -242,11 +235,14 @@ export default function FilmListPageView() {
         setSyncingIds((prev) => [...prev, ids[0]]);
       }
       try {
-        const resp = await ApiPost("/manage/film/refresh", { ids });
+        const resp = await ApiPost("/manage/film/refresh", { ids, sourceId: primaryId });
         if (resp.code === 0) {
           message.success(resp.msg || "更新任务已开启");
           setSelectedRowKeys((prev) => prev.filter((k) => !ids.includes(Number(k))));
           getFilmPage();
+        } else if (resp.code === API_PRIMARY_MISMATCH) {
+          message.warning(resp.msg || "主站已变更，请刷新后重试");
+          void refreshPrimary();
         } else {
           message.error(resp.msg || "更新失败");
         }
@@ -259,7 +255,7 @@ export default function FilmListPageView() {
         }
       }
     },
-    [getFilmPage, message],
+    [getFilmPage, message, primaryId, refreshPrimary],
   );
 
   const handleDelFilms = useCallback(
@@ -267,11 +263,14 @@ export default function FilmListPageView() {
       if (!ids.length) return;
       setDeleting(true);
       try {
-        const resp = await ApiPost("/manage/film/delete", { ids });
+        const resp = await ApiPost("/manage/film/delete", { ids, sourceId: primaryId });
         if (resp.code === 0) {
           message.success(resp.msg || "影片删除成功");
           setSelectedRowKeys((prev) => prev.filter((k) => !ids.includes(Number(k))));
           getFilmPage();
+        } else if (resp.code === API_PRIMARY_MISMATCH) {
+          message.warning(resp.msg || "主站已变更，请刷新后重试");
+          void refreshPrimary();
         } else {
           message.error(resp.msg || "删除失败");
         }
@@ -279,7 +278,7 @@ export default function FilmListPageView() {
         setDeleting(false);
       }
     },
-    [getFilmPage, message],
+    [getFilmPage, message, primaryId, refreshPrimary],
   );
 
   const columns = useFilmColumns({
@@ -292,7 +291,7 @@ export default function FilmListPageView() {
       setEditingFilmId(mid);
       setFilmDrawerOpen(true);
     },
-    activeSourceId: tableSourceId || params.sourceId,
+    activeSourceId: primaryId,
   });
 
   const categoryTreeData = useMemo(() => {
@@ -321,11 +320,9 @@ export default function FilmListPageView() {
       <FilmFilterBar
         params={params}
         setParams={setParams}
-        options={options}
         classId={classId}
         dateRange={dateRange}
         setDateRange={setDateRange}
-        handleSourceChange={handleSourceChange}
         handleClassChange={handleClassChange}
         onSearch={onSearch}
         onReset={onReset}
@@ -380,7 +377,7 @@ export default function FilmListPageView() {
         title={() => (
           <FilmBatchBar
             selectedCount={selectedRowKeys.length}
-            canWrite={canWrite}
+            canWrite={canWrite && Boolean(primaryId)}
             updating={updating}
             deleting={deleting}
             onBatchUpdate={async () => {
@@ -395,15 +392,8 @@ export default function FilmListPageView() {
             }}
             onClearSelection={() => setSelectedRowKeys([])}
             onAdd={() => {
-              const targetSourceId =
-                params.sourceId ||
-                tableSourceId ||
-                options.defaultSourceId ||
-                options.sources?.[0]?.id ||
-                "";
               const targetCid = classId || params.cid || params.pid || undefined;
               setEditingFilmId(null);
-              setModalDefaultSourceId(targetSourceId);
               setModalDefaultCid(targetCid);
               setFilmDrawerOpen(true);
             }}
@@ -433,7 +423,6 @@ export default function FilmListPageView() {
       <FilmDrawer
         open={filmDrawerOpen}
         filmId={editingFilmId}
-        defaultSourceId={modalDefaultSourceId}
         defaultCid={modalDefaultCid}
         onClose={() => setFilmDrawerOpen(false)}
         onSuccess={() => {

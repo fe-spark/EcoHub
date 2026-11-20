@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"server/internal/model"
@@ -17,12 +17,11 @@ type FilmHandler struct{}
 
 var FilmHd = new(FilmHandler)
 
-// FilmSearchPage 获取影视分页数据
+// FilmSearchPage 获取影视分页数据（D3：读请求忽略 sourceId，固定当前主站）
 func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	var s = model.SearchVo{Paging: &dto.Page{}}
 	var err error
 
-	s.SourceId = strings.TrimSpace(c.DefaultQuery("sourceId", ""))
 	s.Name = c.DefaultQuery("name", "")
 	s.Pid, err = strconv.ParseInt(c.DefaultQuery("pid", "0"), 10, 64)
 	if err != nil {
@@ -72,6 +71,12 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	}
 
 	s.Paging = dto.GetPageParams(c)
+	// D3：读请求忽略 sourceId，固定当前主站并在响应中回显
+	if primary := service.CollectSvc.CurrentPrimary(); primary != nil {
+		s.SourceId = primary.Id
+	} else {
+		s.SourceId = ""
+	}
 	sl, err := service.FilmSvc.GetFilmPage(&s)
 	if err != nil {
 		dto.Failed(err.Error(), c)
@@ -80,16 +85,16 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	indexing, indexingProgress := service.FilmSvc.SearchIndexState()
 	dto.Success(gin.H{
 		"params":           s,
+		"primarySourceId":  s.SourceId,
 		"list":             sl,
 		"indexing":         indexing,
 		"indexingProgress": indexingProgress,
 	}, "影片分页信息获取成功", c)
 }
 
-// FilmSearchOptions 获取影片检索筛选项（按 sourceId 联动返回对应站点的分类树与配置项）
+// FilmSearchOptions 获取影片检索筛选项（固定主站，忽略 sourceId，D3）
 func (h *FilmHandler) FilmSearchOptions(c *gin.Context) {
-	sourceId := strings.TrimSpace(c.DefaultQuery("sourceId", ""))
-	options, err := service.FilmSvc.GetSearchOptions(sourceId)
+	options, err := service.FilmSvc.GetSearchOptions()
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
@@ -106,6 +111,10 @@ func (h *FilmHandler) FilmSave(c *gin.Context) {
 	}
 
 	if err := service.FilmSvc.SaveFilmDetail(fd); err != nil {
+		if errors.Is(err, service.ErrPrimaryMismatch) {
+			dto.PrimaryMismatch(c)
+			return
+		}
 		dto.Failed(fmt.Sprint("影片保存失败, 影片信息保存错误: ", err.Error()), c)
 		return
 	}
@@ -115,7 +124,8 @@ func (h *FilmHandler) FilmSave(c *gin.Context) {
 // FilmDelete 删除影片检索信息（兼容单个与批量）
 func (h *FilmHandler) FilmDelete(c *gin.Context) {
 	var req struct {
-		Ids []int64 `json:"ids"`
+		Ids      []int64 `json:"ids"`
+		SourceId string  `json:"sourceId"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数格式异常", c)
@@ -126,7 +136,11 @@ func (h *FilmHandler) FilmDelete(c *gin.Context) {
 		return
 	}
 
-	if err := service.FilmSvc.DelFilms(req.Ids); err != nil {
+	if err := service.FilmSvc.DeletePrimaryFilms(req.Ids, req.SourceId); err != nil {
+		if errors.Is(err, service.ErrPrimaryMismatch) {
+			dto.PrimaryMismatch(c)
+			return
+		}
 		dto.Failed("删除失败: "+err.Error(), c)
 		return
 	}
@@ -135,16 +149,16 @@ func (h *FilmHandler) FilmDelete(c *gin.Context) {
 
 // ----------------------------------------------------影片分类处理----------------------------------------------------
 
-// FilmClassTree 影片分类树数据。scoped=1 时只返回指定采集站的分类，并带上站点选项。
+// FilmClassTree 影片分类树数据固定当前主站。scoped=1 时兼容返回采集站选项供分类规则页使用（D2）。
 func (h *FilmHandler) FilmClassTree(c *gin.Context) {
-	if c.Query("scoped") != "1" {
-		tree := service.FilmSvc.GetFilmClassTree()
-		dto.Success(tree, "影片分类信息获取成功", c)
-		return
-	}
-	view, err := service.FilmSvc.GetScopedClassTree(c.Query("sourceId"))
+	view, err := service.FilmSvc.GetPrimaryClassTree()
 	if err != nil {
 		dto.Failed(err.Error(), c)
+		return
+	}
+	c.Header("X-Primary-Source-ID", view.CurrentSourceId)
+	if c.Query("scoped") != "1" {
+		dto.Success(view.Tree, "影片分类信息获取成功", c)
 		return
 	}
 	sources := make([]gin.H, 0, len(view.Sources))
@@ -160,13 +174,15 @@ func (h *FilmHandler) FilmClassTree(c *gin.Context) {
 		"sources":         sources,
 		"defaultSourceId": view.DefaultSourceId,
 		"currentSourceId": view.CurrentSourceId,
+		"primarySourceId": view.CurrentSourceId,
 	}, "影片分类信息获取成功", c)
 }
 
 // FilmRefresh 批量重新采集指定影片
 func (h *FilmHandler) FilmRefresh(c *gin.Context) {
 	var req struct {
-		Ids []int64 `json:"ids"`
+		Ids      []int64 `json:"ids"`
+		SourceId string  `json:"sourceId"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数格式异常", c)
@@ -182,7 +198,14 @@ func (h *FilmHandler) FilmRefresh(c *gin.Context) {
 		dto.Failed("缺少影片 ID", c)
 		return
 	}
-	service.SpiderSvc.CollectFilms(cleanIds)
+	if err := service.FilmSvc.RefreshPrimaryFilms(cleanIds, req.SourceId); err != nil {
+		if errors.Is(err, service.ErrPrimaryMismatch) {
+			dto.PrimaryMismatch(c)
+			return
+		}
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.SuccessOnlyMsg("更新任务已开启", c)
 }
 
@@ -199,13 +222,13 @@ func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 		dto.Failed("保存失败, 分类结构不能为空", c)
 		return
 	}
-	var err error
-	if strings.TrimSpace(req.SourceId) != "" {
-		err = service.FilmSvc.SaveSourceClassTree(req.SourceId, req.Children)
-	} else {
-		err = service.FilmSvc.SaveClassTree(req.Children)
-	}
+	// D2：展示树只保存主站；空 sourceId 视为主站，非主站返回 409
+	err := service.FilmSvc.SaveSourceClassTree(req.SourceId, req.Children)
 	if err != nil {
+		if errors.Is(err, service.ErrPrimaryMismatch) {
+			dto.PrimaryMismatch(c)
+			return
+		}
 		dto.Failed(err.Error(), c)
 		return
 	}

@@ -56,9 +56,11 @@ export interface RuleMergePreview {
   keep: RulePreviewHit[];
 }
 
+export const ALL_CATEGORY_GROUP = "CategoryAll";
 export const ROOT_GROUP = "CategoryRoot";
 export const SUB_GROUP = "CategorySub";
 export const CATEGORY_GROUPS = [ROOT_GROUP, SUB_GROUP];
+export const CATEGORY_FILTER_GROUPS = [ALL_CATEGORY_GROUP, ROOT_GROUP, SUB_GROUP];
 
 export const emptyRuleMergePreview: RuleMergePreview = {
   loading: false,
@@ -71,6 +73,7 @@ export const emptyRuleMergePreview: RuleMergePreview = {
 };
 
 const groupLabelMap: Record<string, string> = {
+  [ALL_CATEGORY_GROUP]: "全部分组",
   [ROOT_GROUP]: "一级分类规则",
   [SUB_GROUP]: "二级分类规则",
 };

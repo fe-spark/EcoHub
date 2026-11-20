@@ -494,3 +494,35 @@ func TestCollectPages_WriteFailureDoesNotInterrupt(t *testing.T) {
 		t.Fatalf("requested %d pages, want 25", uniquePages(pages))
 	}
 }
+
+func TestFetchStreak_AbandonAfterPauseWakesAndStopsBlockedWorker(t *testing.T) {
+	st, cancel := newFetchStreak(context.Background(), "test-streak")
+	defer cancel()
+	// 模拟已发生过 1 次限流暂停且恢复：paused=true, pausing=false, holdIntake=true, inFlight=1
+	if !st.tryBegin() {
+		t.Fatal("initial tryBegin failed")
+	}
+	st.mu.Lock()
+	st.paused = true
+	st.pausing = false
+	st.holdIntake = true
+	st.mu.Unlock()
+
+	blockedDone := make(chan bool, 1)
+	go func() {
+		blockedDone <- st.tryBegin()
+	}()
+	time.Sleep(20 * time.Millisecond)
+
+	if shouldStop := st.abandon(); !shouldStop {
+		t.Fatal("expected abandon() to signal stop when last inFlight drains while holdIntake && paused")
+	}
+	select {
+	case ok := <-blockedDone:
+		if ok {
+			t.Fatal("expected blocked worker tryBegin() to return false cleanly")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("tryBegin() remained deadlocked after last worker abandon()")
+	}
+}

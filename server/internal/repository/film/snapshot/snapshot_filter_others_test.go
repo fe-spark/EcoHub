@@ -29,12 +29,27 @@ func setupOthersFilterTestDB(t *testing.T) *gorm.DB {
 		&model.SearchTagItem{},
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
+		&model.FilmSource{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{
+		Id: "source_master", Name: "主站", Uri: "https://example.com/source_master", State: true,
+	}).Error; err != nil {
+		t.Fatalf("create primary: %v", err)
 	}
 	db.Mdb = gdb
 	db.Rdb = nil
 	return gdb
+}
+
+func asPrimarySnaps(snaps []model.FilmListSnapshot) []model.FilmListSnapshot {
+	for i := range snaps {
+		if snaps[i].SourceId == "" {
+			snaps[i].SourceId = "source_master"
+		}
+	}
+	return snaps
 }
 
 func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
@@ -97,7 +112,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 			Name: "混合剧情片", Area: "美国", Language: "普通话", Year: 2024, ClassTag: "动作,科幻",
 		},
 	}
-	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+	if err := WriteLiveFilmsFromSnapshots(asPrimarySnaps(snapshots)); err != nil {
 		t.Fatalf("seed live films: %v", err)
 	}
 
@@ -237,7 +252,7 @@ func TestListFilmSnapshotsByTags_OthersFilter_OverDisplayLimit(t *testing.T) {
 		{SnapshotVersion: version, Mid: 2, Pid: targetPid, Name: "展示区外影片", Area: "巴西"},
 		{SnapshotVersion: version, Mid: 3, Pid: targetPid, Name: "展示区外影片二", Area: "加拿大"},
 	}
-	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+	if err := WriteLiveFilmsFromSnapshots(asPrimarySnaps(snapshots)); err != nil {
 		t.Fatalf("seed live films: %v", err)
 	}
 
@@ -275,6 +290,7 @@ func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
 		s := model.FilmListSnapshot{
 			SnapshotVersion: version,
 			Mid:             int64(i),
+			SourceId:        "source_master",
 			Pid:             targetPid,
 			Name:            fmt.Sprintf("电影_%d", i),
 			UpdateStamp:     int64(1000 + i),

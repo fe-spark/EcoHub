@@ -310,15 +310,15 @@ func TestXmlCollect_MixedShareAndVideoLink(t *testing.T) {
 		t.Fatalf("expected 1 detail, got %d", len(details))
 	}
 	movie := details[0]
-	// 网盘非直链必须被过滤，PlayFrom 与 PlayList 必须严格对应且长度均为 1
-	if len(movie.PlayFrom) != 1 {
-		t.Fatalf("expected 1 playFrom source (share skipped), got %d (%v)", len(movie.PlayFrom), movie.PlayFrom)
+	// 支持直链及需嗅探的网络链接入库，PlayFrom 与 PlayList 必须严格一一对应
+	if len(movie.PlayFrom) != 2 {
+		t.Fatalf("expected 2 playFrom sources, got %d (%v)", len(movie.PlayFrom), movie.PlayFrom)
 	}
-	if len(movie.PlayList) != 1 {
-		t.Fatalf("expected 1 playList group, got %d", len(movie.PlayList))
+	if len(movie.PlayList) != 2 {
+		t.Fatalf("expected 2 playList groups, got %d", len(movie.PlayList))
 	}
-	if movie.PlayFrom[0] != "m3u8" {
-		t.Errorf("expected playFrom to be [m3u8], got %v", movie.PlayFrom)
+	if movie.PlayFrom[0] != "quark" || movie.PlayFrom[1] != "m3u8" {
+		t.Errorf("expected playFrom to be [quark, m3u8], got %v", movie.PlayFrom)
 	}
 }
 

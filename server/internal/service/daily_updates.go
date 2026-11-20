@@ -98,7 +98,7 @@ func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]in
 func (i *IndexService) DailyUpdates(req DailyUpdateListReq) (*DailyUpdateResult, error) {
 	req = normalizeDailyUpdateReq(req)
 	if req.SourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
+		if active := repository.CurrentPrimarySource(); active != nil {
 			req.SourceId = active.Id
 		}
 	}

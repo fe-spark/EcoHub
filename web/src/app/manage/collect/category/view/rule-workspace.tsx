@@ -16,6 +16,8 @@ import {
 import RuleEditorDrawer from "./rule-editor-drawer";
 import styles from "./index.module.less";
 import {
+  ALL_CATEGORY_GROUP,
+  CATEGORY_FILTER_GROUPS,
   CATEGORY_GROUPS,
   emptyRuleMergePreview,
   ROOT_GROUP,
@@ -37,7 +39,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   const { ruleTotals, onRuleTotalsChange } = props;
   const { canWrite } = useManagePermission();
   const { message } = useAppMessage();
-  const [ruleGroup, setRuleGroup] = useState<string>(ROOT_GROUP);
+  const [ruleGroup, setRuleGroup] = useState<string>(ALL_CATEGORY_GROUP);
   const [keyword, setKeyword] = useState("");
   const [rulesLoading, setRulesLoading] = useState(false);
   const [rulesSubmitting, setRulesSubmitting] = useState(false);
@@ -185,7 +187,8 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       });
       return;
     }
-    ruleForm.setFieldsValue({ group: ruleGroup || ROOT_GROUP, raw: "", target: "", matchType: "exact", remarks: "" });
+    const defaultGroup = ruleGroup === ALL_CATEGORY_GROUP ? ROOT_GROUP : ruleGroup;
+    ruleForm.setFieldsValue({ group: defaultGroup, raw: "", target: "", matchType: "exact", remarks: "" });
   };
 
   const handleRuleSubmit = async () => {
@@ -211,7 +214,13 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       }
       message.success(resp.msg || "分类规则已保存");
       closeRuleEditor();
-      await Promise.all([fetchRules(paging.current, paging.pageSize, keyword, ruleGroup, sourceId), fetchRuleTotals(sourceId)]);
+      // 若当前仅筛选了另一规则分组，自动切换到所保存的分组以免刚新增的规则被过滤隐藏
+      const nextGroup =
+        ruleGroup !== ALL_CATEGORY_GROUP && ruleGroup !== values.group ? values.group : ruleGroup;
+      if (nextGroup !== ruleGroup) {
+        setRuleGroup(nextGroup);
+      }
+      await Promise.all([fetchRules(1, paging.pageSize, keyword, nextGroup, sourceId), fetchRuleTotals(sourceId)]);
     } finally {
       setRulesSubmitting(false);
     }
@@ -329,7 +338,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         </div>
         <Select
           value={ruleGroup}
-          options={CATEGORY_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
+          options={CATEGORY_FILTER_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
           onChange={(value) => setRuleGroup(value)}
           className={styles.groupSelect}
         />
@@ -348,9 +357,8 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
           icon={<ReloadOutlined />}
           onClick={() => {
             setKeyword("");
-            const defaultGroup = CATEGORY_GROUPS[0] || "all";
-            setRuleGroup(defaultGroup);
-            void fetchRules(1, paging.pageSize, "", defaultGroup, sourceId);
+            setRuleGroup(ALL_CATEGORY_GROUP);
+            void fetchRules(1, paging.pageSize, "", ALL_CATEGORY_GROUP, sourceId);
           }}
         >
           重置

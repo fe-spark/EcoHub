@@ -16,8 +16,7 @@ import { positiveQuotas } from "./banner-quick-recipe";
 
 interface BannerQuickModalProps {
   open: boolean;
-  sourceId: string;
-  // 该站上次排片用的配置；没有时用默认值。
+  // 当前主站上次排片用的配置；没有时用默认值。
   lastConfig?: QuickConfigMemo;
   onRemember: (config: QuickConfigMemo) => void;
   onClose: () => void;
@@ -30,7 +29,6 @@ const DEFAULT_COUNT = 1;
 
 export default function BannerQuickModal({
   open,
-  sourceId,
   lastConfig,
   onRemember,
   onClose,
@@ -57,7 +55,7 @@ export default function BannerQuickModal({
     setRunning(false);
   };
 
-  // 每次打开都重新读该站分类。已有分类沿用上次的数量，新分类用默认值，已不存在的分类丢掉。
+  // 每次打开都重新读当前主站分类。
   useEffect(() => {
     if (!open) {
       abortRunning();
@@ -69,7 +67,7 @@ export default function BannerQuickModal({
     setStrategy(memo?.strategy ?? DEFAULT_STRATEGY);
     setCategories([]);
     setLoadingCategories(true);
-    ApiGet("/categories", { sourceId: sourceId || undefined })
+    ApiGet("/categories")
       .then((resp) => {
         if (cancelled) return;
         const nav: CategoryQuotaItem[] =
@@ -97,7 +95,7 @@ export default function BannerQuickModal({
     return () => {
       cancelled = true;
     };
-  }, [open, sourceId]);
+  }, [open]);
 
   // 组件卸载时中止仍在进行的排片。
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -120,7 +118,7 @@ export default function BannerQuickModal({
     try {
       const resp = await ApiPost<BannerGenerateResult>(
         "/manage/banners/generate",
-        { sourceId, strategy: runStrategy, quotas },
+        { strategy: runStrategy, quotas },
         { signal: controller.signal },
       );
       if (abortRef.current !== controller) return;

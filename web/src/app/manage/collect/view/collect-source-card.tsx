@@ -8,7 +8,7 @@ import {
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { FilmSource } from "./types";
-import { collectIndexUpdatingReason } from "./collect-selection";
+import { collectIndexUpdatingReason, isSourceSelectable } from "./collect-selection";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
 import CollectSourceCardMeta from "./collect-source-card-meta";
@@ -78,7 +78,8 @@ export default function CollectSourceCard({
   const sealing = phase === "sealing";
   // 抓页、停止收尾、待检索都算这次采集还没结束。
   const busy = isRunning || isStopping || sealing;
-  const { canWrite } = useManagePermission();
+  const { canWrite, isAdmin } = useManagePermission();
+  const primaryProtected = Boolean(record.isPrimary && !isAdmin);
   const resolved = resolveSourceStatus(record, active || isStopping, isDeleting);
   const statusLabel = resolved.label;
   const statusTone = resolved.tone;
@@ -141,7 +142,7 @@ export default function CollectSourceCard({
         >
           <Checkbox
             checked={selected}
-            disabled={isDeleting || Boolean(record.categorySyncing)}
+            disabled={!isSourceSelectable(record) || busy}
             onChange={(event) => onSelect(record.id, event.target.checked)}
           />
         </span>
@@ -190,10 +191,29 @@ export default function CollectSourceCard({
               {statusLabel}
             </span>
           )}
-          <Tooltip title={!canWrite ? "无操作权限" : busy ? "任务运行中不可切换" : record.state ? "点击禁用采集站" : "点击启用采集站"}>
+          <Tooltip
+            title={
+              !canWrite
+                ? "无操作权限"
+                : primaryProtected && record.state
+                  ? "仅超级管理员可操作"
+                  : busy
+                    ? "任务运行中不可切换"
+                    : record.state
+                      ? "点击禁用采集站"
+                      : "点击启用采集站"
+            }
+          >
             <Switch
               checked={Boolean(record.state)}
-              disabled={!canWrite || isDeleting || busy || toggling}
+              disabled={
+                !canWrite ||
+                (Boolean(record.state) && primaryProtected) ||
+                isDeleting ||
+                busy ||
+                toggling ||
+                Boolean(record.categorySyncing)
+              }
               loading={toggling}
               checkedChildren="启用"
               unCheckedChildren="禁用"
@@ -317,16 +337,16 @@ export default function CollectSourceCard({
               okText="删除"
               cancelText="取消"
               okButtonProps={{ danger: true, loading: isDeleting }}
-              disabled={!canWrite || isDeleting || busy}
+              disabled={!canWrite || primaryProtected || isDeleting || busy || Boolean(record.categorySyncing)}
               onConfirm={() => onDeleteSource(record.id)}
             >
-              <Tooltip title={busy ? "采集中" : undefined}>
+              <Tooltip title={primaryProtected ? "仅超级管理员可操作" : busy ? "采集中" : undefined}>
                 <span>
                   <Button
                     danger
                     icon={<DeleteOutlined />}
                     loading={isDeleting}
-                    disabled={!canWrite || isDeleting || busy}
+                    disabled={!canWrite || primaryProtected || isDeleting || busy}
                   />
                 </span>
               </Tooltip>

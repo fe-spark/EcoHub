@@ -3,40 +3,53 @@ package repository
 import (
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 )
 
-var collectSourceCatalog atomic.Pointer[[]model.FilmSource]
+var (
+	collectSourceCatalog atomic.Pointer[[]model.FilmSource]
+	collectCatalogMu     sync.Mutex
+)
 
 // RefreshCollectSourceCatalog 用当前库里的采集站覆盖内存目录。查询失败保留原目录。
 func RefreshCollectSourceCatalog() error {
 	if db.Mdb == nil {
 		return errors.New("采集站目录刷新失败")
 	}
+	collectCatalogMu.Lock()
+	defer collectCatalogMu.Unlock()
 	list := make([]model.FilmSource, 0)
 	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		return err
 	}
 	collectSourceCatalog.Store(&list)
+	support.InvalidatePrimarySourceCache()
 	return nil
 }
 
 // forgetCollectSource 站点行已经删掉、目录重读失败时，从当前目录摘掉这一条。
 func forgetCollectSource(id string) {
-	cur := collectSourceCatalog.Load()
-	if cur == nil {
-		return
-	}
-	next := make([]model.FilmSource, 0, len(*cur))
-	for _, src := range *cur {
-		if src.Id != id {
-			next = append(next, src)
+	support.InvalidatePrimarySourceCache()
+	for {
+		cur := collectSourceCatalog.Load()
+		if cur == nil {
+			return
+		}
+		next := make([]model.FilmSource, 0, len(*cur))
+		for _, src := range *cur {
+			if src.Id != id {
+				next = append(next, src)
+			}
+		}
+		if collectSourceCatalog.CompareAndSwap(cur, &next) {
+			return
 		}
 	}
-	collectSourceCatalog.CompareAndSwap(cur, &next)
 }
 
 // FindCollectSourceForDelete 只查内存目录。目录还没装过时先装一次。

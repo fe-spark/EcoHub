@@ -50,6 +50,11 @@ var migrations = []Migration{
 		Name:    "采集记录改为账单，清空后按新表重建",
 		Run:     migrateCollectRecordReset,
 	},
+	{
+		Version: "20261118_film_index_dedup",
+		Name:    "清理 film_index 历史重复与残缺冗余索引",
+		Run:     migrateFilmIndexDedup,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

@@ -65,6 +65,7 @@ func ClearCategoryCache() {
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 	}
+	InvalidatePublicSourceCache()
 	RefreshCategoryCache()
 }
 
@@ -74,7 +75,12 @@ func MarkCategoryChanged() {
 	touchCategoryVersion()
 	support.TouchSearchTagsVersion()
 	ClearIndexPageCache()
-	filmcache.ClearPatterns(config.FilmRelatePrefix + ":*")
+	filmcache.ClearPatterns(
+		config.FilmRelatePrefix+":*",
+		config.FilmClassifyCacheKey+":*",
+		config.FilmCategoryCachePrefix+":*",
+		config.FilmCategoryPageCachePrefix+":*",
+	)
 }
 
 // SourceHasCategoryMapping 该采集站是否已经有分类映射。没有映射时入库写不出本地 pid。
@@ -130,6 +136,9 @@ func ClearSourceCategoryDataTx(tx *gorm.DB, sourceID string) error {
 		return err
 	}
 	if err := DeleteMappingRulesBySourceTx(tx, sourceID); err != nil {
+		return err
+	}
+	if err := tx.Where("stable_key LIKE ?", syntheticRootPrefix(sourceID)+"%").Delete(&model.Category{}).Error; err != nil {
 		return err
 	}
 	if len(categoryIDs) == 0 {

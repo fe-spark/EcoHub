@@ -379,3 +379,23 @@ func TestDeleteMatchingAccessRedisKeys_ScanError(t *testing.T) {
 		t.Fatalf("expected 0 deleted keys on scan error, got %d", deleted)
 	}
 }
+
+func TestClearAccessData_InvalidatesOverviewCache(t *testing.T) {
+	_, cleanup := setupTestRedisAndDB(t)
+	defer cleanup()
+
+	today := time.Now().In(time.Local).Format("20060102")
+	_ = db.Rdb.HSet(db.Cxt, dayAggKey(today), "pv", 10).Err()
+
+	ov1, err := QueryOverviewScope("", "", "")
+	if err != nil || ov1.PV != 10 {
+		t.Fatalf("expected initial PV=10, got ov=%+v err=%v", ov1, err)
+	}
+	if _, err := ClearAccessData(0); err != nil {
+		t.Fatalf("ClearAccessData failed: %v", err)
+	}
+	ov2, err := QueryOverviewScope("", "", "")
+	if err != nil || ov2.PV != 0 {
+		t.Fatalf("expected overviewCache invalidated and PV=0 after clear, got ov=%+v err=%v", ov2, err)
+	}
+}

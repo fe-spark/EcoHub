@@ -1,11 +1,9 @@
 "use client";
 
-import React from "react";
 import {
   Tag,
   Form,
   Input,
-  Select,
   TreeSelect,
   Switch,
   Space,
@@ -30,8 +28,6 @@ import styles from "./index.module.less";
 
 interface FilmBasicSectionProps {
   form: FormInstance;
-  filmId?: number | null;
-  sources: { id: string; name: string; state?: boolean }[];
   categoryTreeData: any[];
   categoryLoading: boolean;
   tmdbEnabled: boolean;
@@ -44,7 +40,6 @@ interface FilmBasicSectionProps {
   onUndoTmdb: () => void;
   onOpenPicker: () => void;
   onCustomUpload: (options: any) => Promise<void>;
-  onSourceChange: (sourceId: string) => void;
   onClassChange: (cid: any) => void;
 }
 
@@ -52,8 +47,6 @@ const { Text } = Typography;
 
 export default function FilmBasicSection({
   form,
-  filmId,
-  sources,
   categoryTreeData,
   categoryLoading,
   tmdbEnabled,
@@ -66,16 +59,8 @@ export default function FilmBasicSection({
   onUndoTmdb,
   onOpenPicker,
   onCustomUpload,
-  onSourceChange,
   onClassChange,
 }: FilmBasicSectionProps) {
-  const sourceOptions = React.useMemo(() => {
-    return sources.map((s) => ({
-      label: s.state === false ? `${s.name} (停用)` : s.name,
-      value: s.id,
-    }));
-  }, [sources]);
-
   const isCustomMode = watchedFollowPosterSource === false;
   const posterSource = String(loadedDetail?.picture || (!isCustomMode ? watchedPicture : "") || "").trim();
   const currentPreview =
@@ -171,27 +156,14 @@ export default function FilmBasicSection({
         </div>
       </div>
 
-      {/* 下方属性网格：归属采集站与所属分类并排联动 */}
+      <Form.Item name="sourceId" hidden>
+        <Input />
+      </Form.Item>
+
+      {/* 下方属性网格：当前主站分类与影片属性 */}
       <div className={styles.metaAttributeGrid}>
         <Row gutter={[16, 12]}>
-          {/* 1. 归属采集站 & 所属分类（联动框排在一起） */}
-          <Col xs={24} sm={12}>
-            <Form.Item
-              label="归属采集站"
-              name="sourceId"
-              className={styles.formItemReset}
-              rules={[{ required: true, message: "请选择采集站" }]}
-            >
-              <Select
-                style={{ width: "100%" }}
-                placeholder="选择采集站"
-                onChange={onSourceChange}
-                disabled={Boolean(filmId)}
-                options={sourceOptions}
-              />
-            </Form.Item>
-          </Col>
-
+          {/* 分类只读取当前主站 */}
           <Col xs={24} sm={12}>
             <Form.Item
               label="所属分类"

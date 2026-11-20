@@ -83,36 +83,31 @@ func PublicTMDBConfig(cfg model.TMDBConfig) model.TMDBConfig {
 
 // GetTMDBConfig 读取 TMDB 配置。没有记录时返回默认值，不写入缓存。
 func GetTMDBConfig() (model.TMDBConfig, error) {
-	if data, ok, err := readCache(config.TMDBConfigKey); err != nil {
-		return model.TMDBConfig{}, err
-	} else if ok && data != "" {
-		cfg, err := decodeTMDBConfig(data)
-		if err != nil {
-			if delErr := dropCache(config.TMDBConfigKey); delErr != nil {
-				return model.TMDBConfig{}, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
+	return loadCachedConfig(
+		config.TMDBConfigKey,
+		decodeTMDBConfig,
+		func() (model.TMDBConfig, string, bool, error) {
+			if db.Mdb == nil {
+				return model.TMDBConfig{}, "", false, errors.New("数据库未连接")
 			}
-		} else {
-			return cfg, nil
-		}
-	}
-	if db.Mdb == nil {
-		return model.TMDBConfig{}, errors.New("数据库未连接")
-	}
-	var rec model.TMDBConfigRecord
-	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		if recordNotFound(err) {
-			return DefaultTMDBConfig(), nil
-		}
-		return model.TMDBConfig{}, err
-	}
-	cfg, err := decodeTMDBConfig(rec.Payload)
-	if err != nil {
-		return model.TMDBConfig{}, err
-	}
-	if err := cacheTMDBConfig(cfg); err != nil {
-		return model.TMDBConfig{}, err
-	}
-	return cfg, nil
+			var rec model.TMDBConfigRecord
+			if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
+				if recordNotFound(err) {
+					return DefaultTMDBConfig(), "", false, nil
+				}
+				return model.TMDBConfig{}, "", false, err
+			}
+			cfg, err := decodeTMDBConfig(rec.Payload)
+			if err != nil {
+				return model.TMDBConfig{}, "", false, err
+			}
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				return model.TMDBConfig{}, "", false, err
+			}
+			return cfg, string(data), true, nil
+		},
+	)
 }
 
 func decodeTMDBConfig(raw string) (model.TMDBConfig, error) {
@@ -128,6 +123,9 @@ func decodeTMDBConfig(raw string) (model.TMDBConfig, error) {
 
 // SaveTMDBConfig 持久化 TMDB 配置并刷新 Redis 缓存
 func SaveTMDBConfig(cfg model.TMDBConfig) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
 	cfg = NormalizeTMDBConfig(cfg)
 	raw, err := json.Marshal(cfg)
 	if err != nil {
