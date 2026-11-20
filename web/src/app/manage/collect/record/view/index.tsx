@@ -7,17 +7,22 @@ import {
   Popconfirm,
   Pagination,
   Segmented,
+  Tag,
 } from "antd";
 import {
   DeleteOutlined,
   ClearOutlined,
   ReloadOutlined,
+  HistoryOutlined,
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
-import ManagePageHeader from "@/app/manage/components/page-header";
+import {
+  ContentPageShell,
+  ContentSectionCard,
+} from "@/app/manage/components/content-shell";
 import { CollectHistoryRecord } from "./types";
 import { BatchDetailDrawer } from "./batch-detail-drawer";
 import { getHistoryColumns } from "./history-columns";
@@ -280,12 +285,10 @@ export default function CollectRecordPageView() {
   );
 
   return (
-    <div className={styles.pageBody}>
-      <ManagePageHeader
-        title="采集记录"
-        description="查看每一轮采集的结果，以及更新了哪些影片。"
-      />
-
+    <ContentPageShell
+      title="采集记录"
+      description="查看每一轮采集的结果，以及更新了哪些影片。"
+    >
       <RecordFilterBar
         params={params}
         dateRange={dateRange}
@@ -295,7 +298,83 @@ export default function CollectRecordPageView() {
         onReset={handleReset}
       />
 
-      <Table
+      <ContentSectionCard
+        icon={<HistoryOutlined />}
+        title="采集记录"
+        count={page.total}
+        extra={
+          selectedRowKeys.length > 0 ? (
+            <Tag color="processing" style={{ margin: 0 }}>
+              已选 {selectedRowKeys.length} 项
+            </Tag>
+          ) : null
+        }
+        actions={
+          <div className={styles.tableActions}>
+            <div className={styles.refreshGroup}>
+              <span className={styles.autoRefresh}>自动刷新</span>
+              <Segmented
+                size="small"
+                value={refreshSeconds}
+                onChange={(value) => setRefreshSeconds(Number(value))}
+                options={[
+                  { label: "5 秒", value: 5 },
+                  { label: "10 秒", value: 10 },
+                  { label: "15 秒", value: 15 },
+                  { label: "30 秒", value: 30 },
+                ]}
+              />
+            </div>
+            <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void handleRefresh()}>
+              刷新
+            </Button>
+            {selectedRowKeys.length > 0 && (
+              <Popconfirm
+                title="删除选中记录？"
+                description="确认删除所选的采集运行记录？"
+                okType="danger"
+                onConfirm={handleDeleteSelected}
+                disabled={!canWrite}
+              >
+                <Button danger icon={<DeleteOutlined />} loading={batchDeleting} disabled={!canWrite}>
+                  删除选中项 ({selectedRowKeys.length})
+                </Button>
+              </Popconfirm>
+            )}
+
+            <Popconfirm
+              title="清空全部历史记录？"
+              description="进行中的批次会保留，其余采集历史删除后不可恢复。"
+              okText="清空"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={handleClearAll}
+              disabled={!canWrite}
+            >
+              <Button icon={<ClearOutlined />} disabled={!canWrite}>
+                清空历史
+              </Button>
+            </Popconfirm>
+          </div>
+        }
+        footer={
+          <Pagination
+            current={page.current}
+            pageSize={page.pageSize}
+            total={page.total}
+            showSizeChanger
+            showTotal={(total) => `共 ${total} 条`}
+            pageSizeOptions={[10, 20, 50, 100]}
+            onChange={(current, pageSize) => {
+              setSelectedRowKeys([]);
+              const newPage = { ...pageRef.current, current, pageSize };
+              setPage(newPage);
+              void getRecords(newPage);
+            }}
+          />
+        }
+      >
+        <Table
           className={styles.recordTable}
           columns={columns}
           dataSource={records}
@@ -325,80 +404,8 @@ export default function CollectRecordPageView() {
                 }
               : undefined
           }
-          title={() => (
-            <div className={styles.tableHeader}>
-              {selectedRowKeys.length > 0 ? (
-                <div className={styles.tableTitle}>
-                  <span className={styles.selectionCount}>已选 {selectedRowKeys.length}</span>
-                </div>
-              ) : null}
-              <div className={styles.tableActions}>
-                <div className={styles.refreshGroup}>
-                  <span className={styles.autoRefresh}>自动刷新</span>
-                  <Segmented
-                    size="small"
-                    value={refreshSeconds}
-                    onChange={(value) => setRefreshSeconds(Number(value))}
-                    options={[
-                      { label: "5 秒", value: 5 },
-                      { label: "10 秒", value: 10 },
-                      { label: "15 秒", value: 15 },
-                      { label: "30 秒", value: 30 },
-                    ]}
-                  />
-                </div>
-                <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void handleRefresh()}>
-                  刷新
-                </Button>
-                {selectedRowKeys.length > 0 && (
-                  <Popconfirm
-                    title="删除选中记录？"
-                    description="确认删除所选的采集运行记录？"
-                    okType="danger"
-                    onConfirm={handleDeleteSelected}
-                    disabled={!canWrite}
-                  >
-                    <Button danger icon={<DeleteOutlined />} loading={batchDeleting} disabled={!canWrite}>
-                      删除选中项 ({selectedRowKeys.length})
-                    </Button>
-                  </Popconfirm>
-                )}
-
-                <Popconfirm
-                  title="清空全部历史记录？"
-                  description="进行中的批次会保留，其余采集历史删除后不可恢复。"
-                  okText="清空"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  onConfirm={handleClearAll}
-                  disabled={!canWrite}
-                >
-                  <Button icon={<ClearOutlined />} disabled={!canWrite}>
-                    清空历史
-                  </Button>
-                </Popconfirm>
-              </div>
-            </div>
-          )}
-          footer={() => (
-            <div className={styles.pagination}>
-              <Pagination
-                current={page.current}
-                pageSize={page.pageSize}
-                total={page.total}
-                showSizeChanger
-                showTotal={(total) => `共 ${total} 条`}
-                pageSizeOptions={[10, 20, 50, 100]}
-                onChange={(current, pageSize) => {
-                  setSelectedRowKeys([]);
-                  const newPage = { ...pageRef.current, current, pageSize };
-                  setPage(newPage);
-                  void getRecords(newPage);
-                }}
-              />
-            </div>
-          )}
-      />
+        />
+      </ContentSectionCard>
 
       <BatchDetailDrawer
         open={detailDrawerOpen}
@@ -408,6 +415,6 @@ export default function CollectRecordPageView() {
         onClose={handleCloseDetail}
         onRetrySingleSource={handleRetrySingleSource}
       />
-    </div>
+    </ContentPageShell>
   );
 }

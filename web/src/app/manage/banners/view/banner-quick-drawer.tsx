@@ -12,8 +12,7 @@ import {
   CheckCircleOutlined,
   CompassOutlined,
 } from "@ant-design/icons";
-import { API_CONFLICT, API_PRIMARY_MISMATCH, ApiPut } from "@/lib/client-api";
-import { usePrimarySource } from "@/lib/manage-primary";
+import { API_CONFLICT, ApiPut } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { BannerListView, BannerRecord } from "./types";
 import { deckItemFields } from "./banner-modal-utils";
@@ -30,8 +29,8 @@ const STRATEGY_LABEL: Record<QuickStrategy, string> = {
 
 interface BannerQuickDrawerProps {
   open: boolean;
-  primarySourceId: string;
-  /** 排片时主站的版本号；发布时带上，期间有人改过就返回 409。 */
+  sourceId: string;
+  /** 排片时该采集站的版本号；发布时带上，期间有人改过就返回 409。 */
   revision: string;
   deck: BannerRecord[];
   strategy: QuickStrategy;
@@ -48,7 +47,7 @@ function withSort(list: BannerRecord[]) {
 
 export default function BannerQuickDrawer({
   open,
-  primarySourceId,
+  sourceId,
   revision,
   deck,
   strategy,
@@ -61,7 +60,6 @@ export default function BannerQuickDrawer({
   const [publishing, setPublishing] = useState(false);
   const [tmdbTargetItem, setTmdbTargetItem] = useState<BannerRecord | null>(null);
   const { message } = useAppMessage();
-  const { refresh: refreshPrimary } = usePrimarySource();
   const deckRef = useRef(deck);
   deckRef.current = deck;
 
@@ -164,7 +162,7 @@ export default function BannerQuickDrawer({
     setPublishing(true);
     try {
       const resp = await ApiPut<BannerListView>("/manage/banners/deck", {
-        sourceId: primarySourceId,
+        sourceId,
         revision,
         items: deck.map(deckItemFields),
       });
@@ -174,12 +172,7 @@ export default function BannerQuickDrawer({
         return;
       }
       if (resp.code === API_CONFLICT) {
-        message.error("排片期间主站轮播已被修改，请重新排片后再发布");
-        return;
-      }
-      if (resp.code === API_PRIMARY_MISMATCH) {
-        message.warning(resp.msg || "主站已变更，请刷新后重试");
-        void refreshPrimary();
+        message.error("排片期间该采集站轮播已被修改，请重新排片后再发布");
         return;
       }
       message.error(resp.msg || "发布失败");

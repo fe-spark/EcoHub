@@ -265,25 +265,42 @@ func TestBannerHandlers(t *testing.T) {
 		return out
 	}
 
-	// D3：读请求忽略非主站 sourceId，仍只返回主站数据。
+	// 按指定采集站读取：src2 应返回 src2 自身轮播列表（空），并带出所有站点选项。
 	db.Mdb.Create(&model.FilmSource{Id: "src2", Name: "站二", Uri: "http://src2.test", State: true, Sort: 2})
 	c, w := testContext(http.MethodGet, "/api/manage/banners?sourceId=src2")
 	h.BannerList(c)
 	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("non-primary list should fall back to primary: code=%d msg=%s", resp.Code, resp.Msg)
+		t.Fatalf("src2 list failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	raw, _ := json.Marshal(decodeResponse(t, w).Data)
-	var primaryList listData
-	_ = json.Unmarshal(raw, &primaryList)
-	if primaryList.SourceId != "src1" {
-		t.Fatalf("read must ignore sourceId, got source=%s", primaryList.SourceId)
+	var src2List listData
+	_ = json.Unmarshal(raw, &src2List)
+	if src2List.SourceId != "src2" || len(src2List.Items) != 0 {
+		t.Fatalf("read must target requested sourceId=src2, got source=%s items=%d", src2List.SourceId, len(src2List.Items))
 	}
 
-	// D3：写请求带非主站 sourceId 返回独立业务码。
+	// 非主站（src2）选片直查与轮播写入均按 src2 隔离。
+	db.Mdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "src2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "站二影片", Area: "日本"},
+	})
+	db.Mdb.Create(&model.FilmSourcePlaylist{Mid: 102, SourceId: "src2", LineKind: model.LineKindPlay})
+	c, w = testContext(http.MethodGet, "/api/manage/banners/films?sourceId=src2&name=站二")
+	h.BannerFilms(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("src2 banner films failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":102}`)
+	h.BannerCreate(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("non-primary create failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	// 跨站影片仍拒绝
 	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":101}`)
 	h.BannerCreate(c)
-	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
-		t.Fatalf("non-primary create want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
+	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
+		t.Fatalf("cross-site create want FAILED, got code=%d body=%s", resp.Code, w.Body.String())
 	}
 
 	// 新增
@@ -350,8 +367,7 @@ func TestBannerHandlers(t *testing.T) {
 		t.Fatalf("banner should be deleted")
 	}
 
-	// T-06：切换主站后，旧站轮播的对象级写返回 409 PRIMARY_MISMATCH（D3）
-	db.Mdb.Create(&model.FilmSource{Id: "src2", Name: "站二", Uri: "http://src2.test", State: true, Sort: 2})
+	// 切换主站后，非主站轮播仍可通过显式 sourceId 管理，但传错 sourceId 时拒绝。
 	if err := repository.SetPrimarySourceID("src2"); err != nil {
 		t.Fatal(err)
 	}
@@ -359,17 +375,29 @@ func TestBannerHandlers(t *testing.T) {
 	if err := db.Mdb.Create(&legacy).Error; err != nil {
 		t.Fatal(err)
 	}
-	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1", `{"blurb":"x"}`)
+	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src2", `{"blurb":"x"}`)
 	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
 	h.BannerUpdate(c)
-	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
-		t.Fatalf("non-primary patch want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
+	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
+		t.Fatalf("cross-source patch want FAILED, got status=%d body=%s", w.Code, w.Body.String())
 	}
-	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1")
+	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src1", `{"blurb":"x"}`)
+	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
+	h.BannerUpdate(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("source-scoped patch want SUCCESS, got status=%d body=%s", w.Code, w.Body.String())
+	}
+	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src2")
 	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
 	h.BannerDelete(c)
-	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != dto.PrimaryMismatchCode {
-		t.Fatalf("non-primary delete want 409 PRIMARY_MISMATCH, got status=%d body=%s", w.Code, w.Body.String())
+	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
+		t.Fatalf("cross-source delete want FAILED, got status=%d body=%s", w.Code, w.Body.String())
+	}
+	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src1")
+	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
+	h.BannerDelete(c)
+	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("source-scoped delete want SUCCESS, got status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 

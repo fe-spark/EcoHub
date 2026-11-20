@@ -134,3 +134,50 @@ func TestLoadPeerPlaylists_DoesNotCrossCategoryWithoutSameDbID(t *testing.T) {
 		t.Fatalf("expected no peer lines from tv series for anime, got %d lines", len(gotAnime[102]))
 	}
 }
+
+func TestLoadPeerPlaylistsWithFilter_SkipsHiddenCategory(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.FilmIndex{}, &model.MovieMatchKey{}, &model.FilmSourcePlaylist{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	gdb.Create(&model.FilmSource{Id: "src-a", Name: "主站", Uri: "http://a", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src-b", Name: "副站", Uri: "http://b", State: true, Sort: 1})
+
+	keys := BuildMovieMatchKeysWithCategory(555, "隐藏分类测试", 1)
+	filmA := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src-a", DbId: 555},
+		FilmIndexContent:  model.FilmIndexContent{Name: "隐藏分类测试"},
+		FilmIndexCategory: model.FilmIndexCategory{Cid: 1, Pid: 1, CategoryKey: "source:src-a:1"},
+	}
+	filmB := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src-b", DbId: 555},
+		FilmIndexContent:  model.FilmIndexContent{Name: "隐藏分类测试"},
+		FilmIndexCategory: model.FilmIndexCategory{Cid: 22, Pid: 20, CategoryKey: "source:src-b:12", RootCategoryKey: "source:src-b:2"},
+	}
+	gdb.Create(&filmA)
+	gdb.Create(&filmB)
+	for _, k := range keys {
+		gdb.Create(&model.MovieMatchKey{Mid: 1, MatchKey: k})
+		gdb.Create(&model.MovieMatchKey{Mid: 2, MatchKey: k})
+	}
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 2, SourceId: "src-b", LineKind: "play", GroupIndex: 0, Content: `[{"episode":"1","link":"http://b/1"}]`})
+
+	got, err := LoadPeerPlaylistsWithFilter(gdb, []model.FilmIndex{filmA}, func(sourceID, categoryKey, rootCategoryKey string, cid, pid int64) bool {
+		return !(sourceID == "src-b" && categoryKey == "source:src-b:12")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got[1]) != 0 {
+		t.Fatalf("expected hidden category peer playlist to be excluded, got %+v", got[1])
+	}
+}

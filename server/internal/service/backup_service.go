@@ -196,6 +196,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.SaveProxyConfig(*backup.Proxy); err != nil {
 			return fmt.Errorf("导入网络代理配置失败: %w", err)
 		}
+		utils.CloseIdleHTTPConnections()
 		NotifySvc.EnsureBotPoller()
 		upgrade.TriggerReleasePoll()
 	}

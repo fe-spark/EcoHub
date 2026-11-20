@@ -118,25 +118,17 @@ func collectApiTest(ctx context.Context, s model.FilmSource, timeoutSeconds int,
 	}
 	if proxyChosen {
 		if useProxy {
-			cfg, err := repository.GetProxyConfig()
+			ok, proxy, err := repository.ResolveSpiderProxy()
 			if err != nil {
 				return err
 			}
-			if !cfg.Enabled || strings.TrimSpace(cfg.ProxyURL) == "" {
-				return errors.New("测试失败, 代理未开启或地址为空")
+			if !ok || strings.TrimSpace(proxy) == "" {
+				return errors.New("测试失败, 全局代理或采集代理模块未开启")
 			}
-			r.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
+			r.ProxyURL = proxy
 		}
 	} else if s.ProxyCollect {
 		ok, proxy, err := repository.ResolveSpiderProxy()
-		if err != nil {
-			return err
-		}
-		if ok {
-			r.ProxyURL = proxy
-		}
-	} else if s.Id != "" {
-		ok, proxy, err := repository.ResolveSourceProxy(s.Id)
 		if err != nil {
 			return err
 		}

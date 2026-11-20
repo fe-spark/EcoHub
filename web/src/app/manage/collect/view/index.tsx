@@ -8,7 +8,7 @@ import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission, ManagePermissionProvider } from "@/lib/manage-permission";
 import { usePrimarySource } from "@/lib/manage-primary";
-import ManagePageHeader from "@/app/manage/components/page-header";
+import { ContentPageShell } from "@/app/manage/components/content-shell";
 import CollectModals from "./collect-modals";
 import CollectQueueBars from "./collect-queue-bars";
 import DeleteQueueBar from "./delete-queue-bar";
@@ -400,11 +400,10 @@ export default function CollectManagePageView() {
 
   return (
     <ManagePermissionProvider canWrite={canOperate} isAdmin={isAdmin}>
-      <div className={styles.pageBody}>
-      <ManagePageHeader
+      <ContentPageShell
         title="采集中心"
-        description={<>管理采集站，开始或停止采集<span className={styles.headerMeta}>· {siteList.length} 个</span></>}
-        actions={
+        description="管理采集站，开始或停止采集。"
+        headerActions={
           <Space size={8}>
             {isAdmin && (
               <Button icon={<ApiOutlined />} onClick={() => router.push("/manage/system/proxy")}>网络代理</Button>
@@ -412,9 +411,7 @@ export default function CollectManagePageView() {
             <Button danger loading={cleanupScanning} disabled={!canOperate || siteList.length === 0} onClick={() => void startCleanupScan()}>清理失效源</Button>
           </Space>
         }
-      />
-
-      <div className={styles.cardPanel}>
+      >
         <CollectToolbar
           totalCount={siteList.length}
           selectedCount={selectedSourceIds.length}
@@ -432,63 +429,64 @@ export default function CollectManagePageView() {
           onBatchEnable={() => void batchChangeSourceState(true)}
           onBatchDisable={() => void batchChangeSourceState(false)}
           onBatchDelete={() => void batchDeleteSources()}
-        />
+        >
+          <div className={styles.cardPanel}>
+            {deleteQueueItems.length > 0 ? (
+              <DeleteQueueBar
+                items={deleteQueueItems}
+                onDismiss={dismissDeleteQueue}
+                onStop={() => void stopDeleteQueue()}
+                stopping={stoppingDelete}
+              />
+            ) : null}
 
-        {deleteQueueItems.length > 0 ? (
-          <DeleteQueueBar
-            items={deleteQueueItems}
-            onDismiss={dismissDeleteQueue}
-            onStop={() => void stopDeleteQueue()}
-            stopping={stoppingDelete}
-          />
-        ) : null}
+            {queueBars.length > 0 || sealBar ? (
+              <CollectQueueBars
+                items={queueBars}
+                sealBar={sealBar}
+                stoppingQueueId={stoppingQueueId}
+                canWrite={canOperate}
+                onStopQueue={(queueId, sourceIds) => void stopQueue(queueId, sourceIds)}
+              />
+            ) : null}
 
-        {queueBars.length > 0 || sealBar ? (
-          <CollectQueueBars
-            items={queueBars}
-            sealBar={sealBar}
-            stoppingQueueId={stoppingQueueId}
-            canWrite={canOperate}
-            onStopQueue={(queueId, sourceIds) => void stopQueue(queueId, sourceIds)}
-          />
-        ) : null}
-
-        {siteList.length > 0 ? (
-          <div className={styles.sourceGroups}>
-            <CollectSourceGrid
-              siteList={siteList}
-              selectedSourceIds={selectedSourceIds.map(String)}
-              activeCollectIds={activeCollectIds}
-              hiddenDoneIds={[]}
-              canWrite={canOperate}
-              canAddSource={canOperate}
-              globalSpiderProxyReady={globalSpiderProxyReady}
-              onSelect={handleSelectSource}
-              onChangeCollectDuration={changeCollectDuration}
-              onChangeSourceState={changeSourceState}
-              togglingSourceId={togglingStateSourceId}
-              onStartTask={(record) => void startTask(record)}
-              onTerminateTask={(id) => void stopTask(id)}
-              onEditSource={(id) => void openEditDialog(id)}
-              onDeleteSource={(id) => void delSource(id)}
-              deletingSourceId={deletingSourceId}
-              onOpenAddDialog={openAddDialog}
-              onSortList={handleSortList}
-              onSyncCategory={handleSyncCategory}
-              onUpdateSite={updateSiteListItem}
-              searchIndex={searchIndexProgress}
-            />
+            {siteList.length > 0 ? (
+              <div className={styles.sourceGroups}>
+                <CollectSourceGrid
+                  siteList={siteList}
+                  selectedSourceIds={selectedSourceIds.map(String)}
+                  activeCollectIds={activeCollectIds}
+                  hiddenDoneIds={[]}
+                  canWrite={canOperate}
+                  canAddSource={canOperate}
+                  globalSpiderProxyReady={globalSpiderProxyReady}
+                  onSelect={handleSelectSource}
+                  onChangeCollectDuration={changeCollectDuration}
+                  onChangeSourceState={changeSourceState}
+                  togglingSourceId={togglingStateSourceId}
+                  onStartTask={(record) => void startTask(record)}
+                  onTerminateTask={(id) => void stopTask(id)}
+                  onEditSource={(id) => void openEditDialog(id)}
+                  onDeleteSource={(id) => void delSource(id)}
+                  deletingSourceId={deletingSourceId}
+                  onOpenAddDialog={openAddDialog}
+                  onSortList={handleSortList}
+                  onSyncCategory={handleSyncCategory}
+                  onUpdateSite={updateSiteListItem}
+                  searchIndex={searchIndexProgress}
+                />
+              </div>
+            ) : (
+              <div className={styles.emptyCard}>
+                <Empty description={loading ? "采集站加载中…" : "暂无采集站"}>
+                  {!loading && canOperate ? (
+                    <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>新增采集站</Button>
+                  ) : null}
+                </Empty>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className={styles.emptyCard}>
-            <Empty description={loading ? "采集站加载中…" : "暂无采集站"}>
-              {!loading && canOperate ? (
-                <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>新增采集站</Button>
-              ) : null}
-            </Empty>
-          </div>
-        )}
-      </div>
+        </CollectToolbar>
 
       <SourceFormDrawer
         key={sourceFormNonce}
@@ -514,7 +512,7 @@ export default function CollectManagePageView() {
         onCancelCleanup={cancelCleanup} onConfirmCleanup={() => void confirmCleanup()}
         categoryConfirm={categoryConfirm} primaryHandoverNode={primaryHandover.modalNode}
       />
-      </div>
+      </ContentPageShell>
     </ManagePermissionProvider>
   );
 }

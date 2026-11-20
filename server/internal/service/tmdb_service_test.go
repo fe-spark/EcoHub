@@ -7,100 +7,6 @@ import (
 	"server/internal/repository"
 )
 
-func TestCleanKeywordForSearch(t *testing.T) {
-	tests := []struct {
-		input        string
-		expectedName string
-		expectedYear string
-	}{
-		{
-			input:        "流浪地球2 4K 60帧 国粤双语",
-			expectedName: "流浪地球2",
-			expectedYear: "",
-		},
-		{
-			input:        "星际穿越 (2014) [1080P]",
-			expectedName: "星际穿越",
-			expectedYear: "2014",
-		},
-		{
-			input:        "狂飙 第01集",
-			expectedName: "狂飙",
-			expectedYear: "",
-		},
-		{
-			input:        "三体 【更新至20集】",
-			expectedName: "三体",
-			expectedYear: "",
-		},
-		{
-			input:        "奥本海默 Oppenheimer 2023 抢先版",
-			expectedName: "奥本海默 Oppenheimer",
-			expectedYear: "2023",
-		},
-		{
-			input:        "Cats 2019",
-			expectedName: "Cats",
-			expectedYear: "2019",
-		},
-		{
-			input:        "Match Point (2005)",
-			expectedName: "Match Point",
-			expectedYear: "2005",
-		},
-		{
-			input:        "Pitch Perfect",
-			expectedName: "Pitch Perfect",
-			expectedYear: "",
-		},
-		{
-			input:        "Gotham Knights",
-			expectedName: "Gotham Knights",
-			expectedYear: "",
-		},
-		{
-			input:        "异星战境 预告片",
-			expectedName: "异星战境",
-			expectedYear: "",
-		},
-		{
-			input:        "异星战境   预告片",
-			expectedName: "异星战境",
-			expectedYear: "",
-		},
-		{
-			input:        "异星战境　预告片",
-			expectedName: "异星战境",
-			expectedYear: "",
-		},
-		{
-			input:        "异星战境 - 预告片",
-			expectedName: "异星战境",
-			expectedYear: "",
-		},
-		{
-			input:        "阿凡达：水之道 特辑 (2022)",
-			expectedName: "阿凡达：水之道",
-			expectedYear: "2022",
-		},
-		{
-			input:        "蜡笔小新：爆盛！功夫男孩.拉面大乱.",
-			expectedName: "蜡笔小新：爆盛！功夫男孩.拉面大乱",
-			expectedYear: "",
-		},
-	}
-
-	for _, tc := range tests {
-		name, year := CleanKeywordForSearch(tc.input)
-		if name != tc.expectedName {
-			t.Errorf("CleanKeywordForSearch(%q) name = %q, expected %q", tc.input, name, tc.expectedName)
-		}
-		if year != tc.expectedYear {
-			t.Errorf("CleanKeywordForSearch(%q) year = %q, expected %q", tc.input, year, tc.expectedYear)
-		}
-	}
-}
-
 func TestPrepareManualSearchKeepsQueryAndYear(t *testing.T) {
 	query, year := prepareManualSearch("流浪地球：飞跃2020 1080p", "2020")
 	if query != "流浪地球：飞跃2020" {
@@ -191,5 +97,18 @@ func TestCandidateYearFilter(t *testing.T) {
 	}
 	if len(filtered2) != 1 || filtered2[0].ID != 1 {
 		t.Fatalf("expected 1 candidate (ID=1) for year 2021, got %+v", filtered2)
+	}
+}
+
+func TestValidateTMDBImageDomain(t *testing.T) {
+	for _, valid := range []string{"", "https://image.tmdb.org/t/p", "http://img.example.com/t/p"} {
+		if err := validateTMDBImageDomain(valid); err != nil {
+			t.Fatalf("expected %q to be valid, got %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"image.tmdb.org/t/p", "ftp://image.tmdb.org/t/p", "https://"} {
+		if err := validateTMDBImageDomain(invalid); err == nil {
+			t.Fatalf("expected %q to be rejected", invalid)
+		}
 	}
 }

@@ -154,12 +154,22 @@ func TestStartBatchCollectRetry_RollbackOccupyOnRecordStartError(t *testing.T) {
 		t.Fatalf("record write failure should not cancel retry: id=%s err=%v", batchID, err)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for isOccupiedCollectSource(src.Id) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if isOccupiedCollectSource(src.Id) {
 		t.Fatal("source stayed occupied after the retry run failed")
+	}
+	// 等待后台采集队列完全退出，避免污染后续依赖 collectQueues.n == 0 的测试
+	for time.Now().Before(deadline) {
+		collectQueues.mu.Lock()
+		n := collectQueues.n
+		collectQueues.mu.Unlock()
+		if n == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

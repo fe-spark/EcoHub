@@ -269,6 +269,7 @@ export default function FilmDrawer({
       ["subTitle", ["subTitle", "originalTitle"], data.subTitle || data.originalTitle],
       ["releaseDate", ["releaseDate"], data.releaseDate],
       ["year", ["year"], data.year ? String(data.year) : undefined],
+      ["dbScore", ["score", "dbScore"], data.dbScore],
       ["area", ["area", "country"], data.area],
       ["language", ["lang", "language"], data.language || data.lang],
       ["director", ["director"], data.director],

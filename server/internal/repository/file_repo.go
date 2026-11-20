@@ -23,8 +23,8 @@ func StoragePath(f *model.FileInfo) string {
 }
 
 // SaveGallery 保存图片关联信息
-func SaveGallery(f model.FileInfo) {
-	db.Mdb.Create(&f)
+func SaveGallery(f model.FileInfo) error {
+	return db.Mdb.Create(&f).Error
 }
 
 // GetFileInfoById 通过ID获取对应的图片信息
@@ -32,6 +32,16 @@ func GetFileInfoById(id uint) model.FileInfo {
 	var f = model.FileInfo{}
 	db.Mdb.First(&f, id)
 	return f
+}
+
+// GetFileInfosByIds 批量查询素材记录
+func GetFileInfosByIds(ids []uint) ([]model.FileInfo, error) {
+	var list []model.FileInfo
+	if len(ids) == 0 {
+		return list, nil
+	}
+	err := db.Mdb.Where("id IN ?", ids).Find(&list).Error
+	return list, err
 }
 
 // GetFileInfoPage 获取素材分页数据（仅用户手动上传，relevance_id = 0）
@@ -66,6 +76,10 @@ func RenameFileInfo(id uint, name string) error {
 	return db.Mdb.Model(&model.FileInfo{}).Where("id = ?", id).Update("name", name).Error
 }
 
-func DelFileInfo(id uint) {
-	db.Mdb.Unscoped().Delete(&model.FileInfo{}, id)
+// DelFileInfos 批量硬删除素材记录
+func DelFileInfos(ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return db.Mdb.Unscoped().Delete(&model.FileInfo{}, ids).Error
 }

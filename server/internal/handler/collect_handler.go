@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -27,12 +26,8 @@ type CollectHandler struct{}
 var CollectHd = new(CollectHandler)
 
 func collectAdminStatus(c *gin.Context) (isAdmin bool, hasClaims bool) {
-	v, ok := c.Get(config.AuthUserClaims)
+	uc, ok := currentClaims(c)
 	if !ok {
-		return false, false
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil {
 		return false, false
 	}
 	return model.IsAdmin(uc.UserID, uc.Role), true
@@ -214,7 +209,11 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-sem }()
 
 			item := model.SourceHealthItem{

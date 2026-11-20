@@ -1,14 +1,11 @@
 package handler
 
 import (
-	"net/http"
 	"strings"
 
-	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
-	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -75,14 +72,7 @@ func (h *SpiderHandler) StarSpider(c *gin.Context) {
 
 // ClearAllFilm 校验通过后以 SSE 推送数据重置进度。重置在后台跑完，连接断开不中止。
 func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可执行数据重置", c)
+	if _, ok := requireAdminClaims(c, "权限不足，仅超级管理员可执行数据重置"); !ok {
 		return
 	}
 	var req struct {

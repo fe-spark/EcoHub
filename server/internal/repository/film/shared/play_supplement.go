@@ -17,17 +17,30 @@ type peerPick struct {
 	rank int
 }
 
+// PeerCategoryVisibleFunc 判断指定采集站的影片所属分类是否对外可见。
+type PeerCategoryVisibleFunc func(sourceID, categoryKey, rootCategoryKey string, cid, pid int64) bool
+
 // LoadActivePeerPlaylists 使用当前数据库连接加载其他站的播放线路。
 func LoadActivePeerPlaylists(infos []model.FilmIndex) (map[int64][]model.FilmSourcePlaylist, error) {
+	return LoadActivePeerPlaylistsWithFilter(infos, nil)
+}
+
+// LoadActivePeerPlaylistsWithFilter 使用当前数据库连接加载其他站的播放线路，并按分类可见性过滤。
+func LoadActivePeerPlaylistsWithFilter(infos []model.FilmIndex, visible PeerCategoryVisibleFunc) (map[int64][]model.FilmSourcePlaylist, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("数据库未连接")
 	}
-	return LoadPeerPlaylists(db.Mdb, infos)
+	return LoadPeerPlaylistsWithFilter(db.Mdb, infos, visible)
 }
 
 // LoadPeerPlaylists 按匹配键找出其他已启用站的播放线路，挂到这些档案上。
 // 返回的线路 Mid 是正在看的档案，SourceId 仍是线路所属站。每站只保留匹配最强的一部。
 func LoadPeerPlaylists(tx *gorm.DB, infos []model.FilmIndex) (map[int64][]model.FilmSourcePlaylist, error) {
+	return LoadPeerPlaylistsWithFilter(tx, infos, nil)
+}
+
+// LoadPeerPlaylistsWithFilter 按匹配键找出其他已启用且分类可见站的播放线路，挂到这些档案上。
+func LoadPeerPlaylistsWithFilter(tx *gorm.DB, infos []model.FilmIndex, visible PeerCategoryVisibleFunc) (map[int64][]model.FilmSourcePlaylist, error) {
 	out := make(map[int64][]model.FilmSourcePlaylist)
 	if tx == nil || len(infos) == 0 {
 		return out, nil
@@ -52,7 +65,7 @@ func LoadPeerPlaylists(tx *gorm.DB, infos []model.FilmIndex) (map[int64][]model.
 	if err != nil {
 		return nil, err
 	}
-	chosen := choosePeerFilms(infos, ranks, keyRows, ownerOf, enabled)
+	chosen := choosePeerFilms(infos, ranks, keyRows, ownerOf, enabled, visible)
 	if len(chosen) == 0 {
 		return out, nil
 	}
@@ -117,9 +130,12 @@ func peerKeyRanks(infos []model.FilmIndex) (map[int64]map[string]int, []string) 
 }
 
 type filmOwnerMeta struct {
-	sourceID string
-	pid      int64
-	dbID     int64
+	sourceID        string
+	cid             int64
+	pid             int64
+	dbID            int64
+	categoryKey     string
+	rootCategoryKey string
 }
 
 func filmOwnersTx(tx *gorm.DB, rows []model.MovieMatchKey) (map[int64]filmOwnerMeta, error) {
@@ -140,20 +156,23 @@ func filmOwnersTx(tx *gorm.DB, rows []model.MovieMatchKey) (map[int64]filmOwnerM
 		return ownerOf, nil
 	}
 	var films []model.FilmIndex
-	if err := tx.Select("mid", "first_source_id", "pid", "db_id").Where("mid IN ?", mids).Find(&films).Error; err != nil {
+	if err := tx.Select("mid", "first_source_id", "cid", "pid", "db_id", "category_key", "root_category_key").Where("mid IN ?", mids).Find(&films).Error; err != nil {
 		return nil, err
 	}
 	for _, film := range films {
 		ownerOf[film.Mid] = filmOwnerMeta{
-			sourceID: strings.TrimSpace(film.FirstSourceId),
-			pid:      film.Pid,
-			dbID:     film.DbId,
+			sourceID:        strings.TrimSpace(film.FirstSourceId),
+			cid:             film.Cid,
+			pid:             film.Pid,
+			dbID:            film.DbId,
+			categoryKey:     strings.TrimSpace(film.CategoryKey),
+			rootCategoryKey: strings.TrimSpace(film.RootCategoryKey),
 		}
 	}
 	return ownerOf, nil
 }
 
-func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, rows []model.MovieMatchKey, ownerOf map[int64]filmOwnerMeta, enabled map[string]struct{}) map[int64]map[string]peerPick {
+func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, rows []model.MovieMatchKey, ownerOf map[int64]filmOwnerMeta, enabled map[string]struct{}, visible PeerCategoryVisibleFunc) map[int64]map[string]peerPick {
 	originInfo := make(map[int64]model.FilmIndex, len(infos))
 	for _, info := range infos {
 		originInfo[info.Mid] = info
@@ -165,6 +184,9 @@ func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, ro
 			continue
 		}
 		if _, ok := enabled[owner.sourceID]; !ok {
+			continue
+		}
+		if visible != nil && !visible(owner.sourceID, owner.categoryKey, owner.rootCategoryKey, owner.cid, owner.pid) {
 			continue
 		}
 		for origin, keyRank := range ranks {

@@ -1,11 +1,10 @@
 import React, { useCallback, useMemo, useRef } from "react";
-import { Button, Empty, Space, Switch, Table, Tag, Typography } from "antd";
+import { Empty, Space, Switch, Table, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   FolderOpenOutlined,
   HolderOutlined,
-  ReloadOutlined,
   SubnodeOutlined,
 } from "@ant-design/icons";
 import {
@@ -29,8 +28,6 @@ interface CategoryTreeCardProps {
   expandedKeys: React.Key[];
   loadingTree: boolean;
   savingTree: boolean;
-  stats: { total: number; roots: number; children: number; hidden: number };
-  onRefresh: () => void;
   onExpand: (keys: React.Key[]) => void;
   onMove: (dragId: number, dropId: number) => void;
   onShowChange: (id: number, show: boolean) => void;
@@ -74,8 +71,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     expandedKeys,
     loadingTree,
     savingTree,
-    stats,
-    onRefresh,
     onExpand,
     onMove,
     onShowChange,
@@ -295,36 +290,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
                 }
               },
             })}
-            title={() => (
-              <div className={styles.tableHeader}>
-                <div className={styles.toolbarLead}>
-                  <div className={styles.stats}>
-                    <span>
-                      <span className={styles.statValue}>{stats.total}</span> 个分类
-                    </span>
-                    <span className={styles.statSep} />
-                    <span>
-                      <span className={styles.statValue}>{stats.roots}</span> 主类
-                    </span>
-                    <span className={styles.statSep} />
-                    <span>
-                      <span className={styles.statValue}>{stats.children}</span> 子类
-                    </span>
-                    {stats.hidden > 0 ? (
-                      <>
-                        <span className={styles.statSep} />
-                        <span className={styles.statWarn}>隐藏 {stats.hidden}</span>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-                <div className={styles.tableActions}>
-                  <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree} disabled={savingTree}>
-                    刷新分类
-                  </Button>
-                </div>
-              </div>
-            )}
             expandable={{
               expandedRowKeys: expandedKeys,
               rowExpandable: (record) => (record.children?.length || 0) > 0,

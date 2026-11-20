@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,28 +49,6 @@ var (
 	emptyBracketsRegex = regexp.MustCompile(`[（(]\s*[）)]|[【\[]\s*[】\]]`)
 )
 
-// CleanKeywordForSearch 清理搜索关键词中的格式、清晰度与集数杂质
-func CleanKeywordForSearch(raw string) (cleaned string, extractedYear string) {
-	s := raw
-	for _, reg := range noiseRegexes {
-		s = reg.ReplaceAllString(s, " ")
-	}
-
-	// 提取可能带有的 4 位年份
-	if match := yearRegex.FindString(s); match != "" {
-		extractedYear = match
-		s = yearRegex.ReplaceAllString(s, " ")
-	}
-
-	// 清理残留的空括号
-	s = emptyBracketsRegex.ReplaceAllString(s, " ")
-
-	// 清洗标点与多余空格（包括半角和全角中文空格）
-	s = strings.Trim(s, " \t\r\n\u3000-_·—:：.~～〜!！?？")
-	s = regexp.MustCompile(`[\s\x{3000}]+`).ReplaceAllString(s, " ")
-	return s, extractedYear
-}
-
 func getHTTPClient() (*http.Client, error) {
 	ok, proxyURL, err := repository.ResolveTMDBProxy()
 	if err != nil {
@@ -96,12 +75,28 @@ func (s *TMDBService) GetConfig() (model.TMDBConfig, error) {
 	return repository.PublicTMDBConfig(cfg), nil
 }
 
-func tmdbScrapeReady(cfg model.TMDBConfig) bool {
-	return cfg.Enabled && strings.TrimSpace(cfg.ApiKey) != ""
+// validateTMDBImageDomain 校验图片域名前缀是否为合法的 http/https 地址
+func validateTMDBImageDomain(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return errors.New("图片域名格式无效，请填写以 http:// 或 https:// 开头的有效地址")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return errors.New("图片域名格式无效，仅支持 http:// 或 https:// 协议")
+	}
+	return nil
 }
 
 // UpdateConfig 更新 TMDB 配置
 func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
+	if err := validateTMDBImageDomain(cfg.ImageDomain); err != nil {
+		return err
+	}
 	existing, err := repository.GetTMDBConfig()
 	if err != nil {
 		return err
@@ -118,6 +113,9 @@ func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 
 // TestConnection 验证 API Key 与网络代理连通性
 func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
+	if err := validateTMDBImageDomain(cfg.ImageDomain); err != nil {
+		return err
+	}
 	apiKey := strings.TrimSpace(cfg.ApiKey)
 	if repository.IsMaskedTMDBApiKey(apiKey) {
 		stored, err := repository.GetTMDBConfig()
@@ -154,11 +152,6 @@ func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 		return fmt.Errorf("TMDB 响应异常 (HTTP %d)", resp.StatusCode)
 	}
 	return nil
-}
-
-// SearchRaw 已无调用方。弹窗检索请用 Search。
-func (s *TMDBService) SearchRaw(query, year, mediaType string) ([]model.TMDBCandidate, error) {
-	return s.Search(query, year, mediaType)
 }
 
 // prepareManualSearch 只去掉采集噪音。片名正文里的数字保留，仅提取括号中的年份。
@@ -231,7 +224,7 @@ func (s *TMDBService) fetchTMDBCandidates(cfg model.TMDBConfig, kw, year, mediaT
 	}
 
 	reqURL := fmt.Sprintf("%s%s?%s", tmdbAPIBaseURL, endpoint, qVals.Encode())
-	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +343,7 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 	qVals.Set("append_to_response", "credits")
 
 	reqURL := fmt.Sprintf("%s/%s/%d?%s", tmdbAPIBaseURL, mediaType, tmdbID, qVals.Encode())
-	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
 	}

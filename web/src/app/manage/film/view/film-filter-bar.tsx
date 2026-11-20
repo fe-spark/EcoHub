@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Space, TreeSelect, Input, DatePicker, Button } from "antd";
+import { TreeSelect, Input, DatePicker, Button } from "antd";
 import { SearchOutlined, ReloadOutlined } from "@ant-design/icons";
 
 const { RangePicker } = DatePicker;
@@ -38,7 +38,7 @@ export function FilmFilterBar({
   styles,
 }: FilmFilterBarProps) {
   return (
-    <Space size={[8, 8]} wrap className={styles.filterBar}>
+    <>
       <TreeSelect
         placeholder="分类"
         className={styles.categorySelect}
@@ -75,6 +75,6 @@ export function FilmFilterBar({
       <Button icon={<ReloadOutlined />} onClick={onReset}>
         重置
       </Button>
-    </Space>
+    </>
   );
 }

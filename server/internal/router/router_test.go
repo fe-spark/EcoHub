@@ -185,9 +185,9 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if wNormalCollectSave.Code == http.StatusForbidden {
 		t.Errorf("POST /api/manage/collect/save should allow normal user, got %d", wNormalCollectSave.Code)
 	}
-	wNormalTMDBScrape := performReq(http.MethodPost, "/api/manage/tmdb/scrape", normalToken)
-	if wNormalTMDBScrape.Code == http.StatusForbidden {
-		t.Errorf("POST /api/manage/tmdb/scrape should allow normal user, got %d", wNormalTMDBScrape.Code)
+	wNormalTMDBApply := performReq(http.MethodPost, "/api/manage/tmdb/apply", normalToken)
+	if wNormalTMDBApply.Code == http.StatusForbidden {
+		t.Errorf("POST /api/manage/tmdb/apply should allow normal user, got %d", wNormalTMDBApply.Code)
 	}
 	// 11. Profile endpoint allows normal authenticated user (not 403)
 	wNormalUserProfile := performReq(http.MethodPost, "/api/manage/user/profile", normalToken)
@@ -205,9 +205,9 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if wVisitorFilmSave.Code != http.StatusForbidden {
 		t.Errorf("POST /api/manage/film/save should forbid visitor, got %d", wVisitorFilmSave.Code)
 	}
-	wVisitorTMDBScrape := performReq(http.MethodPost, "/api/manage/tmdb/scrape", visitorToken)
-	if wVisitorTMDBScrape.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/tmdb/scrape should forbid visitor, got %d", wVisitorTMDBScrape.Code)
+	wVisitorTMDBApply := performReq(http.MethodPost, "/api/manage/tmdb/apply", visitorToken)
+	if wVisitorTMDBApply.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/tmdb/apply should forbid visitor, got %d", wVisitorTMDBApply.Code)
 	}
 }
 

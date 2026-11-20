@@ -22,8 +22,7 @@ import {
   CompassOutlined,
 } from "@ant-design/icons";
 
-import { API_PRIMARY_MISMATCH, ApiPatch, ApiPost } from "@/lib/client-api";
-import { usePrimarySource } from "@/lib/manage-primary";
+import { ApiPatch, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ImagePicker from "@/app/manage/components/image-picker";
@@ -39,9 +38,9 @@ import {
 } from "./types";
 import {
   BannerScrapedData,
+  bannerRecordToFilmOption,
   buildBannerFields,
   computeTmdbPrefillUpdates,
-  fetchFilmOption,
   computeBannerPreview,
   uploadBannerFile,
   initBannerFormValues,
@@ -54,7 +53,8 @@ const { Title, Text } = Typography;
 interface BannerDrawerProps {
   open: boolean;
   mode: EditorMode;
-  primarySourceId: string;
+  sourceId: string;
+  isPrimary?: boolean;
   currentRow: BannerRecord | null;
   tmdbEnabled?: boolean;
   onClose: () => void;
@@ -64,14 +64,14 @@ interface BannerDrawerProps {
 export default function BannerDrawer({
   open,
   mode,
-  primarySourceId,
+  sourceId,
+  isPrimary = false,
   currentRow,
   tmdbEnabled = false,
   onClose,
   onSuccess,
 }: BannerDrawerProps) {
   const { message } = useAppMessage();
-  const { refresh: refreshPrimary } = usePrimarySource();
   const [form] = Form.useForm<BannerFormValues>();
 
   const [selectedFilm, setSelectedFilm] = useState<FilmOption | null>(null);
@@ -96,16 +96,7 @@ export default function BannerDrawer({
     setScrapedData({});
   }, [form]);
 
-  const loadFilmDetail = useCallback(async (mid: number) => {
-    const option = await fetchFilmOption(mid);
-    if (option) {
-      setSelectedFilm(option);
-      return option;
-    }
-    return null;
-  }, []);
-
-  const onFilmSelect = async (film: FilmOption) => {
+  const onFilmSelect = (film: FilmOption) => {
     setSelectedFilm(film);
     setScrapedData({});
     form.setFieldsValue({
@@ -115,21 +106,6 @@ export default function BannerDrawer({
       isCustomPic: false,
     });
     setFilmPickerOpen(false);
-    if (film.id) {
-      const fullDetail = await loadFilmDetail(film.id);
-      if (fullDetail) {
-        setSelectedFilm((prev) => ({
-          ...film,
-          ...fullDetail,
-          picture: fullDetail.picture || film.picture || "",
-          pictureSlide: fullDetail.pictureSlide || film.pictureSlide || "",
-          cName: fullDetail.cName || film.cName || "",
-          year: fullDetail.year || film.year || "",
-          area: fullDetail.area || film.area || "",
-          remarks: fullDetail.remarks || film.remarks || "",
-        }));
-      }
-    }
   };
 
   useEffect(() => {
@@ -141,15 +117,15 @@ export default function BannerDrawer({
     const initialVals = initBannerFormValues(mode, currentRow);
     form.setFieldsValue(initialVals);
 
-    if (mode === "edit" && currentRow?.mid) {
-      loadFilmDetail(currentRow.mid).catch(() => {});
+    if (mode === "edit" && currentRow) {
+      setSelectedFilm(bannerRecordToFilmOption(currentRow));
       setScrapedData({
         score: currentRow.overrides?.score || undefined,
         blurb: currentRow.overrides?.blurb || undefined,
         tmdbId: currentRow.tmdbId || undefined,
       });
     }
-  }, [open, mode, currentRow, form, loadFilmDetail]);
+  }, [open, mode, currentRow, form]);
 
   const handleCustomUpload = async (options: any, fieldName: UploadFieldName) => {
     const { file, onSuccess, onError } = options;
@@ -254,16 +230,14 @@ export default function BannerDrawer({
         return;
       }
       setSubmitting(true);
+      const querySource = sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : "";
       const resp = editing
-        ? await ApiPatch(`/manage/banners/${encodeURIComponent(editing.id)}`, fields)
-        : await ApiPost("/manage/banners", { sourceId: primarySourceId, ...fields });
+        ? await ApiPatch(`/manage/banners/${encodeURIComponent(editing.id)}${querySource}`, fields)
+        : await ApiPost("/manage/banners", { sourceId, ...fields });
       if (resp.code === 0) {
         message.success(resp.msg || "保存成功");
         onSuccess();
         onClose();
-      } else if (resp.code === API_PRIMARY_MISMATCH) {
-        message.warning(resp.msg || "主站已变更，请刷新后重试");
-        void refreshPrimary();
       } else {
         message.error(resp.msg || "保存失败");
       }
@@ -387,14 +361,16 @@ export default function BannerDrawer({
                             TMDB 刮削
                           </Button>
                         )}
-                        <Button
-                          size="small"
-                          icon={<ExportOutlined />}
-                          onClick={handleGoToFilmList}
-                          disabled={!currentMid}
-                        >
-                          前往片库编辑
-                        </Button>
+                        {isPrimary && (
+                          <Button
+                            size="small"
+                            icon={<ExportOutlined />}
+                            onClick={handleGoToFilmList}
+                            disabled={!currentMid}
+                          >
+                            前往片库编辑
+                          </Button>
+                        )}
                         {watchedIsCustomPic && (
                           <Button
                             size="small"
@@ -445,7 +421,7 @@ export default function BannerDrawer({
       <FilmPicker
         open={filmPickerOpen}
         selectedMid={currentMid}
-        primarySourceId={primarySourceId}
+        sourceId={sourceId}
         onCancel={() => setFilmPickerOpen(false)}
         onSelect={onFilmSelect}
       />

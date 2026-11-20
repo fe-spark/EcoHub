@@ -91,6 +91,10 @@ func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error)
 	if primarySource != nil {
 		primaryID = primarySource.Id
 	}
+	spiderProxyOn, _, err := repository.ResolveSpiderProxy()
+	if err != nil {
+		return nil, err
+	}
 	for _, source := range sources {
 		if source.Id == primaryID {
 			source.IsPrimary = true
@@ -108,11 +112,7 @@ func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error)
 		if progress, ok := progressByID[source.Id]; ok {
 			item.Progress = &progress
 		}
-		ok, _, err := repository.ResolveSourceProxy(source.Id)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
+		if spiderProxyOn && source.ProxyCollect {
 			item.ProxyEnabled = true
 		}
 		if _, ok := categoryReady[source.Id]; ok {

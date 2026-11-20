@@ -45,7 +45,7 @@ func (h *ProxyHandler) TestProxy(c *gin.Context) {
 		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	latency, err := service.ProxySvc.TestProxy(req.ProxyURL)
+	latency, err := service.ProxySvc.TestProxy(req.ProxyURL, req.PreserveAuth)
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return

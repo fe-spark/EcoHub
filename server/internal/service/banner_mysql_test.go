@@ -76,7 +76,7 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	if err != nil || len(home) != 3 {
 		t.Fatalf("home should skip film without line on site: %v %+v", err, home)
 	}
-	view, err := BannerSvc.List()
+	view, err := BannerSvc.List("")
 	if err != nil || len(view.Items) != 4 || !view.Items[3].Unavailable {
 		t.Fatalf("admin list should mark unavailable: %v %+v", err, view.Items)
 	}
@@ -109,7 +109,7 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	}
 
 	// 排序没变化的行 MySQL 返回 RowsAffected=0，不能误判为冲突。
-	cur, _ := BannerSvc.List()
+	cur, _ := BannerSvc.List("")
 	same := make([]string, 0, len(cur.Items))
 	for _, it := range cur.Items {
 		same = append(same, it.Id)
@@ -119,7 +119,7 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	}
 
 	// 并发发布整组：同样只能一个成功。
-	cur, _ = BannerSvc.List()
+	cur, _ = BannerSvc.List("")
 	decks := [][]BannerFields{{{Mid: i64Ptr(1)}}, {{Mid: i64Ptr(2)}, {Mid: i64Ptr(3)}}}
 	for i := range decks {
 		wg.Add(1)

@@ -46,8 +46,6 @@ type Deps struct {
 	SkipPublishOnError func(s model.FilmSource, h int) bool
 	// ResolveSpiderProxy 获取全局爬虫通道代理配置（纯内存读取，避免逐页查库）。
 	ResolveSpiderProxy func() (bool, string, error)
-	// ResolveSourceProxy 查询站点是否启用代理。配置读取失败必须返回错误。
-	ResolveSourceProxy func(sourceID string) (bool, string, error)
 	// OnSourceFailed 连续抓取失败且本轮还没有成功页时的通知。有成功页只写入采集记录。
 	OnSourceFailed func(sourceID, sourceName, reason string)
 }
@@ -268,16 +266,6 @@ func buildPageRequest(s *model.FilmSource, h, pg int) (utils.RequestInfo, error)
 			if ok {
 				r.ProxyURL = proxy
 			}
-		}
-		return r, nil
-	}
-	if s.Id != "" && deps.ResolveSourceProxy != nil {
-		ok, proxy, err := deps.ResolveSourceProxy(s.Id)
-		if err != nil {
-			return r, err
-		}
-		if ok {
-			r.ProxyURL = proxy
 		}
 	}
 	return r, nil

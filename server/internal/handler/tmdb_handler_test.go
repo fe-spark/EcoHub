@@ -21,24 +21,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestTMDBHandler_Scrape_Validation(t *testing.T) {
-	// 1. 无效 JSON
-	c, w := testJSONContext(http.MethodPost, "/api/manage/tmdb/scrape", "invalid-json")
-	TMDBHd.Scrape(c)
-	resp := decodeResponse(t, w)
-	if resp.Code != dto.FAILED {
-		t.Fatalf("expected FAILED on invalid JSON, got %d", resp.Code)
-	}
-
-	// 2. 缺少 ids 参数
-	c, w = testJSONContext(http.MethodPost, "/api/manage/tmdb/scrape", `{"ids":[]}`)
-	TMDBHd.Scrape(c)
-	resp = decodeResponse(t, w)
-	if resp.Code != dto.FAILED {
-		t.Fatalf("expected FAILED on empty ids, got %d", resp.Code)
-	}
-}
-
 func TestFilmHandler_FilmDelete_Validation(t *testing.T) {
 	// 1. 无效 JSON
 	c, w := testJSONContext(http.MethodPost, "/api/manage/film/delete", "invalid-json")
@@ -143,6 +125,9 @@ func TestTMDBHandler_GetConfig_HidesApiKeyForNonAdmin(t *testing.T) {
 			if cfg.ApiKey != tc.wantApiKey {
 				t.Fatalf("expected apiKey %q, got %q", tc.wantApiKey, cfg.ApiKey)
 			}
+			if !cfg.Configured {
+				t.Fatalf("expected configured=true even when apiKey is hidden for %s", tc.name)
+			}
 		})
 	}
 }
@@ -239,9 +224,11 @@ func TestUserHandler_UserProfile(t *testing.T) {
 func TestFileHandler_OwnershipEnforcement(t *testing.T) {
 	setupManageConfigDB(t)
 	file := model.FileInfo{
-		Model: gorm.Model{ID: 99},
-		Uid:   10001,
-		Name:  "UserFile",
+		Model:    gorm.Model{ID: 99},
+		Uid:      10001,
+		Name:     "UserFile",
+		FileType: "jpg",
+		Link:     config.FilmPictureAccess + "user_file.jpg",
 	}
 	db.Mdb.Create(&file)
 

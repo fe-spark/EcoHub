@@ -10,6 +10,7 @@ import (
 type TMDBConfig struct {
 	Enabled     bool   `json:"enabled"`
 	ApiKey      string `json:"apiKey"`
+	Configured  bool   `json:"configured,omitempty"` // 只读展示：是否已配置 ApiKey（非超管脱敏清空 ApiKey 时仍可判断可用状态）
 	Language    string `json:"language"`
 	ImageDomain string `json:"imageDomain"`
 }
@@ -66,11 +67,6 @@ type TMDBApplyReq struct {
 	TmdbID    int64    `json:"tmdbId"`
 	MediaType string   `json:"mediaType"` // "movie" | "tv"
 	Fields    []string `json:"fields"`    // 需覆盖的字段列表: "poster", "backdrop", "overview", "actor", "director", "year", "score", "tag"
-}
-
-// TMDBScrapeReq 刮削请求（兼容单个与批量）
-type TMDBScrapeReq struct {
-	Ids []int64 `json:"ids"`
 }
 
 // FilmTMDBScrape 只记录影片对应的 TMDB 词条，正文在 film_index。

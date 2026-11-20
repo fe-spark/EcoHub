@@ -1,3 +1,21 @@
+正式版 **v3.1.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- v3.0.x / v3.1.0：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.1 更新内容
+
+- **分类与轮播支持按采集站切换（#107）**：分类管理与轮播管理默认选中当前主站，支持切换管理任意采集站的分类排序、显隐及轮播排片。
+- **隐藏分类不补充播放源**：非主站隐藏分类下的影片不再补充进主站影片与 TVBox 详情的播放源；保存分类或分类规则变更时同步清理播放详情缓存。
+- **检索封口优化**：大批量采集封口复用已校验主站归属，达到阈值后改走整站顺序重建以降低内存峰值。
+- **TMDB、素材与系统优化**：精简 TMDB 匹配流程并移除自动匹配后台任务；统一图片素材删除校验（先删磁盘再删记录）；重构代理、通知轮询、统一鉴权及管理端内容区布局。
+
+---
+
 正式版 **v3.1.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

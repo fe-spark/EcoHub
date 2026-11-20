@@ -3,6 +3,7 @@ package spider
 import (
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,11 +19,13 @@ const sealWaitLogGap = 15 * time.Second
 // 采集跑完的站点先进 sealing 等检索，所有站在抓页时只攒编号；
 // 全部采集队列都结束后再封一次。按编号增量更新内存索引。
 type searchResealQueue struct {
-	mu        sync.Mutex
-	pending   map[int64]struct{}
-	sealing   map[string]struct{}
-	running   bool
-	retryWait time.Duration
+	mu                 sync.Mutex
+	pending            map[int64]struct{}
+	verifiedPrimary    string
+	allPendingVerified bool
+	sealing            map[string]struct{}
+	running            bool
+	retryWait          time.Duration
 	// awaitDone 停等本轮触发的整表重建终态。只有这时才响应 done/idle。
 	awaitDone bool
 }
@@ -36,8 +39,22 @@ var searchSealRunning atomic.Bool
 
 var waitCollectIdle = func() { collectLifecycle.waitUntilIdle() }
 
-// sealSearchIndex 按编号封口。仅在内存索引不可用时改走整表重建。
-var sealSearchIndex = filmsnapshot.ResealSearchIndex
+// sealSearchIndex 按编号封口。仅在内存索引不可用或超阈值时改走整表重建。
+var (
+	sealSearchIndex             = filmsnapshot.ResealSearchIndex
+	sealOwnedSearchIndex        = filmsnapshot.ResealOwnedSearchIndex
+	defaultSealSearchIndexPtr   = reflect.ValueOf(filmsnapshot.ResealSearchIndex).Pointer()
+	defaultSealOwnedIndexPtr    = reflect.ValueOf(filmsnapshot.ResealOwnedSearchIndex).Pointer()
+)
+
+func applySearchReseal(verifiedPrimary string, mids []int64) bool {
+	if verifiedPrimary != "" &&
+		(reflect.ValueOf(sealOwnedSearchIndex).Pointer() != defaultSealOwnedIndexPtr ||
+			reflect.ValueOf(sealSearchIndex).Pointer() == defaultSealSearchIndexPtr) {
+		return sealOwnedSearchIndex(verifiedPrimary, mids)
+	}
+	return sealSearchIndex(mids)
+}
 
 // sealRetryWait 所属站查询失败时，编号放回队列后隔一会儿再封。
 var sealRetryWait = 2 * time.Second
@@ -263,25 +280,23 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 // schedulePrimarySearchReseal 只把当前主站的编号放进封口队列。
 // 所属站查询失败时编号先入队，封口时再查。查失败会把编号放回队列重试。
 func schedulePrimarySearchReseal(mids []int64) {
-	owned, err := filmsnapshot.PrimarySearchMIDs(mids)
+	primary, owned, err := filmsnapshot.PrimarySearchMIDsWithSource(mids)
 	if err != nil {
 		log.Printf("[Spider] 所属站查询失败，编号留在封口队列稍后重试 mids=%d err=%v", len(mids), err)
 		scheduleSearchReseal(mids)
 		return
 	}
-	scheduleSearchReseal(owned)
+	scheduleSearchResealWithPrimary(primary, owned)
 }
 
 func scheduleSearchReseal(mids []int64) {
+	scheduleSearchResealWithPrimary("", mids)
+}
+
+func scheduleSearchResealWithPrimary(verifiedPrimary string, mids []int64) {
 	q := searchReseal
 	q.mu.Lock()
-	added := 0
-	for _, mid := range mids {
-		if mid > 0 {
-			q.pending[mid] = struct{}{}
-			added++
-		}
-	}
+	added := q.addPendingLocked(mids, verifiedPrimary)
 	if added == 0 {
 		q.mu.Unlock()
 		return
@@ -343,7 +358,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		return true
 	}
 	pendingN, sealingN := len(q.pending), len(q.sealing)
-	mids := q.takePendingLocked()
+	mids, verifiedPrimary := q.takePendingLocked()
 	q.mu.Unlock()
 	log.Printf("[Spider] 开始封口检索索引 pending=%d sealing=%d", pendingN, sealingN)
 
@@ -352,7 +367,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	progressBefore := filmsnapshot.SearchIndexProgressToken()
 	if len(mids) > 0 {
 		searchSealRunning.Store(true)
-		sealed = sealSearchIndex(mids)
+		sealed = applySearchReseal(verifiedPrimary, mids)
 	}
 	// 封口函数决定整表加载时会排队重建。已交出的站点等重建结束再收口。
 	// 重建期间新进来的编号还在 pending，继续封。
@@ -385,7 +400,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 			log.Printf("[Spider] 封口未写入检索索引，进度已变化，编号交给重建 mids=%d", len(mids))
 			return false
 		}
-		q.restorePending(mids)
+		q.restorePending(mids, verifiedPrimary)
 		searchSealRunning.Store(false)
 		retryWait := q.nextSealRetryWait()
 		log.Printf("[Spider] 封口未写入检索索引，编号留在队列稍后重试 mids=%d retry_in=%s", len(mids), retryWait)
@@ -429,23 +444,51 @@ func (q *searchResealQueue) resetSealRetryWait() {
 	q.mu.Unlock()
 }
 
-func (q *searchResealQueue) restorePending(mids []int64) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+func (q *searchResealQueue) addPendingLocked(mids []int64, verifiedPrimary string) int {
+	verifiedPrimary = strings.TrimSpace(verifiedPrimary)
+	wasEmpty := len(q.pending) == 0
+	added := 0
 	for _, mid := range mids {
 		if mid > 0 {
 			q.pending[mid] = struct{}{}
+			added++
 		}
 	}
+	if added == 0 {
+		return 0
+	}
+	if verifiedPrimary == "" {
+		q.allPendingVerified = false
+		q.verifiedPrimary = ""
+	} else if wasEmpty {
+		q.allPendingVerified = true
+		q.verifiedPrimary = verifiedPrimary
+	} else if !q.allPendingVerified || q.verifiedPrimary != verifiedPrimary {
+		q.allPendingVerified = false
+		q.verifiedPrimary = ""
+	}
+	return added
 }
 
-func (q *searchResealQueue) takePendingLocked() []int64 {
+func (q *searchResealQueue) restorePending(mids []int64, verifiedPrimary string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.addPendingLocked(mids, verifiedPrimary)
+}
+
+func (q *searchResealQueue) takePendingLocked() ([]int64, string) {
 	mids := make([]int64, 0, len(q.pending))
 	for mid := range q.pending {
 		mids = append(mids, mid)
 	}
+	verifiedPrimary := ""
+	if q.allPendingVerified {
+		verifiedPrimary = q.verifiedPrimary
+	}
 	q.pending = map[int64]struct{}{}
-	return mids
+	q.verifiedPrimary = ""
+	q.allPendingVerified = false
+	return mids, verifiedPrimary
 }
 
 // complete 把当前等检索的站点收成完成。已经重开的站点保持原状。

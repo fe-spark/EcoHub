@@ -12,7 +12,7 @@ export function useTmdbEnabled(): boolean {
       .then((resp: any) => {
         if (mounted && resp?.code === 0) {
           const cfg = resp.data;
-          setEnabled(Boolean(cfg?.enabled && cfg?.apiKey?.trim()));
+          setEnabled(Boolean(cfg?.enabled && (cfg?.configured || cfg?.apiKey?.trim())));
         }
       })
       .catch(() => {

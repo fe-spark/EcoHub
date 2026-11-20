@@ -52,9 +52,16 @@ export type BannerFields = {
   tmdbId?: number;
 };
 
+export type BannerSourceOption = {
+  id: string;
+  name: string;
+  state?: boolean;
+};
+
 export type BannerListView = {
   sourceId: string;
   primarySourceId: string;
+  sources?: BannerSourceOption[];
   revision: string;
   items: BannerRecord[];
 };
@@ -67,6 +74,7 @@ export type BannerSkipped = {
 };
 
 export type BannerGenerateResult = {
+  sourceId: string;
   primarySourceId: string;
   revision: string;
   items: BannerRecord[];

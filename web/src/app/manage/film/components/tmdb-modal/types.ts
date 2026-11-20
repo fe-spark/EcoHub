@@ -20,18 +20,23 @@ export interface TmdbModalProps {
   onPrefill?: (data: any, fields?: string[]) => void;
 }
 
-export const FIELD_OPTIONS = [
-  { label: "片名", value: "name" },
+// 直接覆盖落库模式（/manage/tmdb/apply）支持的字段与后端 locked_fields 一致
+export const APPLY_FIELD_OPTIONS = [
   { label: "海报", value: "poster" },
   { label: "背景图", value: "backdrop" },
   { label: "简介", value: "overview" },
   { label: "原名", value: "subTitle" },
   { label: "主演", value: "actor" },
   { label: "导演", value: "director" },
-  { label: "编剧", value: "writer" },
-  { label: "地区", value: "area" },
-  { label: "语言", value: "language" },
   { label: "年份", value: "year" },
   { label: "评分", value: "score" },
   { label: "标签", value: "tag" },
+];
+
+export const FIELD_OPTIONS = [
+  { label: "片名", value: "name" },
+  ...APPLY_FIELD_OPTIONS,
+  { label: "编剧", value: "writer" },
+  { label: "地区", value: "area" },
+  { label: "语言", value: "language" },
 ];

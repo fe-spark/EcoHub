@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Form, Input, Pagination, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, SearchOutlined, SlidersOutlined } from "@ant-design/icons";
+import {
+  ContentFilterBar,
+  ContentPageShell,
+  ContentSectionCard,
+  ContentSourceSelect,
+} from "@/app/manage/components/content-shell";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { usePrimarySource } from "@/lib/manage-primary";
 import {
   checkCategoryRuleConflict,
   deleteCategoryRule,
@@ -38,6 +45,8 @@ interface RuleWorkspaceProps {
 export default function RuleWorkspace(props: RuleWorkspaceProps) {
   const { ruleTotals, onRuleTotalsChange } = props;
   const { canWrite } = useManagePermission();
+  const { primary } = usePrimarySource();
+  const primaryId = primary?.id || "";
   const { message } = useAppMessage();
   const [ruleGroup, setRuleGroup] = useState<string>(ALL_CATEGORY_GROUP);
   const [keyword, setKeyword] = useState("");
@@ -318,89 +327,111 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   ];
 
   return (
-    <div className={styles.ruleWorkspace}>
-      <Space size={[8, 8]} wrap className={styles.filterBar}>
-        <div className={styles.sourceField}>
-          <span className={styles.sourceLabel}>采集源</span>
-          <Select
-            placeholder="选择采集源"
-            className={styles.sourceSelect}
-            value={sourceId || undefined}
-            onChange={(value) => setSourceId(value)}
-            options={sources.map((source) => ({
-              label: source.state === false ? `${source.name} (已停用)` : source.name,
-              value: source.id,
-            }))}
-            showSearch
-            optionFilterProp="label"
-            popupMatchSelectWidth={false}
-          />
-        </div>
-        <Select
-          value={ruleGroup}
-          options={CATEGORY_FILTER_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
-          onChange={(value) => setRuleGroup(value)}
-          className={styles.groupSelect}
+    <ContentPageShell
+      title="分类规则"
+      description="把采集站的分类对应到前台显示的名称。"
+      headerActions={
+        <ContentSourceSelect
+          sources={sources}
+          sourceId={sourceId}
+          primaryId={primaryId}
+          onChange={(value) => setSourceId(value)}
         />
-        <Input
-          allowClear
-          placeholder="搜索原始值、目标值或说明"
-          value={keyword}
-          onChange={(event) => setKeyword(event.target.value)}
-          onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId)}
-          className={styles.searchInput}
-        />
-        <Button type="primary" icon={<SearchOutlined />} onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId)} className={styles.searchButton}>
-          搜索
-        </Button>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => {
-            setKeyword("");
-            setRuleGroup(ALL_CATEGORY_GROUP);
-            void fetchRules(1, paging.pageSize, "", ALL_CATEGORY_GROUP, sourceId);
-          }}
-        >
-          重置
-        </Button>
-      </Space>
-
-      <Table<MappingRuleRecord>
-        rowKey="id"
-        columns={ruleColumns}
-        dataSource={rules}
-        loading={rulesLoading}
-        size="middle"
-        pagination={false}
-        scroll={{ x: "max-content" }}
-        title={() => (
-          <div className={styles.tableHeader}>
-            <div className={styles.tableTitle}>分类规则</div>
-            <Space size={[8, 8]} wrap className={styles.tableActions}>
-              <Tag color="processing">一级 {ruleTotals[ROOT_GROUP] || 0} / 二级 {ruleTotals[SUB_GROUP] || 0}</Tag>
-              <Button icon={<ReloadOutlined />} onClick={() => void Promise.all([fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId), fetchRuleTotals(sourceId)])}>
-                刷新规则
-              </Button>
-              <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite || !sourceId} onClick={openCreateModal}>
-                新增规则
-              </Button>
-            </Space>
-          </div>
-        )}
-        footer={() => (
-          <div className={styles.pagination}>
-            <Pagination
-              current={paging.current}
-              pageSize={paging.pageSize}
-              total={paging.total}
-              showSizeChanger
-              pageSizeOptions={[10, 20, 50, 100, 500]}
-              showTotal={(total) => `共 ${total} 条`}
-              onChange={(page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup, sourceId)}
+      }
+    >
+      <ContentFilterBar
+        lead={
+          <>
+            <Select
+              value={ruleGroup}
+              options={CATEGORY_FILTER_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
+              onChange={(value) => setRuleGroup(value)}
+              className={styles.groupSelect}
             />
-          </div>
-        )}
+            <Input
+              allowClear
+              placeholder="搜索原始值、目标值或说明"
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId)}
+              className={styles.searchInput}
+            />
+            <Button
+              type="primary"
+              icon={<SearchOutlined />}
+              onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId)}
+              className={styles.searchButton}
+            >
+              搜索
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                setKeyword("");
+                setRuleGroup(ALL_CATEGORY_GROUP);
+                void fetchRules(1, paging.pageSize, "", ALL_CATEGORY_GROUP, sourceId);
+              }}
+            >
+              重置
+            </Button>
+          </>
+        }
       />
+
+      <ContentSectionCard
+        icon={<SlidersOutlined />}
+        title="分类规则"
+        count={paging.total}
+        extra={
+          <Tag color="processing" style={{ margin: 0 }}>
+            一级 {ruleTotals[ROOT_GROUP] || 0} / 二级 {ruleTotals[SUB_GROUP] || 0}
+          </Tag>
+        }
+        actions={
+          <Space size={8} wrap>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() =>
+                void Promise.all([
+                  fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId),
+                  fetchRuleTotals(sourceId),
+                ])
+              }
+            >
+              刷新规则
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={!canWrite || !sourceId}
+              onClick={openCreateModal}
+            >
+              新增规则
+            </Button>
+          </Space>
+        }
+        footer={
+          <Pagination
+            current={paging.current}
+            pageSize={paging.pageSize}
+            total={paging.total}
+            showSizeChanger
+            pageSizeOptions={[10, 20, 50, 100, 500]}
+            showTotal={(total) => `共 ${total} 条`}
+            onChange={(page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup, sourceId)}
+          />
+        }
+      >
+        <Table<MappingRuleRecord>
+          rowKey="id"
+          columns={ruleColumns}
+          dataSource={rules}
+          loading={rulesLoading}
+          size="middle"
+          pagination={false}
+          scroll={{ x: "max-content" }}
+        />
+      </ContentSectionCard>
 
       <RuleEditorDrawer
         open={editorVisible}
@@ -418,6 +449,6 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         onCancel={closeRuleEditor}
         onAfterOpenChange={applyEditorValues}
       />
-    </div>
+    </ContentPageShell>
   );
 }

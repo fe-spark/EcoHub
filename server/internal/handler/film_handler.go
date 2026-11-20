@@ -149,14 +149,14 @@ func (h *FilmHandler) FilmDelete(c *gin.Context) {
 
 // ----------------------------------------------------影片分类处理----------------------------------------------------
 
-// FilmClassTree 影片分类树数据固定当前主站。scoped=1 时兼容返回采集站选项供分类规则页使用（D2）。
+// FilmClassTree 获取指定采集站的影片分类树；sourceId 为空时默认当前主站。scoped=1 时同时返回采集站选项。
 func (h *FilmHandler) FilmClassTree(c *gin.Context) {
-	view, err := service.FilmSvc.GetPrimaryClassTree()
+	view, err := service.FilmSvc.GetClassTreeScope(c.Query("sourceId"))
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	c.Header("X-Primary-Source-ID", view.CurrentSourceId)
+	c.Header("X-Primary-Source-ID", view.PrimarySourceId)
 	if c.Query("scoped") != "1" {
 		dto.Success(view.Tree, "影片分类信息获取成功", c)
 		return
@@ -174,7 +174,7 @@ func (h *FilmHandler) FilmClassTree(c *gin.Context) {
 		"sources":         sources,
 		"defaultSourceId": view.DefaultSourceId,
 		"currentSourceId": view.CurrentSourceId,
-		"primarySourceId": view.CurrentSourceId,
+		"primarySourceId": view.PrimarySourceId,
 	}, "影片分类信息获取成功", c)
 }
 
@@ -222,13 +222,7 @@ func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 		dto.Failed("保存失败, 分类结构不能为空", c)
 		return
 	}
-	// D2：展示树只保存主站；空 sourceId 视为主站，非主站返回 409
-	err := service.FilmSvc.SaveSourceClassTree(req.SourceId, req.Children)
-	if err != nil {
-		if errors.Is(err, service.ErrPrimaryMismatch) {
-			dto.PrimaryMismatch(c)
-			return
-		}
+	if err := service.FilmSvc.SaveSourceClassTree(req.SourceId, req.Children); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}

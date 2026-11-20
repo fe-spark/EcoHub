@@ -43,7 +43,7 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 	scrapeRecord := model.FilmTMDBScrape{
 		Mid:       req.Mid,
 		TmdbID:    req.TmdbID,
-		MediaType: strings.TrimSpace(req.MediaType),
+		MediaType: tmdbData.MediaType,
 	}
 	if err := repository.SaveFilmScrape(req.Mid, updates, scrapeRecord); err != nil {
 		return 0, fmt.Errorf("写入影片失败: %w", err)

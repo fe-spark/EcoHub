@@ -51,16 +51,6 @@ func requestForSource(s *model.FilmSource) (utils.RequestInfo, error) {
 		if ok {
 			r.ProxyURL = proxy
 		}
-		return r, nil
-	}
-	if s.Id != "" {
-		ok, proxy, err := repository.ResolveSourceProxy(s.Id)
-		if err != nil {
-			return r, err
-		}
-		if ok {
-			r.ProxyURL = proxy
-		}
 	}
 	return r, nil
 }
@@ -84,7 +74,6 @@ func init() {
 		SavePage:           saveCollectedFilmForCollect,
 		SkipPublishOnError: shouldSkipCollectPublishOnError,
 		ResolveSpiderProxy: repository.ResolveSpiderProxy,
-		ResolveSourceProxy: repository.ResolveSourceProxy,
 		OnSourceFailed:     emitSourceFailedNotify,
 	})
 }

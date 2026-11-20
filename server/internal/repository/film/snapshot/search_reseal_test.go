@@ -442,3 +442,80 @@ func TestLoadSearchMetaUpserts_EmptyMidsShortCircuits(t *testing.T) {
 		t.Fatalf("expected empty results, got upsert=%d drop=%d", len(upsertMap), len(drop))
 	}
 }
+
+func TestResealOwnedSearchIndex_SkipsOwnershipQueryWhenPrimaryMatches(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-owned"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-owned", []FilmSearchMeta{{Mid: 1}}))
+
+	var filmIndexQueries atomic.Int32
+	if err := gdb.Callback().Query().Before("gorm:query").Register("count_film_index_queries", func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Table == (model.FilmIndex{}).TableName() {
+			filmIndexQueries.Add(1)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	prevRead := readSearchMetaUpserts
+	readSearchMetaUpserts = func(mids []int64, _ func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		return map[int64]FilmSearchMeta{}, map[int64]struct{}{}, nil
+	}
+	t.Cleanup(func() { readSearchMetaUpserts = prevRead })
+
+	if !ResealOwnedSearchIndex("source_master", []int64{101, 102}) {
+		t.Fatal("expected ResealOwnedSearchIndex to succeed")
+	}
+	if got := filmIndexQueries.Load(); got != 0 {
+		t.Fatalf("expected 0 film_index ownership queries when primary matches, got %d", got)
+	}
+
+	// 传入旧主站时必须回退执行一次所属站过滤查询
+	if !ResealOwnedSearchIndex("stale_source", []int64{101, 102}) {
+		t.Fatal("expected stale primary fallback to succeed")
+	}
+	if got := filmIndexQueries.Load(); got == 0 {
+		t.Fatal("expected ownership query when verifiedPrimary does not match current primary")
+	}
+}
+
+func TestResealSearchIndex_FallsBackToFullRebuildAtLargeThreshold(t *testing.T) {
+	setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-threshold"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-threshold", []FilmSearchMeta{{Mid: 1}}))
+
+	prevThreshold := resealFullRebuildMinMids
+	prevRead := readSearchMetaUpserts
+	resealFullRebuildMinMids = 5
+	var readCalled atomic.Bool
+	readSearchMetaUpserts = func(mids []int64, _ func(int)) (map[int64]FilmSearchMeta, map[int64]struct{}, error) {
+		readCalled.Store(true)
+		return map[int64]FilmSearchMeta{}, map[int64]struct{}{}, nil
+	}
+	var scanned atomic.Bool
+	stopRebuild := stubSearchRebuildScan(t, &scanned)
+	t.Cleanup(func() {
+		resealFullRebuildMinMids = prevThreshold
+		readSearchMetaUpserts = prevRead
+		stopRebuild()
+	})
+
+	if ResealOwnedSearchIndex("source_master", []int64{1, 2, 3, 4, 5}) {
+		t.Fatal("expected ResealOwnedSearchIndex to hand off to full rebuild when hitting threshold")
+	}
+	if readCalled.Load() {
+		t.Fatal("expected threshold fallback not to run point-query readSearchMetaUpserts")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if scanned.Load() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("expected sequential rebuild to run after hitting reseal threshold")
+}

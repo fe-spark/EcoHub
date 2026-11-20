@@ -1,7 +1,5 @@
-"use client";
-
 import React from "react";
-import { Space, Button, Popconfirm, Tag, Divider } from "antd";
+import { Space, Button, Popconfirm, Divider } from "antd";
 import {
   PlusOutlined,
   ReloadOutlined,
@@ -15,9 +13,7 @@ interface FilmBatchBarProps {
   deleting: boolean;
   onBatchUpdate: () => void;
   onBatchDelete: () => void;
-  onClearSelection: () => void;
   onAdd: () => void;
-  styles: any;
 }
 
 export function FilmBatchBar({
@@ -27,77 +23,56 @@ export function FilmBatchBar({
   deleting,
   onBatchUpdate,
   onBatchDelete,
-  onClearSelection,
   onAdd,
-  styles,
 }: FilmBatchBarProps) {
   const hasSelected = selectedCount > 0;
   const isActionDisabled = !canWrite || !hasSelected;
 
   return (
-    <div className={styles.tableHeader}>
-      <div className={styles.tableTitleGroup}>
-        <span className={styles.tableTitle}>影片列表</span>
-        {hasSelected && (
-          <Tag
-            color="processing"
-            closable
-            onClose={(e) => {
-              e.preventDefault();
-              onClearSelection();
-            }}
-            style={{ borderRadius: 4, margin: 0 }}
-          >
-            已选择 {selectedCount} 项
-          </Tag>
-        )}
-      </div>
-
-      <Space size={[8, 8]} wrap align="center" className={styles.tableActions}>
-        <Button
-          type="primary"
-          style={!isActionDisabled ? { background: "#52c41a", borderColor: "#52c41a" } : undefined}
-          icon={<ReloadOutlined />}
-          disabled={isActionDisabled}
-          loading={updating}
-          onClick={onBatchUpdate}
+    <Space size={[8, 8]} wrap align="center">
+      <Button
+        type="primary"
+        style={!isActionDisabled ? { background: "#52c41a", borderColor: "#52c41a" } : undefined}
+        icon={<ReloadOutlined />}
+        disabled={isActionDisabled}
+        loading={updating}
+        onClick={onBatchUpdate}
+      >
+        批量更新
+      </Button>
+      {!isActionDisabled ? (
+        <Popconfirm
+          title="确定删除？"
+          okText="确定"
+          cancelText="取消"
+          onConfirm={onBatchDelete}
         >
-          批量更新
-        </Button>
-        {!isActionDisabled ? (
-          <Popconfirm
-            title="确定删除？"
-            okText="确定"
-            cancelText="取消"
-            onConfirm={onBatchDelete}
-          >
-            <Button
-              danger
-              icon={<DeleteOutlined />}
-              loading={deleting}
-            >
-              批量删除
-            </Button>
-          </Popconfirm>
-        ) : (
           <Button
             danger
             icon={<DeleteOutlined />}
-            disabled
+            loading={deleting}
           >
             批量删除
           </Button>
-        )}
-        <Divider orientation="vertical" style={{ height: 20, margin: "0 4px" }} />
+        </Popconfirm>
+      ) : (
         <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          disabled={!canWrite}
-          onClick={onAdd}
+          danger
+          icon={<DeleteOutlined />}
+          disabled
         >
-          新增
+          批量删除
         </Button>
-      </Space>
-    </div>
+      )}
+      <Divider orientation="vertical" style={{ height: 20, margin: "0 4px" }} />
+      <Button
+        type="primary"
+        icon={<PlusOutlined />}
+        disabled={!canWrite}
+        onClick={onAdd}
+      >
+        新增
+      </Button>
+    </Space>
   );
 }

@@ -2,12 +2,15 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Table, Tag, Switch, Button, Form, Tooltip, Space, Popconfirm, Card } from "antd";
-import { EditOutlined, ThunderboltOutlined, StopOutlined } from "@ant-design/icons";
+import { EditOutlined, ThunderboltOutlined, StopOutlined, ClockCircleOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
-import ManagePageHeader from "@/app/manage/components/page-header";
+import {
+  ContentPageShell,
+  ContentSectionCard,
+} from "@/app/manage/components/content-shell";
 import styles from "./index.module.less";
 import CronDrawer from "./components/cron-drawer";
 import {
@@ -272,27 +275,25 @@ export default function CronManagePageView() {
   ];
 
   return (
-    <div className={styles.pageStack}>
-      <ManagePageHeader
-        title="计划任务"
-        description="设置到点自动执行的任务，也可以立即执行一次。"
-      />
-
-      <Table
-        columns={columns}
-        dataSource={taskList}
-        rowKey="id"
-        loading={loading}
-        size="middle"
-        pagination={false}
-        scroll={{ x: "max-content" }}
-        title={() => (
-          <div className={styles.tableHeader}>
-            <div className={styles.tableTitle}>任务列表</div>
-            <Space size={[8, 8]} wrap className={styles.tableActions} />
-          </div>
-        )}
-      />
+    <ContentPageShell
+      title="计划任务"
+      description="设置到点自动执行的任务，也可以立即执行一次。"
+    >
+      <ContentSectionCard
+        icon={<ClockCircleOutlined />}
+        title="任务列表"
+        count={taskList.length}
+      >
+        <Table
+          columns={columns}
+          dataSource={taskList}
+          rowKey="id"
+          loading={loading}
+          size="middle"
+          pagination={false}
+          scroll={{ x: "max-content" }}
+        />
+      </ContentSectionCard>
 
       <CronDrawer
         open={editOpen}
@@ -304,6 +305,6 @@ export default function CronManagePageView() {
           form.validateFields().then(onEditFinish);
         }}
       />
-    </div>
+    </ContentPageShell>
   );
 }

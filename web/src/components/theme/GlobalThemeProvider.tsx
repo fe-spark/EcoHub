@@ -195,13 +195,14 @@ export default function GlobalThemeProvider({
           rowSelectedHoverBg: solidOn(designToken.colorBgContainer, itemSelectedHoverBg),
         },
         Segmented: {
-          trackBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#eef2f6",
+          trackBg: isDark ? "rgba(255, 255, 255, 0.05)" : "#eef2f6",
           itemColor: isDark ? "rgba(255, 255, 255, 0.65)" : "#475569",
-          itemHoverBg: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(15, 23, 42, 0.04)",
+          // 悬停仅提亮文字/图标，不铺设与选中块紧贴的底色块。
+          itemHoverBg: "transparent",
           itemHoverColor: isDark ? "#ffffff" : "#0f172a",
-          itemSelectedBg: isDark ? "#2e3138" : "#ffffff",
+          itemSelectedBg: isDark ? "#262932" : "#ffffff",
           itemSelectedColor: isDark ? "#ffa940" : "#d46b08",
-          itemActiveBg: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(15, 23, 42, 0.06)",
+          itemActiveBg: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(15, 23, 42, 0.05)",
         },
         Menu: {
           itemBg: "transparent",

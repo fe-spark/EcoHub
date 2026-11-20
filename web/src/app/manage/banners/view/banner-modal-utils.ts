@@ -1,4 +1,4 @@
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { ApiPost } from "@/lib/client-api";
 import {
   BannerRecord,
   BannerFields,
@@ -150,40 +150,28 @@ export function computeTmdbPrefillUpdates(
   return updates;
 }
 
-export async function fetchFilmOption(mid: number): Promise<FilmOption | null> {
-  try {
-    const resp = await ApiGet("/films/play-info", { id: mid, stored: 1 });
-    const d = resp?.data?.detail;
-    if (resp?.code === 0 && d) {
-      const desc = d.descriptor || {};
-      const cName = d.cName || desc.cName || "";
-      const year = d.year || (desc.year ? String(desc.year) : "") || "";
-      const area = d.area || desc.area || "";
-      const remarks = d.remarks || desc.remarks || "";
-      const director = d.director || desc.director || "";
-      const actor = d.actor || desc.actor || "";
-      const rawScore = d.score ?? desc.dbScore;
-      const score = Number(rawScore) || 0;
-
-      return {
-        id: d.id || mid,
-        name: d.name || "",
-        cName,
-        year,
-        remarks,
-        picture: d.picture || "",
-        pictureSlide: d.pictureSlide || "",
-        area,
-        director,
-        actor,
-        label: d.name || "",
-        value: d.id || mid,
-        isScraped: Boolean(d.isScraped),
-        score,
-      };
-    }
-  } catch {}
-  return null;
+/** 由当前轮播记录（已从片库实时组装）还原选片上下文，避免依赖主站详情接口。 */
+export function bannerRecordToFilmOption(record: BannerRecord | null): FilmOption | null {
+  if (!record || record.unavailable || !record.name) {
+    return null;
+  }
+  const year = record.library?.year ?? record.year;
+  return {
+    id: record.mid,
+    name: record.name || "",
+    cName: record.cName || "",
+    year: year && Number(year) > 0 ? String(year) : "",
+    remarks: record.remark || "",
+    picture: record.library?.poster || "",
+    pictureSlide: record.library?.backdrop || "",
+    area: record.area || "",
+    director: record.director || "",
+    actor: record.actor || "",
+    label: record.name || "",
+    value: record.mid,
+    isScraped: Boolean(record.isScraped),
+    score: Number(record.library?.score ?? record.score ?? 0),
+  };
 }
 
 export interface BannerPreviewParams {

@@ -10,12 +10,29 @@ import (
 	"server/internal/repository/film/writer"
 	"server/internal/spider/converter"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 type FilmService struct{}
 
 var FilmSvc = new(FilmService)
+
+var manualFilmSeq atomic.Int64
+
+func nextManualSourceMid(now time.Time) int64 {
+	candidate := -now.UnixNano()
+	for {
+		prev := manualFilmSeq.Load()
+		next := candidate
+		if prev != 0 && next >= prev {
+			next = prev - 1
+		}
+		if manualFilmSeq.CompareAndSwap(prev, next) {
+			return next
+		}
+	}
+}
 
 // GetFilmPage 获取影片检索信息分页数据（D3：读请求忽略 sourceId，固定当前主站）。
 func (s *FilmService) GetFilmPage(vo *model.SearchVo) ([]model.FilmIndex, error) {
@@ -73,8 +90,9 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	fd.UpdateTime = now.Format(time.DateTime)
 	fd.AddTime = fd.UpdateTime
 	isUpdate := fd.Id > 0
-	if fd.Id == 0 {
-		fd.Id = now.Unix()
+	if !isUpdate {
+		// 手动新建分配单调唯一负数作为源站临时映射标识，避免与 source_mid=0 或源站正数 vod_id 碰撞
+		fd.Id = nextManualSourceMid(now)
 	}
 	detail, err := converter.CovertFilmDetailVo(fd)
 	if err != nil {
@@ -115,14 +133,6 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(savedMid)
 	}
 	return nil
-}
-
-// DelFilms 删除影片（支持单个与批量）
-func (s *FilmService) DelFilms(ids []int64) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	return filmrepo.DelFilmSearchBatch(ids)
 }
 
 // validatePrimaryFilmIDs 校验写操作的影片 ID 均属于当前主站（D3）。
@@ -175,11 +185,6 @@ func (s *FilmService) RefreshPrimaryFilms(ids []int64, sourceID string) error {
 	})
 }
 
-// DelFilm 删除分类影片
-func (s *FilmService) DelFilm(id int64) error {
-	return s.DelFilms([]int64{id})
-}
-
 // GetFilmClassTree 获取影片分类信息
 func (s *FilmService) GetFilmClassTree() model.CategoryTree {
 	return repository.GetCategoryTree()
@@ -191,11 +196,16 @@ type ClassTreeScope struct {
 	Sources         []model.FilmSource
 	DefaultSourceId string
 	CurrentSourceId string
+	PrimarySourceId string
 }
 
-// GetPrimaryClassTree 主站分类展示树（D2：前台导航来源，只读主站）。
-// Sources 保留给分类规则页做采集侧站点选择（D2），树本身与 sourceId 无关。
+// GetPrimaryClassTree 获取当前主站的分类展示树及采集站选项。
 func (s *FilmService) GetPrimaryClassTree() (ClassTreeScope, error) {
+	return s.GetClassTreeScope("")
+}
+
+// GetClassTreeScope 按采集站获取分类展示树；sourceID 为空时默认使用当前主站。
+func (s *FilmService) GetClassTreeScope(sourceID string) (ClassTreeScope, error) {
 	sources, err := repository.GetCollectSourceList()
 	if err != nil {
 		return ClassTreeScope{}, err
@@ -204,16 +214,32 @@ func (s *FilmService) GetPrimaryClassTree() (ClassTreeScope, error) {
 	if primary := repository.CurrentPrimarySource(); primary != nil {
 		primaryID = primary.Id
 	}
+	targetID := strings.TrimSpace(sourceID)
+	if targetID == "" {
+		targetID = primaryID
+	} else if !collectSourceExists(sources, targetID) {
+		return ClassTreeScope{}, errors.New("采集站不存在")
+	}
 	tree := model.CategoryTree{}
-	if primaryID != "" {
-		tree = repository.GetSourceBoundCategoryTree(primaryID)
+	if targetID != "" {
+		tree = repository.GetSourceBoundCategoryTree(targetID)
 	}
 	return ClassTreeScope{
 		Tree:            tree,
 		Sources:         sources,
 		DefaultSourceId: primaryID,
-		CurrentSourceId: primaryID,
+		CurrentSourceId: targetID,
+		PrimarySourceId: primaryID,
 	}, nil
+}
+
+func collectSourceExists(sources []model.FilmSource, sourceID string) bool {
+	for _, src := range sources {
+		if strings.TrimSpace(src.Id) == sourceID {
+			return true
+		}
+	}
+	return false
 }
 
 // GetFilmClassById 通过ID获取影片分类信息
@@ -240,25 +266,34 @@ func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTre
 	return res
 }
 
-// SaveSourceClassTree 保存分类展示树结构（D2：只允许保存主站）。
+// SaveSourceClassTree 保存指定采集站的分类展示树结构；sourceID 为空时默认当前主站。
 func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.CategoryTree) error {
 	if len(nodes) == 0 {
 		return errors.New("分类结构不能为空")
 	}
-	primary := repository.CurrentPrimarySource()
-	if primary == nil {
-		return errors.New("暂无主站，无法保存分类结构")
+	targetID := strings.TrimSpace(sourceID)
+	if targetID == "" {
+		primary := repository.CurrentPrimarySource()
+		if primary == nil {
+			return errors.New("暂无主站，无法保存分类结构")
+		}
+		targetID = primary.Id
+	} else {
+		sources, err := repository.GetCollectSourceList()
+		if err != nil {
+			return err
+		}
+		if !collectSourceExists(sources, targetID) {
+			return errors.New("采集站不存在")
+		}
 	}
-	// D3：写请求携带的站点与主站不一致时拒绝
-	if sourceID = strings.TrimSpace(sourceID); sourceID != "" && sourceID != primary.Id {
-		return ErrPrimaryMismatch
-	}
-	if err := repository.SaveSourceCategoryOrder(primary.Id, nodes); err != nil {
+	if err := repository.SaveSourceCategoryOrder(targetID, nodes); err != nil {
 		return err
 	}
 	if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
 		return err
 	}
+	filmsnapshot.ClearDynamicPlayCaches()
 	filmcache.ClearTVBoxConfigCache()
 	filmcache.ClearTVBoxListCache()
 	return nil

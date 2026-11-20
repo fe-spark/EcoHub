@@ -203,6 +203,19 @@ func playGroupsFromPlayLinkVos(sources []model.PlayLinkVo) ([][]model.MovieUrlIn
 	return groups, names
 }
 
+func peerSourceCategoryVisible() filmshared.PeerCategoryVisibleFunc {
+	cache := make(map[string]func(categoryKey, rootKey string, cid, pid int64) bool)
+	return func(sourceID, categoryKey, rootCategoryKey string, cid, pid int64) bool {
+		sourceID = strings.TrimSpace(sourceID)
+		fn, ok := cache[sourceID]
+		if !ok {
+			fn = filmsnapshot.SourceCategoryVisibility(sourceID)
+			cache[sourceID] = fn
+		}
+		return fn(categoryKey, rootCategoryKey, cid, pid)
+	}
+}
+
 func appendPeerPlayRows(mids []int64, rows []model.FilmSourcePlaylist) ([]model.FilmSourcePlaylist, error) {
 	if len(mids) == 0 {
 		return rows, nil
@@ -214,7 +227,7 @@ func appendPeerPlayRows(mids []int64, rows []model.FilmSourcePlaylist) ([]model.
 	if len(films) == 0 {
 		return rows, nil
 	}
-	peers, err := filmshared.LoadActivePeerPlaylists(films)
+	peers, err := filmshared.LoadActivePeerPlaylistsWithFilter(films, peerSourceCategoryVisible())
 	if err != nil {
 		return nil, err
 	}

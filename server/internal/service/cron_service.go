@@ -15,7 +15,6 @@ var CronSvc = new(CronService)
 
 // GetFilmCrontab 获取所有定时任务信息
 func (s *CronService) GetFilmCrontab() ([]model.CronTaskVo, error) {
-	cst := time.FixedZone("UTC", 8*3600)
 	var l []model.CronTaskVo
 	tl, err := repository.GetAllFilmTask()
 	if err != nil {
@@ -27,11 +26,11 @@ func (s *CronService) GetFilmCrontab() ([]model.CronTaskVo, error) {
 		var preV, nextV string
 		// 只有任务开启时，Next 才有意义
 		if t.State && !e.Next.IsZero() {
-			nextV = e.Next.In(cst).Format(time.DateTime)
+			nextV = e.Next.In(time.Local).Format(time.DateTime)
 		}
 		// 上次执行时间是任务真正开工的时间。入队、让行和跳过不算。
 		if prev := spider.TaskPrev(t.Id); !prev.IsZero() {
-			preV = prev.In(cst).Format(time.DateTime)
+			preV = prev.In(time.Local).Format(time.DateTime)
 		}
 		taskVo := model.CronTaskVo{
 			FilmCollectTask: t,
@@ -58,12 +57,15 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 	if err != nil {
 		return fmt.Errorf("定时任务状态切换失败: %w", err)
 	}
+	prevState := ft.State
 	ft.State = state
 	if err := repository.UpdateFilmTask(ft); err != nil {
 		return fmt.Errorf("定时任务状态保存失败: %w", err)
 	}
-	// 同步重载运行时引擎
+	// 同步重载运行时引擎，失败时回滚数据库状态
 	if err := spider.ReloadCronTask(id); err != nil {
+		ft.State = prevState
+		_ = repository.UpdateFilmTask(ft)
 		return fmt.Errorf("定时任务重载失败: %w", err)
 	}
 	return nil
@@ -71,11 +73,15 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 
 // UpdateFilmCron 更新定时任务的状态信息
 func (s *CronService) UpdateFilmCron(t model.FilmCollectTask) error {
+	prev, prevErr := repository.GetFilmTaskById(t.Id)
 	if err := repository.UpdateFilmTask(t); err != nil {
 		return fmt.Errorf("定时任务保存失败: %w", err)
 	}
-	// 同步重载运行时引擎（可能修改了 Cron 表达式或采集站列表）
+	// 同步重载运行时引擎，失败时回滚旧配置
 	if err := spider.ReloadCronTask(t.Id); err != nil {
+		if prevErr == nil {
+			_ = repository.UpdateFilmTask(prev)
+		}
 		return fmt.Errorf("定时任务重载失败: %w", err)
 	}
 	return nil

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/repository"
 )
@@ -17,6 +21,7 @@ import (
 const (
 	pollerConflictWait = 60 * time.Second
 	pollerMaxBackoff   = 30 * time.Second
+	pollerOffsetTTL    = 7 * 24 * time.Hour
 )
 
 type pollerInstance struct {
@@ -116,8 +121,35 @@ func ensurePollerState(token, proxyURL string) {
 	}(inst, token)
 }
 
+func pollerOffsetKey(token string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	return config.NotifyBatchCachePrefix + ":offset:" + hex.EncodeToString(sum[:8])
+}
+
+func loadPollerOffset(token string) int64 {
+	if db.Rdb == nil {
+		return 0
+	}
+	val, err := db.Rdb.Get(db.Cxt, pollerOffsetKey(token)).Result()
+	if err != nil {
+		return 0
+	}
+	offset, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+	if err != nil || offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func savePollerOffset(token string, offset int64) {
+	if db.Rdb == nil || offset <= 0 {
+		return
+	}
+	_ = db.Rdb.Set(db.Cxt, pollerOffsetKey(token), offset, pollerOffsetTTL).Err()
+}
+
 func runTelegramPoller(ctx context.Context, token string) {
-	var offset int64
+	offset := loadPollerOffset(token)
 	var errStreak int
 
 	for {
@@ -152,6 +184,7 @@ func runTelegramPoller(ctx context.Context, token string) {
 		}
 
 		errStreak = 0
+		prevOffset := offset
 		for _, u := range updates {
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
@@ -159,6 +192,9 @@ func runTelegramPoller(ctx context.Context, token string) {
 			if u.CallbackQuery != nil {
 				handleNotifyCallback(ctx, token, u.CallbackQuery)
 			}
+		}
+		if offset > prevOffset {
+			savePollerOffset(token, offset)
 		}
 	}
 }
@@ -240,12 +276,7 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 			return
 		}
 		chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
-		markup, err := buildCategoryKeyboard(sess.Categories, len(sess.AllFilms))
-		if err != nil {
-			log.Printf("[Notify] 读取站点配置失败: %v", err)
-			_ = answerTelegramCallback(ctx, token, cb.ID, "返回失败", false)
-			return
-		}
+		markup := buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
 		if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, sess.OverviewHTML, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
 			log.Printf("[Notify] 返回汇总失败: %v", err)
 			_ = answerTelegramCallback(ctx, token, cb.ID, "返回失败", false)
