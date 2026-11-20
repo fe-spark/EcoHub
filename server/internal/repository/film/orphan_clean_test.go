@@ -237,3 +237,57 @@ func TestCleanEmptyFilms_MidCursorMultiBatch(t *testing.T) {
 		t.Fatalf("left = %v", left)
 	}
 }
+
+func TestCleanGhostFilms_SingleScanMultiBatch(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	origBatch := filmCleanBatchSize
+	filmCleanBatchSize = 2
+	defer func() {
+		db.Rdb = origRdb
+		filmCleanBatchSize = origBatch
+	}()
+	gdb := setupFilmZeroTestDB(t)
+
+	old := time.Now().Add(-10 * 24 * time.Hour)
+	// mid=1: 空片名（应计入 empty=1）
+	// mid=2: pid=0（应计入 empty=2）
+	// mid=3: 过宽限期且无播放线路（应计入 playless=1）
+	// mid=4: 过宽限期但有播放线路（保留）
+	// mid=5: 无播放线路但在宽限期内（保留）
+	rows := []model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src1"}, FilmIndexCategory: model.FilmIndexCategory{Pid: 1}, FilmIndexContent: model.FilmIndexContent{Name: ""}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src1"}, FilmIndexCategory: model.FilmIndexCategory{Pid: 0}, FilmIndexContent: model.FilmIndexContent{Name: "no-pid"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src1"}, FilmIndexCategory: model.FilmIndexCategory{Pid: 1}, FilmIndexContent: model.FilmIndexContent{Name: "ghost"}, CreatedAt: old, UpdatedAt: old},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src1"}, FilmIndexCategory: model.FilmIndexCategory{Pid: 1}, FilmIndexContent: model.FilmIndexContent{Name: "healthy-old"}, CreatedAt: old, UpdatedAt: old},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 5, FirstSourceId: "src1"}, FilmIndexCategory: model.FilmIndexCategory{Pid: 1}, FilmIndexContent: model.FilmIndexContent{Name: "fresh-no-play"}},
+	}
+	for i := range rows {
+		if err := gdb.Create(&rows[i]).Error; err != nil {
+			t.Fatalf("create film %d: %v", rows[i].Mid, err)
+		}
+		if rows[i].Mid == 3 {
+			gdb.Model(&model.FilmIndex{}).Where("mid = ?", 3).UpdateColumn("updated_at", old)
+		}
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:      4,
+		SourceId: "src1",
+		LineKind: "play",
+	}).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+
+	m, p, err := CleanGhostFilms(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("CleanGhostFilms err=%v", err)
+	}
+	if m != 2 || p != 1 {
+		t.Fatalf("cleaned empty=%d playless=%d, want 2, 1", m, p)
+	}
+	var left []int64
+	gdb.Unscoped().Model(&model.FilmIndex{}).Order("mid").Pluck("mid", &left)
+	if fmt.Sprint(left) != "[4 5]" {
+		t.Fatalf("left = %v, want [4 5]", left)
+	}
+}

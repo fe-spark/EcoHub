@@ -297,36 +297,92 @@ func CleanPlaylessFilms(gracePeriod time.Duration) (int64, error) {
 				candPids[row.Mid] = row.Pid
 			}
 		}
-		if len(candMids) == 0 {
-			return nil, nil, nil
-		}
-		var hasPlayMids []int64
-		if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-			Distinct("mid").
-			Where("mid IN ? AND line_kind = ?", candMids, "play").
-			Pluck("mid", &hasPlayMids).Error; err != nil {
-			return nil, nil, err
-		}
-		hasPlay := make(map[int64]struct{}, len(hasPlayMids))
-		for _, mid := range hasPlayMids {
-			hasPlay[mid] = struct{}{}
-		}
+		return filterPlaylessMids(candMids, candPids)
+	})
+}
+
+// CleanGhostFilms 在单轮游标扫描中同时清理空记录与超过宽限期的无线路幽灵影片，
+// 避免重复扫描 film_index，并在整轮结束后统一刷新搜索标签、缓存与内存检索索引。
+func CleanGhostFilms(gracePeriod time.Duration) (int64, int64, error) {
+	if gracePeriod <= 0 {
+		gracePeriod = 7 * 24 * time.Hour
+	}
+	cutoff := time.Now().Add(-gracePeriod)
+
+	var emptyCount, playlessCount int64
+	_, err := cleanFilmScanBatches("CleanGhostFilms", func(batch []filmCleanRow) ([]int64, map[int64]struct{}, error) {
 		var mids []int64
 		pidSet := make(map[int64]struct{})
-		for _, mid := range candMids {
-			if _, ok := hasPlay[mid]; ok {
+		candMids := make([]int64, 0)
+		candPids := make(map[int64]int64)
+
+		for _, row := range batch {
+			if row.Mid <= 0 {
 				continue
 			}
-			mids = append(mids, mid)
-			if pid := candPids[mid]; pid > 0 {
+			if strings.TrimSpace(row.Name) == "" || row.Pid == 0 {
+				mids = append(mids, row.Mid)
+				if row.Pid > 0 {
+					pidSet[row.Pid] = struct{}{}
+				}
+				emptyCount++
+				continue
+			}
+			if row.UpdatedAt.Before(cutoff) && row.CreatedAt.Before(cutoff) {
+				candMids = append(candMids, row.Mid)
+				candPids[row.Mid] = row.Pid
+			}
+		}
+
+		playlessMids, playlessPids, err := filterPlaylessMids(candMids, candPids)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(playlessMids) > 0 {
+			mids = append(mids, playlessMids...)
+			playlessCount += int64(len(playlessMids))
+			for pid := range playlessPids {
 				pidSet[pid] = struct{}{}
 			}
 		}
 		return mids, pidSet, nil
 	})
+	return emptyCount, playlessCount, err
 }
 
+func filterPlaylessMids(candMids []int64, candPids map[int64]int64) ([]int64, map[int64]struct{}, error) {
+	if len(candMids) == 0 {
+		return nil, nil, nil
+	}
+	var hasPlayMids []int64
+	if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+		Distinct("mid").
+		Where("mid IN ? AND line_kind = ?", candMids, "play").
+		Pluck("mid", &hasPlayMids).Error; err != nil {
+		return nil, nil, err
+	}
+	hasPlay := make(map[int64]struct{}, len(hasPlayMids))
+	for _, mid := range hasPlayMids {
+		hasPlay[mid] = struct{}{}
+	}
+	var mids []int64
+	pidSet := make(map[int64]struct{})
+	for _, mid := range candMids {
+		if _, ok := hasPlay[mid]; ok {
+			continue
+		}
+		mids = append(mids, mid)
+		if pid := candPids[mid]; pid > 0 {
+			pidSet[pid] = struct{}{}
+		}
+	}
+	return mids, pidSet, nil
+}
+
+const cleanProgressLogEveryBatches = 20
+
 // cleanFilmScanBatches 按主键 mid 游标定长分窗扫描并过滤删除，避免过滤后置触发百万全表扫描超 readTimeout。
+// 扫描期间仅做事务内级联删，受影响的 pid 集合与已删 mid 统一在扫描结束后刷新一次搜索标签、缓存与检索索引。
 func cleanFilmScanBatches(logName string, pick func([]filmCleanRow) ([]int64, map[int64]struct{}, error)) (int64, error) {
 	if db.Mdb == nil {
 		return 0, nil
@@ -337,6 +393,16 @@ func cleanFilmScanBatches(logName string, pick func([]filmCleanRow) ([]int64, ma
 	}
 	var cleaned int64
 	var cursor int64
+	var deletedMids []int64
+	allPidSet := make(map[int64]struct{})
+	startedAt := time.Now()
+	var batches, scanned int64
+	defer func() {
+		if len(deletedMids) > 0 {
+			flushFilmCleanSideEffects(deletedMids, allPidSet)
+		}
+	}()
+
 	for {
 		var batch []filmCleanRow
 		if err := db.Mdb.Model(&model.FilmIndex{}).
@@ -356,6 +422,8 @@ func cleanFilmScanBatches(logName string, pick func([]filmCleanRow) ([]int64, ma
 			return cleaned, nil
 		}
 		cursor = next
+		batches++
+		scanned += int64(len(batch))
 
 		mids, pidSet, err := pick(batch)
 		if err != nil {
@@ -363,11 +431,19 @@ func cleanFilmScanBatches(logName string, pick func([]filmCleanRow) ([]int64, ma
 			return cleaned, fmt.Errorf("筛选待清理影片失败: %w", err)
 		}
 		if len(mids) > 0 {
-			if err := deleteFilmCascadeBatch(mids, pidSet); err != nil {
+			if err := deleteFilmCascadeDBBatch(mids); err != nil {
 				log.Printf("%s Delete Error: %v", logName, err)
 				return cleaned, fmt.Errorf("删除影片失败: %w", err)
 			}
 			cleaned += int64(len(mids))
+			deletedMids = append(deletedMids, mids...)
+			for pid := range pidSet {
+				allPidSet[pid] = struct{}{}
+			}
+		}
+		if batches%cleanProgressLogEveryBatches == 0 || len(batch) < batchSize {
+			log.Printf("[OrphanClean] %s 进度: batches=%d scanned=%d cleaned=%d cursor=%d elapsed=%s",
+				logName, batches, scanned, cleaned, cursor, time.Since(startedAt).Round(time.Millisecond))
 		}
 		if len(batch) < batchSize {
 			return cleaned, nil
@@ -422,6 +498,8 @@ func cleanOrphanRowsByMid(table, column string) (int64, error) {
 	session := db.Mdb.Session(&gorm.Session{SkipDefaultTransaction: true})
 	var cleaned int64
 	var cursor int64 = -1 << 63
+	startedAt := time.Now()
+	var batches, scanned int64
 	for {
 		var candidates []int64
 		if err := session.Table(table).
@@ -441,6 +519,8 @@ func cleanOrphanRowsByMid(table, column string) (int64, error) {
 			return cleaned, nil
 		}
 		cursor = next
+		batches++
+		scanned += int64(len(candidates))
 
 		var existing []int64
 		if err := session.Unscoped().Model(&model.FilmIndex{}).
@@ -474,17 +554,21 @@ func cleanOrphanRowsByMid(table, column string) (int64, error) {
 			}
 			cleaned += res.RowsAffected
 		}
+		if batches%cleanProgressLogEveryBatches == 0 || len(candidates) < scanSize {
+			log.Printf("[OrphanClean] 扫描 %s.%s 进度: batches=%d scanned=%d cleaned=%d cursor=%d elapsed=%s",
+				table, column, batches, scanned, cleaned, cursor, time.Since(startedAt).Round(time.Millisecond))
+		}
 		if len(candidates) < scanSize {
 			return cleaned, nil
 		}
 	}
 }
 
-func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
+func deleteFilmCascadeDBBatch(mids []int64) error {
 	if len(mids) == 0 {
 		return nil
 	}
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
@@ -505,10 +589,9 @@ func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
+}
 
+func flushFilmCleanSideEffects(deletedMids []int64, pidSet map[int64]struct{}) {
 	if len(pidSet) > 0 {
 		pids := make([]int64, 0, len(pidSet))
 		for pid := range pidSet {
@@ -519,7 +602,6 @@ func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
 		}
 	}
 	writer.ClearFilmIndexCachesByPidSet(pidSet)
-	snapshot.DeleteActiveSnapshotsByMids(mids...)
+	snapshot.DeleteActiveSnapshotsByMids(deletedMids...)
 	cache.ClearTVBoxListCache()
-	return nil
 }

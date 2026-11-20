@@ -1,7 +1,6 @@
 package spider
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -14,7 +13,6 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	filmsnapshot "server/internal/repository/film/snapshot"
 
 	"github.com/robfig/cron/v3"
 )
@@ -352,23 +350,11 @@ func cleanOrphanData() (int64, int64, error) {
 }
 
 func cleanGhostFilms() (int64, int64, error) {
-	m, emptyErr := filmrepo.CleanEmptyFilms()
-	if emptyErr != nil {
-		emptyErr = fmt.Errorf("清理空记录失败: %w", emptyErr)
+	m, p, err := filmrepo.CleanGhostFilms(7 * 24 * time.Hour)
+	if err != nil {
+		return m, p, fmt.Errorf("清理无效影片失败: %w", err)
 	}
-	// 与原逻辑一致：空记录清理失败也继续尝试清理无线路幽灵影片，错误最后合并上报。
-	p, playlessErr := filmrepo.CleanPlaylessFilms(7 * 24 * time.Hour)
-	if playlessErr != nil {
-		playlessErr = fmt.Errorf("清理无线路幽灵影片失败: %w", playlessErr)
-	}
-	cleanErr := errors.Join(emptyErr, playlessErr)
-	// 只要删过影片（即使中途出错），都要重建快照，避免读模型继续展示已删除的影片。
-	if m > 0 || p > 0 {
-		if err := filmsnapshot.ActivateRebuiltFilmListSnapshot(""); err != nil {
-			return m, p, errors.Join(cleanErr, fmt.Errorf("重建影片快照失败: %w", err))
-		}
-	}
-	return m, p, cleanErr
+	return m, p, nil
 }
 
 const (

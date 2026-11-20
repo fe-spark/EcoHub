@@ -37,10 +37,8 @@ func TestCleanGhostFilms_ReportsStepErrors(t *testing.T) {
 		t.Fatalf("cleaned m=%d p=%d, want 0", m, p)
 	}
 	msg := err.Error()
-	for _, want := range []string{"清理空记录失败", "清理无线路幽灵影片失败"} {
-		if !strings.Contains(msg, want) {
-			t.Fatalf("error %q missing %q", msg, want)
-		}
+	if !strings.Contains(msg, "清理无效影片失败") {
+		t.Fatalf("error %q missing %q", msg, "清理无效影片失败")
 	}
 }
 

@@ -12,7 +12,7 @@
 [![Docker](https://img.shields.io/badge/ghcr.io-fe--spark%2Fecohub-2496ED?logo=docker&logoColor=white)](https://github.com/fe-spark/EcoHub/pkgs/container/ecohub)
 [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue)](./LICENSE)
 
-**自托管影视聚合系统：从采集站汇集影视数据，提供观影网站、管理后台和多种客户端订阅接口。**
+**自托管影视聚合系统：从采集站汇集影视数据，提供观影网站、管理后台与多端订阅接口。**
 
 中文 | [English](./docs/README_EN.md)
 
@@ -21,98 +21,64 @@
 </div>
 
 > [!WARNING]
-> v3 与 v2 的数据库不兼容，且不提供数据迁移。请勿在旧的 `./data/mysql` 上直接拉取新镜像，也请勿使用 v2 后台的「立即升级」。操作步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。
+> v3 与 v2 的数据库不兼容，且不提供数据迁移。请勿在旧的 `./data/mysql` 上直接拉取新镜像，也勿使用 v2 后台的「立即升级」。升级步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。
 
 ## 简介
 
-EcoHub 是一套自托管的影视聚合系统。管理员在后台配置一个或多个采集站，EcoHub 定时拉取影片数据并统一入库，对外提供观影网站、管理后台，以及供 EcoHub 客户端、TVBox / 影视仓和 MacCMS 使用的订阅地址。
+EcoHub 是一套面向个人与小型团队的自托管影视聚合系统。管理员在后台配置采集站后，系统定时拉取影片数据并统一入库，提供观影网站、管理后台及客户端订阅接口。
 
-典型流程：安装后在后台启用采集站并执行一次全量采集，前台即可搜索、筛选和播放；将订阅地址填入 TVBox 后，可在电视端观看。
+系统以单个 All-in-One Docker 镜像发布，配合 MySQL 8 和 Redis 7 即可运行。
 
-EcoHub 面向希望在自有服务器上搭建私有影视站点的个人和小型团队。系统以单个 Docker 镜像发布，配合 MySQL 和 Redis 即可运行。
-
-EcoHub 不提供、不存储任何影视文件，片源来自使用者自行配置的采集接口。
+EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自行配置的采集接口。
 
 ## 主要功能
 
-**采集**
+- **多站采集与调度**：支持 JSON / XML 采集接口、全量/增量采集、失败重试与采集批次记录；内置每小时增量采集及片库、日志、采集记录清理任务。
+- **主站与内存检索**：后台显式指定全局主站（调整排序不改变主站），内存倒排索引常驻当前主站并支持分词、全拼与简拼检索；支持分类规则配置与 TMDB 元数据刮削。
+- **观影网站与播放器**：提供首页轮播、分类筛选、每日更新、观看历史与私有化访问控制；集成 Artplayer 与 Hls.js 播放器，支持多线路切换、进度记忆与全网弹幕。
+- **多端订阅接口**：提供 `/api/provide/app`（EcoHub 客户端）、`/api/provide/tvbox`（TVBox / 影视仓）与 `/api/provide/vod`（MacCMS）订阅地址，播放页按匹配键聚合其他启用站点的线路。
+- **管理后台与运维**：覆盖采集中心、片库与轮播管理、素材中心、数据分析、多角色账号、分模块网络代理、Telegram 通知、配置导出导入及在线升级。
+- **独立客户端**：以 git submodule 形式关联 [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)（`app-for-android/`）与 [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`）。
 
-- 支持多个采集站，兼容 JSON 和 XML 两种采集接口格式；各采集站独立建档，单站异常不影响其他站点。
-- 支持全量采集和增量采集，失败页可重试；每次采集的批次、状态和入库明细均有记录。
-- 计划任务：默认包含每小时增量采集，以及片库清理、日志清理、采集记录清理三项维护任务；维护任务与采集任务冲突时按固定规则执行。
-
-**片库与检索**
-
-- 主站机制：已启用采集站中排序最前的一个作为前台主站；播放页按匹配键附加其他采集站的同一部影片的线路。
-- 内存倒排索引，支持分词、全拼和简拼搜索；分类规则、分类合并和隐藏按采集站配置。
-- TMDB 刮削：为影片补充海报、简介、评分等信息。
-
-**观影网站**
-
-- 首页轮播、分类筛选、搜索、每日更新和观看历史。
-- 基于 Artplayer 和 Hls.js 的播放器，支持多线路、播放进度记忆和按显示宽度自适应的布局。
-- 弹幕：支持本站用户发送弹幕，并可从弹弹play 官方接口或自建 danmu-api 获取全网弹幕。
-- 私有化访问：开启后前台和订阅接口需要登录或订阅密钥。
-
-**订阅接口**
-
-| 地址 | 用途 |
-| --- | --- |
-| `/api/provide/app` | EcoHub 客户端 |
-| `/api/provide/tvbox` | TVBox / 影视仓 |
-| `/api/provide/vod` | MacCMS |
-
-**管理后台**
-
-- 采集中心、采集记录、计划任务、影片列表、首页轮播（含一键排片）、分类管理与分类规则。
-- 素材中心、数据分析、账号管理（超级用户、普通用户、访客三种角色）、运行日志。
-- 网络代理：采集、TMDB 刮削、Telegram 通知、版本检查和弹幕抓取可按模块分别配置是否经由代理访问。
-- 通知推送：通过 Telegram 机器人推送采集汇总、采集站失败、计划任务失败和主站变更等通知。
-- 数据安全：站点配置、采集站、首页轮播、分类规则、网络代理、TMDB、数据分析和通知配置支持导出备份，并可按模块导入。
-- 在线升级：后台可拉取最新镜像并重启。
-
-**客户端**
-
-客户端为独立仓库，以 git submodule 形式包含在本仓库中：
-
-- [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)（`app-for-android/`）
-- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`）
+功能细节与机制说明见 [常见问题](./docs/README-FAQ.md)。
 
 ## 技术架构
 
-| 组件 | 技术 | 目录 |
+| 组件 | 技术栈 | 目录 |
 | --- | --- | --- |
 | 后端 API | Go 1.27、Gin、GORM | `server/` |
 | 前端 | Next.js 16、React 19、TypeScript、Ant Design 6 | `web/` |
-| 数据库 | MySQL 8 | — |
-| 缓存 | Redis 7 | — |
-| 发布 | Docker 镜像 `ghcr.io/fe-spark/ecohub`（`linux/amd64`、`linux/arm64`） | `Dockerfile`、`deploy/release/` |
-
-发布镜像为 All-in-One 形式：同一容器内由 supervisord 运行 Go API（端口 `8080`）和 Next.js（端口 `3000`），Next.js 将 `/api/*` 转发给 Go API。
+| 数据库与缓存 | MySQL 8、Redis 7 | — |
+| 发布镜像 | `ghcr.io/fe-spark/ecohub`（`linux/amd64`、`linux/arm64`） | `Dockerfile`、`deploy/release/` |
 
 ```mermaid
 flowchart LR
-    Browser["浏览器"] --> Web["Next.js 前端<br/>web/ :3000"]
-    Clients["EcoHub 客户端 / TVBox / MacCMS"] --> Web
-    Web -- "/api/*" --> API["Go API<br/>server/ :8080"]
-    API --> MySQL[("MySQL")]
-    API --> Redis[("Redis")]
-    API --> Sources["采集站接口"]
-    API --> External["TMDB / Telegram / 弹幕接口"]
+    Browser["浏览器 / 客户端 / TVBox / MacCMS"] --> Web["Next.js 前端 (web/ :3000)"]
+    Web -- "/api/*" --> API["Go API (server/ :8080)"]
+    API --> MySQL[("MySQL 8")]
+    API --> Redis[("Redis 7")]
+    API --> External["采集站 / TMDB / Telegram / 弹幕接口"]
 ```
 
 ## 快速开始
 
-环境要求：Docker 20+ 和 Docker Compose，建议 2 核 CPU、2 GB 内存及以上。执行以下命令安装：
+环境要求：Docker 20+ 与 Docker Compose，建议 2 核 CPU、2 GB 内存及以上。执行以下命令安装：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.6 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.0 sh
 ```
 
-安装完成后，终端输出前台、后台地址、初始账号和三条订阅地址，默认 Web 端口为 `3000`。数据位于 `~/ecohub`，之后通过 `ecohub` 命令管理（如 `ecohub status`、`ecohub update`）。在后台「采集中心」执行一次全量采集后，影片随采集进度陆续出现在前台。
+安装完成后终端将输出前台/后台地址、初始账号与订阅地址，默认 Web 端口为 `3000`，数据目录为 `~/ecohub`，后续可通过 `ecohub` 命令管理。自定义密码、端口、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/README-Deploy.md)。
 
-密码设置、`ecohub` 命令、1Panel、手动 `docker run`、反向代理和环境变量，见 [部署指南](./docs/README-Deploy.md)。
+## 推荐
+
+| 类型 | 服务商 | 链接 |
+| --- | --- | --- |
+| 服务器 | CloudCone（演示站所用，磁盘 I/O 不限） | [选购](https://app.cloudcone.com/?ref=14393) |
+| 网络 | 良心云，低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| 网络 | 赔钱机场，低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| 网络 | DOVE | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## 文档
 
@@ -123,10 +89,10 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 | [常见问题](./docs/README-FAQ.md) | 空站、主站、采集、缓存、网络代理、弹幕、登录、私有化访问 |
 | [计划任务运行冲突](./docs/cron-task-conflict.md) | 采集任务与维护任务同时触发时的执行顺序 |
 | [开发指南](./docs/README-Dev.md) | 本地开发环境与开发编排 |
-| [服务端说明](./server/README.md) | Go 后端的启动、环境变量、接口、目录结构 |
-| [前端说明](./web/README.md) | Next.js 前端的启动、`API_URL`、鉴权、目录结构 |
-| [版本说明](./docs/RELEASE.md) | 当前版本的变更内容 |
-| [文档索引](./docs/README.md) | 全部文档，含英文版 |
+| [服务端说明](./server/README.md) | Go 后端启动、环境变量、接口、目录结构 |
+| [前端说明](./web/README.md) | Next.js 前端启动、`API_URL`、鉴权、目录结构 |
+| [版本说明](./docs/RELEASE.md) | 当前版本及历史版本的变更内容 |
+| [文档索引](./docs/README.md) | 全部中英文文档索引 |
 
 ## 目录结构
 
@@ -139,7 +105,7 @@ EcoHub/
 ├── deploy/release/      # 发布编排 compose.yml
 ├── scripts/             # 安装脚本 install-release.sh（ecohub 命令）
 ├── docs/                # 项目文档
-├── .github/workflows/   # GitHub Release 与 Docker 镜像发布流程
+├── .github/workflows/   # GitHub Release 与 Docker 镜像构建流程
 ├── Dockerfile           # All-in-One 发布镜像
 ├── docker-compose.yml   # 本地开发编排
 └── supervisord.conf     # 镜像内进程管理配置
@@ -147,11 +113,11 @@ EcoHub/
 
 ## 参与贡献
 
-本项目由作者业余维护，更新频率有限，欢迎提交 [Issues](https://github.com/fe-spark/EcoHub/issues) 和 [Pull Requests](https://github.com/fe-spark/EcoHub/pulls)。文档修改请遵循 [文档写作规范](./docs/STYLE.md)。
+本项目由作者业余维护，更新频率有限，欢迎提交 [Issues](https://github.com/fe-spark/EcoHub/issues) 与 [Pull Requests](https://github.com/fe-spark/EcoHub/pulls)。文档修改请遵循 [文档写作规范](./docs/STYLE.md)。
 
 ### 本地开发
 
-环境要求：Go 1.27+、Node.js 20.9+、MySQL 8、Redis 7。开发编排和启动方式见 [开发指南](./docs/README-Dev.md)，后端和前端的详细说明见 [服务端说明](./server/README.md) 和 [前端说明](./web/README.md)。
+环境要求：Go 1.27+、Node.js 20.9+、MySQL 8、Redis 7。搭建步骤与编排说明见 [开发指南](./docs/README-Dev.md)，模块细节见 [服务端说明](./server/README.md) 与 [前端说明](./web/README.md)。
 
 ## 许可证
 
