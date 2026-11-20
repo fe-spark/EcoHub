@@ -1,3 +1,20 @@
+测试版 **v3.1.1-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.1-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.0。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.1-beta.0`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.1-beta.0 更新内容
+
+- **分类管理支持按采集站切换（#107）**：分类管理页默认选中当前主站，支持切换管理任意采集站的分类排序与显隐。
+- **隐藏分类不补充播放源**：非主站隐藏分类下的影片不再补充进主站影片与 TVBox 详情的播放源；保存分类或分类规则变更时同步清理播放详情缓存。
+- **检索封口优化**：大批量采集封口复用已校验主站归属，达到阈值后改走整站顺序重建以降低内存峰值。
+
+---
+
 正式版 **v3.1.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
