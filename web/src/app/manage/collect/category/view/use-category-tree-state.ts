@@ -1,6 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { API_PRIMARY_MISMATCH } from "@/lib/client-api";
 import { usePrimarySource } from "@/lib/manage-primary";
 import { getFilmClassTree, saveFilmClassTree } from "./api";
 import {
@@ -24,10 +23,16 @@ export function useCategoryTreeState() {
   const [loadingTree, setLoadingTree] = useState(false);
   const [savingTree, setSavingTree] = useState(false);
   const sourceIdRef = useRef("");
+  const primaryIdRef = useRef(primaryId);
+  const primaryLoadingRef = useRef(primaryLoading);
   const previousPrimaryIdRef = useRef("");
   const pendingChangesRef = useRef(false);
+  const initializedRef = useRef(false);
+  const requestSeqRef = useRef(0);
 
   sourceIdRef.current = sourceId;
+  primaryIdRef.current = primaryId;
+  primaryLoadingRef.current = primaryLoading;
 
   const stats = useMemo(() => collectStats(classTree), [classTree]);
   const hasPendingChanges = useMemo(
@@ -37,21 +42,10 @@ export function useCategoryTreeState() {
   pendingChangesRef.current = hasPendingChanges;
 
   const fetchFilmClassTree = useCallback(async (keepExpanded = false, overrideSourceId?: string) => {
-    if (primaryLoading) return;
-    const previousPrimaryId = previousPrimaryIdRef.current;
-    const primaryChanged = Boolean(previousPrimaryId && previousPrimaryId !== primaryId);
+    if (primaryLoadingRef.current && overrideSourceId === undefined) return;
     const currentSelected = sourceIdRef.current;
-    let targetSourceId = overrideSourceId !== undefined ? overrideSourceId : currentSelected || primaryId;
-
-    if (overrideSourceId === undefined && primaryChanged && (!currentSelected || currentSelected === previousPrimaryId)) {
-      if (pendingChangesRef.current) {
-        message.warning("主站已变更，未保存的分类调整已丢弃");
-      }
-      targetSourceId = primaryId;
-      setClassTree([]);
-      setOriginalTree([]);
-      setExpandedKeys([]);
-    }
+    const targetSourceId = overrideSourceId !== undefined ? overrideSourceId : currentSelected || primaryIdRef.current;
+    const requestSeq = ++requestSeqRef.current;
 
     setLoadingTree(true);
     try {
@@ -62,15 +56,17 @@ export function useCategoryTreeState() {
         currentSourceId,
         primarySourceId,
       } = await getFilmClassTree(targetSourceId);
+      if (requestSeq !== requestSeqRef.current) {
+        return;
+      }
       if (resp.code !== 0) {
         message.error(resp.msg || "分类数据加载失败");
         return;
       }
-      if (primarySourceId && primarySourceId !== primaryId) {
+      if (primarySourceId && primarySourceId !== primaryIdRef.current) {
         void refreshPrimary();
       }
       const resolvedSourceId = currentSourceId || targetSourceId;
-      previousPrimaryIdRef.current = primaryId;
       setSources(nextSources);
       setSourceId(resolvedSourceId);
       setClassTree(tree);
@@ -79,9 +75,38 @@ export function useCategoryTreeState() {
         setExpandedKeys([]);
       }
     } finally {
-      setLoadingTree(false);
+      if (requestSeq === requestSeqRef.current) {
+        setLoadingTree(false);
+      }
     }
-  }, [message, primaryId, primaryLoading, refreshPrimary]);
+  }, [message, refreshPrimary]);
+
+  useEffect(() => {
+    if (primaryLoading) {
+      return;
+    }
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      previousPrimaryIdRef.current = primaryId;
+      void fetchFilmClassTree();
+      return;
+    }
+    const previousPrimaryId = previousPrimaryIdRef.current;
+    if (previousPrimaryId === primaryId) {
+      return;
+    }
+    previousPrimaryIdRef.current = primaryId;
+    const currentSelected = sourceIdRef.current;
+    if (!currentSelected || (previousPrimaryId && currentSelected === previousPrimaryId)) {
+      if (pendingChangesRef.current) {
+        message.warning("主站已变更，未保存的分类调整已丢弃");
+      }
+      setClassTree([]);
+      setOriginalTree([]);
+      setExpandedKeys([]);
+      void fetchFilmClassTree(false, primaryId);
+    }
+  }, [fetchFilmClassTree, message, primaryId, primaryLoading]);
 
   const selectSource = useCallback(async (nextSourceId: string) => {
     if (!nextSourceId || nextSourceId === sourceIdRef.current) {
@@ -91,7 +116,7 @@ export function useCategoryTreeState() {
   }, [fetchFilmClassTree]);
 
   const saveTree = useCallback(async () => {
-    const targetSourceId = sourceIdRef.current || primaryId;
+    const targetSourceId = sourceIdRef.current || primaryIdRef.current;
     if (!targetSourceId) {
       message.warning("暂无可用采集站");
       return;
@@ -100,11 +125,6 @@ export function useCategoryTreeState() {
     try {
       const resp = await saveFilmClassTree(classTree, targetSourceId);
       if (resp.code !== 0) {
-        if (resp.code === API_PRIMARY_MISMATCH) {
-          message.warning(resp.msg || "主站已变更，请刷新后重试");
-          void refreshPrimary();
-          return;
-        }
         message.error(resp.msg || "保存分类变更失败");
         return;
       }
@@ -113,7 +133,7 @@ export function useCategoryTreeState() {
     } finally {
       setSavingTree(false);
     }
-  }, [classTree, fetchFilmClassTree, message, primaryId, refreshPrimary]);
+  }, [classTree, fetchFilmClassTree, message]);
 
   const discardTree = useCallback(() => {
     setClassTree(cloneTree(originalTree));

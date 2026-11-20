@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -13,11 +12,6 @@ export default function CategoryWorkspacePageView() {
   const treeState = useCategoryTreeState();
   const { canWrite } = useManagePermission();
   const { modal } = useAppMessage();
-  const { fetchFilmClassTree } = treeState;
-
-  useEffect(() => {
-    void fetchFilmClassTree();
-  }, [fetchFilmClassTree]);
 
   const runUnlessDirty = (action: () => void, title: string, okText: string) => {
     if (treeState.savingTree) {
