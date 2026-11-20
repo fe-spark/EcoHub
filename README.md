@@ -32,14 +32,7 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 | 观影前台 | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | 管理后台 | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
 
-## 推荐
 
-| 类型 | 服务商 | 说明 | 链接 |
-| --- | --- | --- | --- |
-| 服务器 | CloudCone | 演示站所用，磁盘 I/O 不限 | [选购](https://app.cloudcone.com/?ref=14393) |
-| 网络 | 良心云 | 低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| 网络 | 赔钱机场 | 低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| 网络 | DOVE | 稳定备用网络服务 | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## 主要功能
 
@@ -64,6 +57,16 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 - [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`）
 
 功能细节见 [常见问题](./docs/README-FAQ.md)。
+
+## 推荐
+
+| 类型 | 服务商 | 说明 | 链接 |
+| --- | --- | --- | --- |
+| 服务器 | CloudCone | 演示站所用，磁盘 I/O 不限 | [选购](https://app.cloudcone.com/?ref=14393) |
+| 网络 | 良心云 | 低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| 网络 | 赔钱机场 | 低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| 网络 | DOVE | 稳定备用网络服务 | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
+
 
 ## 技术架构
 
