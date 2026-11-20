@@ -131,7 +131,11 @@ func refreshProjectedReadModelAfterMappingRuleChange(groups ...string) error {
 			if err := repository.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 				return err
 			}
-			return filmsnapshot.RefreshActiveProjectedReadModel()
+			if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
+				return err
+			}
+			filmsnapshot.ClearDynamicPlayCaches()
+			return nil
 		}
 	}
 	return nil

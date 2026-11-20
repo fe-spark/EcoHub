@@ -45,11 +45,22 @@ export default function CategoryWorkspacePageView() {
       />
 
       <CategoryTreeCard
+        sources={treeState.sources}
+        sourceId={treeState.sourceId}
+        primaryId={treeState.primaryId}
         classTree={treeState.classTree}
         expandedKeys={treeState.expandedKeys}
         loadingTree={treeState.loadingTree}
         savingTree={treeState.savingTree}
         stats={treeState.stats}
+        onSourceChange={(nextSourceId) => {
+          if (nextSourceId === treeState.sourceId) return;
+          runUnlessDirty(
+            () => void treeState.selectSource(nextSourceId),
+            "切换采集源？",
+            "切换",
+          );
+        }}
         onRefresh={() =>
           runUnlessDirty(
             () => void treeState.fetchFilmClassTree(true),

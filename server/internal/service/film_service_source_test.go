@@ -8,7 +8,9 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -79,7 +81,7 @@ func TestFilmService_GetSearchOptions_PrimaryOnly(t *testing.T) {
 	}
 }
 
-func TestFilmService_GetPrimaryClassTree(t *testing.T) {
+func TestFilmService_GetClassTreeScope(t *testing.T) {
 	gdb := setupFilmServiceTestDB(t)
 	gdb.Create(&model.FilmSource{Id: "src_b", Name: "站点B", Uri: "http://b", State: true, Sort: 2})
 	gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0})
@@ -90,40 +92,168 @@ func TestFilmService_GetPrimaryClassTree(t *testing.T) {
 	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0})
 	gdb.Create(&model.SourceCategory{SourceId: "src_b", SourceTypeId: 2, ParentSourceTypeId: 0, RawName: "电视剧", Sort: 1, Depth: 0})
 
-	view, err := new(FilmService).GetPrimaryClassTree()
+	srv := new(FilmService)
+	view, err := srv.GetClassTreeScope("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.DefaultSourceId != "src_a" || view.CurrentSourceId != "src_a" {
-		t.Fatalf("default source = %s current = %s", view.DefaultSourceId, view.CurrentSourceId)
+	if view.DefaultSourceId != "src_a" || view.CurrentSourceId != "src_a" || view.PrimarySourceId != "src_a" {
+		t.Fatalf("default=%s current=%s primary=%s", view.DefaultSourceId, view.CurrentSourceId, view.PrimarySourceId)
 	}
-	// Sources 保留给分类规则页做采集侧站点选择（D2）
 	if len(view.Sources) != 2 {
 		t.Fatalf("sources = %d", len(view.Sources))
 	}
-	// 展示树固定主站：始终是 src_a 的分类
 	if len(view.Tree.Children) != 1 || view.Tree.Children[0].Name != "电影" {
 		t.Fatalf("primary tree = %+v", view.Tree.Children)
 	}
+
+	peerView, err := srv.GetClassTreeScope("src_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peerView.CurrentSourceId != "src_b" || peerView.PrimarySourceId != "src_a" {
+		t.Fatalf("peer current=%s primary=%s", peerView.CurrentSourceId, peerView.PrimarySourceId)
+	}
+	if len(peerView.Tree.Children) != 1 || peerView.Tree.Children[0].Name != "电视剧" {
+		t.Fatalf("peer tree = %+v", peerView.Tree.Children)
+	}
+
+	if _, err := srv.GetClassTreeScope("missing"); err == nil {
+		t.Fatal("expected error for unknown source")
+	}
 }
 
-// D3：展示树写请求只允许主站；空 sourceId 视为主站。
-func TestFilmService_SaveSourceClassTree_PrimaryOnly(t *testing.T) {
+func TestFilmService_SaveSourceClassTree_BySource(t *testing.T) {
 	gdb := setupFilmServiceTestDB(t)
 	gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0})
 	gdb.Create(&model.FilmSource{Id: "src_b", Name: "站点B", Uri: "http://b", State: true, Sort: 1})
-	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "电影", StableKey: "a-movie", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "电影", StableKey: "source:src_a:1", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 10, Pid: 0, Name: "电视剧", StableKey: "source:src_b:2", Show: true, Sort: 1})
 	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 9})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 2, CategoryId: 10})
 	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0})
+	gdb.Create(&model.SourceCategory{SourceId: "src_b", SourceTypeId: 2, ParentSourceTypeId: 0, RawName: "电视剧", Sort: 1, Depth: 0})
 
 	srv := new(FilmService)
-	// 树节点 ID 为展示分类 ID
-	nodes := []*model.CategoryTree{{Id: 9, Name: "电影", Show: true}}
-	if err := srv.SaveSourceClassTree("src_b", nodes); !errors.Is(err, ErrPrimaryMismatch) {
-		t.Fatalf("save to non-primary should mismatch, got %v", err)
+	if err := srv.SaveSourceClassTree("src_b", []*model.CategoryTree{{Id: 10, Name: "电视剧", Show: false}}); err != nil {
+		t.Fatalf("save to non-primary should succeed, got %v", err)
 	}
-	if err := srv.SaveSourceClassTree("", nodes); err != nil {
+	if err := srv.SaveSourceClassTree("", []*model.CategoryTree{{Id: 9, Name: "电影", Show: true}}); err != nil {
 		t.Fatalf("save with empty source should use primary: %v", err)
+	}
+	if err := srv.SaveSourceClassTree("missing", []*model.CategoryTree{{Id: 9, Name: "电影", Show: true}}); err == nil {
+		t.Fatal("save to missing source should fail")
+	}
+
+	var catA, catB model.Category
+	gdb.First(&catA, 9)
+	gdb.First(&catB, 10)
+	if !catA.Show || catB.Show {
+		t.Fatalf("expected catA.Show=true catB.Show=false, got %v %v", catA.Show, catB.Show)
+	}
+}
+
+func TestGetFilmDetail_ExcludesHiddenNonPrimaryCategoryPeerPlay(t *testing.T) {
+	gdb, _ := setupTestDBAndRedis(t)
+	t.Cleanup(func() { support.SetCategoryShowForTest(map[int64]bool{}) })
+
+	gdb.Create(&model.FilmSource{Id: "src_a", Name: "主站A", Uri: "http://a", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src_b", Name: "备站B", Uri: "http://b", State: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", StableKey: "source:src_a:1", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 20, Pid: 0, Name: "伦理", StableKey: "source:src_b:2", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 21, Pid: 20, Name: "福利", StableKey: "source:src_b:12", Show: true, Sort: 1})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 1})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 2, CategoryId: 20})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 12, CategoryId: 21})
+	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0})
+	gdb.Create(&model.SourceCategory{SourceId: "src_b", SourceTypeId: 2, ParentSourceTypeId: 0, RawName: "伦理", Sort: 1, Depth: 0})
+	gdb.Create(&model.SourceCategory{SourceId: "src_b", SourceTypeId: 12, ParentSourceTypeId: 2, RawName: "福利", Sort: 1, Depth: 1})
+	repository.MarkCategoryChanged()
+
+	const version = "live"
+	filmA := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "src_a", DbId: 9001},
+		FilmIndexCategory: model.FilmIndexCategory{Cid: 1, Pid: 1, CategoryKey: "source:src_a:1", RootCategoryKey: "source:src_a:1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "测试影片"},
+	}
+	filmB := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "src_b", DbId: 9001},
+		FilmIndexCategory: model.FilmIndexCategory{Cid: 21, Pid: 20, CategoryKey: "source:src_b:12", RootCategoryKey: "source:src_b:2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "测试影片"},
+	}
+	gdb.Create(&filmA)
+	gdb.Create(&filmB)
+	for _, k := range filmshared.BuildMovieMatchKeysWithCategory(9001, "测试影片", 1) {
+		gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: k})
+	}
+	for _, k := range filmshared.BuildMovieMatchKeysWithCategory(9001, "测试影片", 20) {
+		gdb.Create(&model.MovieMatchKey{Mid: 102, MatchKey: k})
+	}
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 101, SourceId: "src_a", LineKind: model.LineKindPlay, GroupIndex: 0, Content: `[{"episode":"1","link":"http://a/1"}]`})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 102, SourceId: "src_b", LineKind: model.LineKindPlay, GroupIndex: 0, Content: `[{"episode":"1","link":"http://b/1"}]`})
+
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
+
+	// 1. 未隐藏前，主站详情和 TVBox 均能补充非主站播放源
+	before, err := IndexSvc.GetFilmDetail(101)
+	if err != nil {
+		t.Fatalf("GetFilmDetail before hide: %v", err)
+	}
+	if len(before.List) != 2 {
+		t.Fatalf("expected 2 play sources before hide, got %+v", before.List)
+	}
+
+	// 2. 在分类管理中隐藏非主站 src_b 的二级分类「福利」
+	if err := new(FilmService).SaveSourceClassTree("src_b", []*model.CategoryTree{
+		{
+			Id:   20,
+			Name: "伦理",
+			Show: true,
+			Children: []*model.CategoryTree{
+				{Id: 21, Name: "福利", Show: false},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveSourceClassTree: %v", err)
+	}
+
+	// 3. 缓存被清理，主站详情与 TVBox 批量读取均不得再出现 src_b 播放源
+	after, err := IndexSvc.GetFilmDetail(101)
+	if err != nil {
+		t.Fatalf("GetFilmDetail after hide: %v", err)
+	}
+	if len(after.List) != 1 || after.List[0].SourceId != "src_a" {
+		t.Fatalf("expected only src_a play source after hiding child category, got %+v", after.List)
+	}
+	batch, _, err := BatchGetPlayPlaylistsByMids([]int64{101})
+	if err != nil {
+		t.Fatalf("BatchGetPlayPlaylistsByMids: %v", err)
+	}
+	if len(batch[101]) != 1 || batch[101][0].SourceId != "src_a" {
+		t.Fatalf("expected TVBox batch to exclude hidden peer source, got %+v", batch[101])
+	}
+
+	// 4. 恢复二级显示但隐藏一级父分类「伦理」，同样不得出现
+	if err := new(FilmService).SaveSourceClassTree("src_b", []*model.CategoryTree{
+		{
+			Id:   20,
+			Name: "伦理",
+			Show: false,
+			Children: []*model.CategoryTree{
+				{Id: 21, Name: "福利", Show: true},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveSourceClassTree hide root: %v", err)
+	}
+	afterRootHide, err := IndexSvc.GetFilmDetail(101)
+	if err != nil {
+		t.Fatalf("GetFilmDetail after root hide: %v", err)
+	}
+	if len(afterRootHide.List) != 1 || afterRootHide.List[0].SourceId != "src_a" {
+		t.Fatalf("expected only src_a play source after hiding root category, got %+v", afterRootHide.List)
 	}
 }
 
