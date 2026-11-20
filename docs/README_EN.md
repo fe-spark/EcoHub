@@ -32,6 +32,15 @@ EcoHub neither provides nor stores any media files; all sources come from collec
 | Viewing site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin panel | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
 
+## Recommendations
+
+| Kind | Provider | Notes | Link |
+| --- | --- | --- | --- |
+| Server | CloudCone | Hosts the demo; unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
+| Network | LiangXinYun | From ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| Network | PeiQian | From ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| Network | DOVE | Reliable backup network service | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
+
 ## Main features
 
 | Module | Capabilities |
@@ -39,9 +48,24 @@ EcoHub neither provides nor stores any media files; all sources come from collec
 | Multi-source collect | JSON / XML APIs, scheduled full and incremental collects |
 | Main source and search | Explicit global main source, in-memory pinyin/word search, TMDB scraping |
 | Viewing site | Banners, filters, watch history, Artplayer + danmaku, private access |
-| Subscription endpoints | `/api/provide/app` (clients), `tvbox`, and `vod` (MacCMS) |
 | Admin panel | Collect and library management, category rules, analytics, proxy, Telegram, online upgrade |
-| Native clients | [Android](https://github.com/fe-spark/EcoHub-for-Android) (`app-for-android/`), [OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (`app-for-ohos/`) |
+
+### Subscription endpoints
+
+| URL | Purpose |
+| --- | --- |
+| `/api/provide/app` | EcoHub clients |
+| `/api/provide/tvbox` | TVBox / 影视仓 |
+| `/api/provide/vod` | MacCMS |
+
+### Clients
+
+The clients are separate repositories, included as git submodules:
+
+| Platform | Repository | Directory |
+| --- | --- | --- |
+| Android | [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) | `app-for-android/` |
+| OHOS | [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) | `app-for-ohos/` |
 
 For behavioral details, see the [FAQ](./README-FAQ_EN.md).
 
@@ -65,15 +89,6 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 ```
 
 After installation, the terminal prints the URLs, initial credentials, and subscription URLs. The default web port is `3000`, the install directory is `~/ecohub`, and daily management uses `ecohub`. For passwords, ports, 1Panel, manual deployment, reverse proxies, and environment variables, see the [Deploy guide](./README-Deploy_EN.md).
-
-## Recommendations
-
-| Kind | Provider | Notes | Link |
-| --- | --- | --- | --- |
-| Server | CloudCone | Hosts the demo; unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
-| Network | LiangXinYun | From ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| Network | PeiQian | From ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| Network | DOVE | Reliable backup network service | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## Documentation
 

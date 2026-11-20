@@ -32,6 +32,15 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 | 观影前台 | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | 管理后台 | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
 
+## 推荐
+
+| 类型 | 服务商 | 说明 | 链接 |
+| --- | --- | --- | --- |
+| 服务器 | CloudCone | 演示站所用，磁盘 I/O 不限 | [选购](https://app.cloudcone.com/?ref=14393) |
+| 网络 | 良心云 | 低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| 网络 | 赔钱机场 | 低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| 网络 | DOVE | 稳定备用网络服务 | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
+
 ## 主要功能
 
 | 模块 | 核心能力 |
@@ -39,9 +48,24 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 | 多站采集 | JSON / XML 接口，全量与增量定时采集 |
 | 主站与检索 | 全局主站、内存拼音/分词检索、TMDB 刮削 |
 | 观影网站 | 轮播筛选、观看历史、Artplayer 弹幕播放、私有访问 |
-| 订阅接口 | `/api/provide/app`（客户端）、`tvbox`、`vod`（MacCMS） |
 | 管理后台 | 采集与片库管理、分类规则、统计、代理、Telegram 通知、在线升级 |
-| 独立客户端 | [Android](https://github.com/fe-spark/EcoHub-for-Android)（`app-for-android/`）、[OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`） |
+
+### 订阅接口
+
+| 地址 | 用途 |
+| --- | --- |
+| `/api/provide/app` | EcoHub 客户端 |
+| `/api/provide/tvbox` | TVBox / 影视仓 |
+| `/api/provide/vod` | MacCMS |
+
+### 客户端
+
+客户端为独立仓库，以 git submodule 形式包含在本仓库中：
+
+| 平台 | 仓库 | 目录 |
+| --- | --- | --- |
+| Android | [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) | `app-for-android/` |
+| OHOS | [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) | `app-for-ohos/` |
 
 功能细节见 [常见问题](./docs/README-FAQ.md)。
 
@@ -65,15 +89,6 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 ```
 
 安装完成后终端将输出访问地址、初始账号与订阅地址，默认 Web 端口为 `3000`，数据目录为 `~/ecohub`，后续可通过 `ecohub` 命令管理。密码、端口、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/README-Deploy.md)。
-
-## 推荐
-
-| 类型 | 服务商 | 说明 | 链接 |
-| --- | --- | --- | --- |
-| 服务器 | CloudCone | 演示站所用，磁盘 I/O 不限 | [选购](https://app.cloudcone.com/?ref=14393) |
-| 网络 | 良心云 | 低至 2 元/月 | [注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| 网络 | 赔钱机场 | 低至 1.5 元/月 | [注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| 网络 | DOVE | 稳定备用网络服务 | [注册](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## 文档
 
