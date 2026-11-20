@@ -1,17 +1,18 @@
-Pre-release **v3.1.1-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.1-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.0 below.
+Release **v3.1.1**, image `ghcr.io/fe-spark/ecohub:v3.1.1` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.1-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v3.0.x / v3.1.0: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.1.1-beta.0 changes
+### v3.1.1 changes
 
-- **Per-source category management (#107)**: category management defaults to the current primary source and supports switching to manage any collect source's category order and visibility.
+- **Per-source category and banner management (#107)**: category and banner management default to the current primary source and support switching to manage any collect source's category order, visibility, and banners.
 - **Hidden categories excluded from peer playback supplement**: films under hidden categories on non-primary sources are no longer attached as peer playback sources in primary film or TVBox details; dynamic playback caches are invalidated on category or rule changes.
 - **Search reseal optimization**: large batch reseals reuse verified primary ownership and fall back to sequential full-site rebuild above the threshold to reduce peak memory usage.
+- **TMDB, gallery & management refinements**: streamlined TMDB matching by removing background auto-match jobs, unified gallery file deletion checks (delete disk files before DB records), and refactored proxy, notification polling, auth helpers, and admin page shells.
 
 ---
 
