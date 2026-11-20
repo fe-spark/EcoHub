@@ -1,3 +1,18 @@
+Test release **v3.1.0-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.0-beta.1`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
+
+### Upgrade notes
+
+- Test install: set `ECOHUB_IMAGE` to `ghcr.io/fe-spark/ecohub:v3.1.0-beta.1` in the install directory, then run `docker compose pull && docker compose up -d`.
+- Upgrade notes from `v3.0.6` still apply for index creation and source recounts on first startup; instances already running `v3.1.0-beta.0` upgrade smoothly.
+
+### v3.1.0-beta.1 changes
+
+- **Global primary source & collect management**: completed global primary switching, disable/delete handover validation, admin access enforcement, batch-delete queue cancellation, primary deleting indicator in header selector, and fixed full-page remount flicker on batch delete.
+- **Category rules & hidden-category filtering (#106)**: synthetic root groups created by `CategoryRoot` rules now use dedicated `film_category` rows and non-colliding public IDs instead of borrowing the first child's ID; filtered hidden subcategories out of homepage recommendations, top category rank pools, local fallbacks, and banner candidate pools, and added classify/category cache invalidation on visibility changes.
+- **Reset & server hardening**: improved full-site database reset and seed re-initialization under large catalogs; added danmaku validation/IP rate limits, SSRF and bounded decompression guards, config redaction, batch detail caps, and cache/lifecycle concurrency fixes.
+
+---
+
 Test release **v3.1.0-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0-beta.0`. A hyphenated prerelease tag does not move `:latest`. The stable release remains v3.0.6 below.
 
 ### Upgrade notes
