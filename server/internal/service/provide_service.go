@@ -219,6 +219,9 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	}
 	wd = strings.TrimSpace(wd)
 	sourceId := primaryProvideSourceID()
+	if sourceId == "" {
+		return 1, 1, 0, []model.FilmList{}, nil
+	}
 	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
 	if len([]rune(wd)) > 64 || strings.HasPrefix(wd, "http://") || strings.HasPrefix(wd, "https://") {
 		return 1, 1, 0, []model.FilmList{}, nil
@@ -382,7 +385,7 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 
 	apiPath := baseURL + "/api/provide/vod"
 	sites := make([]map[string]any, 0, 1)
-	primary := repository.PickPrimarySourceForCategory()
+	primary := repository.CurrentPrimarySource()
 	if primary != nil {
 		sourceApi := apiPath
 		if key != "" {

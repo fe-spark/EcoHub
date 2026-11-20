@@ -23,10 +23,10 @@ export async function getFilmClassTree(sourceId = "") {
     defaultSourceId: String(resp.data?.defaultSourceId || ""),
     currentSourceId: String(resp.data?.currentSourceId || sourceId || ""),
     primarySourceId: String(
-      resp.data?.primarySourceId ||
-        resp.data?.currentSourceId ||
-        resp.data?.defaultSourceId ||
-        sourceId ||
+      resp.data?.primarySourceId ??
+        resp.data?.currentSourceId ??
+        resp.data?.defaultSourceId ??
+        sourceId ??
         "",
     ),
   };

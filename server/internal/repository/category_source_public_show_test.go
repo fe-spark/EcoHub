@@ -67,7 +67,17 @@ func TestSourceTypeTree_HiddenMergedRootStaysOffNav(t *testing.T) {
 		db.Rdb = origRdb
 		support.StoreMappingSnapshotForTest(prev)
 	})
-	seedMergedShowTree(t, false, true)
+	seedMergedShowTree(t, true, true)
+
+	admin := GetSourceBoundCategoryTree("src1")
+	if len(admin.Children) != 2 || admin.Children[0].Name != "电影" || admin.Children[1].Name != "男人帮" {
+		t.Fatalf("admin roots = %v, want 电影 then 男人帮", rootNames(admin))
+	}
+	// 隐藏合成一级父组本身：整个男人帮及其成员对前台均不可见，但子行自身的 Show 保持独立
+	admin.Children[1].Show = false
+	if err := SaveSourceCategoryOrder("src1", admin.Children); err != nil {
+		t.Fatalf("save hidden merged root: %v", err)
+	}
 
 	tree, err := GetActiveCategoryTree("src1")
 	if err != nil {
@@ -97,9 +107,12 @@ func TestSourceTypeTree_HiddenMergedRootStaysOffNav(t *testing.T) {
 		t.Fatalf("hidden 男人帮 chips = %v", childNames(&model.CategoryTree{Children: nodes}))
 	}
 
-	admin := GetSourceBoundCategoryTree("src1")
+	admin = GetSourceBoundCategoryTree("src1")
 	if len(admin.Children) != 2 || admin.Children[0].Name != "电影" || !admin.Children[0].Show || admin.Children[1].Name != "男人帮" || admin.Children[1].Show {
 		t.Fatalf("admin roots = %v, want 电影 then hidden 男人帮", rootNames(admin))
+	}
+	if len(admin.Children[1].Children) != 3 {
+		t.Fatalf("hidden 男人帮 should still expose all 3 independent children, got %v", childNames(admin.Children[1]))
 	}
 }
 
@@ -111,7 +124,7 @@ func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 		db.Rdb = origRdb
 		support.StoreMappingSnapshotForTest(prev)
 	})
-	seedMergedShowTree(t, true, false)
+	seedMergedShowTree(t, false, false)
 
 	tree, err := GetActiveCategoryTree("src1")
 	if err != nil {
@@ -122,38 +135,40 @@ func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 		byName[child.Name] = child
 	}
 	root := byName["男人帮"]
-	if root == nil || root.Id != 5 || !root.Show {
-		t.Fatalf("roots = %v, want shown 男人帮#5", rootNames(tree))
+	if root == nil || root.Id < syntheticRootTypeOffset || !root.Show {
+		t.Fatalf("roots = %v, want shown synthetic 男人帮", rootNames(tree))
 	}
 	got := childNames(root)
-	if len(root.Children) != 2 || got[0] != "福利视频#5" || got[1] != "海外抖音#37" {
-		t.Fatalf("男人帮 children = %v, want 福利视频#5 海外抖音#37", got)
+	if len(root.Children) != 1 || got[0] != "海外抖音#37" {
+		t.Fatalf("男人帮 children = %v, want 海外抖音#37", got)
 	}
-	nodes := PublicSourceChildNodes("src1", 5)
-	if len(nodes) != 2 || nodes[0].Name != "福利视频" || nodes[1].Name != "海外抖音" {
+	nodes := PublicSourceChildNodes("src1", root.Id)
+	if len(nodes) != 1 || nodes[0].Name != "海外抖音" {
 		t.Fatalf("filter children = %v", childNames(&model.CategoryTree{Children: nodes}))
 	}
-	ids := PublicSourceTypeIDs("src1", "pid", 5)
-	if len(ids) != 2 || ids[0] != 5 || ids[1] != 37 {
-		t.Fatalf("男人帮 pid members = %v, want [5 37]", ids)
+	ids := PublicSourceTypeIDs("src1", "pid", root.Id)
+	if len(ids) != 1 || ids[0] != 37 {
+		t.Fatalf("男人帮 pid members = %v, want [37]", ids)
 	}
-	if PublicSourceTypeVisible("src1", 18) {
-		t.Fatal("hidden 网红主播 still visible")
+	for _, hiddenTypeID := range []int64{5, 18} {
+		if PublicSourceTypeVisible("src1", hiddenTypeID) {
+			t.Fatalf("hidden child %d still visible", hiddenTypeID)
+		}
+		if got := LookupRootSourceType("src1", hiddenTypeID); got != nil {
+			t.Fatalf("hidden child %d lookup = %+v, want nil", hiddenTypeID, got)
+		}
+		if got := PublicSourceTypeIDs("src1", "cid", hiddenTypeID); len(got) != 0 {
+			t.Fatalf("hidden child %d cid = %v, want empty", hiddenTypeID, got)
+		}
+		if name := PublicSourceTypeName("src1", hiddenTypeID); name != "" {
+			t.Fatalf("hidden child %d name = %q, want empty", hiddenTypeID, name)
+		}
+		if nodes := PublicSourceChildNodes("src1", hiddenTypeID); len(nodes) != 0 {
+			t.Fatalf("hidden child chips via pid %d = %v, want empty", hiddenTypeID, childNames(&model.CategoryTree{Children: nodes}))
+		}
 	}
-	if !PublicSourceTypeVisible("src1", 5) || !PublicSourceTypeVisible("src1", 37) {
-		t.Fatal("shown 男人帮 members should stay visible")
-	}
-	if got := LookupRootSourceType("src1", 18); got != nil {
-		t.Fatalf("hidden 网红主播 lookup = %+v, want nil", got)
-	}
-	if got := PublicSourceTypeIDs("src1", "cid", 18); len(got) != 0 {
-		t.Fatalf("hidden 网红主播 cid = %v, want empty", got)
-	}
-	if name := PublicSourceTypeName("src1", 18); name != "" {
-		t.Fatalf("hidden 网红主播 name = %q, want empty", name)
-	}
-	if nodes := PublicSourceChildNodes("src1", 18); len(nodes) != 0 {
-		t.Fatalf("hidden 网红主播 chips via pid 18 = %v, want empty", childNames(&model.CategoryTree{Children: nodes}))
+	if !PublicSourceTypeVisible("src1", 37) {
+		t.Fatal("shown 男人帮 member 37 should stay visible")
 	}
 
 	admin := GetSourceBoundCategoryTree("src1")
@@ -164,11 +179,11 @@ func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 			break
 		}
 	}
-	if merged == nil || !merged.Show {
-		t.Fatalf("admin 男人帮 = %+v, want shown", merged)
+	if merged == nil || !merged.Show || merged.Id == 547 || merged.Id == 549 || merged.Id == 550 {
+		t.Fatalf("admin 男人帮 = %+v, want dedicated shown row", merged)
 	}
 	gotAdmin := childNames(merged)
-	if len(merged.Children) != 2 || gotAdmin[0] != "网红主播#549" || merged.Children[0].Show || gotAdmin[1] != "海外抖音#550" || !merged.Children[1].Show {
-		t.Fatalf("admin 男人帮 children = %v show=%v %v, want hidden 网红主播 then 海外抖音", gotAdmin, merged.Children[0].Show, merged.Children[1].Show)
+	if len(merged.Children) != 3 || gotAdmin[0] != "网红主播#549" || merged.Children[0].Show || gotAdmin[1] != "福利视频#547" || merged.Children[1].Show || gotAdmin[2] != "海外抖音#550" || !merged.Children[2].Show {
+		t.Fatalf("admin 男人帮 children = %v", gotAdmin)
 	}
 }

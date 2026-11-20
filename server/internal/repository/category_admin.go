@@ -216,6 +216,16 @@ func sourceMappedCategoryIDs(sourceID string) map[int64]struct{} {
 			allowed[id] = struct{}{}
 		}
 	}
+	var syntheticIDs []int64
+	if err := db.Mdb.Model(&model.Category{}).
+		Where("stable_key LIKE ?", syntheticRootPrefix(sourceID)+"%").
+		Pluck("id", &syntheticIDs).Error; err == nil {
+		for _, id := range syntheticIDs {
+			if id > 0 {
+				allowed[id] = struct{}{}
+			}
+		}
+	}
 	return allowed
 }
 

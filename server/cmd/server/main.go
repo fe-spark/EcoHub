@@ -110,8 +110,10 @@ func start() {
 
 	r := router.SetupRouter()
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%s", config.ListenerPort),
-		Handler: r,
+		Addr:              fmt.Sprintf(":%s", config.ListenerPort),
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 	go func() {
@@ -120,7 +122,7 @@ func start() {
 				log.Printf("[Init] 启动预热首页缓存发生异常: %v", r)
 			}
 		}()
-		if primary := repository.PickPrimarySourceForCategory(); primary != nil {
+		if primary := repository.CurrentPrimarySource(); primary != nil {
 			if _, err := service.IndexSvc.IndexPage(primary.Id); err == nil {
 				log.Printf("[Init] 首页数据缓存预热完成 primary=%s", primary.Name)
 			}

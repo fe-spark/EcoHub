@@ -41,14 +41,6 @@ func (s *InitService) DefaultDataInit() error {
 			return err
 		}
 	}
-	if seedDefaultSources {
-		if err := repository.BatchAddCollectSource(defaultFilmSources()); err != nil {
-			return fmt.Errorf("写入默认采集站失败: %w", err)
-		}
-	}
-
-	repository.InitMappingEngine()
-	repository.InitMainCategories()
 	if err := repository.InitBuiltinAccounts(); err != nil {
 		return err
 	}
@@ -60,6 +52,33 @@ func (s *InitService) DefaultDataInit() error {
 		syslog.Warnf("[Init] %v", err)
 	}
 
+	return s.seedRuntimeDefaults(seedDefaultSources, true)
+}
+
+// ReinitAfterReset 在数据重置清库后重新写入默认采集源、分类、站点配置、定时任务并刷新运行时状态。
+func (s *InitService) ReinitAfterReset() error {
+	if err := utils.CreateBaseDir(); err != nil {
+		return fmt.Errorf("重建素材目录失败: %w", err)
+	}
+	InvalidateMediaProxyMemoryCache()
+	clearProvideNetworkConfigCache()
+	return s.seedRuntimeDefaults(true, false)
+}
+
+func (s *InitService) seedRuntimeDefaults(seedSources, runBootSpiderInit bool) error {
+	if seedSources {
+		if err := repository.BatchAddCollectSource(defaultFilmSources()); err != nil {
+			return fmt.Errorf("写入默认采集站失败: %w", err)
+		}
+	}
+	if err := repository.RefreshCollectSourceCatalog(); err != nil {
+		return fmt.Errorf("刷新采集站目录失败: %w", err)
+	}
+	_ = repository.CurrentPrimarySource()
+
+	repository.InitMappingEngine()
+	repository.InitMainCategories()
+
 	if err := s.SiteWebConfigInit(); err != nil {
 		return err
 	}
@@ -70,8 +89,14 @@ func (s *InitService) DefaultDataInit() error {
 		return err
 	}
 	filmsnapshot.RestoreActiveSnapshotVersion()
-	if err := s.SpiderInit(); err != nil {
-		return err
+	if runBootSpiderInit {
+		if err := s.SpiderInit(); err != nil {
+			return err
+		}
+	} else {
+		if err := s.CollectCrontabInit(); err != nil {
+			return err
+		}
 	}
 	NotifySvc.EnsureBotPoller()
 	if err := s.ensureFilmListSnapshot(); err != nil {

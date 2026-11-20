@@ -82,7 +82,10 @@ export default function FilmDrawer({
       try {
         const resp = await ApiGet("/manage/film/search/options");
         if (resp.code === 0 && resp.data) {
-          if (resp.data.primarySourceId && resp.data.primarySourceId !== primaryId) {
+          if (
+            typeof resp.data.primarySourceId === "string" &&
+            resp.data.primarySourceId !== primaryId
+          ) {
             void refreshPrimary();
             return null;
           }

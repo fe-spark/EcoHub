@@ -86,7 +86,7 @@ func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error)
 		}
 	}
 	categoryReady := repository.SourceIDsWithCategory(sourceIDs)
-	primarySource := repository.GetActiveCollectSource()
+	primarySource := repository.CurrentPrimarySource()
 	primaryID := ""
 	if primarySource != nil {
 		primaryID = primarySource.Id
@@ -217,7 +217,7 @@ func applyPrimaryChanged(oldPrimary, newPrimary *model.FilmSource) bool {
 		primarySwitchMu.Lock()
 		defer primarySwitchMu.Unlock()
 
-		latestPrimary := repository.PickPrimarySourceForCategory()
+		latestPrimary := repository.CurrentPrimarySource()
 		if latestPrimary == nil || latestPrimary.Id != targetSourceID {
 			syslog.Infof("[Collect] 实际主站已非目标站，改为补建当前主站索引 targetSource=%s", targetSourceID)
 			if err := filmsnapshot.EnsurePrimarySearchIndex(); err != nil {

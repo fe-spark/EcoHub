@@ -8,6 +8,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,19 +22,25 @@ func resolveProvideBaseURL(c *gin.Context) (string, error) {
 	if c.Request.TLS != nil {
 		scheme = "https"
 	}
-	if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
-		if i := strings.Index(forwardedProto, ","); i >= 0 {
-			forwardedProto = strings.TrimSpace(forwardedProto[:i])
+	trustedPeer := utils.IsTrustedForwardedPeer(c.Request.RemoteAddr)
+	if trustedPeer {
+		if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
+			if i := strings.Index(forwardedProto, ","); i >= 0 {
+				forwardedProto = strings.TrimSpace(forwardedProto[:i])
+			}
+			if forwardedProto != "http" && forwardedProto != "https" {
+				return "", errors.New("无法解析当前请求协议")
+			}
+			scheme = forwardedProto
 		}
-		if forwardedProto != "http" && forwardedProto != "https" {
-			return "", errors.New("无法解析当前请求协议")
-		}
-		scheme = forwardedProto
 	}
 
-	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
-	if host != "" {
-		host = strings.TrimSpace(strings.Split(host, ",")[0])
+	var host string
+	if trustedPeer {
+		host = strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+		if host != "" {
+			host = strings.TrimSpace(strings.Split(host, ",")[0])
+		}
 	}
 	if host == "" {
 		host = strings.TrimSpace(c.Request.Host)
@@ -128,7 +135,12 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	switch ac {
 	case "videolist", "detail":
 		if ids != "" {
-			vodList, err := service.ProvideSvc.GetVodDetail(strings.Split(ids, ","))
+			idList := strings.Split(ids, ",")
+			if len(idList) > 100 {
+				c.JSON(200, gin.H{"code": 0, "msg": "单次请求 ids 不能超过 100 个"})
+				return
+			}
+			vodList, err := service.ProvideSvc.GetVodDetail(idList)
 			if err != nil {
 				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 				return

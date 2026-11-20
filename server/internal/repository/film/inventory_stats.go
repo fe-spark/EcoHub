@@ -40,7 +40,7 @@ func GetLibraryInventory() (LibraryInventory, error) {
 	if db.Mdb == nil {
 		return library, filmsnapshot.ErrSearchIndexMissing
 	}
-	primarySource := repository.GetActiveCollectSource()
+	primarySource := repository.CurrentPrimarySource()
 	if primarySource == nil || strings.TrimSpace(primarySource.Id) == "" {
 		return library, nil
 	}
@@ -92,7 +92,7 @@ func GetSourceInventories() ([]SourceInventory, error) {
 }
 
 func activePrimaryID() string {
-	if primary := repository.GetActiveCollectSource(); primary != nil {
+	if primary := repository.CurrentPrimarySource(); primary != nil {
 		return strings.TrimSpace(primary.Id)
 	}
 	return ""

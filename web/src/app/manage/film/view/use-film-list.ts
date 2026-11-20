@@ -80,7 +80,7 @@ export function useFilmList({
         });
         if (!current()) return;
         if (
-          resp.data?.primarySourceId &&
+          typeof resp.data?.primarySourceId === "string" &&
           resp.data.primarySourceId !== primarySourceId
         ) {
           setList([]);

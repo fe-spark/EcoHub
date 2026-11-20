@@ -271,7 +271,7 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params.Language = queryFirst(c, "language", "Language")
 	params.Year = yStr
 	params.Sort = queryFirst(c, "sort", "Sort")
-	params.SourceId = service.IndexSvc.BaselineSourceID()
+	params.SourceId = repository.CurrentPrimaryID()
 
 	page := dto.GetPageParams(c)
 	if !pageSizeSpecified(c) {
@@ -330,7 +330,7 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 
 // FilmClassify 影片分类首页数据展示 (GET /api/categories/overview)
 func (h *IndexHandler) FilmClassify(c *gin.Context) {
-	sourceId := service.IndexSvc.BaselineSourceID()
+	sourceId := repository.CurrentPrimaryID()
 	pidStr := queryFirst(c, "pid", "Pid")
 	var pid int64
 	if pidStr != "" {

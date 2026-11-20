@@ -89,6 +89,11 @@ export default function CollectSourceGrid({
     }),
   );
 
+  const primarySite = siteList.find((item) => item.isPrimary) ?? null;
+  const sortableSites = primarySite
+    ? siteList.filter((item) => item.id !== primarySite.id)
+    : siteList;
+
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(String(event.active.id));
   };
@@ -99,12 +104,13 @@ export default function CollectSourceGrid({
     if (!over || active.id === over.id) {
       return;
     }
-    const oldIndex = siteList.findIndex((item) => item.id === active.id);
-    const newIndex = siteList.findIndex((item) => item.id === over.id);
+    const oldIndex = sortableSites.findIndex((item) => item.id === active.id);
+    const newIndex = sortableSites.findIndex((item) => item.id === over.id);
     if (oldIndex === -1 || newIndex === -1) {
       return;
     }
-    const nextList = arrayMove(siteList, oldIndex, newIndex);
+    const reorderedSortable = arrayMove(sortableSites, oldIndex, newIndex);
+    const nextList = primarySite ? [primarySite, ...reorderedSortable] : reorderedSortable;
     onSortList(nextList);
   };
 
@@ -112,7 +118,34 @@ export default function CollectSourceGrid({
     setActiveId(null);
   };
 
-  const activeSite = activeId ? siteList.find((item) => item.id === activeId) : null;
+  const activeSite = activeId ? sortableSites.find((item) => item.id === activeId) : null;
+
+  const resolveCardRecord = (site: FilmSource) => {
+    const hiddenDone =
+      hiddenDoneIds.includes(site.id) &&
+      site.progress != null &&
+      !isActiveCollectStatus(site.progress.status);
+    return hiddenDone ? { ...site, progress: null } : site;
+  };
+
+  const buildCardProps = (site: FilmSource) => ({
+    record: resolveCardRecord(site),
+    selected: selectedSourceIds.includes(site.id),
+    active: activeCollectIds.includes(site.id),
+    globalSpiderProxyReady,
+    onSelect,
+    onChangeCollectDuration,
+    onStartTask,
+    onTerminateTask,
+    onEditSource,
+    onDeleteSource,
+    deleting: deletingSourceId === site.id || Boolean(site.deleting),
+    toggling: togglingSourceId === site.id,
+    onChangeSourceState,
+    onSyncCategory,
+    onUpdateSite,
+    indexing: searchIndex?.status === "indexing",
+  });
 
   return (
     <DndContext
@@ -124,38 +157,19 @@ export default function CollectSourceGrid({
       onDragCancel={handleDragCancel}
     >
       <SortableContext
-        items={siteList.map((s) => s.id)}
+        items={sortableSites.map((s) => s.id)}
         strategy={rectSortingStrategy}
         disabled={!canWrite}
       >
         <div className={styles.cardGrid}>
-          {siteList.map((site) => {
-            const hiddenDone =
-              hiddenDoneIds.includes(site.id) &&
-              site.progress != null &&
-              !isActiveCollectStatus(site.progress.status);
-            return (
-              <SortableCollectSourceCard
-                key={site.id}
-                record={hiddenDone ? { ...site, progress: null } : site}
-                selected={selectedSourceIds.includes(site.id)}
-                active={activeCollectIds.includes(site.id)}
-                globalSpiderProxyReady={globalSpiderProxyReady}
-                onSelect={onSelect}
-                onChangeCollectDuration={onChangeCollectDuration}
-                onStartTask={onStartTask}
-                onTerminateTask={onTerminateTask}
-                onEditSource={onEditSource}
-                onDeleteSource={onDeleteSource}
-                deleting={deletingSourceId === site.id || Boolean(site.deleting)}
-                toggling={togglingSourceId === site.id}
-                onChangeSourceState={onChangeSourceState}
-                onSyncCategory={onSyncCategory}
-                onUpdateSite={onUpdateSite}
-                indexing={searchIndex?.status === "indexing"}
-              />
-            );
-          })}
+          {primarySite ? (
+            <div key={primarySite.id} id={`source-card-${primarySite.id}`}>
+              <CollectSourceCard {...buildCardProps(primarySite)} />
+            </div>
+          ) : null}
+          {sortableSites.map((site) => (
+            <SortableCollectSourceCard key={site.id} {...buildCardProps(site)} />
+          ))}
           {canAddSource && canWrite ? (
             <button
               type="button"

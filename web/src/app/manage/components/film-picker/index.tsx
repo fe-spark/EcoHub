@@ -75,7 +75,10 @@ export default function FilmPicker({
           sort: sort || undefined,
         });
         if (resp?.code === 0 && resp.data) {
-          if (resp.data.primarySourceId && resp.data.primarySourceId !== primarySourceId) {
+          if (
+            typeof resp.data.primarySourceId === "string" &&
+            resp.data.primarySourceId !== primarySourceId
+          ) {
             void refreshPrimary();
             setList([]);
             setPage({ current: 1, pageSize: pSize, total: 0 });

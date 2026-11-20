@@ -25,6 +25,7 @@ type pollerInstance struct {
 }
 
 var (
+	pollerCfgMu    sync.Mutex
 	pollerMu       sync.Mutex
 	activePoller   *pollerInstance
 	activeBotToken string
@@ -56,6 +57,9 @@ func (s *NotifyService) StopBotPoller() {
 }
 
 func ensurePollerState(token, proxyURL string) {
+	pollerCfgMu.Lock()
+	defer pollerCfgMu.Unlock()
+
 	pollerMu.Lock()
 	if activePoller != nil {
 		select {

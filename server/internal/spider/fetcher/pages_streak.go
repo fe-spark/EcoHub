@@ -111,13 +111,20 @@ func (s *fetchStreak) resumeIntake() {
 }
 
 // abandon 这次请求被取消，不计入连续失败。
-func (s *fetchStreak) abandon() {
+// 若处于暂停恢复后的中止态且在途已归零，置 stopping 并通知调用方取消上下文唤醒 tryBegin。
+func (s *fetchStreak) abandon() bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.inFlight > 0 {
 		s.inFlight--
 	}
+	shouldStop := false
+	if s.holdIntake && s.paused && !s.pausing && s.inFlight == 0 && !s.stopping {
+		s.stopping = true
+		shouldStop = true
+	}
 	s.cond.Broadcast()
+	s.mu.Unlock()
+	return shouldStop
 }
 
 // collectFetch 本站这一轮的请求上下文。限流时取消它，恢复后再换一个。

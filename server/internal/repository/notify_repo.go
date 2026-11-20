@@ -116,36 +116,31 @@ func PublicNotifyConfig(cfg model.NotifyConfig) model.NotifyConfig {
 
 // GetNotifyConfig 读取 Telegram 通知配置。没有记录时返回默认值，不写入缓存。
 func GetNotifyConfig() (model.NotifyConfig, error) {
-	if data, ok, err := readCache(config.NotifyConfigKey); err != nil {
-		return model.NotifyConfig{}, err
-	} else if ok && data != "" {
-		cfg, err := decodeNotifyConfig(data)
-		if err != nil {
-			if delErr := dropCache(config.NotifyConfigKey); delErr != nil {
-				return model.NotifyConfig{}, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
+	return loadCachedConfig(
+		config.NotifyConfigKey,
+		decodeNotifyConfig,
+		func() (model.NotifyConfig, string, bool, error) {
+			if db.Mdb == nil {
+				return model.NotifyConfig{}, "", false, errors.New("数据库未连接")
 			}
-		} else {
-			return cfg, nil
-		}
-	}
-	if db.Mdb == nil {
-		return model.NotifyConfig{}, errors.New("数据库未连接")
-	}
-	var rec model.NotifyConfigRecord
-	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		if recordNotFound(err) {
-			return DefaultNotifyConfig(), nil
-		}
-		return model.NotifyConfig{}, err
-	}
-	cfg, err := decodeNotifyConfig(rec.Payload)
-	if err != nil {
-		return model.NotifyConfig{}, err
-	}
-	if err := cacheNotifyConfig(cfg); err != nil {
-		return model.NotifyConfig{}, err
-	}
-	return cfg, nil
+			var rec model.NotifyConfigRecord
+			if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
+				if recordNotFound(err) {
+					return DefaultNotifyConfig(), "", false, nil
+				}
+				return model.NotifyConfig{}, "", false, err
+			}
+			cfg, err := decodeNotifyConfig(rec.Payload)
+			if err != nil {
+				return model.NotifyConfig{}, "", false, err
+			}
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				return model.NotifyConfig{}, "", false, err
+			}
+			return cfg, string(data), true, nil
+		},
+	)
 }
 
 func decodeNotifyConfig(raw string) (model.NotifyConfig, error) {
@@ -222,7 +217,11 @@ func LoadNotifyBatchSession(batchID string) (model.NotifyBatchSession, error) {
 		if data, err := db.Rdb.Get(db.Cxt, key).Result(); err == nil && data != "" {
 			var sess model.NotifyBatchSession
 			if json.Unmarshal([]byte(data), &sess) == nil {
-				rememberNotifyMemSession(sess, time.Now().Add(notifyBatchSessionTTL))
+				ttl := notifyBatchSessionTTL
+				if rem, err := db.Rdb.TTL(db.Cxt, key).Result(); err == nil && rem > 0 {
+					ttl = rem
+				}
+				rememberNotifyMemSession(sess, time.Now().Add(ttl))
 				return sess, nil
 			}
 		}
@@ -234,6 +233,15 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 	now := time.Now()
 	notifySessionMu.Lock()
 	defer notifySessionMu.Unlock()
+	// 更新既有会话时先移除旧槽位，保持 notifySessionOrder 与 expiresAt 单调递增一致
+	if _, exists := notifyMemSessions[sess.BatchID]; exists {
+		for i, id := range notifySessionOrder {
+			if id == sess.BatchID {
+				notifySessionOrder = append(notifySessionOrder[:i], notifySessionOrder[i+1:]...)
+				break
+			}
+		}
+	}
 	for len(notifySessionOrder) > 0 {
 		oldest := notifySessionOrder[0]
 		e, ok := notifyMemSessions[oldest]
@@ -249,9 +257,7 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 		delete(notifyMemSessions, oldest)
 		notifySessionOrder = notifySessionOrder[1:]
 	}
-	if _, exists := notifyMemSessions[sess.BatchID]; !exists {
-		notifySessionOrder = append(notifySessionOrder, sess.BatchID)
-	}
+	notifySessionOrder = append(notifySessionOrder, sess.BatchID)
 	notifyMemSessions[sess.BatchID] = notifyMemSession{sess: sess, expiresAt: expiresAt}
 }
 

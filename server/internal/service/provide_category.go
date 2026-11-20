@@ -51,7 +51,7 @@ func resolveProvideListedRootType(snapshot model.FilmListSnapshot, sourceID stri
 
 // primaryProvideSourceID 订阅只服务当前主站。
 func primaryProvideSourceID() string {
-	if active := repository.GetActiveCollectSource(); active != nil {
+	if active := repository.CurrentPrimarySource(); active != nil {
 		return strings.TrimSpace(active.Id)
 	}
 	return ""

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"server/internal/access"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
@@ -61,23 +62,69 @@ func (s *SpiderService) AutoCollect(time int) {
 }
 
 // resetSiteDataRunning 防止并发重复触发站点数据重置。
-var resetSiteDataRunning atomic.Bool
+var (
+	resetSiteDataRunning atomic.Bool
+	resetSiteLifecycle   atomic.Bool
+)
 
-// ClearFilms 重置站点业务数据：清空影视/采集派生数据。
-// 清空会连分类一起清掉，随后按每个采集站重新拉取分类副本。
-// 注意：不重置任何账号与密码，也不改网站配置、映射规则、采集源和采集计划任务。线上轮播清空，排片规则保留。
+func init() {
+	spider.RegisterSiteResetChecker(func() bool {
+		return resetSiteDataRunning.Load() || resetSiteLifecycle.Load()
+	})
+}
+
+// triggerResetCategorySync 数据重置后异步回补默认站分类，测试可替换避免访问外网。
+var triggerResetCategorySync = func() {
+	go SpiderSvc.SyncMissingSourceCategories()
+}
+
+// ClearFilms 重置站点数据：清空业务与配置数据表（保留账号表 user 与迁移版本表 schema_migrations），
+// 同步清空图库与全部缓存，并重新写入初始化数据与启动默认定时任务。
 // 全程按关键节点上报真实进度，由 SSE 推给页面。
 func (s *SpiderService) ClearFilms() (retErr error) {
+	resetSiteLifecycle.Store(true)
+	defer resetSiteLifecycle.Store(false)
+
 	filmrepo.StartResetProgress()
+	clearedDB := false
 	defer func() {
 		if retErr != nil {
+			// 清库前置阶段失败或半途失败时尽力恢复访问统计开关与定时任务，避免系统停摆
+			_ = InitSvc.AnalyticsConfigInit()
+			if clearedDB {
+				_ = InitSvc.CollectCrontabInit()
+			}
 			filmrepo.FinishResetProgress(retErr)
 		}
 	}()
+
+	filmrepo.ReportResetProgress(2, "正在停止后台任务")
+	access.SetEnabled(false)
+	spider.StopAllCollect("数据重置，停止采集")
+	CollectSvc.CancelDelFilmSources(nil)
+	deleteSourceJobs.Wait()
+	primaryWarmups.Wait()
+	categorySyncs.Wait()
+
 	if err := spider.ClearSpider(); err != nil {
 		return err
 	}
-	filmrepo.ReportResetProgress(100, "重置完成，片库与业务数据已清空")
+	clearedDB = true
+	if _, err := access.ClearAccessData(0); err != nil {
+		return err
+	}
+
+	filmrepo.ReportResetProgress(85, "正在写入初始化数据")
+	if err := InitSvc.ReinitAfterReset(); err != nil {
+		return err
+	}
+
+	filmrepo.ReportResetProgress(95, "正在同步默认分类")
+	if triggerResetCategorySync != nil {
+		triggerResetCategorySync()
+	}
+
+	filmrepo.ReportResetProgress(100, "数据重置完成，已恢复初始状态")
 	filmrepo.FinishResetProgress(nil)
 	return nil
 }
@@ -262,6 +309,7 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 		progress.BroadcastCategoryReadyMessage(source.Id, "分类获取成功", false, pageCount)
 	}
 	finalizeCategorySync()
+	_ = filmsnapshot.RefreshActiveProjectedReadModel()
 	if failed == 0 {
 		return nil
 	}
@@ -311,7 +359,7 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 		return
 	}
 
-	primary := repository.PickPrimarySourceForCategory()
+	primary := repository.CurrentPrimarySource()
 	primaryID := ""
 	if primary != nil {
 		primaryID = primary.Id
@@ -349,6 +397,7 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 
 	if synced > 0 {
 		finalizeCategorySync()
+	_ = filmsnapshot.RefreshActiveProjectedReadModel()
 		if primarySynced {
 			_ = filmsnapshot.RefreshActiveProjectedReadModel()
 			repository.ClearIndexPageCache()

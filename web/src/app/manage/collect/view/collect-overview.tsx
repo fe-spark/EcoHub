@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, Descriptions, Statistic, Tag, Tooltip, Typography } from "antd";
 import Link from "next/link";
 import { ApiGet } from "@/lib/client-api";
+import { usePrimarySource } from "@/lib/manage-primary";
 import { type FilmSource } from "./types";
 import styles from "./collect-overview.module.less";
 
@@ -36,9 +37,11 @@ interface CollectOverviewProps {
 }
 
 export default function CollectOverview({ onPrimaryChange }: CollectOverviewProps = {}) {
+  const { primary, loading: primaryLoading } = usePrimarySource();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(false);
+  const prevPrimaryIdRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,6 +69,19 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
       mountedRef.current = false;
     };
   }, [load]);
+
+  useEffect(() => {
+    if (primaryLoading) return;
+    const currentId = primary?.id || "empty";
+    if (prevPrimaryIdRef.current === null) {
+      prevPrimaryIdRef.current = currentId;
+      return;
+    }
+    if (prevPrimaryIdRef.current !== currentId) {
+      prevPrimaryIdRef.current = currentId;
+      void load();
+    }
+  }, [load, primary?.id, primaryLoading]);
 
   const stats = useMemo(
     () => ({

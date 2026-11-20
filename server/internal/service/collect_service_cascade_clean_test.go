@@ -31,7 +31,7 @@ func TestEnqueueDelFilmSources_ConcurrentBatchesAreAtomic(t *testing.T) {
 			{Id: "src_atomic_b2", Name: "站点B2"},
 		},
 	}
-	queue := make(chan string, 2)
+	queue := make(chan deleteSourceJob, 2)
 	t.Cleanup(func() {
 		for len(queue) > 0 {
 			<-queue
@@ -74,11 +74,14 @@ func TestEnqueueDelFilmSources_ConcurrentBatchesAreAtomic(t *testing.T) {
 		t.Fatalf("queued %d sources, want whole batch of %d", len(queue), len(batches[success]))
 	}
 	queued := make(map[string]struct{}, len(batches[success]))
+	drained := make([]deleteSourceJob, 0, len(batches[success]))
 	for len(queue) > 0 {
-		queued[<-queue] = struct{}{}
+		job := <-queue
+		queued[job.id] = struct{}{}
+		drained = append(drained, job)
 	}
-	for id := range queued {
-		queue <- id
+	for _, job := range drained {
+		queue <- job
 	}
 	for _, src := range batches[success] {
 		if _, ok := queued[src.Id]; !ok {
@@ -350,7 +353,7 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 	}
 }
 
-func TestPickPrimarySourceForCategory_SkipsDeletingSource(t *testing.T) {
+func TestCurrentPrimarySource_SkipsDeletingSource(t *testing.T) {
 	gdb := setupCascadeCleanTestDB(t)
 	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true, Sort: 0})
 	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true, Sort: 1})
@@ -364,7 +367,7 @@ func TestPickPrimarySourceForCategory_SkipsDeletingSource(t *testing.T) {
 	})
 
 	// 主站为空时懒初始化会跳过删除中的站
-	primary := repository.PickPrimarySourceForCategory()
+	primary := repository.CurrentPrimarySource()
 	if primary == nil || primary.Id != "src3" {
 		t.Fatalf("expected primary to skip deleting sources and pick src3, got %#v", primary)
 	}
@@ -372,7 +375,7 @@ func TestPickPrimarySourceForCategory_SkipsDeletingSource(t *testing.T) {
 	progress.SetSourceDeleting("src1", false)
 	progress.SetSourceDeleting("src2", false)
 	// 主站已持久化：排序首位恢复可用也不改变主站
-	primary = repository.PickPrimarySourceForCategory()
+	primary = repository.CurrentPrimarySource()
 	if primary == nil || primary.Id != "src3" {
 		t.Fatalf("expected primary to stick to src3 after deleting flags cleared, got %#v", primary)
 	}
@@ -406,7 +409,7 @@ func TestCollectService_TriggerDelFilmSourceBatch_SupportsPrimaryAndDeletesClean
 	}
 
 	// 入队后主站已交接至 src3
-	if curPrimary := repository.PickPrimarySourceForCategory(); curPrimary == nil || curPrimary.Id != "src3" {
+	if curPrimary := repository.CurrentPrimarySource(); curPrimary == nil || curPrimary.Id != "src3" {
 		t.Fatalf("expected primary src3 while deleting, got %#v", curPrimary)
 	}
 
@@ -422,7 +425,7 @@ func TestCollectService_TriggerDelFilmSourceBatch_SupportsPrimaryAndDeletesClean
 	if leftFilms != 0 {
 		t.Fatalf("expected films 1 and 2 deleted, remaining=%d", leftFilms)
 	}
-	if curPrimary := repository.PickPrimarySourceForCategory(); curPrimary == nil || curPrimary.Id != "src3" {
+	if curPrimary := repository.CurrentPrimarySource(); curPrimary == nil || curPrimary.Id != "src3" {
 		t.Fatalf("expected final primary src3, got %#v", curPrimary)
 	}
 }
@@ -624,5 +627,40 @@ func TestCollectService_UpdateFilmSource_RejectsUriAndStateChangeWhenCategorySyn
 	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", src.Id).Count(&mapCount)
 	if filmCount != 1 || lineCount != 1 || mapCount != 1 {
 		t.Fatalf("data must not be wiped when UpdateFilmSource fails validation, films=%d lines=%d maps=%d", filmCount, lineCount, mapCount)
+	}
+}
+
+func TestCollectService_UpdateFilmSource_RejectsDuplicateUriBeforeClean(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	src1 := model.FilmSource{Id: "src_dup_1", Name: "站1", Uri: "http://dup1.example/api", State: true, Sort: 0}
+	src2 := model.FilmSource{Id: "src_dup_2", Name: "站2", Uri: "http://dup2.example/api", State: true, Sort: 1}
+	if err := gdb.Create(&src1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&src2).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 888, FirstSourceId: src1.Id},
+		FilmIndexContent:  model.FilmIndexContent{Name: "站1宝贵影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{Mid: 888, SourceId: src1.Id, LineKind: "play", Content: "[]"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	srv := new(CollectService)
+	next := src1
+	next.Uri = src2.Uri
+	if err := srv.UpdateFilmSource(next, "", false); err == nil {
+		t.Fatal("expected duplicate URI error")
+	}
+
+	var filmCount, lineCount int64
+	gdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", src1.Id).Count(&filmCount)
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", src1.Id).Count(&lineCount)
+	if filmCount != 1 || lineCount != 1 {
+		t.Fatalf("source data must NOT be cleaned when URI conflicts, films=%d lines=%d", filmCount, lineCount)
 	}
 }

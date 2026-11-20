@@ -25,7 +25,7 @@ var (
 )
 
 func enqueueCronTask(ft model.FilmCollectTask) {
-	if !ft.State {
+	if !ft.State || IsSiteResetRunning() {
 		return
 	}
 	cronDispatchOnce.Do(func() {
@@ -41,6 +41,12 @@ func enqueueCronTask(ft model.FilmCollectTask) {
 	}
 }
 
+func clearPendingCronDispatch() {
+	cronMu.Lock()
+	cronPending = nil
+	cronMu.Unlock()
+}
+
 func cronDispatchLoop() {
 	for range cronFlushCh {
 		time.Sleep(cronCoalesceWait())
@@ -53,7 +59,7 @@ func flushCronQueue() {
 	batch := cronPending
 	cronPending = nil
 	cronMu.Unlock()
-	if len(batch) == 0 {
+	if len(batch) == 0 || IsSiteResetRunning() {
 		return
 	}
 	busy := isMaintenanceRunning()

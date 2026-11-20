@@ -220,11 +220,11 @@ func runSearchRebuild() {
 	}
 }
 
-// notifySearchIndexIfCurrent 只在代数未变时发终态。旧一轮完成不能把新一轮的构建标记清掉。
+// notifySearchIndexIfCurrent 只在代数未变且无后台重建运行中时发终态。旧一轮完成不能把新一轮或正在跑的后台重建标记清掉。
 func notifySearchIndexIfCurrent(seen uint64, total, current int64, status string) {
 	searchRebuild.mu.Lock()
 	defer searchRebuild.mu.Unlock()
-	if searchRebuild.gen != seen {
+	if searchRebuild.gen != seen || searchRebuild.running {
 		return
 	}
 	NotifySearchIndexProgress(total, current, status)

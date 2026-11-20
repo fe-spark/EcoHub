@@ -14,7 +14,11 @@ export function useCollectSort(
   const handleSortList = useCallback(
     (nextList: FilmSource[]) => {
       const prevList = pendingSortRef.current?.prev ?? siteList;
-      // 排序只改顺序；主站是持久化状态，不随排序变化
+      const primary = prevList.find((item) => item.isPrimary);
+      if (primary && nextList[0]?.id !== primary.id) {
+        message.warning({ content: "当前主站必须保持在首位", key: "collect-sort" });
+        return;
+      }
       setSiteList(nextList);
       pendingSortRef.current = { prev: prevList, next: nextList };
 

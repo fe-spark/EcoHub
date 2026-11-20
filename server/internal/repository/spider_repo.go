@@ -63,17 +63,18 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	}
 	// 备份导入整体替换站点：存储的主站不在新列表时清空，由懒初始化按新列表重选
 	support.ReconcilePrimaryAfterSourceReplace(list)
+	InvalidatePublicSourceCache()
 	return RefreshCollectSourceCatalog()
 }
 
-// PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前基准源）。
-// 统一委托给 support.PickPrimarySourceForCategory，跳过已停用和正在删除中的站点。
-func PickPrimarySourceForCategory() *model.FilmSource {
-	return support.PickPrimarySourceForCategory()
+// CurrentPrimarySource 当前主站。没有主站时返回 nil。
+func CurrentPrimarySource() *model.FilmSource {
+	return support.CurrentPrimarySource()
 }
 
-func GetActiveCollectSource() *model.FilmSource {
-	return PickPrimarySourceForCategory()
+// CurrentPrimaryID 当前主站 ID。没有主站或主站不可用时返回空。
+func CurrentPrimaryID() string {
+	return support.CurrentPrimaryID()
 }
 
 // SetPrimarySourceID 写入主站状态（切换与交接的持久化入口）。
@@ -87,6 +88,11 @@ func SetPrimarySourceID(id string) error {
 // ClearPrimarySourceState 置空主站状态（停用/删除最后一个启用站时的例外路径）。
 func ClearPrimarySourceState() error {
 	return support.ClearPrimarySourceState()
+}
+
+// StoredPrimarySourceID 读取持久化的主站 ID（不校验删除态）。
+func StoredPrimarySourceID() string {
+	return support.StoredPrimarySourceID()
 }
 
 // FindOtherEnabledCollectSource 返回除 excludeID 外排序最前的可用启用站；不存在时返回 nil。
@@ -235,6 +241,7 @@ func DelCollectResource(id string) ([]int64, error) {
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
+	InvalidatePublicSourceCache(id)
 	if err := RefreshCollectSourceCatalog(); err != nil {
 		forgetCollectSource(id)
 		return orphanMids, err
@@ -391,6 +398,21 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 		return err
 	}
 	return RefreshCollectSourceCatalog()
+}
+
+// ValidateCollectSourceUpdate 在执行破坏性清库或写库前预检采集站更新的唯一性等约束。
+func ValidateCollectSourceUpdate(s model.FilmSource) error {
+	if db.Mdb == nil {
+		return errors.New("database not available")
+	}
+	var count int64
+	if err := db.Mdb.Model(&model.FilmSource{}).Where("id != ? AND uri = ?", s.Id, s.Uri).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errors.New("当前采集站链接已存在其他站点中，请勿重复添加")
+	}
+	return nil
 }
 
 func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {

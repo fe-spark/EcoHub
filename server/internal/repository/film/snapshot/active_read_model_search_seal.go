@@ -48,7 +48,7 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 		SourceId string `gorm:"column:source_id"`
 	}
 	const batchSize = 2500
-	var rows []row
+	out := make(map[int64][]string)
 	for i := 0; i < len(mids); i += batchSize {
 		end := i + batchSize
 		if end > len(mids) {
@@ -62,11 +62,9 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 			Scan(&chunk).Error; err != nil {
 			return nil, err
 		}
-		rows = append(rows, chunk...)
-	}
-	out := make(map[int64][]string)
-	for _, r := range rows {
-		addPlaySource(out, r.Mid, r.SourceId)
+		for _, r := range chunk {
+			addPlaySource(out, r.Mid, r.SourceId)
+		}
 	}
 	return out, nil
 }

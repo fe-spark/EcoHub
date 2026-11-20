@@ -9,31 +9,84 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	"server/internal/spider/scheduler"
 	"server/internal/utils"
 )
 
-var siteResetting atomic.Bool
+var (
+	siteResetting        atomic.Bool
+	fullResetRunningMu   sync.RWMutex
+	fullResetRunningFn   func() bool
+)
+
+// RegisterSiteResetChecker 注册全站重置生命周期状态检查器（覆盖至数据回写初始化完成）。
+func RegisterSiteResetChecker(fn func() bool) {
+	fullResetRunningMu.Lock()
+	fullResetRunningFn = fn
+	fullResetRunningMu.Unlock()
+}
 
 // IsSiteResetRunning 片库数据是否正在清空/重置中。
 func IsSiteResetRunning() bool {
-	return siteResetting.Load()
+	if siteResetting.Load() {
+		return true
+	}
+	fullResetRunningMu.RLock()
+	fn := fullResetRunningFn
+	fullResetRunningMu.RUnlock()
+	return fn != nil && fn()
 }
+
+const resetReadyWaitTimeout = 2 * time.Minute
 
 func ClearSpider() error {
 	siteResetting.Store(true)
 	defer siteResetting.Store(false)
 	filmrepo.ReportResetProgress(5, "正在停止采集任务")
-	StopAllCollect("清空片库，停止采集")
+	StopAllCollect("数据重置，停止采集")
+	clearPendingCronDispatch()
+	if err := clearAndWaitMaintenanceQueue(resetReadyWaitTimeout); err != nil {
+		return err
+	}
+	filmrepo.ReportResetProgress(10, "正在等待在途写入与索引结束")
+	if err := waitResetReady(resetReadyWaitTimeout); err != nil {
+		return err
+	}
 	filmrepo.ReportResetProgress(15, "正在清空数据")
 	return collectLifecycle.runExclusive(func() error {
+		ClearAllCrons()
+		ClearAllLimiters()
+		ClearAllCMSSearchUnsupported()
 		repository.ResetCollectStatsCoalescer()
 		return filmrepo.FilmZero()
 	})
+}
+
+// waitResetReady 等待在途写库与检索索引重建结束，避免清表与长查询争夺表元数据锁。
+func waitResetReady(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := scheduler.WaitPendingWrites(ctx); err != nil {
+		return fmt.Errorf("等待在途写入结束失败: %w", err)
+	}
+	for {
+		reason := SearchWorkBusyReason()
+		if reason == "" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待检索索引空闲超时: %s", reason)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 func CollectApiTest(s model.FilmSource) error {

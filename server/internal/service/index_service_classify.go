@@ -53,7 +53,7 @@ func (i *IndexService) GetNavCategory(sourceIdOpt ...string) ([]*model.Category,
 		if src := repository.FindCollectSourceById(sourceId); src == nil || !src.State {
 			return nil, ErrNavCategorySourceUnavailable
 		}
-	} else if active := repository.GetActiveCollectSource(); active != nil {
+	} else if active := repository.CurrentPrimarySource(); active != nil {
 		sourceId = active.Id
 	}
 	tree, err := repository.GetActiveCategoryTree(sourceId)
@@ -85,7 +85,7 @@ func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.C
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
+		if active := repository.CurrentPrimarySource(); active != nil {
 			sourceId = active.Id
 		}
 	}
@@ -99,7 +99,7 @@ func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.C
 func (i *IndexService) SearchTags(st model.SearchTagsVO) (map[string]any, error) {
 	sourceId := strings.TrimSpace(st.SourceId)
 	if sourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
+		if active := repository.CurrentPrimarySource(); active != nil {
 			sourceId = active.Id
 		}
 	}
@@ -125,19 +125,20 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ...string) (map[string]any, error) {
-	if pid > 0 && !support.IsCategoryVisible(0, pid) {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+	// 仅在未指定采集站（默认本地分类ID）时用本地可见性校验；指定站点的 pid 是源站 type_id，由源站分类树决定可见性。
+	if sourceId == "" && pid > 0 && !support.IsCategoryVisible(0, pid) {
 		return map[string]any{
 			"news":   []model.MovieBasicInfo{},
 			"top":    []model.MovieBasicInfo{},
 			"recent": []model.MovieBasicInfo{},
 		}, nil
 	}
-	var sourceId string
-	if len(sourceIdOpt) > 0 {
-		sourceId = strings.TrimSpace(sourceIdOpt[0])
-	}
 	if sourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
+		if active := repository.CurrentPrimarySource(); active != nil {
 			sourceId = active.Id
 		}
 	}
@@ -165,69 +166,84 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 	if page != nil && page.PageSize > 0 {
 		limit = page.PageSize
 	}
-	listGen := filmsnapshot.GetSearchCacheVersion()
-
-	var (
-		newsMovies   []model.MovieBasicInfo
-		topMovies    []model.MovieBasicInfo
-		recentMovies []model.MovieBasicInfo
-		wg           sync.WaitGroup
-		errMu        sync.Mutex
-		pageErr      error
-	)
-	setPageErr := func(err error) {
-		if err == nil {
-			return
+	sfKey := fmt.Sprintf("%s:%d", cacheKey, limit)
+	val, err, _ := indexClassSF.Do(sfKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var cached map[string]any
+				if json.Unmarshal([]byte(data), &cached) == nil {
+					return cached, nil
+				}
+			}
 		}
-		errMu.Lock()
-		if pageErr == nil {
-			pageErr = err
+		listGen := filmsnapshot.GetSearchCacheVersion()
+
+		var (
+			newsMovies   []model.MovieBasicInfo
+			topMovies    []model.MovieBasicInfo
+			recentMovies []model.MovieBasicInfo
+			wg           sync.WaitGroup
+			errMu        sync.Mutex
+			pageErr      error
+		)
+		setPageErr := func(err error) {
+			if err == nil {
+				return
+			}
+			errMu.Lock()
+			if pageErr == nil {
+				pageErr = err
+			}
+			errMu.Unlock()
 		}
-		errMu.Unlock()
-	}
 
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 0, pid, limit)
-		setPageErr(err)
-		newsMovies = list
-	}()
-	go func() {
-		defer wg.Done()
-		list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 1, pid, limit)
-		setPageErr(err)
-		topMovies = list
-	}()
-	go func() {
-		defer wg.Done()
-		list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 2, pid, limit)
-		setPageErr(err)
-		recentMovies = list
-	}()
-	wg.Wait()
-	if pageErr != nil {
-		return nil, pageErr
-	}
-
-	if newsMovies == nil {
-		newsMovies = []model.MovieBasicInfo{}
-	}
-	if topMovies == nil {
-		topMovies = []model.MovieBasicInfo{}
-	}
-	if recentMovies == nil {
-		recentMovies = []model.MovieBasicInfo{}
-	}
-
-	res := make(map[string]any, 3)
-	res["news"] = newsMovies
-	res["top"] = topMovies
-	res["recent"] = recentMovies
-	if db.Rdb != nil {
-		if data, err := json.Marshal(res); err == nil {
-			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Hour*12, listGen)
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 0, pid, limit)
+			setPageErr(err)
+			newsMovies = list
+		}()
+		go func() {
+			defer wg.Done()
+			list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 1, pid, limit)
+			setPageErr(err)
+			topMovies = list
+		}()
+		go func() {
+			defer wg.Done()
+			list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 2, pid, limit)
+			setPageErr(err)
+			recentMovies = list
+		}()
+		wg.Wait()
+		if pageErr != nil {
+			return nil, pageErr
 		}
+
+		if newsMovies == nil {
+			newsMovies = []model.MovieBasicInfo{}
+		}
+		if topMovies == nil {
+			topMovies = []model.MovieBasicInfo{}
+		}
+		if recentMovies == nil {
+			recentMovies = []model.MovieBasicInfo{}
+		}
+
+		res := make(map[string]any, 3)
+		res["news"] = newsMovies
+		res["top"] = topMovies
+		res["recent"] = recentMovies
+		if db.Rdb != nil {
+			if data, err := json.Marshal(res); err == nil {
+				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Hour*12, listGen)
+			}
+		}
+		return res, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return res, nil
+	return val.(map[string]any), nil
 }

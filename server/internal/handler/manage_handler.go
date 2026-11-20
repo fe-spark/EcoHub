@@ -72,13 +72,14 @@ func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	// 若非超级管理员（如公开未登录接口或访客），清空 ProvideKey 防止敏感密钥泄露
+	// 若非超级管理员（如公开未登录接口或访客），清空敏感密钥及携带 Token 的自建弹幕地址
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
 	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
 		cfg.ProvideKey = ""
 		cfg.Danmaku.AppID = ""
 		cfg.Danmaku.AppSecret = ""
+		cfg.Danmaku.ApiURL = ""
 	}
 	dto.Success(cfg, "网站基本信息获取成功", c)
 }
@@ -192,6 +193,7 @@ func (h *ManageHandler) SiteDanmakuConfig(c *gin.Context) {
 	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
 		cfg.AppID = ""
 		cfg.AppSecret = ""
+		cfg.ApiURL = ""
 	}
 	dto.Success(cfg, "弹幕系统配置获取成功", c)
 }
@@ -201,6 +203,10 @@ func (h *ManageHandler) UpdateSiteDanmaku(c *gin.Context) {
 	var cfg model.DanmakuConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
 		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
+		return
+	}
+	if strings.TrimSpace(cfg.ApiURL) != "" && !utils.IsSafeOutboundURL(cfg.ApiURL) {
+		dto.Failed("弹幕接口地址无效或禁止访问内网地址", c)
 		return
 	}
 	if err := service.ManageSvc.UpdateSiteDanmakuConfig(cfg); err != nil {
@@ -231,6 +237,10 @@ func (h *ManageHandler) TestSiteDanmaku(c *gin.Context) {
 		req.Episode = 1
 	}
 	cfg := req.Config
+	if strings.TrimSpace(cfg.ApiURL) != "" && !utils.IsSafeOutboundURL(cfg.ApiURL) {
+		dto.Failed("弹幕接口地址无效或禁止访问内网地址", c)
+		return
+	}
 	if saved, err := service.ManageSvc.GetSiteDanmakuConfig(); err == nil {
 		if strings.TrimSpace(cfg.AppID) == "" {
 			cfg.AppID = saved.AppID
@@ -487,8 +497,8 @@ func validFilmSource(fs model.FilmSource) error {
 	if len(fs.Name) <= 0 || len(fs.Name) > 20 {
 		return errors.New("资源名称不能为空且长度不能超过20")
 	}
-	if !utils.ValidURL(fs.Uri) {
-		return errors.New("资源链接格式异常, 请输入规范的URL链接")
+	if !utils.IsSafeOutboundURL(fs.Uri) {
+		return errors.New("资源链接格式异常或禁止访问内网地址")
 	}
 	if err := utils.ValidateDomainReplaceRules(fs.DomainReplaceRules); err != nil {
 		return err

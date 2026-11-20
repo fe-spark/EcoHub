@@ -96,6 +96,13 @@ func (s *TMDBService) ScrapeFilms(ctx context.Context, mids []int64) (*ScrapeRes
 	}
 
 	var successMids []int64
+	defer func() {
+		if len(successMids) > 0 {
+			_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(successMids...)
+			filmsnapshot.ClearDynamicPlayCaches()
+			support.ClearIndexPageCache()
+		}
+	}()
 	for _, mid := range cleanMids {
 		select {
 		case <-ctx.Done():
@@ -119,12 +126,6 @@ func (s *TMDBService) ScrapeFilms(ctx context.Context, mids []int64) (*ScrapeRes
 			res.Success++
 			successMids = append(successMids, mid)
 		}
-	}
-
-	if len(successMids) > 0 {
-		_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(successMids...)
-		filmsnapshot.ClearDynamicPlayCaches()
-		support.ClearIndexPageCache()
 	}
 
 	return res, nil

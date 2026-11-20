@@ -24,12 +24,41 @@ var ErrCMSSearchUnsupported = errors.New("cms search unsupported")
 
 var cmsSearchUnsupported sync.Map // uri -> expiry time.Time
 
+const maxCMSSearchUnsupportedEntries = 256
+
 func rememberCMSSearchUnsupported(uri string) {
 	uri = strings.TrimSpace(uri)
 	if uri == "" {
 		return
 	}
-	cmsSearchUnsupported.Store(uri, time.Now().Add(cmsSearchUnsupportedTTL))
+	now := time.Now()
+	count := 0
+	cmsSearchUnsupported.Range(func(k, v any) bool {
+		if until, ok := v.(time.Time); !ok || now.After(until) {
+			cmsSearchUnsupported.Delete(k)
+			return true
+		}
+		count++
+		return count <= maxCMSSearchUnsupportedEntries
+	})
+	if count > maxCMSSearchUnsupportedEntries {
+		cmsSearchUnsupported.Clear()
+	}
+	cmsSearchUnsupported.Store(uri, now.Add(cmsSearchUnsupportedTTL))
+}
+
+// ClearCMSSearchUnsupported 清理指定站点 URI 的“不支持搜索”缓存。
+func ClearCMSSearchUnsupported(uri string) {
+	uri = strings.TrimSpace(uri)
+	if uri == "" {
+		return
+	}
+	cmsSearchUnsupported.Delete(uri)
+}
+
+// ClearAllCMSSearchUnsupported 清空所有 CMS 搜索不支持缓存。
+func ClearAllCMSSearchUnsupported() {
+	cmsSearchUnsupported.Clear()
 }
 
 func isCMSSearchUnsupportedCached(uri string) bool {

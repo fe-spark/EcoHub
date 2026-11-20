@@ -126,7 +126,7 @@ func GetActiveCategoryTree(sourceIdOpt ...string) (model.CategoryTree, error) {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceId == "" {
-		if activeSrc := GetActiveCollectSource(); activeSrc != nil {
+		if activeSrc := CurrentPrimarySource(); activeSrc != nil {
 			sourceId = activeSrc.Id
 		}
 	}

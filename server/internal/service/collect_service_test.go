@@ -128,9 +128,17 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 		Uri:   ts.URL + "/2",
 		State: true,
 	}
+	thirdSrc := model.FilmSource{
+		Id:    "src_3",
+		Name:  "站3",
+		Uri:   ts.URL + "/3",
+		State: true,
+	}
 
-	err := srv.SaveFilmSource(newSrc)
-	if err != nil {
+	if err := srv.SaveFilmSource(newSrc); err != nil {
+		t.Fatalf("SaveFilmSource failed: %v", err)
+	}
+	if err := srv.SaveFilmSource(thirdSrc); err != nil {
 		t.Fatalf("SaveFilmSource failed: %v", err)
 	}
 
@@ -138,36 +146,34 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) < 2 {
-		t.Fatalf("expected at least 2 sources, got %d", len(list))
+	if len(list) < 3 {
+		t.Fatalf("expected at least 3 sources, got %d", len(list))
 	}
-	if list[0].Id != "src_1" {
-		t.Fatalf("expected src_1 to be first, got %s", list[0].Id)
+	if list[0].Id != "src_1" || !list[0].IsPrimary {
+		t.Fatalf("expected primary src_1 to be first, got %+v", list[0])
 	}
-	if list[1].Id != "src_2" {
-		t.Fatalf("expected src_2 (added at end) to be second, got %s", list[1].Id)
+	if list[1].Id != "src_2" || list[2].Id != "src_3" {
+		t.Fatalf("expected src_2, src_3 after src_1, got %+v", list)
 	}
 
-	// 测试拖拽排序
-	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
+	// 禁止把非主站排在主站前面替下首位
+	if err := srv.SortFilmSources([]string{"src_2", "src_1", "src_3"}); err == nil {
+		t.Fatal("expected error when attempting to move non-primary before primary")
+	}
+
+	// 保持主站在首位，仅调整非主站顺序应成功
+	if err := srv.SortFilmSources([]string{"src_1", "src_3", "src_2"}); err != nil {
 		t.Fatalf("SortFilmSources failed: %v", err)
 	}
 	sortedList, err := srv.GetFilmSourceList()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sortedList[0].Id != "src_2" || sortedList[1].Id != "src_1" {
-		t.Fatalf("expected src_2 to be first after sorting, got %+v", sortedList)
+	if sortedList[0].Id != "src_1" || sortedList[1].Id != "src_3" || sortedList[2].Id != "src_2" {
+		t.Fatalf("expected [src_1, src_3, src_2] after sorting, got %+v", sortedList)
 	}
-	// 排序不再切换主站：主站仍是 src_1
-	primaryID := ""
-	for _, item := range sortedList {
-		if item.IsPrimary {
-			primaryID = item.Id
-		}
-	}
-	if primaryID != "src_1" {
-		t.Fatalf("sorting must not switch primary, got %s", primaryID)
+	if !sortedList[0].IsPrimary {
+		t.Fatalf("sorting must keep primary at first, got %+v", sortedList[0])
 	}
 	var categoryCount int64
 	gdb.Model(&model.CategoryMapping{}).Count(&categoryCount)
@@ -263,7 +269,10 @@ func TestSortFilmSources_ReorderKeepsPrimaryDuringCollecting(t *testing.T) {
 	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", Sort: 1, State: true}).Error; err != nil {
 		t.Fatalf("create src_2: %v", err)
 	}
-	// 先建立主站（懒初始化取 src_1），后续排序不得改变它
+	if err := gdb.Create(&model.FilmSource{Id: "src_3", Name: "站3", Uri: "http://3", Sort: 2, State: true}).Error; err != nil {
+		t.Fatalf("create src_3: %v", err)
+	}
+	// 先建立主站（懒初始化取 src_1），排序不得改变主站或将其替出首位
 	if _, err := (&CollectService{}).GetFilmSourceList(); err != nil {
 		t.Fatal(err)
 	}
@@ -279,25 +288,21 @@ func TestSortFilmSources_ReorderKeepsPrimaryDuringCollecting(t *testing.T) {
 	})
 
 	srv := &CollectService{}
-	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
-		t.Fatalf("sort while collecting: %v", err)
+	if err := srv.SortFilmSources([]string{"src_2", "src_1", "src_3"}); err == nil {
+		t.Fatal("expected error when moving non-primary before primary")
+	}
+	if err := srv.SortFilmSources([]string{"src_1", "src_3", "src_2"}); err != nil {
+		t.Fatalf("sort non-primary while primary collecting: %v", err)
 	}
 	list, err := srv.GetFilmSourceList()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) == 0 || list[0].Id != "src_2" {
-		t.Fatalf("sort order should put src_2 first, got %+v", list)
+	if len(list) < 3 || list[0].Id != "src_1" || list[1].Id != "src_3" || list[2].Id != "src_2" {
+		t.Fatalf("expected [src_1, src_3, src_2], got %+v", list)
 	}
-	// 排序不再切换主站：主站仍是 src_1
-	primaryID := ""
-	for _, item := range list {
-		if item.IsPrimary {
-			primaryID = item.Id
-		}
-	}
-	if primaryID != "src_1" {
-		t.Fatalf("primary must stay src_1 after reorder, got %s", primaryID)
+	if !list[0].IsPrimary {
+		t.Fatalf("primary must stay src_1 at first, got %+v", list[0])
 	}
 	if !progress.IsTaskRunning("src_1") {
 		t.Fatal("the running collect should stay running")
@@ -327,7 +332,7 @@ func TestSortFilmSources_ReorderKeepsPrimaryDuringCollecting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	primaryID = ""
+	primaryID := ""
 	for _, item := range list {
 		if item.IsPrimary {
 			primaryID = item.Id

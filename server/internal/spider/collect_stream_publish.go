@@ -49,7 +49,7 @@ func newStreamPublishBuffer() *streamPublishBuffer {
 }
 
 func lookupPreferredSourceID() string {
-	src := repository.GetActiveCollectSource()
+	src := repository.CurrentPrimarySource()
 	if src == nil {
 		return ""
 	}

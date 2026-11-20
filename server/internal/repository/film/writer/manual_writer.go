@@ -23,11 +23,16 @@ type SaveDetailOptions struct {
 
 // ClearFilmIndexCachesByPidSet 清理指定分类的搜索标签与列表缓存。
 func ClearFilmIndexCachesByPidSet(pidSet map[int64]struct{}) {
+	hasPid := false
 	for pid := range pidSet {
-		if pid <= 0 {
-			continue
+		if pid > 0 {
+			hasPid = true
+			break
 		}
-		cache.ClearSearchTagsCache(pid)
+	}
+	if hasPid {
+		snapshot.BumpSearchCacheVersion()
+		cache.ClearAllSearchTagsCache()
 	}
 	cache.ClearProvideListCache()
 }
@@ -96,6 +101,7 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 	var mid int64
 	if isManualUpdate {
 		mid = existingFilm.Mid
+		var updatedFilm model.FilmIndex
 		unlock := lockManualUpdate(source, existingFilm, detail)
 		defer unlock()
 		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -216,23 +222,28 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 			}
 			allKeys := shared.BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 			if len(allKeys) > 0 {
-				_ = tx.Where("mid = ?", mid).Delete(&model.MovieMatchKey{}).Error
+				if err := tx.Where("mid = ?", mid).Delete(&model.MovieMatchKey{}).Error; err != nil {
+					return err
+				}
 				mks := make([]model.MovieMatchKey, 0, len(allKeys))
 				for _, k := range allKeys {
 					mks = append(mks, model.MovieMatchKey{Mid: mid, MatchKey: k})
 				}
-				_ = tx.Create(&mks).Error
+				if err := tx.Create(&mks).Error; err != nil {
+					return err
+				}
 			}
 
-			if isFilmSearchTagFieldsChanged(existingFilm, fi) {
-				_ = UpsertDynamicSearchTags(fi)
-			}
+			updatedFilm = fi
 			return nil
 		})
 		if err != nil {
 			return 0, err
 		}
-		ClearFilmIndexCachesByPidSet(map[int64]struct{}{existingFilm.Pid: {}})
+		if isFilmSearchTagFieldsChanged(existingFilm, updatedFilm) {
+			_ = UpsertDynamicSearchTags(updatedFilm)
+		}
+		ClearFilmIndexCachesByPidSet(map[int64]struct{}{existingFilm.Pid: {}, updatedFilm.Pid: {}})
 	} else {
 		if !shared.HasPlayableLinks(detail) {
 			return 0, errors.New("影片必须包含至少一条有效播放链接")

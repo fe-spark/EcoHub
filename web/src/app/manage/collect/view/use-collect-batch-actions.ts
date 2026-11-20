@@ -25,6 +25,8 @@ export function useCollectBatchActions(
     leavingName: string;
     otherEnabled: FilmSource[];
   }) => Promise<HandoverChoice | null>,
+  isAdmin = false,
+  refreshPrimary?: () => Promise<void> | void,
 ) {
   const { message } = useAppMessage();
   const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
@@ -135,6 +137,10 @@ export function useCollectBatchActions(
     let extra: { newPrimaryId?: string; confirmClearPrimary?: boolean } = {};
     const primarySrc = targets.find((item) => item.isPrimary);
     if (primarySrc) {
+      if (!isAdmin) {
+        message.error("权限不足，仅超级管理员可执行主站切换");
+        return;
+      }
       const otherEnabled = siteList.filter((s) => s.state && !idSet.has(s.id));
       if (otherEnabled.length > 0) {
         if (askPrimaryHandover) {
@@ -166,6 +172,9 @@ export function useCollectBatchActions(
       if (resp.code === 0) {
         onDeleteSubmitted?.(targets.map((s) => ({ id: s.id, name: s.name })));
         message.success("已提交批量删除");
+        if (primarySrc) {
+          void refreshPrimary?.();
+        }
         return;
       }
       setSiteList((current) =>
@@ -182,7 +191,7 @@ export function useCollectBatchActions(
     } finally {
       setBatchDeleting(false);
     }
-  }, [askPrimaryHandover, message, onDeleteSubmitted, reloadList, selectedSources, setSiteList, siteList]);
+  }, [askPrimaryHandover, isAdmin, message, onDeleteSubmitted, refreshPrimary, reloadList, selectedSources, setSiteList, siteList]);
 
   const deleteConfirmTitle = `删除 ${selectedSources.length} 个采集站？`;
   const deleteConfirmDescription = "";

@@ -27,9 +27,14 @@ export function useCollectDeleteQueue() {
   const stopDeleteQueue = useCallback(async () => {
     setStoppingDelete(true);
     try {
-      const resp = await ApiPost("/manage/collect/delete/cancel", {});
+      const resp = await ApiPost<{ canceled?: string[]; count?: number }>(
+        "/manage/collect/delete/cancel",
+        {},
+      );
       if (resp.code !== 0) {
         message.error(resp.msg || "终止删除失败");
+      } else if ((resp.data?.count ?? 0) === 0) {
+        message.info(resp.msg || "当前无排队中的待取消站点");
       } else {
         message.info(resp.msg || "已终止排队中的站点删除");
       }

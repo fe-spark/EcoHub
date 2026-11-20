@@ -85,7 +85,10 @@ export default function BannersPageView() {
       );
       if (controller.signal.aborted) return;
       if (resp.code === 0 && resp.data) {
-        if (resp.data.primarySourceId && resp.data.primarySourceId !== primaryId) {
+        if (
+          typeof resp.data.primarySourceId === "string" &&
+          resp.data.primarySourceId !== primaryId
+        ) {
           replaceList([]);
           revisionRef.current = "";
           void refreshPrimary();
@@ -292,7 +295,10 @@ export default function BannersPageView() {
         onRemember={setQuickConfig}
         onClose={() => setQuickModalOpen(false)}
         onGenerated={(result, strategy) => {
-          if (result.primarySourceId && result.primarySourceId !== primaryId) {
+          if (
+            typeof result.primarySourceId === "string" &&
+            result.primarySourceId !== primaryId
+          ) {
             void refreshPrimary();
             return;
           }
@@ -326,7 +332,10 @@ export default function BannersPageView() {
         }}
         onChange={setQuickDeck}
         onSuccess={(view) => {
-          if (view.primarySourceId && view.primarySourceId !== primaryId) {
+          if (
+            typeof view.primarySourceId === "string" &&
+            view.primarySourceId !== primaryId
+          ) {
             void refreshPrimary();
             return;
           }

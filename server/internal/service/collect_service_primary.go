@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"strings"
+	"sync"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -10,12 +11,31 @@ import (
 	"server/internal/spider/progress"
 )
 
+// cleaningURISources 记录正在执行换源清库的站点，防止清库窗口被切为主站。
+var cleaningURISources sync.Map
+
 // ErrPrimaryMismatch 写操作携带或归属的站点与当前主站不一致（D3）。
 var ErrPrimaryMismatch = errors.New("主站已变更，请刷新后重试")
 
+// ErrPrimarySwitchForbidden 非超级管理员尝试执行或触发主站切换/交接（D4）。
+var ErrPrimarySwitchForbidden = errors.New("权限不足，仅超级管理员可执行主站切换")
+
 // CurrentPrimary 当前主站。没有主站时返回 nil。
 func (s *CollectService) CurrentPrimary() *model.FilmSource {
-	return repository.PickPrimarySourceForCategory()
+	return repository.CurrentPrimarySource()
+}
+
+// DeletingPrimary 返回当前仍绑定但处于删除队列中的原主站（仅用于后台状态展示）。
+func (s *CollectService) DeletingPrimary() *model.FilmSource {
+	id := repository.StoredPrimarySourceID()
+	if id == "" || !progress.IsSourceDeleting(id) {
+		return nil
+	}
+	src := repository.FindCollectSourceById(id)
+	if src == nil || !src.State {
+		return nil
+	}
+	return src
 }
 
 // SwitchPrimary 切换主站（全站唯一入口；路由挂 AdminAccess，仅超管可达，D4）。
@@ -25,7 +45,7 @@ func (s *CollectService) SwitchPrimary(id string) error {
 		return errors.New("主站 ID 不能为空")
 	}
 	return withPrimaryMutation(func(searchBusy bool) error {
-		oldPrimary := repository.PickPrimarySourceForCategory()
+		oldPrimary := repository.CurrentPrimarySource()
 		if oldPrimary != nil && oldPrimary.Id == id {
 			return nil // 已是当前主站，幂等返回
 		}
@@ -38,7 +58,7 @@ func (s *CollectService) SwitchPrimary(id string) error {
 		if err := repository.SetPrimarySourceID(id); err != nil {
 			return err
 		}
-		applyPrimaryChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+		applyPrimaryChanged(oldPrimary, repository.CurrentPrimarySource())
 		return nil
 	})
 }
@@ -61,6 +81,9 @@ func validateNewPrimary(newPrimaryID, leavingID string) error {
 	}
 	if progress.IsSourceDeleting(id) {
 		return errors.New("新主站正在删除")
+	}
+	if _, cleaning := cleaningURISources.Load(id); cleaning {
+		return errors.New("新主站正在换源清理数据，请稍后再试")
 	}
 	return nil
 }
@@ -104,7 +127,7 @@ func applyPrimaryHandover(oldPrimary *model.FilmSource, leavingID, newPrimaryID 
 		if err := repository.SetPrimarySourceID(newPrimaryID); err != nil {
 			return err
 		}
-		applyPrimaryChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+		applyPrimaryChanged(oldPrimary, repository.CurrentPrimarySource())
 		return nil
 	}
 	if err := repository.ClearPrimarySourceState(); err != nil {

@@ -171,21 +171,40 @@ func ClearAccessData(retentionDays int) (ClearAccessResult, error) {
 		}
 	}
 
+	ClearOverviewCache()
 	return res, nil
 }
 
 func deleteMatchingAccessRedisKeys(retentionDays int, cutoffRedisDay string) (int64, error) {
 	ctx := db.Cxt
-	var toDelete []string
-	var cursor uint64
+	const batchSize = 500
+	var (
+		deleted int64
+		cursor  uint64
+		batch   = make([]string, 0, batchSize)
+	)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		n, err := db.Rdb.Unlink(ctx, batch...).Result()
+		deleted += n
+		batch = batch[:0]
+		return err
+	}
 	for {
 		keys, nextCursor, err := db.Rdb.Scan(ctx, cursor, config.AccessKeyPrefix+"*", 500).Result()
 		if err != nil {
-			return 0, err
+			return deleted, err
 		}
 		for _, k := range keys {
 			if retentionDays <= 0 || isAccessKeyOlderThan(k, cutoffRedisDay) {
-				toDelete = append(toDelete, k)
+				batch = append(batch, k)
+				if len(batch) >= batchSize {
+					if err := flush(); err != nil {
+						return deleted, err
+					}
+				}
 			}
 		}
 		cursor = nextCursor
@@ -193,19 +212,8 @@ func deleteMatchingAccessRedisKeys(retentionDays int, cutoffRedisDay string) (in
 			break
 		}
 	}
-
-	var deleted int64
-	const batchSize = 500
-	for i := 0; i < len(toDelete); i += batchSize {
-		end := i + batchSize
-		if end > len(toDelete) {
-			end = len(toDelete)
-		}
-		n, err := db.Rdb.Del(ctx, toDelete[i:end]...).Result()
-		deleted += n
-		if err != nil {
-			return deleted, err
-		}
+	if err := flush(); err != nil {
+		return deleted, err
 	}
 	return deleted, nil
 }

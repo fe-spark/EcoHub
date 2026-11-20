@@ -85,3 +85,24 @@ func TestProvideService_GetAppSourceConfig(t *testing.T) {
 		t.Errorf("site_url 应规范去除尾部斜杠，实际: %v", siteURL)
 	}
 }
+
+func TestProvideService_GetVodList_EmptyWhenNoPrimarySource(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
+		t.Fatal(err)
+	}
+	gdb.Create(&model.FilmSource{Id: "src_off", Name: "停用站", Uri: "https://off.example/api", State: false, Sort: 0})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 701, FirstSourceId: "src_off"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "停用站泄漏影片"},
+	})
+	_ = repository.RefreshCollectSourceCatalog()
+
+	cur, pages, total, list, err := ProvideSvc.GetVodList(0, 0, 1, "停用", 0, "", "", "", "", "", 20)
+	if err != nil {
+		t.Fatalf("GetVodList failed: %v", err)
+	}
+	if cur != 1 || pages != 1 || total != 0 || len(list) != 0 {
+		t.Fatalf("expected empty list when no primary source, got cur=%d pages=%d total=%d list=%+v", cur, pages, total, list)
+	}
+}

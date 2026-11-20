@@ -1,9 +1,11 @@
 package repository
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +14,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // SourceRootTypeIDs 当前采集站前台正在显示的一级分类。id 是该站 type_id，和首页栏目一致。
@@ -191,6 +195,9 @@ func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	}
 	if field == "cid" {
 		if group, ok := view.groupByMember(typeID); ok {
+			if group.Synthetic {
+				return group.publicTypeIDs(view.Hidden)
+			}
 			if group.Parent == 0 && len(group.Children) > 0 {
 				return []int64{typeID}
 			}
@@ -271,13 +278,16 @@ type sourceTypeRow struct {
 }
 
 type publicTypeGroup struct {
-	ID       int64
-	Parent   int64
-	Name     string
-	Sort     int
-	Show     bool
-	Members  []int64
-	Children []publicTypeGroup
+	ID            int64
+	CategoryID    int64
+	Parent        int64
+	Name          string
+	Sort          int
+	Show          bool
+	Synthetic     bool
+	Members       []int64
+	RootMemberIDs []int64
+	Children      []publicTypeGroup
 }
 
 func (g publicTypeGroup) publicMembers(hidden map[int64]sourceTypeRow) []int64 {
@@ -335,6 +345,7 @@ func (g publicTypeGroup) publicTypeIDs(hidden map[int64]sourceTypeRow) []int64 {
 			add(id)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 
@@ -406,14 +417,32 @@ type publicSourceCacheEntry struct {
 var (
 	publicSourceCacheMu sync.Mutex
 	publicSourceCache   = map[string]publicSourceCacheEntry{}
+	publicSourceSF      singleflight.Group
 )
+
+// InvalidatePublicSourceCache 清理站点公开分类内存缓存；不传参时清空全部。
+func InvalidatePublicSourceCache(sourceIDs ...string) {
+	publicSourceCacheMu.Lock()
+	defer publicSourceCacheMu.Unlock()
+	if len(sourceIDs) == 0 {
+		clear(publicSourceCache)
+		return
+	}
+	for _, id := range sourceIDs {
+		delete(publicSourceCache, strings.TrimSpace(id))
+	}
+}
+
+func publicSourceCacheVersionKey(sourceID string) string {
+	return sourceID + ":" + support.GetRuleVersion() + ":" + support.GetCategoryVersion()
+}
 
 func loadPublicSourceTypes(sourceID string) (publicSourceView, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || db.Mdb == nil {
 		return publicSourceView{}, nil
 	}
-	cacheKey := sourceID + ":" + support.GetRuleVersion() + ":" + support.GetCategoryVersion()
+	cacheKey := publicSourceCacheVersionKey(sourceID)
 	publicSourceCacheMu.Lock()
 	if entry, ok := publicSourceCache[sourceID]; ok && entry.key == cacheKey {
 		view := entry.view
@@ -422,14 +451,25 @@ func loadPublicSourceTypes(sourceID string) (publicSourceView, error) {
 	}
 	publicSourceCacheMu.Unlock()
 
-	view, err := buildPublicSourceView(sourceID)
+	res, err, _ := publicSourceSF.Do(cacheKey, func() (any, error) {
+		view, err := buildPublicSourceView(sourceID)
+		if err != nil {
+			return publicSourceView{}, err
+		}
+		if publicSourceCacheVersionKey(sourceID) == cacheKey {
+			publicSourceCacheMu.Lock()
+			// 仅当写回时全局规则与分类版本仍未变化才写入缓存，防止慢构建覆盖新版视图
+			if publicSourceCacheVersionKey(sourceID) == cacheKey {
+				publicSourceCache[sourceID] = publicSourceCacheEntry{key: cacheKey, view: view}
+			}
+			publicSourceCacheMu.Unlock()
+		}
+		return view, nil
+	})
 	if err != nil {
 		return publicSourceView{}, err
 	}
-	publicSourceCacheMu.Lock()
-	publicSourceCache[sourceID] = publicSourceCacheEntry{key: cacheKey, view: view}
-	publicSourceCacheMu.Unlock()
-	return view, nil
+	return res.(publicSourceView), nil
 }
 
 func buildPublicSourceView(sourceID string) (publicSourceView, error) {
@@ -466,12 +506,142 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 		}
 		parsed = append(parsed, item)
 	}
+	groups := groupPublicTypes(parsed, sourceID)
+	ensureSyntheticRootGroups(sourceID, parsed, groups)
+	sortPublicGroups(groups)
 	view := publicSourceView{
-		Groups:  groupPublicTypes(parsed, sourceID),
+		Groups:  groups,
 		Hidden:  hidden,
 		members: map[int64]publicTypeGroup{},
 		roots:   map[int64]publicTypeGroup{},
 	}
 	indexPublicGroups(view.Groups, view.members, view.roots)
 	return view, nil
+}
+
+const syntheticRootTypeOffset int64 = 100_000_000
+
+func syntheticRootPrefix(sourceID string) string {
+	return "rule:root:" + strings.TrimSpace(sourceID) + ":"
+}
+
+func syntheticRootStableKey(sourceID, groupName string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(groupName)))
+	return fmt.Sprintf("%s%x", syntheticRootPrefix(sourceID), sum[:8])
+}
+
+func allocateSyntheticTypeID(categoryID int64, used map[int64]struct{}) int64 {
+	id := syntheticRootTypeOffset + categoryID
+	if id <= 0 {
+		id = syntheticRootTypeOffset + 1
+	}
+	for {
+		if _, exists := used[id]; !exists {
+			used[id] = struct{}{}
+			return id
+		}
+		id++
+	}
+}
+
+// ensureSyntheticRootGroups 为规则新合成的一级分组维护独立的 film_category 行，
+// 避免借用首个子项 ID 导致后台父子 rowKey 冲突或子项被隐藏吞并。
+func ensureSyntheticRootGroups(sourceID string, rows []sourceTypeRow, groups []publicTypeGroup) {
+	if db.Mdb == nil || strings.TrimSpace(sourceID) == "" {
+		return
+	}
+	prefix := syntheticRootPrefix(sourceID)
+	var existing []model.Category
+	if err := db.Mdb.Where("stable_key LIKE ?", prefix+"%").Find(&existing).Error; err != nil {
+		return
+	}
+	existingByKey := make(map[string]model.Category, len(existing))
+	for _, cat := range existing {
+		existingByKey[cat.StableKey] = cat
+	}
+	usedIDs := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		if row.ID > 0 {
+			usedIDs[row.ID] = struct{}{}
+		}
+	}
+	desiredKeys := make(map[string]struct{})
+	for i := range groups {
+		if groups[i].Synthetic {
+			desiredKeys[syntheticRootStableKey(sourceID, groups[i].Name)] = struct{}{}
+		}
+	}
+	if len(desiredKeys) == 0 && len(existingByKey) == 0 {
+		return
+	}
+
+	changed := false
+	staleIDs := make([]int64, 0)
+	for key, cat := range existingByKey {
+		if _, keep := desiredKeys[key]; !keep && cat.Id > 0 {
+			staleIDs = append(staleIDs, cat.Id)
+		}
+	}
+	if len(staleIDs) > 0 {
+		var mapped []int64
+		_ = db.Mdb.Model(&model.CategoryMapping{}).
+			Where("category_id IN ?", staleIDs).
+			Distinct("category_id").
+			Pluck("category_id", &mapped).Error
+		inUse := make(map[int64]struct{}, len(mapped))
+		for _, id := range mapped {
+			inUse[id] = struct{}{}
+		}
+		dropIDs := make([]int64, 0, len(staleIDs))
+		for _, id := range staleIDs {
+			if _, ok := inUse[id]; !ok {
+				dropIDs = append(dropIDs, id)
+			}
+		}
+		if len(dropIDs) > 0 && db.Mdb.Where("id IN ?", dropIDs).Delete(&model.Category{}).Error == nil {
+			changed = true
+		}
+	}
+
+	for i := range groups {
+		if !groups[i].Synthetic {
+			continue
+		}
+		key := syntheticRootStableKey(sourceID, groups[i].Name)
+		cat, ok := existingByKey[key]
+		if !ok {
+			cat = model.Category{
+				Pid:       0,
+				Name:      groups[i].Name,
+				StableKey: key,
+				Show:      true,
+				Sort:      groups[i].Sort,
+			}
+			if err := db.Mdb.Create(&cat).Error; err != nil {
+				var again model.Category
+				if db.Mdb.Where("stable_key = ?", key).First(&again).Error != nil {
+					continue
+				}
+				cat = again
+			} else {
+				changed = true
+			}
+			existingByKey[key] = cat
+		} else if cat.Name != groups[i].Name {
+			if db.Mdb.Model(&model.Category{}).Where("id = ?", cat.Id).Update("name", groups[i].Name).Error == nil {
+				cat.Name = groups[i].Name
+				changed = true
+			}
+		}
+		groups[i].CategoryID = cat.Id
+		groups[i].Show = cat.Show
+		groups[i].Sort = cat.Sort
+		groups[i].ID = allocateSyntheticTypeID(cat.Id, usedIDs)
+		for j := range groups[i].Children {
+			groups[i].Children[j].Parent = groups[i].ID
+		}
+	}
+	if changed {
+		RefreshCategoryCache()
+	}
 }

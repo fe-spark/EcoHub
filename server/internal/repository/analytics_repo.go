@@ -15,33 +15,32 @@ import (
 
 // GetAnalyticsConfig 读取数据分析配置。优先读取 Redis 缓存；无缓存查库；数据库无记录返回默认关闭。
 func GetAnalyticsConfig() (model.AnalyticsConfig, error) {
-	if data, ok, err := readCache(config.AnalyticsConfigKey); err != nil {
-		return model.DefaultAnalyticsConfig(), err
-	} else if ok && data != "" {
-		cfg, err := decodeAnalyticsConfig(data)
-		if err != nil {
-			if delErr := dropCache(config.AnalyticsConfigKey); delErr != nil {
-				return model.DefaultAnalyticsConfig(), fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
+	cfg, err := loadCachedConfig(
+		config.AnalyticsConfigKey,
+		decodeAnalyticsConfig,
+		func() (model.AnalyticsConfig, string, bool, error) {
+			if db.Mdb == nil {
+				return model.DefaultAnalyticsConfig(), "", false, nil
 			}
-		} else {
-			return cfg, nil
-		}
-	}
-	if db.Mdb == nil {
-		return model.DefaultAnalyticsConfig(), nil
-	}
-	var rec model.AnalyticsConfigRecord
-	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		if recordNotFound(err) {
-			return model.DefaultAnalyticsConfig(), nil
-		}
-		return model.DefaultAnalyticsConfig(), err
-	}
-	cfg, err := decodeAnalyticsConfig(rec.Payload)
+			var rec model.AnalyticsConfigRecord
+			if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
+				if recordNotFound(err) {
+					return model.DefaultAnalyticsConfig(), "", false, nil
+				}
+				return model.DefaultAnalyticsConfig(), "", false, err
+			}
+			cfg, err := decodeAnalyticsConfig(rec.Payload)
+			if err != nil {
+				return model.DefaultAnalyticsConfig(), "", false, err
+			}
+			data, err := json.Marshal(cfg)
+			if err != nil {
+				return model.DefaultAnalyticsConfig(), "", false, err
+			}
+			return cfg, string(data), true, nil
+		},
+	)
 	if err != nil {
-		return model.DefaultAnalyticsConfig(), err
-	}
-	if err := cacheAnalyticsConfig(cfg); err != nil {
 		return model.DefaultAnalyticsConfig(), err
 	}
 	return cfg, nil

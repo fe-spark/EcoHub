@@ -7,6 +7,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/testutil"
 
@@ -235,5 +236,73 @@ func TestFilmService_GetFilmPage_SnapshotMode_FixedPrimary(t *testing.T) {
 	}
 	if len(page2) != 1 || page2[0].Mid != 201 {
 		t.Fatalf("sourceId must be ignored in favor of primary, got %v", page2)
+	}
+}
+
+func TestFilmService_DeletePrimaryFilms_AllowsDuringSearchWarmAndChecksOwnership(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
+		t.Fatal(err)
+	}
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", State: true, Sort: 1})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 301, FirstSourceId: "src1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "主站影片"},
+	})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 302, FirstSourceId: "src2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "非主站影片"},
+	})
+
+	// 模拟正在预热：SwitchPrimary 会因 ErrSearchIndexBusy 被拒，但删片不应误报切主错误
+	primaryWarmCount.Add(1)
+	defer primaryWarmCount.Add(-1)
+
+	srv := new(FilmService)
+	if err := srv.DeletePrimaryFilms([]int64{302}, "src1"); err != ErrPrimaryMismatch {
+		t.Fatalf("expected ErrPrimaryMismatch for non-primary film, got %v", err)
+	}
+	if err := srv.DeletePrimaryFilms([]int64{301}, "src1"); err != nil {
+		t.Fatalf("DeletePrimaryFilms must succeed during search warm, got %v", err)
+	}
+
+	var count int64
+	gdb.Unscoped().Model(&model.FilmIndex{}).Where("mid = ?", 301).Count(&count)
+	if count != 0 {
+		t.Fatalf("expected film 301 deleted, count=%d", count)
+	}
+}
+
+func TestFilmService_SaveFilmDetail_RejectsNonPrimaryMid(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
+		t.Fatal(err)
+	}
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "主站", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src2", Name: "非主站", State: true, Sort: 1})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 402, FirstSourceId: "src2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "非主站原片名"},
+	})
+	_ = repository.RefreshCollectSourceCatalog()
+
+	srv := new(FilmService)
+	err := srv.SaveFilmDetail(model.FilmDetailVo{
+		Id:   402,
+		Name: "试图跨站篡改",
+		Pid:  1,
+		Cid:  2,
+	})
+	if err != ErrPrimaryMismatch {
+		t.Fatalf("expected ErrPrimaryMismatch when saving non-primary mid, got %v", err)
+	}
+
+	var saved model.FilmIndex
+	if err := gdb.First(&saved, "mid = ?", 402).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Name != "非主站原片名" || saved.FirstSourceId != "src2" {
+		t.Fatalf("non-primary film must remain untouched, got %+v", saved)
 	}
 }

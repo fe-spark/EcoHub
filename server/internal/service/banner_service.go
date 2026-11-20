@@ -92,7 +92,7 @@ var bannerStrategies = map[string]string{
 
 // resolveBannerSource 当前主站。写请求可带 sourceId 作为旧页面的上下文断言（D3）。
 func resolveBannerSource(expectedSourceID string) (*model.FilmSource, error) {
-	primary := repository.PickPrimarySourceForCategory()
+	primary := repository.CurrentPrimarySource()
 	if primary == nil {
 		return nil, bannerInputErr("没有已启用的采集站")
 	}

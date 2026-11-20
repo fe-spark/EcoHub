@@ -40,6 +40,8 @@ var (
 	categoryShowMap        = make(map[int64]bool)
 	catInitialized         = false
 	catMu                  sync.RWMutex
+	catSnapVer             atomic.Uint64
+	indexPageGen           atomic.Uint64
 )
 
 func init() {

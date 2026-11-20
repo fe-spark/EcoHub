@@ -17,7 +17,7 @@ import (
 // 采集站归属在请求写入前决定。页面埋点的 source 是客户端类型，不能当作采集站。
 var (
 	lookupActiveCollectSourceID = func() string {
-		active := repository.GetActiveCollectSource()
+		active := repository.CurrentPrimarySource()
 		if active == nil {
 			return ""
 		}

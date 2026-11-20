@@ -193,3 +193,74 @@ func TestCurrentPrimarySource_ConcurrentReadSafe(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// 缓存已预热后若主站进入删除态，CurrentPrimarySource 必须立即返回 nil，撤回后恢复
+func TestCurrentPrimarySource_WarmedCacheRespectsDeletingState(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "warm_a", Name: "WarmA", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPrimarySourceID("warm_a"); err != nil {
+		t.Fatal(err)
+	}
+	// 先预热缓存
+	if p := CurrentPrimarySource(); p == nil || p.Id != "warm_a" {
+		t.Fatalf("expected warm_a before deleting, got %+v", p)
+	}
+
+	deleting := true
+	RegisterSourceDeletingChecker(func(id string) bool {
+		return deleting && id == "warm_a"
+	})
+	t.Cleanup(func() { RegisterSourceDeletingChecker(nil) })
+
+	if p := CurrentPrimarySource(); p != nil {
+		t.Fatalf("expected nil while warm_a is deleting even with warm cache, got %+v", p)
+	}
+
+	deleting = false
+	if p := CurrentPrimarySource(); p == nil || p.Id != "warm_a" {
+		t.Fatalf("expected warm_a restored after cancel, got %+v", p)
+	}
+}
+
+// 并发切换主站与单飞回源交叉执行时，缓存不会写入旧主站快照
+func TestCurrentPrimarySource_ConcurrentInvalidateNoStaleCache(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "s1", Name: "S1", Uri: "http://1", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "s2", Name: "S2", Uri: "http://2", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPrimarySourceID("s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			_ = SetPrimarySourceID("s2")
+			_ = SetPrimarySourceID("s1")
+		}
+	}()
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_ = CurrentPrimarySource()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if err := SetPrimarySourceID("s2"); err != nil {
+		t.Fatal(err)
+	}
+	if p := CurrentPrimarySource(); p == nil || p.Id != "s2" {
+		t.Fatalf("expected final primary s2, got %+v", p)
+	}
+}

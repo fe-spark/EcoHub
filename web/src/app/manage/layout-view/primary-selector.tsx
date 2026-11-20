@@ -10,7 +10,7 @@ type SourceOption = { id: string; name: string };
 
 /** 后台顶栏主站选择器：仅超管可切换（D4），其余只读展示。 */
 export default function PrimarySelector({ isAdmin }: { isAdmin?: boolean }) {
-  const { primary, loading, switching, refresh, switchPrimary } = usePrimarySource();
+  const { primary, deletingPrimary, loading, switching, refresh, switchPrimary } = usePrimarySource();
   const { message, modal } = useAppMessage();
   const [options, setOptions] = useState<SourceOption[]>([]);
 
@@ -25,16 +25,19 @@ export default function PrimarySelector({ isAdmin }: { isAdmin?: boolean }) {
   }, []);
 
   useEffect(() => {
-    if (isAdmin !== false) void loadOptions();
+    if (isAdmin === true) void loadOptions();
   }, [isAdmin, loadOptions]);
+
+  const displayPrimary = primary ?? deletingPrimary;
+  const isDeletingPrimary = Boolean(deletingPrimary);
 
   const selectOptions = useMemo(() => {
     const list = [...options];
-    if (primary && !list.some((item) => item.id === primary.id)) {
-      list.unshift({ id: primary.id, name: primary.name });
+    if (displayPrimary && !list.some((item) => item.id === displayPrimary.id)) {
+      list.unshift({ id: displayPrimary.id, name: displayPrimary.name });
     }
     return list.map((item) => ({ value: item.id, label: item.name }));
-  }, [options, primary]);
+  }, [displayPrimary, options]);
 
   const askSwitch = useCallback(
     (id: string) => {
@@ -62,22 +65,19 @@ export default function PrimarySelector({ isAdmin }: { isAdmin?: boolean }) {
     [message, modal, options, primary, refresh, switchPrimary],
   );
 
-  if (isAdmin === false) {
-    if (loading) {
-      return <Tag color="gold">主站加载中…</Tag>;
-    }
-    if (!primary) {
+  if (isAdmin === false && !loading) {
+    if (!displayPrimary) {
       return <Tag color="warning">未配置主站</Tag>;
     }
-    return <Tag color="gold">{primary.name}</Tag>;
+    return <Tag color="gold">{displayPrimary.name}</Tag>;
   }
 
   return (
     <Select
-      value={primary?.id}
-      placeholder={loading ? "加载中…" : "未配置主站"}
-      loading={loading || switching}
-      disabled={loading || switching}
+      value={displayPrimary?.id}
+      placeholder={loading ? undefined : "未配置主站"}
+      loading={loading || switching || isDeletingPrimary}
+      disabled={isAdmin !== true || loading || switching || isDeletingPrimary}
       popupMatchSelectWidth={false}
       options={selectOptions}
       onOpenChange={(open) => {

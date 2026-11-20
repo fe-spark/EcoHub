@@ -2,6 +2,7 @@ package film
 
 import (
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -52,11 +53,17 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	gdb := setupFilmZeroTestDB(t)
 
 	// 注入数据
+	gdb.Create(&model.User{UserName: "admin_keep", Password: "hashed", Role: model.UserRoleAdmin, Status: 0})
+	gdb.Create(&model.SchemaMigration{Version: "20261120_init"})
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "自定义站", Uri: "https://example.com/api", State: true})
+	gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: "src1"})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 200, SourceId: "src1", LineKind: "play", Content: "playlist"})
 	gdb.Create(&model.Category{Name: "动作片"})
 	gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: 100, GlobalMid: 200})
 	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 10})
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "动作"})
+	gdb.Create(&model.SiteConfigRecord{SiteName: "OldSite"})
+	gdb.Create(&model.CrontabRecord{TaskId: "task1", TaskModel: 0, Spec: "0 0 * * * *"})
 	gdb.Create(&fileDummy{Id: 1})
 	gdb.Create(&model.BannerSlot{Id: "b1", SourceId: "src1", Mid: 200})
 
@@ -65,6 +72,7 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	}
 
 	var playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, bannerCount int64
+	var sourceCount, primaryCount, siteCfgCount, cronCount, userCount, migCount int64
 	gdb.Model(&model.FilmSourcePlaylist{}).Count(&playlistCount)
 	gdb.Model(&model.Category{}).Count(&catCount)
 	gdb.Model(&fileDummy{}).Count(&fileCount)
@@ -72,14 +80,21 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	gdb.Unscoped().Model(&model.CategoryMapping{}).Count(&catMapCount)
 	gdb.Unscoped().Model(&model.SourceCategory{}).Count(&srcCatCount)
 	gdb.Model(&model.BannerSlot{}).Count(&bannerCount)
+	gdb.Unscoped().Model(&model.FilmSource{}).Count(&sourceCount)
+	gdb.Model(&model.PrimaryState{}).Count(&primaryCount)
+	gdb.Model(&model.SiteConfigRecord{}).Count(&siteCfgCount)
+	gdb.Model(&model.CrontabRecord{}).Count(&cronCount)
+	gdb.Model(&model.User{}).Count(&userCount)
+	gdb.Model(&model.SchemaMigration{}).Count(&migCount)
 
-	if playlistCount != 0 || fileCount != 0 || mappingCount != 0 || bannerCount != 0 {
-		t.Fatalf("expected inventory tables physically cleared, got playlists=%d files=%d mapping=%d banners=%d",
-			playlistCount, fileCount, mappingCount, bannerCount)
+	if playlistCount != 0 || fileCount != 0 || mappingCount != 0 || bannerCount != 0 ||
+		catCount != 0 || catMapCount != 0 || srcCatCount != 0 ||
+		sourceCount != 0 || primaryCount != 0 || siteCfgCount != 0 || cronCount != 0 {
+		t.Fatalf("expected all non-user tables cleared, got playlists=%d files=%d mapping=%d banners=%d cats=%d catMap=%d srcCat=%d sources=%d primary=%d siteCfg=%d crons=%d",
+			playlistCount, fileCount, mappingCount, bannerCount, catCount, catMapCount, srcCatCount, sourceCount, primaryCount, siteCfgCount, cronCount)
 	}
-	if catCount == 0 || catMapCount == 0 || srcCatCount == 0 {
-		t.Fatalf("expected category structures to be preserved, got cats=%d catMap=%d srcCat=%d",
-			catCount, catMapCount, srcCatCount)
+	if userCount != 1 || migCount != 1 {
+		t.Fatalf("expected user and schema_migrations preserved, got users=%d migrations=%d", userCount, migCount)
 	}
 }
 
@@ -186,5 +201,51 @@ func TestInvalidateMasterSwitchCaches_ClearsActiveSnapshotVersion(t *testing.T) 
 	InvalidateMasterSwitchCaches()
 	if got := snapshot.GetActiveSnapshotVersion(); got != "" {
 		t.Fatalf("expected memory snapshot version cleared on master switch, got %q", got)
+	}
+}
+
+func TestCleanPlaylessFilms_MultiBatchCursorScansPastHealthyRows(t *testing.T) {
+	origRdb := db.Rdb
+	origBatch := filmCleanBatchSize
+	db.Rdb = nil
+	filmCleanBatchSize = 2
+	t.Cleanup(func() {
+		db.Rdb = origRdb
+		filmCleanBatchSize = origBatch
+	})
+
+	gdb := setupFilmZeroTestDB(t)
+	oldTime := time.Now().Add(-10 * 24 * time.Hour)
+
+	// 前 5 条为带播放线路的健康老片，第 6 条为无播放线路的幽灵老片（跨 3 批扫描仍能精确清理且不误伤前 5 条）
+	for mid := int64(1); mid <= 5; mid++ {
+		gdb.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: "健康片"},
+			CreatedAt:         oldTime,
+			UpdatedAt:         oldTime,
+		})
+		gdb.Create(&model.FilmSourcePlaylist{Mid: mid, SourceId: "s1", LineKind: "play", Content: "01$https://v/1.m3u8"})
+	}
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 6},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1},
+		FilmIndexContent:  model.FilmIndexContent{Name: "幽灵片"},
+		CreatedAt:         oldTime,
+		UpdatedAt:         oldTime,
+	})
+
+	cleaned, err := CleanPlaylessFilms(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("CleanPlaylessFilms failed: %v", err)
+	}
+	if cleaned != 1 {
+		t.Fatalf("expected 1 ghost film cleaned across batches, got %d", cleaned)
+	}
+	var left int64
+	gdb.Unscoped().Model(&model.FilmIndex{}).Count(&left)
+	if left != 5 {
+		t.Fatalf("expected 5 healthy films preserved, got %d", left)
 	}
 }

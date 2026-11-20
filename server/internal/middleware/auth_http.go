@@ -5,12 +5,16 @@ import (
 	"strings"
 
 	"server/internal/config"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
 func useSecureCookie(c *gin.Context) bool {
-	return c.Request.TLS != nil || forwardedProto(c.GetHeader("X-Forwarded-Proto")) == "https"
+	if c.Request.TLS != nil {
+		return true
+	}
+	return utils.IsTrustedForwardedPeer(c.Request.RemoteAddr) && forwardedProto(c.GetHeader("X-Forwarded-Proto")) == "https"
 }
 
 func forwardedProto(header string) string {

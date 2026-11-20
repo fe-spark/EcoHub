@@ -6,6 +6,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -403,5 +404,129 @@ func TestSourceTypePidMatch_IncludesCategoryKey(t *testing.T) {
 	})
 	if strings.Contains(cidSQL, "root_category_key") || !strings.Contains(cidSQL, "category_key") {
 		t.Fatalf("cid match must stay on category_key, got: %s", cidSQL)
+	}
+}
+
+func TestCategoryRank_HiddenSubcategoryExcludedFromHomeAndTopPools(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	const srcID = "src_hide_sub"
+	usePrimarySource(t, gdb, srcID)
+
+	cats := []model.Category{
+		{Id: 100, Pid: 0, Name: "电影", Show: true, Sort: 1, StableKey: "test:movie"},
+		{Id: 106, Pid: 100, Name: "动作片", Show: true, Sort: 1, StableKey: "test:action"},
+		{Id: 119, Pid: 100, Name: "伦理片", Show: false, Sort: 2, StableKey: "test:adult"},
+	}
+	if err := gdb.Create(&cats).Error; err != nil {
+		t.Fatalf("create categories: %v", err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 119).Update("show", false).Error; err != nil {
+		t.Fatalf("hide subcategory: %v", err)
+	}
+	srcCats := []model.SourceCategory{
+		{SourceId: srcID, SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影"},
+		{SourceId: srcID, SourceTypeId: 6, ParentSourceTypeId: 1, RawName: "动作片"},
+		{SourceId: srcID, SourceTypeId: 19, ParentSourceTypeId: 1, RawName: "伦理片"},
+	}
+	if err := gdb.Create(&srcCats).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+	mappings := []model.CategoryMapping{
+		{SourceId: srcID, SourceTypeId: 1, CategoryId: 100},
+		{SourceId: srcID, SourceTypeId: 6, CategoryId: 106},
+		{SourceId: srcID, SourceTypeId: 19, CategoryId: 119},
+	}
+	if err := gdb.Create(&mappings).Error; err != nil {
+		t.Fatalf("create category mappings: %v", err)
+	}
+	repository.InvalidatePublicSourceCache(srcID)
+	repository.RefreshCategoryCache()
+	t.Cleanup(func() {
+		repository.InvalidatePublicSourceCache(srcID)
+		repository.RefreshCategoryCache()
+	})
+
+	films := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 501, FirstSourceId: srcID},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 100, Cid: 119, CName: "伦理片", RootCategoryKey: "source:" + srcID + ":1", CategoryKey: "source:" + srcID + ":19"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "隐藏热门伦理", Hits: 9999, UpdateStamp: 9999, Year: 2026},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 502, FirstSourceId: srcID},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 100, Cid: 106, CName: "动作片", RootCategoryKey: "source:" + srcID + ":1", CategoryKey: "source:" + srcID + ":6"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "公开动作", Hits: 50, UpdateStamp: 50, Year: 2026},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 503, FirstSourceId: srcID},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 100, Cid: 100, CName: "电影", RootCategoryKey: "source:" + srcID + ":1", CategoryKey: "source:" + srcID + ":1"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "公开主类", Hits: 20, UpdateStamp: 20, Year: 2026},
+		},
+	}
+	if err := gdb.Create(&films).Error; err != nil {
+		t.Fatalf("create films: %v", err)
+	}
+	lines := []model.FilmSourcePlaylist{
+		{Mid: 501, SourceId: srcID, LineKind: "play", GroupIndex: 0},
+		{Mid: 502, SourceId: srcID, LineKind: "play", GroupIndex: 0},
+		{Mid: 503, SourceId: srcID, LineKind: "play", GroupIndex: 0},
+	}
+	if err := gdb.Create(&lines).Error; err != nil {
+		t.Fatalf("create lines: %v", err)
+	}
+
+	const ver = "v_hide_sub_rank"
+	if err := SetActiveSnapshotVersion(ver); err != nil {
+		t.Fatalf("set snapshot version: %v", err)
+	}
+	if err := LoadActiveFilmReadModel(ver); err != nil {
+		t.Fatalf("load read model: %v", err)
+	}
+	WaitActiveFilmSearchIndexBuilt()
+
+	// 1. 首页抽样与热播池
+	movies, hot, err := HomeCategoryMids(ver, srcID, "pid", 1, 10, 50)
+	if err != nil {
+		t.Fatalf("HomeCategoryMids: %v", err)
+	}
+	for _, mid := range append(append([]int64(nil), movies...), hot...) {
+		if mid == 501 {
+			t.Fatalf("hidden subcategory film 501 leaked into HomeCategoryMids: movies=%v hot=%v", movies, hot)
+		}
+	}
+	if len(hot) != 2 || hot[0] != 502 || hot[1] != 503 {
+		t.Fatalf("HomeCategoryMids hot=%v want [502 503]", hot)
+	}
+
+	// 2. 分类大页三路排序（年份/热播/最新）
+	for _, sortType := range []int{0, 1, 2} {
+		topList, err := GetSnapshotTopMoviesBySortFastWithSource(ver, srcID, sortType, 1, 10)
+		if err != nil {
+			t.Fatalf("GetSnapshotTopMoviesBySortFastWithSource sort=%d: %v", sortType, err)
+		}
+		if len(topList) != 2 {
+			t.Fatalf("sort=%d got %+v, want 2 visible films", sortType, topList)
+		}
+		for _, item := range topList {
+			if item.Id == 501 {
+				t.Fatalf("hidden subcategory film 501 leaked into sort=%d: %+v", sortType, topList)
+			}
+		}
+	}
+
+	// 3. 本地兜底（sourceID=""）也必须过滤隐藏子分类
+	localTop, err := GetSnapshotTopMoviesBySortFast(ver, 1, 100, 10)
+	if err != nil {
+		t.Fatalf("GetSnapshotTopMoviesBySortFast: %v", err)
+	}
+	if len(localTop) != 2 || localTop[0].Id != 502 || localTop[1].Id != 503 {
+		t.Fatalf("local top=%+v, want mids 502 and 503 without 501", localTop)
+	}
+	localList, err := GetSnapshotMovieListByCategoryReadModel(ver, "pid", 100, 10, 0)
+	if err != nil {
+		t.Fatalf("GetSnapshotMovieListByCategoryReadModel: %v", err)
+	}
+	if len(localList) != 2 || localList[0].Id != 502 || localList[1].Id != 503 {
+		t.Fatalf("local list=%+v, want mids 502 and 503 without 501", localList)
 	}
 }

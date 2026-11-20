@@ -168,7 +168,7 @@ func TestResolveRootCategoryIDByCName_ConcurrencyDeadlockFree(t *testing.T) {
 	close(done)
 }
 
-func TestPickPrimarySourceForCategory_DisabledReturnsNil(t *testing.T) {
+func TestCurrentPrimarySource_DisabledReturnsNil(t *testing.T) {
 	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -180,10 +180,14 @@ func TestPickPrimarySourceForCategory_DisabledReturnsNil(t *testing.T) {
 	}
 	prev := db.Mdb
 	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
+	InvalidatePrimarySourceCache()
+	t.Cleanup(func() {
+		db.Mdb = prev
+		InvalidatePrimarySourceCache()
+	})
 
 	// 1. 无任何站点
-	if primary := PickPrimarySourceForCategory(); primary != nil {
+	if primary := CurrentPrimarySource(); primary != nil {
 		t.Fatalf("expected nil when no sources, got %+v", primary)
 	}
 
@@ -195,7 +199,7 @@ func TestPickPrimarySourceForCategory_DisabledReturnsNil(t *testing.T) {
 		t.Fatalf("create src_2 error: %v", err)
 	}
 
-	if primary := PickPrimarySourceForCategory(); primary != nil {
+	if primary := CurrentPrimarySource(); primary != nil {
 		t.Fatalf("expected nil when all sources are disabled, got %+v", primary)
 	}
 
@@ -203,7 +207,7 @@ func TestPickPrimarySourceForCategory_DisabledReturnsNil(t *testing.T) {
 	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "src_2").Update("state", true).Error; err != nil {
 		t.Fatalf("update error: %v", err)
 	}
-	primary := PickPrimarySourceForCategory()
+	primary := CurrentPrimarySource()
 	if primary == nil || primary.Id != "src_2" {
 		t.Fatalf("expected src_2 as primary, got %+v", primary)
 	}

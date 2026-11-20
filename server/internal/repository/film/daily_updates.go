@@ -34,7 +34,7 @@ func NavTopCategories(sourceIdOpt ...string) ([]model.Category, error) {
 		sourceID = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceID == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
+		if active := repository.CurrentPrimarySource(); active != nil {
 			sourceID = strings.TrimSpace(active.Id)
 		}
 	}

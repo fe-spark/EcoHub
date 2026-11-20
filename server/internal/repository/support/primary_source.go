@@ -24,14 +24,27 @@ type primaryCacheHolder struct {
 	source *model.FilmSource
 }
 
+type primaryLoadResult struct {
+	source *model.FilmSource
+	stale  bool
+}
+
 var (
-	primaryCache atomic.Pointer[primaryCacheHolder]
-	primarySF    singleflight.Group
+	primaryCache    atomic.Pointer[primaryCacheHolder]
+	primaryCacheGen atomic.Uint64
+	primarySF       singleflight.Group
 )
 
 // InvalidatePrimarySourceCache 使主站内存缓存失效，下次读取时重新加载。
 func InvalidatePrimarySourceCache() {
+	primaryCacheGen.Add(1)
 	primaryCache.Store(nil)
+	primarySF.Forget("current_primary")
+}
+
+// StoredPrimarySourceID 读取持久化的主站 ID（不经过内存缓存，不校验删除态）。
+func StoredPrimarySourceID() string {
+	return storedPrimarySourceID()
 }
 
 func cloneFilmSource(src *model.FilmSource) *model.FilmSource {
@@ -49,41 +62,67 @@ func CurrentPrimarySource() *model.FilmSource {
 		return nil
 	}
 	if p := primaryCache.Load(); p != nil && p.dbConn == db.Mdb {
+		if p.source != nil && isSourceDeleting(p.source.Id) {
+			return nil
+		}
 		return cloneFilmSource(p.source)
 	}
-	res, err, _ := primarySF.Do("current_primary", func() (any, error) {
-		// 双检：并发排队请求不重复查库
-		if p := primaryCache.Load(); p != nil && p.dbConn == db.Mdb {
-			return p.source, nil
+	for attempt := 0; attempt < 3; attempt++ {
+		res, err, _ := primarySF.Do("current_primary", func() (any, error) {
+			// 双检：并发排队请求不重复查库
+			if p := primaryCache.Load(); p != nil && p.dbConn == db.Mdb {
+				if p.source != nil && isSourceDeleting(p.source.Id) {
+					return primaryLoadResult{source: nil}, nil
+				}
+				return primaryLoadResult{source: p.source}, nil
+			}
+			dbConn := db.Mdb
+			src, gen := resolveCurrentPrimarySourceDB()
+			if primaryCacheGen.Load() != gen {
+				// 查询期间发生并发写操作导致缓存失效，禁止将可能陈旧的快照回填进缓存
+				return primaryLoadResult{source: src, stale: true}, nil
+			}
+			if src != nil && !isSourceDeleting(src.Id) && dbConn == db.Mdb {
+				primaryCache.Store(&primaryCacheHolder{
+					dbConn: dbConn,
+					source: src,
+				})
+			}
+			return primaryLoadResult{source: src}, nil
+		})
+		if err != nil || res == nil {
+			return nil
 		}
-		src := resolveCurrentPrimarySourceDB()
-		if src != nil {
-			primaryCache.Store(&primaryCacheHolder{
-				dbConn: db.Mdb,
-				source: src,
-			})
+		loaded := res.(primaryLoadResult)
+		if loaded.stale && attempt < 2 {
+			primarySF.Forget("current_primary")
+			continue
 		}
-		return src, nil
-	})
-	if err != nil || res == nil {
-		return nil
+		if loaded.source != nil && isSourceDeleting(loaded.source.Id) {
+			return nil
+		}
+		return cloneFilmSource(loaded.source)
 	}
-	return cloneFilmSource(res.(*model.FilmSource))
+	return nil
 }
 
-func resolveCurrentPrimarySourceDB() *model.FilmSource {
+func resolveCurrentPrimarySourceDB() (*model.FilmSource, uint64) {
+	gen := primaryCacheGen.Load()
 	if id := storedPrimarySourceID(); id != "" {
-		return primarySourceByID(id)
+		return primarySourceByID(id), gen
 	}
 	first := pickEnabledCollectSource()
 	if first == nil {
-		return nil
+		return nil, gen
 	}
 	if err := SetPrimarySourceID(first.Id); err != nil {
 		// 写库失败（如测试库未建该表）时仍返回正确主站，下次调用再试
 		syslog.Errorf("[Primary] 主站状态持久化失败: %v", err)
+		return first, gen
 	}
-	return first
+	// SetPrimarySourceID 内部会递增 primaryCacheGen，记录写库后的基准版本再回读校验
+	genAfterSet := primaryCacheGen.Load()
+	return primarySourceByID(first.Id), genAfterSet
 }
 
 // CurrentPrimaryID 当前主站 ID。没有主站或主站处于不可用状态时返回空。
@@ -227,10 +266,13 @@ func ReconcilePrimaryAfterSourceReplace(list []model.FilmSource) {
 	}
 	id := storedPrimarySourceID()
 	if id == "" {
+		InvalidatePrimarySourceCache()
 		return
 	}
 	for i := range list {
-		if strings.TrimSpace(list[i].Id) == id {
+		if strings.TrimSpace(list[i].Id) == id && list[i].State {
+			// 主站 ID 未变但站点名称、启用状态或域名规则可能已替换，必须失效缓存强制重载
+			InvalidatePrimarySourceCache()
 			return
 		}
 	}

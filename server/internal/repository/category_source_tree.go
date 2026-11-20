@@ -8,7 +8,7 @@ import (
 )
 
 // GetSourceBoundCategoryTree 分类管理树。分组、排序、显示与前台同一套规则。
-// 节点 ID 仍是 film_category.id，供保存；代表分类不再重复挂成子节点，避免表格 rowKey 冲突。
+// 节点 ID 仍是 film_category.id，供保存；规则新合成的父组拥有独立合成行，不再借用首个子项 ID。
 func GetSourceBoundCategoryTree(sourceID string) model.CategoryTree {
 	root := model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
@@ -22,8 +22,25 @@ func GetSourceBoundCategoryTree(sourceID string) model.CategoryTree {
 	if err != nil || len(view.Groups) == 0 {
 		return root
 	}
-	root.Children = adminTreeFromGroups(view.Groups, 0, loadSourceTypeCategories(sourceID), 0)
+	root.Children = adminTreeFromGroups(view.Groups, 0, loadSourceTypeCategories(sourceID), loadSyntheticRootCategories(sourceID))
 	return root
+}
+
+func loadSyntheticRootCategories(sourceID string) map[int64]model.Category {
+	out := make(map[int64]model.Category)
+	if db.Mdb == nil || strings.TrimSpace(sourceID) == "" {
+		return out
+	}
+	var rows []model.Category
+	if err := db.Mdb.Where("stable_key LIKE ?", syntheticRootPrefix(sourceID)+"%").Find(&rows).Error; err != nil {
+		return out
+	}
+	for _, item := range rows {
+		if item.Id > 0 {
+			out[item.Id] = item
+		}
+	}
+	return out
 }
 
 func loadSourceTypeCategories(sourceID string) map[int64]model.Category {
@@ -60,25 +77,31 @@ func loadSourceTypeCategories(sourceID string) map[int64]model.Category {
 	return out
 }
 
-func adminTreeFromGroups(groups []publicTypeGroup, parentID int64, typeToCat map[int64]model.Category, skipType int64) []*model.CategoryTree {
+func adminTreeFromGroups(groups []publicTypeGroup, parentID int64, typeToCat map[int64]model.Category, syntheticCats map[int64]model.Category) []*model.CategoryTree {
 	out := make([]*model.CategoryTree, 0, len(groups))
 	for _, group := range groups {
-		if skipType > 0 && group.ID == skipType {
-			continue
-		}
-		node, memberIDs, ok := adminNodeFromGroup(group, parentID, typeToCat)
+		node, memberIDs, ok := adminNodeFromGroup(group, parentID, typeToCat, syntheticCats)
 		if !ok {
 			continue
 		}
-		node.Children = adminTreeFromGroups(group.Children, node.Id, typeToCat, group.ID)
+		node.Children = adminTreeFromGroups(group.Children, node.Id, typeToCat, syntheticCats)
 		node.MemberIds = leftoverMemberIDs(node, memberIDs)
 		out = append(out, node)
 	}
 	return out
 }
 
-func adminNodeFromGroup(group publicTypeGroup, parentID int64, typeToCat map[int64]model.Category) (*model.CategoryTree, []int64, bool) {
-	item, memberIDs, ok := mappedAdminCategory(group, typeToCat)
+func adminNodeFromGroup(group publicTypeGroup, parentID int64, typeToCat map[int64]model.Category, syntheticCats map[int64]model.Category) (*model.CategoryTree, []int64, bool) {
+	var (
+		item      model.Category
+		memberIDs []int64
+		ok        bool
+	)
+	if group.Synthetic {
+		item, ok = syntheticCats[group.CategoryID]
+	} else {
+		item, memberIDs, ok = mappedAdminCategory(group, typeToCat)
+	}
 	if !ok {
 		return nil, nil, false
 	}

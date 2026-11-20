@@ -9,8 +9,21 @@ export interface PrimarySourceInfo {
   state: boolean;
 }
 
+export interface DeletingPrimaryInfo {
+  id: string;
+  name: string;
+}
+
+type PrimaryStateResponse = {
+  id?: string;
+  name?: string;
+  state?: boolean;
+  deletingSource?: DeletingPrimaryInfo | null;
+} | null;
+
 interface ManagePrimaryValue {
   primary: PrimarySourceInfo | null;
+  deletingPrimary: DeletingPrimaryInfo | null;
   loading: boolean;
   switching: boolean;
   refresh: () => Promise<void>;
@@ -19,6 +32,7 @@ interface ManagePrimaryValue {
 
 const ManagePrimaryContext = createContext<ManagePrimaryValue>({
   primary: null,
+  deletingPrimary: null,
   loading: true,
   switching: false,
   refresh: async () => {},
@@ -32,19 +46,30 @@ export function usePrimarySource() {
 
 export function ManagePrimaryProvider({ children }: { children: React.ReactNode }) {
   const [primary, setPrimary] = useState<PrimarySourceInfo | null>(null);
+  const [deletingPrimary, setDeletingPrimary] = useState<DeletingPrimaryInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
 
+  const applyPrimaryState = useCallback((data: PrimaryStateResponse | undefined) => {
+    if (data?.id) {
+      setPrimary({ id: data.id, name: String(data.name ?? ""), state: Boolean(data.state) });
+      setDeletingPrimary(null);
+    } else {
+      setPrimary(null);
+      setDeletingPrimary(data?.deletingSource ?? null);
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
-      const resp = await ApiGet<PrimarySourceInfo | null>("/manage/primary");
+      const resp = await ApiGet<PrimaryStateResponse>("/manage/primary");
       if (resp.code === 0) {
-        setPrimary(resp.data ?? null);
+        applyPrimaryState(resp.data);
       }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyPrimaryState]);
 
   useEffect(() => {
     void refresh();
@@ -68,9 +93,9 @@ export function ManagePrimaryProvider({ children }: { children: React.ReactNode 
   const switchPrimary = useCallback(async (id: string) => {
     setSwitching(true);
     try {
-      const resp = await ApiPut<PrimarySourceInfo | null>("/manage/primary", { id });
+      const resp = await ApiPut<PrimaryStateResponse>("/manage/primary", { id });
       if (resp.code === 0) {
-        setPrimary(resp.data ?? null);
+        applyPrimaryState(resp.data);
         return { ok: true, msg: resp.msg };
       }
       return { ok: false, msg: resp.msg || "切换主站失败" };
@@ -79,11 +104,11 @@ export function ManagePrimaryProvider({ children }: { children: React.ReactNode 
     } finally {
       setSwitching(false);
     }
-  }, []);
+  }, [applyPrimaryState]);
 
   return (
     <ManagePrimaryContext.Provider
-      value={{ primary, loading, switching, refresh, switchPrimary }}
+      value={{ primary, deletingPrimary, loading, switching, refresh, switchPrimary }}
     >
       {children}
     </ManagePrimaryContext.Provider>

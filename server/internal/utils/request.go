@@ -208,19 +208,19 @@ func decompressBody(resp *http.Response) ([]byte, error) {
 
 	encoding := strings.ToLower(resp.Header.Get("Content-Encoding"))
 	if encoding == "gzip" {
-		gz, err := gzip.NewReader(resp.Body)
+		gz, err := gzip.NewReader(io.LimitReader(resp.Body, maxOutboundResponseBytes+1))
 		if err != nil {
 			return nil, err
 		}
 		defer gz.Close()
 		reader = gz
 	} else if encoding == "deflate" {
-		flateReader := flate.NewReader(resp.Body)
+		flateReader := flate.NewReader(io.LimitReader(resp.Body, maxOutboundResponseBytes+1))
 		defer flateReader.Close()
 		reader = flateReader
 	}
 
-	body, err := io.ReadAll(reader)
+	body, err := readLimitedBytes(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func decompressBody(resp *http.Response) ([]byte, error) {
 	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
 		gz, err := gzip.NewReader(bytes.NewReader(body))
 		if err == nil {
-			decompressed, err := io.ReadAll(gz)
+			decompressed, err := readLimitedBytes(gz)
 			gz.Close()
 			if err == nil {
 				return decompressed, nil
@@ -238,6 +238,19 @@ func decompressBody(resp *http.Response) ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+const maxOutboundResponseBytes = 32 << 20
+
+func readLimitedBytes(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxOutboundResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxOutboundResponseBytes {
+		return nil, fmt.Errorf("response body exceeds %d bytes limit", maxOutboundResponseBytes)
+	}
+	return data, nil
 }
 
 var (

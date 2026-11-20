@@ -316,10 +316,10 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 		},
 	}
 	raw201, _ := json.Marshal(vo201)
-	_ = mr.Set(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 201), string(raw201))
+	_ = mr.Set(fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, 201), string(raw201))
 
 	// 将 9999 写入哨兵 "{}"
-	_ = mr.Set(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 9999), "{}")
+	_ = mr.Set(fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, 9999), "{}")
 
 	// 请求批量详情：包含命中的 201、未命中的 202 和 203、哨兵 9999、完全不存在的 8888
 	ids := []string{"201", "202", "203", "9999", "8888"}
@@ -335,11 +335,14 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 		t.Fatalf("unexpected vod detail ids: %+v", details)
 	}
 
-	// 验证未命中的 202 与 203 是否在 GetVodDetail 后被补齐写入了 Redis
+	// 验证未命中的 202 与 203 是否在 GetVodDetail 后被补齐写入了独立 vod 缓存，且不污染 Web 详情键
 	for _, mid := range []int64{202, 203} {
-		val, err := mr.Get(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
+		val, err := mr.Get(fmt.Sprintf("%s:vod:%d", config.FilmPlayInfoKey, mid))
 		if err != nil || val == "" || val == "{}" {
-			t.Fatalf("expected film %d to be cached after call, got %q, err: %v", mid, val, err)
+			t.Fatalf("expected film %d vod cache to be populated after call, got %q, err: %v", mid, val, err)
+		}
+		if mr.Exists(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid)) {
+			t.Fatalf("expected GetVodDetail not to populate web FilmPlayInfoKey for %d", mid)
 		}
 	}
 }

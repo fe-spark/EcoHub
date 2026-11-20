@@ -22,7 +22,7 @@ func (s *FilmService) GetFilmPage(vo *model.SearchVo) ([]model.FilmIndex, error)
 	if vo == nil {
 		return nil, errors.New("search params cannot be nil")
 	}
-	if primary := repository.GetActiveCollectSource(); primary != nil {
+	if primary := repository.CurrentPrimarySource(); primary != nil {
 		vo.SourceId = primary.Id
 	} else {
 		// 无主站：空列表，不回退其他站点
@@ -46,7 +46,7 @@ func (s *FilmService) SearchIndexState() (bool, any) {
 // GetSearchOptions 获取影片检索的筛选项（固定主站，D3/X-12：不再返回站点列表与默认站点）。
 func (s *FilmService) GetSearchOptions() (map[string]any, error) {
 	options := make(map[string]any)
-	primary := repository.GetActiveCollectSource()
+	primary := repository.CurrentPrimarySource()
 	primaryID := ""
 	if primary != nil {
 		primaryID = primary.Id
@@ -72,6 +72,7 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	now := time.Now()
 	fd.UpdateTime = now.Format(time.DateTime)
 	fd.AddTime = fd.UpdateTime
+	isUpdate := fd.Id > 0
 	if fd.Id == 0 {
 		fd.Id = now.Unix()
 	}
@@ -80,19 +81,38 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		return errors.New("影片参数格式异常或缺少关键信息")
 	}
 
-	sourceId := strings.TrimSpace(fd.SourceId)
-	// D3：保存影片固定当前主站；携带其他站点时拒绝
-	primary := repository.GetActiveCollectSource()
-	if primary == nil {
-		return errors.New("暂无主站，无法保存影片")
-	}
-	if sourceId != "" && sourceId != primary.Id {
-		return ErrPrimaryMismatch
-	}
-	sourceId = primary.Id
-
-	if err := writer.SaveDetail(sourceId, detail); err != nil {
+	var savedMid int64
+	err = withPrimaryMutation(func(_ bool) error {
+		sourceId := strings.TrimSpace(fd.SourceId)
+		// D3：保存影片固定当前主站；携带其他站点时拒绝
+		primary := repository.CurrentPrimarySource()
+		if primary == nil {
+			return errors.New("暂无主站，无法保存影片")
+		}
+		if sourceId != "" && sourceId != primary.Id {
+			return ErrPrimaryMismatch
+		}
+		if isUpdate {
+			owned, err := filmrepo.FilmIDsBelongToSource([]int64{fd.Id}, primary.Id)
+			if err != nil {
+				return err
+			}
+			if !owned {
+				return ErrPrimaryMismatch
+			}
+		}
+		mid, err := writer.SaveDetailWithOptions(primary.Id, detail, writer.SaveDetailOptions{PublishSnapshot: false})
+		if err != nil {
+			return err
+		}
+		savedMid = mid
+		return nil
+	})
+	if err != nil {
 		return err
+	}
+	if savedMid > 0 {
+		_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(savedMid)
 	}
 	return nil
 }
@@ -107,7 +127,7 @@ func (s *FilmService) DelFilms(ids []int64) error {
 
 // validatePrimaryFilmIDs 校验写操作的影片 ID 均属于当前主站（D3）。
 func validatePrimaryFilmIDs(ids []int64, expectedSourceID string) (string, error) {
-	primary := repository.GetActiveCollectSource()
+	primary := repository.CurrentPrimarySource()
 	if primary == nil {
 		return "", errors.New("暂无主站")
 	}
@@ -125,41 +145,34 @@ func validatePrimaryFilmIDs(ids []int64, expectedSourceID string) (string, error
 	return primary.Id, nil
 }
 
-// DeletePrimaryFilms 删除主站影片。在准入锁内校验主站归属，耗时物理删除在锁外执行，执行前复验主站未变，避免阻塞全站管理同时消除切主 TOCTOU。
+// DeletePrimaryFilms 删除主站影片。校验与数据库删库在同一互斥锁内完成，避免切主 TOCTOU；快照与缓存清理在锁外执行避免重入重建锁。
 func (s *FilmService) DeletePrimaryFilms(ids []int64, sourceID string) error {
-	var validatedSourceID string
-	err := withPrimarySwitchAdmitted(func() error {
-		sid, valErr := validatePrimaryFilmIDs(ids, sourceID)
-		validatedSourceID = sid
-		return valErr
+	var cleanIds, pids, playPeers []int64
+	err := withPrimaryMutation(func(_ bool) error {
+		if _, err := validatePrimaryFilmIDs(ids, sourceID); err != nil {
+			return err
+		}
+		playPeers = filmsnapshot.ExpandPlayInfoPeerMids(ids)
+		var delErr error
+		cleanIds, pids, delErr = filmrepo.DelFilmSearchBatchDB(ids)
+		return delErr
 	})
 	if err != nil {
 		return err
 	}
-	current := repository.GetActiveCollectSource()
-	if current == nil || current.Id != validatedSourceID {
-		return ErrPrimaryMismatch
-	}
-	return filmrepo.DelFilmSearchBatch(ids)
+	filmrepo.InvalidateFilmSearchBatchCaches(cleanIds, pids, playPeers...)
+	return nil
 }
 
-// RefreshPrimaryFilms 校验影片属于当前主站后启动采集更新。执行前复验主站未变，消除切主 TOCTOU。
+// RefreshPrimaryFilms 校验影片属于当前主站后异步启动采集更新。校验与派发在同一互斥锁内完成，消除切主 TOCTOU。
 func (s *FilmService) RefreshPrimaryFilms(ids []int64, sourceID string) error {
-	var validatedSourceID string
-	err := withPrimarySwitchAdmitted(func() error {
-		sid, valErr := validatePrimaryFilmIDs(ids, sourceID)
-		validatedSourceID = sid
-		return valErr
+	return withPrimaryMutation(func(_ bool) error {
+		if _, err := validatePrimaryFilmIDs(ids, sourceID); err != nil {
+			return err
+		}
+		SpiderSvc.CollectFilms(ids)
+		return nil
 	})
-	if err != nil {
-		return err
-	}
-	current := repository.GetActiveCollectSource()
-	if current == nil || current.Id != validatedSourceID {
-		return ErrPrimaryMismatch
-	}
-	SpiderSvc.CollectFilms(ids)
-	return nil
 }
 
 // DelFilm 删除分类影片
@@ -188,7 +201,7 @@ func (s *FilmService) GetPrimaryClassTree() (ClassTreeScope, error) {
 		return ClassTreeScope{}, err
 	}
 	primaryID := ""
-	if primary := repository.GetActiveCollectSource(); primary != nil {
+	if primary := repository.CurrentPrimarySource(); primary != nil {
 		primaryID = primary.Id
 	}
 	tree := model.CategoryTree{}
@@ -232,7 +245,7 @@ func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.Catego
 	if len(nodes) == 0 {
 		return errors.New("分类结构不能为空")
 	}
-	primary := repository.GetActiveCollectSource()
+	primary := repository.CurrentPrimarySource()
 	if primary == nil {
 		return errors.New("暂无主站，无法保存分类结构")
 	}

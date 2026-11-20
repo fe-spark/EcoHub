@@ -22,8 +22,9 @@ func groupPublicTypes(rows []sourceTypeRow, sourceID string) []publicTypeGroup {
 	}
 
 	type bucket struct {
-		members []sourceTypeRow
+		native  []sourceTypeRow
 		renamed []sourceTypeRow
+		all     []sourceTypeRow
 	}
 	order := make([]string, 0)
 	buckets := map[string]*bucket{}
@@ -38,18 +39,37 @@ func groupPublicTypes(rows []sourceTypeRow, sourceID string) []publicTypeGroup {
 			buckets[name] = item
 			order = append(order, name)
 		}
-		item.members = append(item.members, row)
+		item.all = append(item.all, row)
 		if name != row.Name {
 			item.renamed = append(item.renamed, row)
+		} else {
+			item.native = append(item.native, row)
 		}
 	}
 
 	groups := make([]publicTypeGroup, 0, len(order))
 	for _, name := range order {
 		item := buckets[name]
-		group := makePublicGroup(name, item.members)
+		var group publicTypeGroup
+		if len(item.native) > 0 {
+			group = makePublicGroup(name, item.native)
+		} else {
+			// 所有命中规则的一级分类均被改名到新组名：父组使用独立合成行，不再借用首个子项的数据行。
+			seed := makePublicGroup(name, item.all)
+			group = publicTypeGroup{
+				Name:      name,
+				Sort:      seed.Sort,
+				Show:      true,
+				Synthetic: true,
+			}
+		}
+		for _, row := range item.renamed {
+			if row.ID > 0 {
+				group.RootMemberIDs = append(group.RootMemberIDs, row.ID)
+			}
+		}
 		childRows := append([]sourceTypeRow{}, item.renamed...)
-		for _, row := range item.members {
+		for _, row := range item.all {
 			for _, child := range childrenOf[row.ID] {
 				child.Name = support.NormalizeSubCategoryName(sourceID, child.Name)
 				childRows = append(childRows, child)
@@ -115,14 +135,22 @@ func sortPublicGroups(groups []publicTypeGroup) {
 func indexPublicGroups(groups []publicTypeGroup, byID, roots map[int64]publicTypeGroup) {
 	for i := range groups {
 		group := groups[i]
+		if group.ID > 0 {
+			byID[group.ID] = group
+			roots[group.ID] = group
+		}
 		for _, member := range group.Members {
 			byID[member] = group
 			roots[member] = group
 		}
-		byID[group.ID] = group
-		roots[group.ID] = group
+		for _, member := range group.RootMemberIDs {
+			if member > 0 {
+				roots[member] = group
+			}
+		}
 		for j := range group.Children {
 			child := group.Children[j]
+			child.Parent = group.ID
 			for _, member := range child.Members {
 				byID[member] = child
 			}

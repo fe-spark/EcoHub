@@ -402,8 +402,9 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 		names = append(names, child.Name)
 		byName[child.Name] = child
 	}
-	if len(names) != 2 || byName["电影"] == nil || byName["测试"] == nil || byName["测试"].Id != 21 {
-		t.Fatalf("public roots = %v, want 电影 and 测试#21", names)
+	testRoot := byName["测试"]
+	if len(names) != 2 || byName["电影"] == nil || testRoot == nil || testRoot.Id < syntheticRootTypeOffset || testRoot.Id == 21 {
+		t.Fatalf("public roots = %v, want 电影 and synthetic 测试", names)
 	}
 	movieChildren := make([]string, 0)
 	for _, child := range byName["电影"].Children {
@@ -413,16 +414,16 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 		t.Fatalf("电影 children = %v, want 影片#11 and 剧情", movieChildren)
 	}
 	testChildren := make([]string, 0)
-	for _, child := range byName["测试"].Children {
+	for _, child := range testRoot.Children {
 		testChildren = append(testChildren, fmt.Sprintf("%s#%d", child.Name, child.Id))
 	}
-	if len(byName["测试"].Children) != 2 || byName["测试"].Children[0].Name != "纪录片" || byName["测试"].Children[0].Id != 21 || byName["测试"].Children[1].Name != "动画片" || byName["测试"].Children[1].Id != 30 {
+	if len(testRoot.Children) != 2 || testRoot.Children[0].Name != "纪录片" || testRoot.Children[0].Id != 21 || testRoot.Children[1].Name != "动画片" || testRoot.Children[1].Id != 30 {
 		t.Fatalf("测试 children = %v, want 纪录片#21 and 动画片#30", testChildren)
 	}
 
 	merged := LookupRootSourceType("src1", 30)
-	if merged == nil || merged.Id != 21 || merged.Name != "测试" {
-		t.Fatalf("member 30 lookup = %+v, want 测试#21", merged)
+	if merged == nil || merged.Id != testRoot.Id || merged.Name != "测试" {
+		t.Fatalf("member 30 lookup = %+v, want 测试#%d", merged, testRoot.Id)
 	}
 	hidden := LookupRootSourceType("src1", 17)
 	if hidden != nil {
@@ -432,7 +433,7 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	if len(movieIDs) != 4 || movieIDs[0] != 1 || movieIDs[1] != 11 || movieIDs[2] != 12 || movieIDs[3] != 13 {
 		t.Fatalf("电影 members = %v, want [1 11 12 13]", movieIDs)
 	}
-	rootIDs := PublicSourceTypeIDs("src1", "pid", 21)
+	rootIDs := PublicSourceTypeIDs("src1", "pid", testRoot.Id)
 	if len(rootIDs) != 2 || rootIDs[0] != 21 || rootIDs[1] != 30 {
 		t.Fatalf("测试 members = %v, want 21 and 30", rootIDs)
 	}
@@ -489,8 +490,8 @@ func TestSourceTypeTree_PromotesRenamedRootsAsChildren(t *testing.T) {
 		byName[child.Name] = child
 	}
 	root := byName["男人帮"]
-	if root == nil || root.Id != 5 || byName["福利视频"] != nil || byName["网红主播"] != nil || byName["海外抖音"] != nil {
-		t.Fatalf("roots = %v, want 男人帮#5 as only merged root", rootNames(tree))
+	if root == nil || root.Id < syntheticRootTypeOffset || root.Id == 5 || byName["福利视频"] != nil || byName["网红主播"] != nil || byName["海外抖音"] != nil {
+		t.Fatalf("roots = %v, want synthetic 男人帮 as only merged root", rootNames(tree))
 	}
 	got := childNames(root)
 	if len(root.Children) != 4 || got[0] != "自拍#51" || got[1] != "福利视频#5" || got[2] != "网红主播#18" || got[3] != "海外抖音#37" {
@@ -498,14 +499,14 @@ func TestSourceTypeTree_PromotesRenamedRootsAsChildren(t *testing.T) {
 	}
 
 	merged := LookupRootSourceType("src1", 18)
-	if merged == nil || merged.Id != 5 || merged.Name != "男人帮" {
-		t.Fatalf("member 18 lookup = %+v, want 男人帮#5", merged)
+	if merged == nil || merged.Id != root.Id || merged.Name != "男人帮" {
+		t.Fatalf("member 18 lookup = %+v, want 男人帮#%d", merged, root.Id)
 	}
-	nodes := PublicSourceChildNodes("src1", 5)
+	nodes := PublicSourceChildNodes("src1", root.Id)
 	if len(nodes) != 4 || nodes[0].Name != "自拍" || nodes[1].Name != "福利视频" || nodes[2].Name != "网红主播" || nodes[3].Name != "海外抖音" {
 		t.Fatalf("filter children = %v", childNames(&model.CategoryTree{Children: nodes}))
 	}
-	pidIDs := PublicSourceTypeIDs("src1", "pid", 5)
+	pidIDs := PublicSourceTypeIDs("src1", "pid", root.Id)
 	if len(pidIDs) != 4 || pidIDs[0] != 5 || pidIDs[1] != 18 || pidIDs[2] != 37 || pidIDs[3] != 51 {
 		t.Fatalf("男人帮 pid members = %v, want [5 18 37 51]", pidIDs)
 	}

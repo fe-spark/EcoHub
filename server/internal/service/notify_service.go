@@ -380,7 +380,7 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 	}
 
 	var activeSourceID string
-	if active := repository.GetActiveCollectSource(); active != nil {
+	if active := repository.CurrentPrimarySource(); active != nil {
 		activeSourceID = strings.TrimSpace(active.Id)
 	}
 	nav, err := film.NavTopCategories(activeSourceID)

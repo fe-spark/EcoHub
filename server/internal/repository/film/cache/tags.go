@@ -8,30 +8,20 @@ import (
 	"server/internal/infra/db"
 )
 
-// ClearSearchTagsCache 清除所有分类的复合搜索标签缓存。
-func ClearSearchTagsCache(pid int64) {
-	if db.Rdb == nil {
-		return
-	}
-	pattern := fmt.Sprintf("%s:*", config.SearchTags)
-	ctx := db.Cxt
-	iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(ctx) {
-		db.Rdb.Del(ctx, iter.Val())
-	}
-	BumpSearchTagsVersion()
+// ClearSearchTagsCache 清除搜索标签与筛选项缓存。
+func ClearSearchTagsCache(_ int64) {
+	ClearAllSearchTagsCache()
 }
 
-// ClearAllSearchTagsCache 清除所有分类的搜索标签缓存 (扫描清理)
+// ClearAllSearchTagsCache 清除所有分类的搜索标签及筛选项缓存（单次流式扫描 + 批量 UNLINK）。
 func ClearAllSearchTagsCache() {
 	if db.Rdb == nil {
 		return
 	}
-	pattern := config.SearchTags + ":*"
-	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
-	}
+	ClearPatterns(
+		config.SearchTags+":*",
+		config.FilmFilterOptionKey+":*",
+	)
 	BumpSearchTagsVersion()
 	ClearTVBoxConfigCache()
 }

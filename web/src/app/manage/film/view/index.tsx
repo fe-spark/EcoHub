@@ -154,7 +154,10 @@ export default function FilmListPageView() {
           message.error(resp.msg || "筛选项获取失败");
           return;
         }
-        if (resp.data.primarySourceId && resp.data.primarySourceId !== primaryId) {
+        if (
+          typeof resp.data.primarySourceId === "string" &&
+          resp.data.primarySourceId !== primaryId
+        ) {
           void refreshPrimary();
           return;
         }

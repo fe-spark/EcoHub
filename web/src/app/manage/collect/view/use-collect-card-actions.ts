@@ -13,6 +13,8 @@ interface UseCollectCardActionsParams {
   getCollectList: (createdId?: string) => Promise<void>;
   onDeleteSubmitted?: (sources: { id: string; name: string }[]) => void;
   searchIndex?: SearchIndexProgress;
+  isAdmin?: boolean;
+  refreshPrimary?: () => Promise<void> | void;
   askPrimaryHandover: (req: {
     title: string;
     leavingName: string;
@@ -27,6 +29,8 @@ export function useCollectCardActions({
   getCollectList,
   onDeleteSubmitted,
   searchIndex,
+  isAdmin = false,
+  refreshPrimary,
   askPrimaryHandover,
 }: UseCollectCardActionsParams) {
   const { message } = useAppMessage();
@@ -36,8 +40,12 @@ export function useCollectCardActions({
   const changeSourceState = useCallback(
     async (id: string, nextState: boolean) => {
       const record = siteList.find((s) => s.id === id);
-      // D6：停用当前主站须先完成主站交接，走单站编辑接口携带交接参数
+      // D6：停用当前主站须先完成主站交接，走单站编辑接口携带交接参数（仅超管，D4）
       if (!nextState && record?.isPrimary) {
+        if (!isAdmin) {
+          message.error("权限不足，仅超级管理员可执行主站切换");
+          return;
+        }
         const choice = await askPrimaryHandover({
           title: `停用主站「${record.name}」？`,
           leavingName: record.name,
@@ -58,6 +66,7 @@ export function useCollectCardActions({
           if (resp.code === 0) {
             message.success(resp.msg || "采集站已禁用");
             await getCollectList();
+            void refreshPrimary?.();
           } else {
             message.error(resp.msg || "状态切换失败");
             updateSiteListItem(id, (item) => ({ ...item, state: true }));
@@ -88,7 +97,7 @@ export function useCollectCardActions({
         setTogglingStateSourceId(null);
       }
     },
-    [askPrimaryHandover, getCollectList, message, siteList, updateSiteListItem],
+    [askPrimaryHandover, getCollectList, isAdmin, message, refreshPrimary, siteList, updateSiteListItem],
   );
 
   const startTask = useCallback(
@@ -162,8 +171,12 @@ export function useCollectCardActions({
     async (id: string) => {
       const src = siteList.find((s) => s.id === id);
       let extra: { newPrimaryId?: string; confirmClearPrimary?: boolean } = {};
-      // D6：删除当前主站须先完成主站交接
+      // D6：删除当前主站须先完成主站交接（仅超管，D4）
       if (src?.isPrimary) {
+        if (!isAdmin) {
+          message.error("权限不足，仅超级管理员可执行主站切换");
+          return;
+        }
         const otherEnabled = siteList.filter((s) => s.state && s.id !== id);
         if (otherEnabled.length > 0) {
           if (askPrimaryHandover) {
@@ -191,6 +204,9 @@ export function useCollectCardActions({
         if (resp.code === 0) {
           onDeleteSubmitted?.([{ id, name: src?.name || id }]);
           message.success("已提交删除");
+          if (src?.isPrimary) {
+            void refreshPrimary?.();
+          }
           return;
         }
         setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, deleting: false } : s)));
@@ -204,7 +220,7 @@ export function useCollectCardActions({
         setDeletingSourceId("");
       }
     },
-    [askPrimaryHandover, getCollectList, message, onDeleteSubmitted, setSiteList, siteList],
+    [askPrimaryHandover, getCollectList, isAdmin, message, onDeleteSubmitted, refreshPrimary, setSiteList, siteList],
   );
 
   return {

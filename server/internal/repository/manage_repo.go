@@ -3,7 +3,6 @@ package repository
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"server/internal/config"
@@ -109,68 +108,68 @@ func cachedBasicHasDanmaku(data string) bool {
 
 // GetSiteBasic 读取网站基本配置。没有记录时返回默认赞赏和公告，不写入缓存。
 func GetSiteBasic() (model.BasicConfig, error) {
-	if data, ok, err := readCache(config.SiteConfigBasic); err != nil {
-		return model.BasicConfig{}, err
-	} else if ok && data != "" && cachedBasicHasDanmaku(data) {
-		var cached model.BasicConfig
-		if err := json.Unmarshal([]byte(data), &cached); err != nil {
-			if delErr := dropCache(config.SiteConfigBasic); delErr != nil {
-				return model.BasicConfig{}, fmt.Errorf("站点配置缓存损坏: %v; 删除失败: %w", err, delErr)
+	return loadCachedConfig(
+		config.SiteConfigBasic,
+		func(data string) (model.BasicConfig, error) {
+			if !cachedBasicHasDanmaku(data) {
+				return model.BasicConfig{}, errors.New("站点配置缓存缺少弹幕字段")
 			}
-		} else {
+			var cached model.BasicConfig
+			if err := json.Unmarshal([]byte(data), &cached); err != nil {
+				return model.BasicConfig{}, err
+			}
 			cached.SiteURL = NormalizeSiteURL(cached.SiteURL)
 			cached.Tip = model.NormalizeTipConfig(cached.Tip)
 			cached.Notice = model.NormalizeNoticeConfig(cached.Notice)
 			return cached, nil
-		}
-	}
-	if db.Mdb == nil {
-		return model.BasicConfig{}, errors.New("数据库未连接")
-	}
-	var rec model.SiteConfigRecord
-	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		if recordNotFound(err) {
-			return model.BasicConfig{
-				Danmaku:    model.DefaultDanmakuConfig(),
-				Tip:        model.DefaultTipConfig(),
-				Notice:     model.DefaultNoticeConfig(),
-				MediaProxy: model.DefaultMediaProxyConfig(),
-			}, nil
-		}
-		return model.BasicConfig{}, err
-	}
-	tip, err := model.DecodeTipJSON(rec.TipJSON)
-	if err != nil {
-		return model.BasicConfig{}, err
-	}
-	notice, err := model.DecodeNoticeJSON(rec.NoticeJSON)
-	if err != nil {
-		return model.BasicConfig{}, err
-	}
-	danmaku, err := model.DecodeDanmakuJSON(rec.DanmakuJSON)
-	if err != nil {
-		return model.BasicConfig{}, err
-	}
-	mediaProxy, err := model.DecodeMediaProxyJSON(rec.MediaProxyJSON)
-	if err != nil {
-		return model.BasicConfig{}, err
-	}
-	c := model.BasicConfig{
-		SiteName: rec.SiteName, SiteURL: NormalizeSiteURL(rec.SiteURL), Logo: rec.Logo,
-		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
-		PrivateAccess: rec.PrivateAccess,
-		ProvideKey:    rec.ProvideKey,
-		Danmaku:       danmaku,
-		Tip:           tip,
-		Notice:        notice,
-		MediaProxy:    mediaProxy,
-	}
-	raw, err := json.Marshal(c)
-	if err != nil {
-		return model.BasicConfig{}, err
-	}
-	if err := fillCache(config.SiteConfigBasic, string(raw)); err != nil {
-		return model.BasicConfig{}, err
-	}
-	return c, nil
+		},
+		func() (model.BasicConfig, string, bool, error) {
+			if db.Mdb == nil {
+				return model.BasicConfig{}, "", false, errors.New("数据库未连接")
+			}
+			var rec model.SiteConfigRecord
+			if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
+				if recordNotFound(err) {
+					return model.BasicConfig{
+						Danmaku:    model.DefaultDanmakuConfig(),
+						Tip:        model.DefaultTipConfig(),
+						Notice:     model.DefaultNoticeConfig(),
+						MediaProxy: model.DefaultMediaProxyConfig(),
+					}, "", false, nil
+				}
+				return model.BasicConfig{}, "", false, err
+			}
+			tip, err := model.DecodeTipJSON(rec.TipJSON)
+			if err != nil {
+				return model.BasicConfig{}, "", false, err
+			}
+			notice, err := model.DecodeNoticeJSON(rec.NoticeJSON)
+			if err != nil {
+				return model.BasicConfig{}, "", false, err
+			}
+			danmaku, err := model.DecodeDanmakuJSON(rec.DanmakuJSON)
+			if err != nil {
+				return model.BasicConfig{}, "", false, err
+			}
+			mediaProxy, err := model.DecodeMediaProxyJSON(rec.MediaProxyJSON)
+			if err != nil {
+				return model.BasicConfig{}, "", false, err
+			}
+			c := model.BasicConfig{
+				SiteName: rec.SiteName, SiteURL: NormalizeSiteURL(rec.SiteURL), Logo: rec.Logo,
+				Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
+				PrivateAccess: rec.PrivateAccess,
+				ProvideKey:    rec.ProvideKey,
+				Danmaku:       danmaku,
+				Tip:           tip,
+				Notice:        notice,
+				MediaProxy:    mediaProxy,
+			}
+			raw, err := json.Marshal(c)
+			if err != nil {
+				return model.BasicConfig{}, "", false, err
+			}
+			return c, string(raw), true, nil
+		},
+	)
 }

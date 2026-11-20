@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission, ManagePermissionProvider } from "@/lib/manage-permission";
+import { usePrimarySource } from "@/lib/manage-primary";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectModals from "./collect-modals";
 import CollectQueueBars from "./collect-queue-bars";
@@ -40,8 +41,34 @@ export default function CollectManagePageView() {
   const router = useRouter();
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
+  const { primary, loading: primaryLoading, refresh: refreshPrimary } = usePrimarySource();
   const canOperate = canWrite;
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
+  const siteListRef = useRef<FilmSource[]>([]);
+  siteListRef.current = siteList;
+  const prevPrimaryIdRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (primaryLoading) return;
+    const nextPrimaryId = primary?.id ?? "";
+    if (prevPrimaryIdRef.current === undefined) {
+      prevPrimaryIdRef.current = nextPrimaryId;
+      return;
+    }
+    if (prevPrimaryIdRef.current === nextPrimaryId) return;
+    prevPrimaryIdRef.current = nextPrimaryId;
+    setSiteList((current) => {
+      let changed = false;
+      const next = current.map((item) => {
+        if (item.deleting && !nextPrimaryId) return item;
+        const shouldBePrimary = Boolean(nextPrimaryId && item.id === nextPrimaryId);
+        if (item.isPrimary === shouldBePrimary) return item;
+        changed = true;
+        return { ...item, isPrimary: shouldBePrimary };
+      });
+      return changed ? next : current;
+    });
+  }, [primary?.id, primaryLoading]);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
   const collectListRequestRef = useRef(0);
@@ -169,15 +196,18 @@ export default function CollectManagePageView() {
       setSearchIndexProgress(p);
     },
     onSourceDelete: (evt) => {
+      if (
+        (evt.status === "deleted" || evt.status === "canceled" || evt.status === "failed") &&
+        siteListRef.current.some((s) => s.id === evt.sourceId && s.isPrimary)
+      ) {
+        void refreshPrimary();
+      }
       handleSourceDelete(evt);
       handleSourceDeleteEvent(evt);
     },
     onDeleteSnapshot: (ids) => {
       handleDeleteSnapshot(ids);
-      setSiteList((current) => {
-        handleDeleteSnapshotQueue(ids, current);
-        return current;
-      });
+      handleDeleteSnapshotQueue(ids, siteListRef.current);
     },
     onReconnect: () => {
       void getCollectList();
@@ -211,7 +241,9 @@ export default function CollectManagePageView() {
     clearSelection,
     batchChangeSourceState,
     batchDeleteSources,
-  } = useCollectBatchActions(siteList, setSiteList, getCollectList, enqueueDeletingSources, primaryHandover.ask);
+  } = useCollectBatchActions(
+    siteList, setSiteList, getCollectList, enqueueDeletingSources, primaryHandover.ask, isAdmin, refreshPrimary,
+  );
 
   const {
     batchOpen,
@@ -289,6 +321,8 @@ export default function CollectManagePageView() {
     getCollectList,
     onDeleteSubmitted: enqueueDeletingSources,
     searchIndex: searchIndexProgress,
+    isAdmin,
+    refreshPrimary,
     askPrimaryHandover: primaryHandover.ask,
   });
 
@@ -471,22 +505,14 @@ export default function CollectManagePageView() {
       />
 
       <CollectModals
-        batchOpen={batchOpen}
-        batchRows={batchRows}
-        batchTime={batchTime}
+        batchOpen={batchOpen} batchRows={batchRows} batchTime={batchTime}
         isIndexing={searchIndexProgress?.status === "indexing"}
-        onCancelBatch={() => setBatchOpen(false)}
-        onSubmitBatch={() => void startBatchCollect()}
+        onCancelBatch={() => setBatchOpen(false)} onSubmitBatch={() => void startBatchCollect()}
         onBatchTimeChange={setBatchTime}
-        cleanupOpen={cleanupOpen}
-        cleanupScanning={cleanupScanning}
-        cleanupDeleting={cleanupDeleting}
-        invalidSources={invalidSources}
-        cleanupSkipped={cleanupSkipped}
-        onCancelCleanup={cancelCleanup}
-        onConfirmCleanup={() => void confirmCleanup()}
-        categoryConfirm={categoryConfirm}
-        primaryHandoverNode={primaryHandover.modalNode}
+        cleanupOpen={cleanupOpen} cleanupScanning={cleanupScanning} cleanupDeleting={cleanupDeleting}
+        invalidSources={invalidSources} cleanupSkipped={cleanupSkipped}
+        onCancelCleanup={cancelCleanup} onConfirmCleanup={() => void confirmCleanup()}
+        categoryConfirm={categoryConfirm} primaryHandoverNode={primaryHandover.modalNode}
       />
       </div>
     </ManagePermissionProvider>

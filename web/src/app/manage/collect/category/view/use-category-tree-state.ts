@@ -56,7 +56,7 @@ export function useCategoryTreeState() {
         message.error(resp.msg || "分类数据加载失败");
         return;
       }
-      if (primarySourceId && primarySourceId !== primaryId) {
+      if (typeof primarySourceId === "string" && primarySourceId !== primaryId) {
         setClassTree([]);
         setOriginalTree([]);
         setExpandedKeys([]);

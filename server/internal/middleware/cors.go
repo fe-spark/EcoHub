@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"server/internal/model/dto"
+	"server/internal/utils"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -50,7 +51,10 @@ func isAllowedCORSOrigin(c *gin.Context, origin string) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	reqHost := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	var reqHost string
+	if utils.IsTrustedForwardedPeer(c.Request.RemoteAddr) {
+		reqHost = strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	}
 	if reqHost == "" {
 		reqHost = c.Request.Host
 	}

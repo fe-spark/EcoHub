@@ -15,18 +15,18 @@ import (
 	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type IndexService struct{}
 
-var IndexSvc = new(IndexService)
-
-func (i *IndexService) BaselineSourceID() string {
-	if active := repository.GetActiveCollectSource(); active != nil {
-		return strings.TrimSpace(active.Id)
-	}
-	return ""
-}
+var (
+	IndexSvc      = new(IndexService)
+	indexPageSF   singleflight.Group
+	indexClassSF  singleflight.Group
+)
 
 func normalizeIndexPage(page *dto.Page) *dto.Page {
 	if page == nil {
@@ -105,7 +105,7 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceId == "" {
-		if defSource := repository.PickPrimarySourceForCategory(); defSource != nil {
+		if defSource := repository.CurrentPrimarySource(); defSource != nil {
 			sourceId = defSource.Id
 		}
 	}
@@ -130,7 +130,26 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 			}
 		}
 	}
+	val, err, _ := indexPageSF.Do(cacheKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var cached map[string]any
+				if json.Unmarshal([]byte(data), &cached) == nil {
+					return cached, nil
+				}
+			}
+		}
+		return i.buildIndexPage(sourceId, version, cacheKey)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return val.(map[string]any), nil
+}
+
+func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[string]any, error) {
 	listGen := filmsnapshot.GetSearchCacheVersion()
+	pageGen := support.IndexPageGeneration()
 	tree, err := repository.GetActiveCategoryTree(sourceId)
 	if err != nil {
 		return nil, err
@@ -212,9 +231,12 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		"banners":       banners,
 		"currentSource": sourceId,
 	}
-	if db.Rdb != nil && cacheable {
+	if db.Rdb != nil && cacheable && support.IndexPageGeneration() == pageGen {
 		if data, err := json.Marshal(res); err == nil {
 			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), 10*time.Minute, listGen)
+			if support.IndexPageGeneration() != pageGen {
+				_ = db.Rdb.Del(db.Cxt, cacheKey).Err()
+			}
 		}
 	}
 	return res, nil

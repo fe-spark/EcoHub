@@ -7,11 +7,15 @@ import (
 	"server/internal/repository"
 	"server/internal/utils"
 	"strings"
+	"sync"
 )
 
 type ManageService struct{}
 
 var ManageSvc = new(ManageService)
+
+// siteBasicMu 串行化 BasicConfig 局部字段的读-改-写，避免并发保存不同子模块相互覆盖。
+var siteBasicMu sync.Mutex
 
 // AccessGuardConfig 返回私有化开关和订阅密钥。
 func (s *ManageService) AccessGuardConfig() (bool, string, error) {
@@ -29,6 +33,8 @@ func (s *ManageService) GetSiteBasicConfig() (model.BasicConfig, error) {
 
 // UpdateSiteBasic 更新网站名称和简介。访问控制、弹幕、缺省的赞赏和公告保留。
 func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
+	siteBasicMu.Lock()
+	defer siteBasicMu.Unlock()
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err
@@ -68,6 +74,8 @@ func (s *ManageService) UpdateSiteMediaProxyConfig(cfg model.MediaProxyConfig) e
 	if err := ValidateMediaProxyConfig(cfg); err != nil {
 		return err
 	}
+	siteBasicMu.Lock()
+	defer siteBasicMu.Unlock()
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err
@@ -77,7 +85,6 @@ func (s *ManageService) UpdateSiteMediaProxyConfig(cfg model.MediaProxyConfig) e
 		return err
 	}
 	UpdateMediaProxyRuntime(curr.MediaProxy, curr.SiteURL)
-	repository.ClearIndexPageCache()
 	return nil
 }
 
@@ -97,6 +104,8 @@ func (s *ManageService) GetSiteAccessConfig() (model.AccessConfig, error) {
 
 // UpdateSiteAccessConfig 更新网站访问控制配置
 func (s *ManageService) UpdateSiteAccessConfig(ac model.AccessConfig) error {
+	siteBasicMu.Lock()
+	defer siteBasicMu.Unlock()
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err
@@ -131,6 +140,8 @@ func (s *ManageService) GetSiteDanmakuConfig() (model.DanmakuConfig, error) {
 
 // UpdateSiteDanmakuConfig 更新网站弹幕系统配置
 func (s *ManageService) UpdateSiteDanmakuConfig(cfg model.DanmakuConfig) error {
+	siteBasicMu.Lock()
+	defer siteBasicMu.Unlock()
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err
@@ -165,6 +176,8 @@ func (s *ManageService) GetSiteTipConfig() (model.TipConfig, error) {
 
 // UpdateSiteTipConfig 更新赞赏配置
 func (s *ManageService) UpdateSiteTipConfig(tip model.TipConfig) error {
+	siteBasicMu.Lock()
+	defer siteBasicMu.Unlock()
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err
@@ -184,6 +197,8 @@ func (s *ManageService) GetSiteNoticeConfig() (model.NoticeConfig, error) {
 
 // UpdateSiteNoticeConfig 更新站点公告配置
 func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error {
+	siteBasicMu.Lock()
+	defer siteBasicMu.Unlock()
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err

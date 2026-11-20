@@ -115,7 +115,7 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 	}
 	if len(detail.List) > 0 {
 		primarySourceID := ""
-		if primary := repository.GetActiveCollectSource(); primary != nil {
+		if primary := repository.CurrentPrimarySource(); primary != nil {
 			primarySourceID = primary.Id
 		}
 		playFrom = resolvePlayableSourceID(detail.List, playFrom, primarySourceID)
