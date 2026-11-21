@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"server/internal/model"
-	"server/internal/repository"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
@@ -386,9 +385,6 @@ func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageIt
 		return nil
 	}
 	if err := tx.Create(&newFilms).Error; err != nil {
-		return err
-	}
-	if err := repository.AddFilmCountTx(tx, source.Id, int64(len(newFilms))); err != nil {
 		return err
 	}
 	for j, idx := range newIdx {

@@ -5,6 +5,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -179,5 +180,224 @@ func TestLoadPeerPlaylistsWithFilter_SkipsHiddenCategory(t *testing.T) {
 	}
 	if len(got[1]) != 0 {
 		t.Fatalf("expected hidden category peer playlist to be excluded, got %+v", got[1])
+	}
+}
+
+func TestLoadPeerPlaylists_AllowsDifferentLocalPidsWithSameSemanticBigCategory(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.Category{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{}, &model.FilmIndex{}, &model.MovieMatchKey{}, &model.FilmSourcePlaylist{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	prevSnap := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() {
+		db.Mdb = prev
+		support.StoreMappingSnapshotForTest(prevSnap)
+		support.ResetCategoryNameCache()
+		support.ClearRootCategoryCNameCache()
+	})
+
+	for _, src := range []model.FilmSource{
+		{Id: "src-duck", Name: "鸭鸭", Uri: "http://duck.test", State: true, Sort: 0},
+		{Id: "src-tianya", Name: "天涯影视", Uri: "http://tianya.test", State: true, Sort: 1},
+		{Id: "src-anime", Name: "动漫站", Uri: "http://anime.test", State: true, Sort: 2},
+		{Id: "src-short", Name: "短剧站", Uri: "http://short.test", State: true, Sort: 3},
+		{Id: "src-custom", Name: "自定义站", Uri: "http://custom.test", State: true, Sort: 4},
+	} {
+		if err := gdb.Create(&src).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 各自源独立建档：本地 Pid 完全不同，但语义同属「电视剧」与不同大类「动漫」「短剧」。
+	for _, cat := range []model.Category{
+		{Id: 353, Pid: 0, Name: "电视剧", StableKey: "source:src-duck:2"},
+		{Id: 266, Pid: 0, Name: "连续剧", StableKey: "source:src-tianya:2"},
+		{Id: 412, Pid: 0, Name: "动漫", StableKey: "source:src-anime:4"},
+		{Id: 518, Pid: 0, Name: "微短剧", StableKey: "source:src-short:5"},
+		{Id: 601, Pid: 0, Name: "怀旧剧场", StableKey: "source:src-custom:6"},
+	} {
+		if err := gdb.Create(&cat).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 测试 CategoryRoot 映射规则同样生效：把「怀旧剧场」规整为「电视剧」。
+	if err := gdb.Create(&model.MappingRule{SourceId: "src-custom", Group: "CategoryRoot", Raw: "怀旧剧场", Target: "电视剧", MatchType: "exact"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	support.ReloadMappingRules()
+
+	filmDuck := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src-duck", DbId: 4303597},
+		FilmIndexContent:  model.FilmIndexContent{Name: "乡村爱情3"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 353},
+	}
+	filmTianya := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src-tianya", DbId: 0},
+		FilmIndexContent:  model.FilmIndexContent{Name: "乡村爱情3"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 266},
+	}
+	filmAnime := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src-anime", DbId: 0},
+		FilmIndexContent:  model.FilmIndexContent{Name: "乡村爱情3"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 412},
+	}
+	filmShort := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src-short", DbId: 0},
+		FilmIndexContent:  model.FilmIndexContent{Name: "乡村爱情3"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 518},
+	}
+	filmCustom := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 5, FirstSourceId: "src-custom", DbId: 0},
+		FilmIndexContent:  model.FilmIndexContent{Name: "乡村爱情3"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 601},
+	}
+	for _, film := range []model.FilmIndex{filmDuck, filmTianya, filmAnime, filmShort, filmCustom} {
+		gdb.Create(&film)
+		for _, k := range BuildMovieMatchKeysWithCategory(film.DbId, film.Name, film.Pid) {
+			gdb.Create(&model.MovieMatchKey{Mid: film.Mid, MatchKey: k})
+		}
+	}
+
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 2, SourceId: "src-tianya", LineKind: "play", GroupIndex: 0, GroupName: "天涯", Content: `[{"episode":"1","link":"http://tianya/1"}]`})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 3, SourceId: "src-anime", LineKind: "play", GroupIndex: 0, GroupName: "动漫", Content: `[{"episode":"1","link":"http://anime/1"}]`})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 4, SourceId: "src-short", LineKind: "play", GroupIndex: 0, GroupName: "短剧", Content: `[{"episode":"1","link":"http://short/1"}]`})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 5, SourceId: "src-custom", LineKind: "play", GroupIndex: 0, GroupName: "自定义", Content: `[{"episode":"1","link":"http://custom/1"}]`})
+
+	got, err := LoadPeerPlaylists(gdb, []model.FilmIndex{filmDuck})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]bool{}
+	for _, line := range got[1] {
+		sources[line.SourceId] = true
+	}
+	if !sources["src-tianya"] {
+		t.Fatalf("expected src-tianya (Pid=266 连续剧) to match src-duck (Pid=353 电视剧), got %+v", got[1])
+	}
+	if !sources["src-custom"] {
+		t.Fatalf("expected src-custom (mapped 电视剧) to match src-duck, got %+v", got[1])
+	}
+	if sources["src-anime"] {
+		t.Fatalf("did not expect src-anime (动漫) to cross-match 电视剧, got %+v", got[1])
+	}
+	if sources["src-short"] {
+		t.Fatalf("did not expect src-short (微短剧) to cross-match 电视剧, got %+v", got[1])
+	}
+}
+
+func TestNormalizeCanonicalBigCategory_SuffixIsNotBigCategory(t *testing.T) {
+	if got := normalizeCanonicalBigCategory("伦理片"); got == model.BigCategoryMovie {
+		t.Fatalf("伦理片 must not become 电影, got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("音乐剧"); got == model.BigCategoryTV {
+		t.Fatalf("音乐剧 must not become 电视剧, got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("电视剧"); got != model.BigCategoryTV {
+		t.Fatalf("电视剧: got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("连续剧"); got != model.BigCategoryTV {
+		t.Fatalf("连续剧: got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("电影"); got != model.BigCategoryMovie {
+		t.Fatalf("电影: got %s", got)
+	}
+}
+
+func TestLoadPeerPlaylists_MissingCategoryNameDoesNotMerge(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.FilmIndex{}, &model.MovieMatchKey{}, &model.FilmSourcePlaylist{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	for _, src := range []model.FilmSource{
+		{Id: "src-home", Name: "主站", Uri: "http://home.test", State: true, Sort: 0},
+		{Id: "src-douban", Name: "豆瓣站", Uri: "http://douban.test", State: true, Sort: 1},
+		{Id: "src-anime", Name: "动漫站", Uri: "http://anime.test", State: true, Sort: 2},
+		{Id: "src-blank", Name: "缺分类站", Uri: "http://blank.test", State: true, Sort: 3},
+	} {
+		if err := gdb.Create(&src).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	films := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src-home", DbId: 88},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src-douban", DbId: 88},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 77},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src-anime", DbId: 0},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 4, OriginalCategory: "动漫"},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src-blank", DbId: 0},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 99},
+		},
+	}
+	for _, film := range films {
+		if err := gdb.Create(&film).Error; err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range BuildMovieMatchKeysWithCategory(film.DbId, film.Name, film.Pid) {
+			if err := gdb.Create(&model.MovieMatchKey{Mid: film.Mid, MatchKey: k}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, line := range []model.FilmSourcePlaylist{
+		{Mid: 2, SourceId: "src-douban", LineKind: "play", GroupIndex: 0, Content: `[{"episode":"1","link":"http://douban/1"}]`},
+		{Mid: 3, SourceId: "src-anime", LineKind: "play", GroupIndex: 0, Content: `[{"episode":"1","link":"http://anime/1"}]`},
+		{Mid: 4, SourceId: "src-blank", LineKind: "play", GroupIndex: 0, Content: `[{"episode":"1","link":"http://blank/1"}]`},
+	} {
+		if err := gdb.Create(&line).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	gotAnime, err := LoadPeerPlaylists(gdb, []model.FilmIndex{films[2]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotAnime[3]) != 0 {
+		t.Fatalf("missing category must not merge by title, got %+v", gotAnime[3])
+	}
+
+	gotHome, err := LoadPeerPlaylists(gdb, []model.FilmIndex{films[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]bool{}
+	for _, line := range gotHome[1] {
+		sources[line.SourceId] = true
+	}
+	if !sources["src-douban"] {
+		t.Fatalf("same douban id should still merge, got %+v", gotHome[1])
+	}
+	if sources["src-anime"] || sources["src-blank"] {
+		t.Fatalf("different or missing category must not merge without the same douban id, got %+v", gotHome[1])
 	}
 }

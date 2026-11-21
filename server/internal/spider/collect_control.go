@@ -187,3 +187,8 @@ func IsTaskRunning(id string) bool {
 func IsAnyTaskRunning() bool {
 	return progress.IsAnyTaskRunning()
 }
+
+// IsCollecting 是否仍有采集任务、运行队列或待检索封口尚未收尾。
+func IsCollecting() bool {
+	return progress.IsAnyTaskRunning() || collectQueueActive() || collectLifecycle.collecting()
+}

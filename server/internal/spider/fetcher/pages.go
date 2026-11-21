@@ -326,6 +326,11 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 						}
 						continue
 					}
+					if ctx.Err() != nil {
+						abandonStreak()
+						markStopped()
+						return
+					}
 					stop, pause := streak.finish(true)
 					if stop {
 						pages.done()
@@ -340,6 +345,10 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 						streak.resumeIntake()
 					}
 					pages.done()
+					if ctx.Err() != nil {
+						markStopped()
+						return
+					}
 					page := pg
 					items := list
 					writeWG.Add(1)

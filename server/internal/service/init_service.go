@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/access"
@@ -10,6 +11,7 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/utils"
@@ -19,7 +21,10 @@ import (
 
 type InitService struct{}
 
-var InitSvc = new(InitService)
+var (
+	InitSvc                = new(InitService)
+	inventoryStatsHookOnce sync.Once
+)
 
 func (s *InitService) DefaultDataInit() error {
 	isNewDatabase := !repository.ExistUserTable()
@@ -105,6 +110,13 @@ func (s *InitService) seedRuntimeDefaults(seedSources, runBootSpiderInit bool) e
 	if err := s.loadActiveFilmReadModel(); err != nil {
 		return err
 	}
+	inventoryStatsHookOnce.Do(func() {
+		filmrepo.SetInventoryStatsCollectingChecker(spider.IsCollecting)
+		spider.RegisterCollectDoneHook(func() {
+			filmrepo.RefreshInventoryStatsAsync()
+		})
+	})
+	filmrepo.RefreshInventoryStatsAsync()
 	return nil
 }
 
@@ -144,9 +156,6 @@ func (s *InitService) TableInit() error {
 	}
 	if err := repository.EnsureCollectRecordFilmSourceIndex(); err != nil {
 		return fmt.Errorf("采集清单站点索引失败: %w", err)
-	}
-	if err := repository.RefreshFilmCounts(); err != nil {
-		return fmt.Errorf("统计采集站影片数失败: %w", err)
 	}
 	return nil
 }

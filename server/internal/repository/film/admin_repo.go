@@ -56,9 +56,6 @@ func DelFilmSearchBatchDB(ids []int64) ([]int64, []int64, error) {
 		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
-		if err := repository.SubtractFilmCountsByMidsTx(tx, cleanIds); err != nil {
-			return err
-		}
 		if err := tx.Unscoped().Where("mid IN ?", cleanIds).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
@@ -106,6 +103,7 @@ func InvalidateFilmSearchBatchCaches(cleanIds, pids []int64, playPeerMids ...int
 			break
 		}
 	}
+	RefreshInventoryStatsAsync()
 }
 
 func DelFilmSearch(id int64) error {
@@ -199,9 +197,6 @@ func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
 		if cost := time.Since(startedAt); cost > time.Second {
 			log.Printf("[Collect] 源重置清表较慢 table=%s cost=%s", table, cost)
 		}
-	}
-	if err := repository.ZeroFilmCounts(conn); err != nil {
-		return err
 	}
 	return repository.DeleteCollectSourceStatsTx(conn, sourceIDs...)
 }
@@ -572,9 +567,6 @@ func deleteFilmCascadeDBBatch(mids []int64) error {
 		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
-		if err := repository.SubtractFilmCountsByMidsTx(tx, mids); err != nil {
-			return err
-		}
 		if err := tx.Unscoped().Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
@@ -604,4 +596,5 @@ func flushFilmCleanSideEffects(deletedMids []int64, pidSet map[int64]struct{}) {
 	writer.ClearFilmIndexCachesByPidSet(pidSet)
 	snapshot.DeleteActiveSnapshotsByMids(deletedMids...)
 	cache.ClearTVBoxListCache()
+	RefreshInventoryStatsAsync()
 }

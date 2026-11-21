@@ -13,6 +13,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -216,8 +218,21 @@ func TestImportConfig_LegacyBannersGoToSites(t *testing.T) {
 		t.Fatalf("decode legacy backup: %v", err)
 	}
 	req := model.ConfigBackupImportRequest{Modules: model.ConfigBackupModules{Banners: true}, Backup: backup}
+	filmsnapshot.ResetSearchCacheVersionForTest()
+	searchBefore := filmsnapshot.GetSearchCacheVersion()
+	indexBefore := support.IndexPageGeneration()
 	if err := BackupSvc.ImportConfig(req); err != nil {
 		t.Fatalf("import config failed: %v", err)
+	}
+	primary := repository.CurrentPrimarySource()
+	if primary == nil || primary.Id != "src_live" {
+		t.Fatalf("expected primary to stay src_live, got %+v", primary)
+	}
+	if filmsnapshot.GetSearchCacheVersion() == searchBefore {
+		t.Fatal("film source import should bump search cache when primary id stays")
+	}
+	if support.IndexPageGeneration() == indexBefore {
+		t.Fatal("film source import should clear index page cache when primary id stays")
 	}
 	slots, err := repository.ListAllBannerSlots()
 	if err != nil {
@@ -479,5 +494,72 @@ func TestImportConfig_IgnoresDeprecatedCronTasks(t *testing.T) {
 	}
 	if _, err := repository.GetFilmTaskById("deprecated_task"); err == nil {
 		t.Fatal("deprecated task should not be imported")
+	}
+}
+
+func TestImportConfig_FilmSources_ReplacesAndRejectsDuplicateURI(t *testing.T) {
+	gdb := setupBackupTestDB(t)
+
+	prevFn := syncImportedSourceCategoriesFn
+	syncImportedSourceCategoriesFn = func() {}
+	t.Cleanup(func() {
+		syncImportedSourceCategoriesFn = prevFn
+	})
+
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_live",
+		Name:  "线上主站",
+		Uri:   "http://live.test/api",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 备份中包含重复 Uri 时应在前置校验拦截，不覆盖现有站点
+	dupReq := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{FilmSources: true},
+		Backup: model.ConfigBackup{
+			Version: model.ConfigBackupVersion,
+			FilmSources: []model.FilmSource{
+				{Id: "a", Name: "站1", Uri: "http://dup.test/api"},
+				{Id: "b", Name: "站2", Uri: "http://dup.test/api"},
+			},
+		},
+	}
+	if err := BackupSvc.ImportConfig(dupReq); err == nil {
+		t.Fatal("expected error for duplicate source uri")
+	}
+	slashReq := dupReq
+	slashReq.Backup.FilmSources = []model.FilmSource{
+		{Id: "a", Name: "站1", Uri: "http://dup.test/api"},
+		{Id: "b", Name: "站2", Uri: "http://DUP.test/api/"},
+	}
+	if err := BackupSvc.ImportConfig(slashReq); err == nil {
+		t.Fatal("expected error for duplicate source uri differing by host case or trailing slash")
+	}
+
+	// 2. 正常导入采集站替换生效
+	req := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{FilmSources: true},
+		Backup: model.ConfigBackup{
+			Version: model.ConfigBackupVersion,
+			FilmSources: []model.FilmSource{
+				{Id: "src_live", Name: "线上主站-更新", Uri: "http://live.test/api", State: true},
+				{Id: "src_new", Name: "新站点", Uri: "http://new.test/api", State: true},
+			},
+		},
+	}
+	if err := BackupSvc.ImportConfig(req); err != nil {
+		t.Fatalf("import config failed: %v", err)
+	}
+
+	gotLive := repository.FindCollectSourceById("src_live")
+	if gotLive == nil || gotLive.Name != "线上主站-更新" {
+		t.Fatalf("expected updated live source, got %+v", gotLive)
+	}
+	gotNew := repository.FindCollectSourceById("src_new")
+	if gotNew == nil || gotNew.Name != "新站点" {
+		t.Fatalf("expected new source created, got %+v", gotNew)
 	}
 }

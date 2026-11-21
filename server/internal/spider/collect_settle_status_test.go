@@ -1,10 +1,19 @@
 package spider
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/spider/fetcher"
 	"server/internal/spider/progress"
+	"server/internal/testutil"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestSettleSourceStatus(t *testing.T) {
@@ -84,5 +93,151 @@ func TestBatchCollectStatus(t *testing.T) {
 
 	if s := model.CollectBatchStatus(1, 0, 0, 0, 1, 2, 4, 0); s != model.CollectRecordStatusInterrupted {
 		t.Fatalf("expected interrupted, got %s", s)
+	}
+}
+
+func setupStopTestDB(t *testing.T, source model.FilmSource) *gorm.DB {
+	t.Helper()
+	prev := db.Mdb
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CategoryMapping{}, &model.Category{}, &model.SourceCategory{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := gdb.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: source.Id, SourceTypeId: 1, CategoryId: 9}).Error; err != nil {
+		t.Fatalf("seed mapping: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+	return gdb
+}
+
+func TestStoppedSourceSkipsPublishMuBeforeSealing(t *testing.T) {
+	resetSearchReseal()
+	resetStreamPublishBufferForTest()
+	origCollectPages := collectPagesFn
+	origPub := publishStreamWindowFn
+	origPref := preferredSourceIDFn
+	origSeal := sealSearchIndex
+	publishStreamWindowFn = func([]int64) error { return nil }
+	preferredSourceIDFn = func() string { return "" }
+	sealSearchIndex = func([]int64) bool { return true }
+	t.Cleanup(func() {
+		collectPagesFn = origCollectPages
+		publishStreamWindowFn = origPub
+		preferredSourceIDFn = origPref
+		sealSearchIndex = origSeal
+		resetStreamPublishBufferForTest()
+		resetSearchReseal()
+	})
+
+	src := model.FilmSource{Id: "stop-skip-publish-mu", Name: "跳过发布锁", Uri: "http://127.0.0.1:1/api", State: true}
+	setupStopTestDB(t, src)
+
+	beginCollectQueue()
+	defer endCollectQueue()
+
+	collectPagesFn = func(ctx context.Context, _ int, _ []int, source *model.FilmSource, hours int, batch fetcher.Batch) (bool, int, int, []int, error) {
+		batch.AddAffectedMIDs(source, hours, []int64{42})
+		StopCollectSource(source.Id, "测试停止跳过publishMu")
+		<-ctx.Done()
+		return true, 1, 0, nil, ctx.Err()
+	}
+
+	claim, err := claimCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil || len(claim.Sources) != 1 {
+		t.Fatalf("claim failed: %v", err)
+	}
+	progress.SetPageTotal(src.Id, 2)
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claim.Sources, time.Now()).withClaim(claim)
+	defer batch.close()
+
+	// 先占住全局 publishMu，验证已停站点不会被 sealFinishedSource 卡在「停止中」。
+	publishMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			publishMu.Unlock()
+		}
+	}()
+
+	ver := stopAllVersion.Load()
+	done := make(chan error, 1)
+	go func() {
+		done <- handleCollectWithStopVersion(src.Id, 24, &ver, batch)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("stopped source blocked on publishMu instead of entering sealing")
+	}
+	if snap, ok := progress.Snapshot(src.Id); !ok || snap.Status != progress.StatusSealing {
+		t.Fatalf("stopped source with writes should enter sealing, got ok=%v status=%q", ok, snap.Status)
+	}
+
+	publishMu.Unlock()
+	locked = false
+	if err := batch.flushAndFinalize(); err != nil {
+		t.Fatalf("flushAndFinalize failed: %v", err)
+	}
+	searchReseal.mu.Lock()
+	_, hasMid := searchReseal.pending[42]
+	searchReseal.mu.Unlock()
+	if !hasMid {
+		t.Fatal("expected affected MID 42 enqueued into searchReseal by flushAndFinalize")
+	}
+}
+
+func TestStoppedDuringInternalProbe_ZeroWritesDoesNotEnterSealing(t *testing.T) {
+	resetSearchReseal()
+	origFetchProbe := fetchProbePageCount
+	t.Cleanup(func() {
+		fetchProbePageCount = origFetchProbe
+		resetSearchReseal()
+	})
+
+	src := model.FilmSource{Id: "stop-internal-probe", Name: "内探停", Uri: "http://127.0.0.1:1/api", State: true}
+	setupStopTestDB(t, src)
+
+	entered := make(chan struct{})
+	fetchProbePageCount = func(ctx context.Context, _ *model.FilmSource, _ int) (int, error) {
+		close(entered)
+		<-ctx.Done()
+		return 0, ctx.Err()
+	}
+
+	claim, err := claimCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil || len(claim.Sources) != 1 {
+		t.Fatalf("claim failed: %v", err)
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Single-Collect", claim.Sources, time.Now()).withClaim(claim)
+	defer batch.close()
+
+	ver := stopAllVersion.Load()
+	done := make(chan error, 1)
+	go func() {
+		done <- handleCollectWithStopVersion(src.Id, 24, &ver, batch)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe did not start")
+	}
+
+	StopCollectSource(src.Id, "探页阶段停止")
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("handleCollectWithStopVersion did not return after probe stop")
+	}
+	if snap, ok := progress.Snapshot(src.Id); !ok || snap.Status != progress.StatusStopped {
+		t.Fatalf("0-write probe stop must settle stopped instead of sealing, got ok=%v status=%q", ok, snap.Status)
 	}
 }

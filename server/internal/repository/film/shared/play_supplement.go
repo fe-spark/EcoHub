@@ -8,6 +8,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
+	"server/internal/utils"
 
 	"gorm.io/gorm"
 )
@@ -65,7 +66,8 @@ func LoadPeerPlaylistsWithFilter(tx *gorm.DB, infos []model.FilmIndex, visible P
 	if err != nil {
 		return nil, err
 	}
-	chosen := choosePeerFilms(infos, ranks, keyRows, ownerOf, enabled, visible)
+	catNames := loadPeerCategoryNamesTx(tx, infos, ownerOf)
+	chosen := choosePeerFilms(infos, ranks, keyRows, ownerOf, enabled, catNames, visible)
 	if len(chosen) == 0 {
 		return out, nil
 	}
@@ -130,12 +132,14 @@ func peerKeyRanks(infos []model.FilmIndex) (map[int64]map[string]int, []string) 
 }
 
 type filmOwnerMeta struct {
-	sourceID        string
-	cid             int64
-	pid             int64
-	dbID            int64
-	categoryKey     string
-	rootCategoryKey string
+	sourceID         string
+	cid              int64
+	pid              int64
+	dbID             int64
+	categoryKey      string
+	rootCategoryKey  string
+	originalCategory string
+	cName            string
 }
 
 func filmOwnersTx(tx *gorm.DB, rows []model.MovieMatchKey) (map[int64]filmOwnerMeta, error) {
@@ -156,23 +160,122 @@ func filmOwnersTx(tx *gorm.DB, rows []model.MovieMatchKey) (map[int64]filmOwnerM
 		return ownerOf, nil
 	}
 	var films []model.FilmIndex
-	if err := tx.Select("mid", "first_source_id", "cid", "pid", "db_id", "category_key", "root_category_key").Where("mid IN ?", mids).Find(&films).Error; err != nil {
+	if err := tx.Select("mid", "first_source_id", "cid", "pid", "db_id", "category_key", "root_category_key", "original_category", "c_name").Where("mid IN ?", mids).Find(&films).Error; err != nil {
 		return nil, err
 	}
 	for _, film := range films {
 		ownerOf[film.Mid] = filmOwnerMeta{
-			sourceID:        strings.TrimSpace(film.FirstSourceId),
-			cid:             film.Cid,
-			pid:             film.Pid,
-			dbID:            film.DbId,
-			categoryKey:     strings.TrimSpace(film.CategoryKey),
-			rootCategoryKey: strings.TrimSpace(film.RootCategoryKey),
+			sourceID:         strings.TrimSpace(film.FirstSourceId),
+			cid:              film.Cid,
+			pid:              film.Pid,
+			dbID:             film.DbId,
+			categoryKey:      strings.TrimSpace(film.CategoryKey),
+			rootCategoryKey:  strings.TrimSpace(film.RootCategoryKey),
+			originalCategory: strings.TrimSpace(film.OriginalCategory),
+			cName:            strings.TrimSpace(film.CName),
 		}
 	}
 	return ownerOf, nil
 }
 
-func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, rows []model.MovieMatchKey, ownerOf map[int64]filmOwnerMeta, enabled map[string]struct{}, visible PeerCategoryVisibleFunc) map[int64]map[string]peerPick {
+func loadPeerCategoryNamesTx(tx *gorm.DB, infos []model.FilmIndex, ownerOf map[int64]filmOwnerMeta) map[int64]string {
+	names := make(map[int64]string)
+	if tx == nil {
+		return names
+	}
+	seen := make(map[int64]struct{})
+	pids := make([]int64, 0)
+	addPid := func(pid int64) {
+		if pid <= 0 {
+			return
+		}
+		if _, ok := seen[pid]; ok {
+			return
+		}
+		seen[pid] = struct{}{}
+		pids = append(pids, pid)
+	}
+	for _, info := range infos {
+		addPid(info.Pid)
+	}
+	for _, owner := range ownerOf {
+		addPid(owner.pid)
+	}
+	if len(pids) == 0 {
+		return names
+	}
+	var cats []model.Category
+	if err := tx.Select("id", "name").Where("id IN ?", pids).Find(&cats).Error; err != nil {
+		return names
+	}
+	for _, cat := range cats {
+		if trimmed := strings.TrimSpace(cat.Name); trimmed != "" {
+			names[cat.Id] = trimmed
+		}
+	}
+	return names
+}
+
+func peerCategoryCompatible(originFilm model.FilmIndex, owner filmOwnerMeta, catNames map[int64]string) bool {
+	if originFilm.DbId > 0 && owner.dbID > 0 && originFilm.DbId == owner.dbID {
+		return true
+	}
+	originCat := resolvePeerBigCategory(originFilm.FirstSourceId, originFilm.Pid, originFilm.OriginalCategory, originFilm.CName, catNames)
+	ownerCat := resolvePeerBigCategory(owner.sourceID, owner.pid, owner.originalCategory, owner.cName, catNames)
+	// 分类名缺失时不靠本地 Pid 猜。各站 Pid 各自建档，数字相同也不代表同一大类。
+	if originCat == "" || ownerCat == "" {
+		return false
+	}
+	return originCat == ownerCat
+}
+
+func resolvePeerBigCategory(sourceID string, pid int64, origCat, cName string, catNames map[int64]string) string {
+	raw := ""
+	if pid > 0 {
+		raw = strings.TrimSpace(catNames[pid])
+	}
+	if raw == "" {
+		raw = strings.TrimSpace(origCat)
+	}
+	if raw == "" {
+		raw = strings.TrimSpace(cName)
+	}
+	if raw == "" {
+		return ""
+	}
+	if sid := strings.TrimSpace(sourceID); sid != "" {
+		if mapped := strings.TrimSpace(support.NormalizeRootCategoryName(sid, raw)); mapped != "" {
+			raw = mapped
+		}
+	}
+	return normalizeCanonicalBigCategory(raw)
+}
+
+func normalizeCanonicalBigCategory(raw string) string {
+	s := strings.ToLower(utils.TraditionalToSimplified(strings.TrimSpace(raw)))
+	if s == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(s, "短剧") || strings.Contains(s, "爽剧"):
+		return model.BigCategoryShortFilm
+	case strings.Contains(s, "纪录") || strings.Contains(s, "记录片") || s == "记录":
+		return model.BigCategoryDocumentary
+	case strings.Contains(s, "动漫") || strings.Contains(s, "动画") || strings.Contains(s, "番剧") || s == "国漫" || s == "日漫" || s == "美漫":
+		return model.BigCategoryAnimation
+	case strings.Contains(s, "综艺") || strings.Contains(s, "真人秀") || strings.Contains(s, "脱口秀"):
+		return model.BigCategoryVariety
+	case s == "电视剧" || s == "连续剧" || s == "剧集" || s == "剧场" ||
+		strings.Contains(s, "连续剧") || strings.Contains(s, "电视剧"):
+		return model.BigCategoryTV
+	case strings.Contains(s, "电影") || s == "大片" || s == "院线":
+		return model.BigCategoryMovie
+	default:
+		return s
+	}
+}
+
+func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, rows []model.MovieMatchKey, ownerOf map[int64]filmOwnerMeta, enabled map[string]struct{}, catNames map[int64]string, visible PeerCategoryVisibleFunc) map[int64]map[string]peerPick {
 	originInfo := make(map[int64]model.FilmIndex, len(infos))
 	for _, info := range infos {
 		originInfo[info.Mid] = info
@@ -194,9 +297,8 @@ func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, ro
 			if row.Mid == origin || owner.sourceID == strings.TrimSpace(originFilm.FirstSourceId) {
 				continue
 			}
-			// 跨分类防混拼：无相同有效豆瓣 ID 时，大类 Pid 冲突则禁止关联
-			hasSameDbID := originFilm.DbId > 0 && owner.dbID > 0 && originFilm.DbId == owner.dbID
-			if !hasSameDbID && originFilm.Pid > 0 && owner.pid > 0 && originFilm.Pid != owner.pid {
+			// 跨分类防混拼：无相同有效豆瓣 ID 时只比归一化后的大类名，不比各站本地 Pid
+			if !peerCategoryCompatible(originFilm, owner, catNames) {
 				continue
 			}
 			rank, ok := keyRank[row.MatchKey]

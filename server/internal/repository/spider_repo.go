@@ -19,11 +19,16 @@ import (
 
 // GetCollectSourceList 获取采集站 API 列表（按排序序号升序）
 func GetCollectSourceList() ([]model.FilmSource, error) {
-	if db.Mdb == nil {
+	return GetCollectSourceListDB(db.Mdb)
+}
+
+// GetCollectSourceListDB 使用指定数据库连接获取采集站 API 列表（按排序序号升序）。
+func GetCollectSourceListDB(connDB *gorm.DB) ([]model.FilmSource, error) {
+	if connDB == nil {
 		return nil, errors.New("数据库未连接")
 	}
 	list := make([]model.FilmSource, 0)
-	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+	if err := connDB.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		return nil, err
 	}
 	return list, nil
@@ -31,38 +36,42 @@ func GetCollectSourceList() ([]model.FilmSource, error) {
 
 // ReplaceCollectSources 用备份列表整体替换采集站（事务清空后写入）
 func ReplaceCollectSources(list []model.FilmSource) error {
+	next := append([]model.FilmSource(nil), list...)
+	now := time.Now()
+	for i := range next {
+		next[i].Id = strings.TrimSpace(next[i].Id)
+		next[i].Uri = strings.TrimSpace(next[i].Uri)
+		if next[i].Id == "" && next[i].Uri != "" {
+			next[i].Id = utils.GenerateHashKey(next[i].Uri)
+		}
+		if next[i].CreatedAt.IsZero() {
+			next[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
+		}
+		normalizeCollectSourceDefaults(&next[i])
+	}
+
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}
-		if len(list) == 0 {
+		if len(next) == 0 {
 			return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerSlot{}).Error
 		}
-		now := time.Now()
-		for i := range list {
-			if list[i].Id == "" && list[i].Uri != "" {
-				list[i].Id = utils.GenerateHashKey(list[i].Uri)
-			}
-			if list[i].CreatedAt.IsZero() {
-				list[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
-			}
-			normalizeCollectSourceDefaults(&list[i])
-		}
 		// 不在新列表里的站点，它们的轮播一并删除。
-		ids := make([]string, 0, len(list))
-		for _, s := range list {
+		ids := make([]string, 0, len(next))
+		for _, s := range next {
 			ids = append(ids, s.Id)
 		}
 		if err := tx.Where("source_id NOT IN ?", ids).Delete(&model.BannerSlot{}).Error; err != nil {
 			return err
 		}
-		return insertFilmSources(tx, list)
+		return insertFilmSources(tx, next)
 	})
 	if err != nil {
 		return err
 	}
 	// 备份导入整体替换站点：存储的主站不在新列表时清空，由懒初始化按新列表重选
-	support.ReconcilePrimaryAfterSourceReplace(list)
+	support.ReconcilePrimaryAfterSourceReplace(next)
 	InvalidatePublicSourceCache()
 	return RefreshCollectSourceCatalog()
 }
@@ -438,8 +447,7 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 			return err
 		}
 	}
-	// 影片数只由入库和删除维护。整行保存不能把请求里缺省的 0 写回去。
-	if err := tx.Omit("FilmCount").Save(&s).Error; err != nil {
+	if err := tx.Save(&s).Error; err != nil {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)

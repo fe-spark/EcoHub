@@ -23,6 +23,9 @@ import (
 
 var spiderCore = &JsonCollect{}
 
+// collectPagesFn 分页拉取实现；默认注入 fetcher.CollectPages，测试可替换以验证停止收尾路径。
+var collectPagesFn = fetcher.CollectPages
+
 func init() {
 	filmsnapshot.AddSearchIndexProgressListener(func(p filmsnapshot.SearchIndexProgress) {
 		progress.BroadcastSearchIndexProgress(progress.SearchIndexProgressEvent{
@@ -152,7 +155,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	defer func() {
 		originalErr := retErr
 		// 只有真正落盘写入过的停止任务才需要进入待检索封口；0 页被中断直接标记已停止避免统计为完成。
-		if collectCtx != nil && progress.IsStopping(s.Id) && (hadWrites || originalErr == nil) {
+		if collectCtx != nil && progress.IsStopping(s.Id) && hadWrites {
 			defer func() {
 				if progress.MarkStoppedAsSealing(collectCtx, s.Id) {
 					searchReseal.addSealing(s.Id)
@@ -243,8 +246,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 				Error:       errMsg,
 			})
 			batchCtx.markSourceFinished(*s)
-			if err := batchCtx.sealFinishedSource(*s); err != nil {
-				log.Printf("[Spider] 站点 %s 封口入队失败: %v", s.Name, err)
+			// 被用户停止时不再同步抢 publishMu 刷快照窗口，避免已停站点卡在「停止中」；
+			// 已入库数据会在批次收尾 flushAndFinalize 与 searchReseal 中统一刷新并检索封口。
+			stoppedByUser := collectCtx != nil && (progress.IsStopping(s.Id) || progress.IsStopped(s.Id))
+			if !stoppedByUser {
+				if err := batchCtx.sealFinishedSource(*s); err != nil {
+					log.Printf("[Spider] 站点 %s 封口入队失败: %v", s.Name, err)
+				}
 			}
 		}
 	}()
@@ -326,8 +334,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		pageCount = len(targetPages)
 		batchCtx.setSourcePageTotal(id, pageCount)
 	} else if pageCount < 0 {
-		if err := probeSourcePageCount(s, h, trigger, batchCtx); err != nil {
+		if err := probeSourcePageCount(collectCtx, s, h, trigger, batchCtx); err != nil {
 			return err
+		}
+		if collectCtx.Err() != nil {
+			return collectCtx.Err()
 		}
 		pageCount = progress.PageTotal(id)
 	}
@@ -346,7 +357,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 	}
 
-	hadWrites, successPagesCount, failedPagesCount, failedPagesList, err = fetcher.CollectPages(collectCtx, pageCount, targetPages, s, h, batchCtx)
+	hadWrites, successPagesCount, failedPagesCount, failedPagesList, err = collectPagesFn(collectCtx, pageCount, targetPages, s, h, batchCtx)
 	// 有成功页的失败也进待检索。零成功直接失败。停止中由 MarkSourceSealingIfRun 拒绝。
 	if err != nil && !hadWrites {
 		return err

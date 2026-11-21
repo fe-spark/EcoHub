@@ -415,12 +415,18 @@ func ExistingFilmMids(mids []int64) (map[int64]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	var hit []int64
-	if err := gdb.Model(&model.FilmIndex{}).Where("mid IN ?", mids).Pluck("mid", &hit).Error; err != nil {
-		return nil, err
-	}
-	for _, mid := range hit {
-		out[mid] = true
+	for start := 0; start < len(mids); start += 500 {
+		end := start + 500
+		if end > len(mids) {
+			end = len(mids)
+		}
+		var hit []int64
+		if err := gdb.Model(&model.FilmIndex{}).Where("mid IN ?", mids[start:end]).Pluck("mid", &hit).Error; err != nil {
+			return nil, err
+		}
+		for _, mid := range hit {
+			out[mid] = true
+		}
 	}
 	return out, nil
 }

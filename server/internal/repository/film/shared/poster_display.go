@@ -94,7 +94,8 @@ func posterPicturesFor(tx *gorm.DB, films []model.FilmIndex, posterID string) ma
 	if err != nil {
 		return out
 	}
-	chosen := choosePeerFilms(films, ranks, keyRows, ownerOf, map[string]struct{}{posterID: {}}, nil)
+	catNames := loadPeerCategoryNamesTx(tx, films, ownerOf)
+	chosen := choosePeerFilms(films, ranks, keyRows, ownerOf, map[string]struct{}{posterID: {}}, catNames, nil)
 	type posterPair struct {
 		origin int64
 		peer   int64

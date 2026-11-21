@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { Card, Spin, Tag } from "antd";
-import { DownOutlined } from "@ant-design/icons";
-import Link from "next/link";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Button, Card, Spin, Tag } from "antd";
+import { DownOutlined, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
+import { usePrimarySource } from "@/lib/manage-primary";
+import { useAppMessage } from "@/lib/useAppMessage";
 import styles from "./inventory-stats.module.less";
 
 interface LibraryInventory {
@@ -24,14 +25,19 @@ interface SourceInventory {
 }
 
 interface InventoryStatsData {
+  status: "ready" | "computing" | "collecting";
   library: LibraryInventory;
   sources: SourceInventory[];
 }
 
+type StatsPhase = "loading" | "collecting" | "computing" | "ready" | "error";
+
+const POLL_INTERVAL_MS = 2000;
+
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
-  { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
-  { key: "categories", label: "分类", hint: "已映射且分类还在" },
-  { key: "failures", label: "采集失败页数", hint: "当天" },
+  { key: "films", label: "片库影片", hint: "全部已启用站点合计", lead: true },
+  { key: "categories", label: "分类", hint: "已启用站已映射且分类还在" },
+  { key: "failures", label: "采集失败页数", hint: "当天已启用站点合计" },
 ];
 
 function formatCount(value: number | undefined) {
@@ -42,8 +48,11 @@ function formatCount(value: number | undefined) {
 }
 
 function placePrimaryFirst(sources: SourceInventory[], id: string) {
-  const index = sources.findIndex((item) => item.id === id);
-  const next = sources.map((item) => ({ ...item, isPrimary: item.id === id }));
+  const next = sources.map((item) => ({ ...item, isPrimary: Boolean(id) && item.id === id }));
+  if (!id) {
+    return next;
+  }
+  const index = next.findIndex((item) => item.id === id);
   if (index <= 0) {
     return next;
   }
@@ -51,98 +60,129 @@ function placePrimaryFirst(sources: SourceInventory[], id: string) {
   return [chosen, ...next];
 }
 
-export default function InventoryStats({ primaryId, pending = false }: { primaryId?: string; pending?: boolean }) {
+export default function InventoryStats() {
+  const { message } = useAppMessage();
+  const { primary, loading: primaryLoading } = usePrimarySource();
+  const primaryId = primary?.id || "";
   const [library, setLibrary] = useState<LibraryInventory | null>(null);
-  const [libraryLoading, setLibraryLoading] = useState(true);
-  const [libraryFailed, setLibraryFailed] = useState(false);
   const [sources, setSources] = useState<SourceInventory[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [phase, setPhase] = useState<StatsPhase>("loading");
   const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [sourcesLoading, setSourcesLoading] = useState(false);
-  const [sourcesFailed, setSourcesFailed] = useState(false);
-  const primaryIdRef = useRef(primaryId || "");
-  const sourcesLoadedRef = useRef(false);
-  const [libraryVersion, setLibraryVersion] = useState(0);
+  const requestSeqRef = useRef(0);
+  const primaryIdRef = useRef(primaryId);
+  const hasLoadedRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
+
+  primaryIdRef.current = primaryId;
+
+  const clearPollTimer = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  const loadStats = useCallback(async (forceRefresh = false) => {
+    clearPollTimer();
+    const seq = ++requestSeqRef.current;
+    setLoading(true);
+    try {
+      const params = forceRefresh ? { refresh: 1 } : undefined;
+      const resp = await ApiGet<InventoryStatsData>("/manage/spider/clear/stats", params, 10000);
+      if (unmountedRef.current || seq !== requestSeqRef.current) {
+        return;
+      }
+      if (resp.code !== 0 || !resp.data) {
+        if (hasLoadedRef.current) {
+          setPhase("ready");
+          message.error(resp.msg || "片库统计刷新失败，已保留当前数据");
+        } else {
+          setPhase("error");
+        }
+        return;
+      }
+      if (resp.data.status === "collecting") {
+        // 采集中不展示过期数字，直接切换为数据入库中并轮询等待采集结束
+        hasLoadedRef.current = false;
+        setLibrary(null);
+        setSources(null);
+        setPhase("collecting");
+        pollTimerRef.current = setTimeout(() => {
+          void loadStats(false);
+        }, POLL_INTERVAL_MS);
+        return;
+      }
+      if (resp.data.status === "computing") {
+        setPhase("computing");
+        pollTimerRef.current = setTimeout(() => {
+          void loadStats(false);
+        }, POLL_INTERVAL_MS);
+        return;
+      }
+      if (!resp.data.library) {
+        if (hasLoadedRef.current) {
+          setPhase("ready");
+          message.error(resp.msg || "片库统计刷新失败，已保留当前数据");
+        } else {
+          setPhase("error");
+        }
+        return;
+      }
+      const id = primaryIdRef.current;
+      const nextSources = resp.data.sources ?? [];
+      hasLoadedRef.current = true;
+      setPhase("ready");
+      setLibrary(resp.data.library);
+      setSources(id ? placePrimaryFirst(nextSources, id) : nextSources);
+    } catch {
+      if (unmountedRef.current || seq !== requestSeqRef.current) {
+        return;
+      }
+      if (hasLoadedRef.current) {
+        setPhase("ready");
+        message.error("片库统计刷新失败，已保留当前数据");
+      } else {
+        setPhase("error");
+      }
+    } finally {
+      if (!unmountedRef.current && seq === requestSeqRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [clearPollTimer, message]);
 
   useEffect(() => {
-    if (pending) {
-      return;
-    }
-    if (primaryId && primaryId !== primaryIdRef.current) {
-      primaryIdRef.current = primaryId;
-      setSources((prev) => (prev ? placePrimaryFirst(prev, primaryId) : prev));
-      sourcesLoadedRef.current = false;
-      setLibraryVersion((version) => version + 1);
-    }
-  }, [primaryId, pending]);
-
-  useEffect(() => {
-    if (pending) {
-      return;
-    }
-    let active = true;
-    setLibraryLoading(true);
-    setLibraryFailed(false);
-    ApiGet<InventoryStatsData>("/manage/spider/clear/stats", { scope: "library" }, 10000)
-      .then((resp) => {
-        if (!active) {
-          return;
-        }
-        if (resp.code !== 0 || !resp.data?.library) {
-          setLibraryFailed(true);
-          return;
-        }
-        setLibrary(resp.data.library);
-      })
-      .catch(() => {
-        if (active) {
-          setLibraryFailed(true);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setLibraryLoading(false);
-        }
-      });
+    unmountedRef.current = false;
+    void loadStats(false);
     return () => {
-      active = false;
+      unmountedRef.current = true;
+      clearPollTimer();
     };
-  }, [libraryVersion, pending]);
+  }, [clearPollTimer, loadStats]);
 
   useEffect(() => {
-    if (pending || !sourcesOpen || sourcesLoadedRef.current) {
+    if (primaryLoading) {
       return;
     }
-    let active = true;
-    setSourcesLoading(true);
-    setSourcesFailed(false);
-    ApiGet<InventoryStatsData>("/manage/spider/clear/stats", { scope: "sources" }, 10000)
-      .then((resp) => {
-        if (!active) {
-          return;
-        }
-        if (resp.code !== 0 || !resp.data) {
-          setSourcesFailed(true);
-          return;
-        }
-        const id = primaryIdRef.current;
-        const next = resp.data.sources ?? [];
-        setSources(id ? placePrimaryFirst(next, id) : next);
-        sourcesLoadedRef.current = true;
-      })
-      .catch(() => {
-        if (active) {
-          setSourcesFailed(true);
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setSourcesLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [sourcesOpen, libraryVersion, pending]);
+    // 切换主站不影响各站真实片库规模，仅在本地重排主站标识与顺序，避免触发百万级全表重查
+    setSources((prev) => (prev ? placePrimaryFirst(prev, primaryId) : prev));
+  }, [primaryId, primaryLoading]);
+
+  const isCollecting = phase === "collecting";
+  const isComputing = phase === "computing";
+  const isBusy = loading || isCollecting || isComputing;
+  const statusNotice = isCollecting
+    ? "数据入库中，采集完成后将自动统计..."
+    : isComputing
+      ? "片库规模计算中，请稍候..."
+      : "加载中...";
+  const stationStatusNotice = isCollecting
+    ? "数据入库中，采集完成后将统计各站规模..."
+    : isComputing
+      ? "各站规模计算中，请稍候..."
+      : "加载中...";
 
   return (
     <Card
@@ -150,16 +190,28 @@ export default function InventoryStats({ primaryId, pending = false }: { primary
       classNames={{ header: styles.header, body: styles.body, title: styles.title }}
       title="片库规模"
       extra={
-        <Link href="/manage/film" className={styles.filmLink}>
-          影片列表
-        </Link>
+        <div className={styles.headerExtra}>
+          {isCollecting ? <Tag color="warning">数据入库中</Tag> : null}
+          {isComputing && library !== null ? <Tag color="processing">计算中</Tag> : null}
+          <Button
+            type="text"
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={isBusy}
+            disabled={isCollecting}
+            onClick={() => void loadStats(true)}
+          >
+            {isCollecting ? "入库中" : isComputing ? "计算中" : "刷新"}
+          </Button>
+        </div>
       }
     >
-      {libraryLoading || pending ? (
+      {isCollecting || (isBusy && library === null) ? (
         <div className={styles.loading} role="status" aria-busy="true">
           <Spin />
+          <span className={styles.loadingText}>{statusNotice}</span>
         </div>
-      ) : libraryFailed || library === null ? (
+      ) : library === null ? (
         <div className={styles.empty}>统计失败</div>
       ) : (
         <div className={styles.metrics}>
@@ -178,16 +230,7 @@ export default function InventoryStats({ primaryId, pending = false }: { primary
           type="button"
           className={`${styles.stationToggle} ${sourcesOpen ? styles.stationToggleOpen : ""}`}
           aria-expanded={sourcesOpen}
-          onClick={() =>
-            setSourcesOpen((open) => {
-              const next = !open;
-              if (next && !sourcesLoadedRef.current) {
-                setSourcesLoading(true);
-                setSourcesFailed(false);
-              }
-              return next;
-            })
-          }
+          onClick={() => setSourcesOpen((open) => !open)}
         >
           <span className={styles.stationLead}>
             <span className={styles.chevronWrap} aria-hidden="true">
@@ -196,18 +239,19 @@ export default function InventoryStats({ primaryId, pending = false }: { primary
             <span className={styles.stationCopy}>
               <span className={styles.stationTitle}>各采集站</span>
               <span className={styles.stationHint}>
-                {sourcesOpen ? "各站片库影片、分类和当天失败页" : "展开后查看各站片库影片、分类和当天失败页"}
+                {sourcesOpen ? "各站真实已采集影片、分类和当天失败页" : "展开后查看各站真实已采集影片、分类和当天失败页"}
               </span>
             </span>
           </span>
           <span className={styles.stationAction}>{sourcesOpen ? "收起" : "展开"}</span>
         </button>
         {sourcesOpen ? (
-          sourcesLoading || pending ? (
+          isCollecting || (isBusy && sources === null) ? (
             <div className={styles.loading} role="status" aria-busy="true">
               <Spin />
+              <span className={styles.loadingText}>{stationStatusNotice}</span>
             </div>
-          ) : sourcesFailed || sources === null ? (
+          ) : sources === null ? (
             <div className={styles.stationEmpty}>统计失败</div>
           ) : sources.length === 0 ? (
             <div className={styles.stationEmpty}>还没有采集站</div>

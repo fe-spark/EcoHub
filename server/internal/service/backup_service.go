@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"server/internal/access"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/service/upgrade"
 	"server/internal/spider"
@@ -130,13 +132,16 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	needCategoryRefresh := false
+	primaryChanged := false
 
 	if req.Modules.Site {
 		if err := repository.SaveSiteBasic(*backup.Site); err != nil {
 			return fmt.Errorf("导入网站配置失败: %w", err)
 		}
 		InvalidateMediaProxyMemoryCache()
-		filmsnapshot.BumpSearchCacheVersion()
+		if !req.Modules.FilmSources && !req.Modules.MappingRules {
+			filmsnapshot.BumpSearchCacheVersion()
+		}
 	}
 
 	if req.Modules.FilmSources {
@@ -164,13 +169,16 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if replaceErr != nil {
 			return replaceErr
 		}
-		applyPrimaryChanged(oldPrimaryBeforeImport, repository.CurrentPrimarySource())
+		primaryChanged = applyPrimaryChanged(oldPrimaryBeforeImport, repository.CurrentPrimarySource())
+		// 主站 ID 没变时 applyPrimaryChanged 不会动缓存。地址或启用状态变了，搜索和首页仍要失效。
+		if !primaryChanged {
+			repository.ClearIndexPageCache()
+			filmsnapshot.BumpSearchCacheVersion()
+		}
 		spider.ClearAllCMSSearchUnsupported()
 		clearProvideNetworkConfigCache()
-		filmsnapshot.BumpSearchCacheVersion()
 		filmsnapshot.ClearDynamicPlayCaches()
 		filmsnapshot.ClearDerivedFilmListCaches()
-		repository.ClearIndexPageCache()
 		needCategoryRefresh = true
 	}
 
@@ -218,8 +226,11 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 			syslog.Errorf("[Backup] 刷新来源分类映射失败: %v", err)
 		}
-		if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
-			syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
+		// applyPrimaryChanged 已执行过 RefreshAccessDataCaches，避免重复扫删 Redis 前缀
+		if !primaryChanged {
+			if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
+				syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
+			}
 		}
 	}
 	if req.Modules.Analytics {
@@ -231,6 +242,9 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 
 	if req.Modules.FilmSources {
 		syncImportedSourceCategoriesFn()
+	}
+	if req.Modules.FilmSources || req.Modules.MappingRules {
+		filmrepo.RefreshInventoryStatsAsync()
 	}
 
 	return nil
@@ -246,13 +260,26 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 			return errors.New("备份中缺少采集站")
 		}
 		seenID := make(map[string]struct{}, len(b.FilmSources))
+		seenURI := make(map[string]struct{}, len(b.FilmSources))
 		for _, src := range b.FilmSources {
-			if !utils.ValidURL(src.Uri) {
+			uri := strings.TrimSpace(src.Uri)
+			if !utils.ValidURL(uri) {
 				return fmt.Errorf("采集站 %q 接口地址无效", src.Name)
 			}
+			// shortcut: 协议大小写和连续多个结尾斜杠仍视为不同地址, 导入里出现再收紧
+			key := uri
+			if u, err := url.Parse(uri); err == nil && u.Host != "" {
+				u.Host = strings.ToLower(u.Host)
+				u.Path = strings.TrimSuffix(u.Path, "/")
+				key = u.String()
+			}
+			if _, dup := seenURI[key]; dup {
+				return fmt.Errorf("备份中包含重复采集站地址: %s", uri)
+			}
+			seenURI[key] = struct{}{}
 			id := strings.TrimSpace(src.Id)
 			if id == "" {
-				id = utils.GenerateHashKey(src.Uri)
+				id = utils.GenerateHashKey(uri)
 			}
 			if _, dup := seenID[id]; dup {
 				return fmt.Errorf("备份中包含重复采集站 ID: %s", id)

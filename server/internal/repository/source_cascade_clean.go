@@ -44,9 +44,6 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
 		return nil, err
 	}
-	if err := SetFilmCountTx(tx, id, 0); err != nil {
-		return nil, err
-	}
 	return owned, nil
 }
 
@@ -80,9 +77,6 @@ func cleanSourceDataBatched(id string) ([]int64, error) {
 		return allOwned, err
 	}
 	if err := DeleteBannerSlotsBySource(db.Mdb, id); err != nil {
-		return allOwned, err
-	}
-	if err := SetFilmCountTx(db.Mdb, id, 0); err != nil {
 		return allOwned, err
 	}
 	return allOwned, nil
@@ -177,10 +171,7 @@ func deleteOwnedFilmsBatched(sourceID string, mids []int64) error {
 		end := min(i+1000, total)
 		chunk := mids[i:end]
 		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-			if err := deleteOwnedFilmChunk(tx, chunk); err != nil {
-				return err
-			}
-			return AddFilmCountTx(tx, sourceID, -int64(len(chunk)))
+			return deleteOwnedFilmChunk(tx, chunk)
 		}); err != nil {
 			return err
 		}
