@@ -1,3 +1,20 @@
+Pre-release **v3.1.2-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.2-beta.1` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.2-beta.1 changes
+
+- **Library size**: removed incremental count caches in favor of async recalculation after collection finishes, showing ingesting/computing states in the UI.
+- **Collection stop**: enabled immediate probe cancellation, drops fetched pages when canceled before queue submission, and skips synchronous publish lock waits for stopped sources.
+- **Cross-source matching (#110)**: compares normalized root category semantics instead of per-source local `Pid`s when matching peer playlists and posters.
+
+---
+
 Pre-release **v3.1.2-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

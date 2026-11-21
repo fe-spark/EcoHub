@@ -1,3 +1,20 @@
+测试版 **v3.1.2-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.2-beta.1 更新内容
+
+- **片库规模**：移除增量计数缓存，改为采集结束后异步查库重算，前台展示「数据入库中」「计算中」状态。
+- **采集停止**：支持探页即时取消与抓取命中取消直接丢弃，已停站点跳过同步发布锁以缩短停止等待。
+- **跨源线路匹配（#110）**：跨源补全线路与海报时改为比对归一化一级大类语义，修复各站本地分类 ID 不同导致的误过滤。
+
+---
+
 测试版 **v3.1.2-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
