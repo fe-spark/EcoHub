@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"server/internal/access"
 	"sort"
 	"strings"
@@ -169,6 +170,11 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			return replaceErr
 		}
 		primaryChanged = applyPrimaryChanged(oldPrimaryBeforeImport, repository.CurrentPrimarySource())
+		// 主站 ID 没变时 applyPrimaryChanged 不会动缓存。地址或启用状态变了，搜索和首页仍要失效。
+		if !primaryChanged {
+			repository.ClearIndexPageCache()
+			filmsnapshot.BumpSearchCacheVersion()
+		}
 		spider.ClearAllCMSSearchUnsupported()
 		clearProvideNetworkConfigCache()
 		filmsnapshot.ClearDynamicPlayCaches()
@@ -260,10 +266,17 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 			if !utils.ValidURL(uri) {
 				return fmt.Errorf("采集站 %q 接口地址无效", src.Name)
 			}
-			if _, dup := seenURI[uri]; dup {
+			// shortcut: 协议大小写和连续多个结尾斜杠仍视为不同地址, 导入里出现再收紧
+			key := uri
+			if u, err := url.Parse(uri); err == nil && u.Host != "" {
+				u.Host = strings.ToLower(u.Host)
+				u.Path = strings.TrimSuffix(u.Path, "/")
+				key = u.String()
+			}
+			if _, dup := seenURI[key]; dup {
 				return fmt.Errorf("备份中包含重复采集站地址: %s", uri)
 			}
-			seenURI[uri] = struct{}{}
+			seenURI[key] = struct{}{}
 			id := strings.TrimSpace(src.Id)
 			if id == "" {
 				id = utils.GenerateHashKey(uri)

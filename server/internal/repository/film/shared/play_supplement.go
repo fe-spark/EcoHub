@@ -222,13 +222,11 @@ func peerCategoryCompatible(originFilm model.FilmIndex, owner filmOwnerMeta, cat
 	}
 	originCat := resolvePeerBigCategory(originFilm.FirstSourceId, originFilm.Pid, originFilm.OriginalCategory, originFilm.CName, catNames)
 	ownerCat := resolvePeerBigCategory(owner.sourceID, owner.pid, owner.originalCategory, owner.cName, catNames)
-	if originCat != "" && ownerCat != "" {
-		return originCat == ownerCat
+	// 分类名缺失时不靠本地 Pid 猜。各站 Pid 各自建档，数字相同也不代表同一大类。
+	if originCat == "" || ownerCat == "" {
+		return false
 	}
-	if originCat == "" && ownerCat == "" && originFilm.Pid > 0 && owner.pid > 0 {
-		return originFilm.Pid == owner.pid
-	}
-	return true
+	return originCat == ownerCat
 }
 
 func resolvePeerBigCategory(sourceID string, pid int64, origCat, cName string, catNames map[int64]string) string {
@@ -268,11 +266,9 @@ func normalizeCanonicalBigCategory(raw string) string {
 	case strings.Contains(s, "综艺") || strings.Contains(s, "真人秀") || strings.Contains(s, "脱口秀"):
 		return model.BigCategoryVariety
 	case s == "电视剧" || s == "连续剧" || s == "剧集" || s == "剧场" ||
-		strings.Contains(s, "连续剧") || strings.Contains(s, "电视剧") ||
-		(strings.HasSuffix(s, "剧") && !strings.Contains(s, "喜剧") && !strings.Contains(s, "剧情")):
+		strings.Contains(s, "连续剧") || strings.Contains(s, "电视剧"):
 		return model.BigCategoryTV
-	case strings.Contains(s, "电影") || s == "大片" || s == "院线" ||
-		(strings.HasSuffix(s, "片") && s != "纪录片" && s != "记录片"):
+	case strings.Contains(s, "电影") || s == "大片" || s == "院线":
 		return model.BigCategoryMovie
 	default:
 		return s
@@ -301,7 +297,7 @@ func choosePeerFilms(infos []model.FilmIndex, ranks map[int64]map[string]int, ro
 			if row.Mid == origin || owner.sourceID == strings.TrimSpace(originFilm.FirstSourceId) {
 				continue
 			}
-			// 跨分类防混拼：无相同有效豆瓣 ID 时，按归一化一级大类语义比对，避免各站独立本地 Pid 误过滤同片
+			// 跨分类防混拼：无相同有效豆瓣 ID 时只比归一化后的大类名，不比各站本地 Pid
 			if !peerCategoryCompatible(originFilm, owner, catNames) {
 				continue
 			}

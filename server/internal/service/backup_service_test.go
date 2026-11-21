@@ -13,6 +13,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -216,8 +218,21 @@ func TestImportConfig_LegacyBannersGoToSites(t *testing.T) {
 		t.Fatalf("decode legacy backup: %v", err)
 	}
 	req := model.ConfigBackupImportRequest{Modules: model.ConfigBackupModules{Banners: true}, Backup: backup}
+	filmsnapshot.ResetSearchCacheVersionForTest()
+	searchBefore := filmsnapshot.GetSearchCacheVersion()
+	indexBefore := support.IndexPageGeneration()
 	if err := BackupSvc.ImportConfig(req); err != nil {
 		t.Fatalf("import config failed: %v", err)
+	}
+	primary := repository.CurrentPrimarySource()
+	if primary == nil || primary.Id != "src_live" {
+		t.Fatalf("expected primary to stay src_live, got %+v", primary)
+	}
+	if filmsnapshot.GetSearchCacheVersion() == searchBefore {
+		t.Fatal("film source import should bump search cache when primary id stays")
+	}
+	if support.IndexPageGeneration() == indexBefore {
+		t.Fatal("film source import should clear index page cache when primary id stays")
 	}
 	slots, err := repository.ListAllBannerSlots()
 	if err != nil {
@@ -514,6 +529,14 @@ func TestImportConfig_FilmSources_ReplacesAndRejectsDuplicateURI(t *testing.T) {
 	}
 	if err := BackupSvc.ImportConfig(dupReq); err == nil {
 		t.Fatal("expected error for duplicate source uri")
+	}
+	slashReq := dupReq
+	slashReq.Backup.FilmSources = []model.FilmSource{
+		{Id: "a", Name: "站1", Uri: "http://dup.test/api"},
+		{Id: "b", Name: "站2", Uri: "http://DUP.test/api/"},
+	}
+	if err := BackupSvc.ImportConfig(slashReq); err == nil {
+		t.Fatal("expected error for duplicate source uri differing by host case or trailing slash")
 	}
 
 	// 2. 正常导入采集站替换生效

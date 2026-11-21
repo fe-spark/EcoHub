@@ -203,6 +203,7 @@ func CollectSingleFilm(ids string) {
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[CollectSingleFilm] 缓存刷新失败: %v", err)
 	}
+	triggerCollectDoneHooks()
 	batchCtx.emitSummary()
 }
 

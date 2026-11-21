@@ -292,3 +292,112 @@ func TestLoadPeerPlaylists_AllowsDifferentLocalPidsWithSameSemanticBigCategory(t
 		t.Fatalf("did not expect src-short (微短剧) to cross-match 电视剧, got %+v", got[1])
 	}
 }
+
+func TestNormalizeCanonicalBigCategory_SuffixIsNotBigCategory(t *testing.T) {
+	if got := normalizeCanonicalBigCategory("伦理片"); got == model.BigCategoryMovie {
+		t.Fatalf("伦理片 must not become 电影, got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("音乐剧"); got == model.BigCategoryTV {
+		t.Fatalf("音乐剧 must not become 电视剧, got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("电视剧"); got != model.BigCategoryTV {
+		t.Fatalf("电视剧: got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("连续剧"); got != model.BigCategoryTV {
+		t.Fatalf("连续剧: got %s", got)
+	}
+	if got := normalizeCanonicalBigCategory("电影"); got != model.BigCategoryMovie {
+		t.Fatalf("电影: got %s", got)
+	}
+}
+
+func TestLoadPeerPlaylists_MissingCategoryNameDoesNotMerge(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.FilmIndex{}, &model.MovieMatchKey{}, &model.FilmSourcePlaylist{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	for _, src := range []model.FilmSource{
+		{Id: "src-home", Name: "主站", Uri: "http://home.test", State: true, Sort: 0},
+		{Id: "src-douban", Name: "豆瓣站", Uri: "http://douban.test", State: true, Sort: 1},
+		{Id: "src-anime", Name: "动漫站", Uri: "http://anime.test", State: true, Sort: 2},
+		{Id: "src-blank", Name: "缺分类站", Uri: "http://blank.test", State: true, Sort: 3},
+	} {
+		if err := gdb.Create(&src).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	films := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src-home", DbId: 88},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src-douban", DbId: 88},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 77},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src-anime", DbId: 0},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 4, OriginalCategory: "动漫"},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src-blank", DbId: 0},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 99},
+		},
+	}
+	for _, film := range films {
+		if err := gdb.Create(&film).Error; err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range BuildMovieMatchKeysWithCategory(film.DbId, film.Name, film.Pid) {
+			if err := gdb.Create(&model.MovieMatchKey{Mid: film.Mid, MatchKey: k}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, line := range []model.FilmSourcePlaylist{
+		{Mid: 2, SourceId: "src-douban", LineKind: "play", GroupIndex: 0, Content: `[{"episode":"1","link":"http://douban/1"}]`},
+		{Mid: 3, SourceId: "src-anime", LineKind: "play", GroupIndex: 0, Content: `[{"episode":"1","link":"http://anime/1"}]`},
+		{Mid: 4, SourceId: "src-blank", LineKind: "play", GroupIndex: 0, Content: `[{"episode":"1","link":"http://blank/1"}]`},
+	} {
+		if err := gdb.Create(&line).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	gotAnime, err := LoadPeerPlaylists(gdb, []model.FilmIndex{films[2]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotAnime[3]) != 0 {
+		t.Fatalf("missing category must not merge by title, got %+v", gotAnime[3])
+	}
+
+	gotHome, err := LoadPeerPlaylists(gdb, []model.FilmIndex{films[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]bool{}
+	for _, line := range gotHome[1] {
+		sources[line.SourceId] = true
+	}
+	if !sources["src-douban"] {
+		t.Fatalf("same douban id should still merge, got %+v", gotHome[1])
+	}
+	if sources["src-anime"] || sources["src-blank"] {
+		t.Fatalf("different or missing category must not merge without the same douban id, got %+v", gotHome[1])
+	}
+}

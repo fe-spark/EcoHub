@@ -46,6 +46,7 @@ var (
 	inventoryStatsData         inventoryStatsSnapshot
 	inventoryStatsInflight     *inventoryStatsRun
 	inventoryStatsPending      *gorm.DB
+	inventoryStatsDirty        bool
 	inventoryStatsCollectingFn func() bool
 
 	// 测试钩子：控制接口快等窗口、错误冷却期与实际查库实现。
@@ -94,9 +95,12 @@ type InventoryStats struct {
 }
 
 // RefreshInventoryStatsAsync 在采集完成或数据变更后于后台异步重算一次片库规模。
-// 采集中跳过触发，等待采集彻底结束后由收尾回调统一计算；若已有计算在进行中则登记补算。
+// 采集中只记脏不查库；脏标记还在时，下次读取不会交当日旧缓存。已有计算在进行中则登记补算。
 func RefreshInventoryStatsAsync() {
 	if isInventoryCollecting() {
+		inventoryStatsMu.Lock()
+		inventoryStatsDirty = true
+		inventoryStatsMu.Unlock()
 		return
 	}
 	currentDB := db.Mdb
@@ -104,6 +108,7 @@ func RefreshInventoryStatsAsync() {
 		return
 	}
 	inventoryStatsMu.Lock()
+	inventoryStatsDirty = false
 	_ = triggerInventoryStatsLocked(currentDB, true)
 	inventoryStatsMu.Unlock()
 }
@@ -157,6 +162,10 @@ func acquireInventoryStatsRun(currentDB *gorm.DB, refresh bool) (*inventoryStats
 	inventoryStatsMu.Lock()
 	defer inventoryStatsMu.Unlock()
 
+	if inventoryStatsDirty {
+		refresh = true
+		inventoryStatsDirty = false
+	}
 	if !refresh {
 		if inventoryStatsInflight != nil && inventoryStatsInflight.dbConn == currentDB {
 			return inventoryStatsInflight, InventoryStats{}, nil, false

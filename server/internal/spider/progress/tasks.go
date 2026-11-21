@@ -214,9 +214,7 @@ func CancelAllTasks() int {
 // MarkAllRunningStopped 把所有 starting/running 的进度置为 stopped，并立即取消在途探页。
 func MarkAllRunningStopped() {
 	taskMu.Lock()
-	cancels := takeAllProbeCancelsLocked()
-	taskMu.Unlock()
-
+	// 先标停止再放锁，避免探页在放锁后、改状态前登记而漏取消。
 	store.Range(func(_, value any) bool {
 		state := value.(*progressState)
 		state.mu.Lock()
@@ -227,6 +225,9 @@ func MarkAllRunningStopped() {
 		state.mu.Unlock()
 		return true
 	})
+	cancels := takeAllProbeCancelsLocked()
+	taskMu.Unlock()
+
 	for _, cancel := range cancels {
 		cancel()
 	}

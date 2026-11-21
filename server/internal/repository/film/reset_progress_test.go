@@ -238,6 +238,7 @@ func TestGetInventoryStats_SlowQueryReturnsComputingThenReady(t *testing.T) {
 		inventoryStatsData = inventoryStatsSnapshot{}
 		inventoryStatsInflight = nil
 		inventoryStatsPending = nil
+		inventoryStatsDirty = false
 		inventoryStatsMu.Unlock()
 	})
 
@@ -317,6 +318,7 @@ func TestGetInventoryStats_BackgroundErrorCooldownAndRefreshReset(t *testing.T) 
 		inventoryStatsData = inventoryStatsSnapshot{}
 		inventoryStatsInflight = nil
 		inventoryStatsPending = nil
+		inventoryStatsDirty = false
 		inventoryStatsMu.Unlock()
 	})
 
@@ -409,6 +411,7 @@ func TestGetInventoryStats_CollectingSkipsQueryAndResumesAfterDone(t *testing.T)
 		inventoryStatsData = inventoryStatsSnapshot{}
 		inventoryStatsInflight = nil
 		inventoryStatsPending = nil
+		inventoryStatsDirty = false
 		inventoryStatsMu.Unlock()
 	})
 
@@ -476,4 +479,90 @@ func TestGetInventoryStats_CollectingSkipsQueryAndResumesAfterDone(t *testing.T)
 		t.Fatalf("expected 1 DB query after collection ended, got %d", fetchCalls)
 	}
 	mu.Unlock()
+}
+
+func TestGetInventoryStats_DirtySkipsDayCacheAfterCollect(t *testing.T) {
+	setupResetStatsDB(t)
+	origWait := inventoryStatsFastWait
+	origFetch := fetchInventoriesFn
+	origChecker := inventoryStatsCollectingFn
+	t.Cleanup(func() {
+		inventoryStatsFastWait = origWait
+		fetchInventoriesFn = origFetch
+		SetInventoryStatsCollectingChecker(origChecker)
+		inventoryStatsMu.Lock()
+		inventoryStatsData = inventoryStatsSnapshot{}
+		inventoryStatsInflight = nil
+		inventoryStatsPending = nil
+		inventoryStatsDirty = false
+		inventoryStatsMu.Unlock()
+	})
+
+	inventoryStatsFastWait = 20 * time.Millisecond
+	var mu sync.Mutex
+	films := int64(1)
+	collecting := false
+	var fetchCalls int
+	SetInventoryStatsCollectingChecker(func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return collecting
+	})
+	fetchInventoriesFn = func(_ context.Context, _ *gorm.DB) ([]SourceInventory, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		fetchCalls++
+		return []SourceInventory{{Id: "src_a", Name: "主站A", Enabled: true, Films: films}}, nil
+	}
+
+	var warm InventoryStats
+	var err error
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		warm, err = GetInventoryStats(context.Background(), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if warm.Status == InventoryStatsStatusReady && warm.Library.Films == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if warm.Library.Films != 1 || warm.Status != InventoryStatsStatusReady {
+		t.Fatalf("expected warm cache Films=1, got %+v", warm)
+	}
+
+	mu.Lock()
+	collecting = true
+	films = 2
+	callsWhileCollecting := fetchCalls
+	mu.Unlock()
+	RefreshInventoryStatsAsync()
+	mu.Lock()
+	if fetchCalls != callsWhileCollecting {
+		mu.Unlock()
+		t.Fatalf("collecting refresh queried the db: %d -> %d", callsWhileCollecting, fetchCalls)
+	}
+	collecting = false
+	mu.Unlock()
+
+	got, err := GetInventoryStats(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status == InventoryStatsStatusReady && got.Library.Films == 1 {
+		t.Fatalf("stale day cache served after a skipped refresh: %+v", got)
+	}
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		got, err = GetInventoryStats(context.Background(), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status == InventoryStatsStatusReady && got.Library.Films == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got.Status != InventoryStatsStatusReady || got.Library.Films != 2 {
+		t.Fatalf("expected refreshed Films=2 without another explicit refresh, got %+v", got)
+	}
 }
