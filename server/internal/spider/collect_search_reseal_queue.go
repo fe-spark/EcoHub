@@ -501,6 +501,9 @@ func (q *searchResealQueue) complete() {
 	q.sealing = map[string]struct{}{}
 	q.mu.Unlock()
 	progress.MarkSealed(ids)
+	if len(ids) > 0 && !IsCollecting() {
+		triggerCollectDoneHooks()
+	}
 }
 
 // onSearchIndexTerminal 仅在停等本轮重建时处理终态：done 收口，idle 表示失败不收口。

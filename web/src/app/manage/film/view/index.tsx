@@ -444,6 +444,12 @@ export default function FilmListPageView() {
         />
       </ContentSectionCard>
 
+      {primary?.id ? (
+        <div className={styles.listHint}>
+          当前为主站{primary.name ? `「${primary.name}」的` : ""}采集数据，如需查看其他采集站数据，请在顶栏切换主站。
+        </div>
+      ) : null}
+
       <FilmDrawer
         open={filmDrawerOpen}
         filmId={editingFilmId}

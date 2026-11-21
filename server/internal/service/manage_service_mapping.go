@@ -7,6 +7,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -135,6 +136,7 @@ func refreshProjectedReadModelAfterMappingRuleChange(groups ...string) error {
 				return err
 			}
 			filmsnapshot.ClearDynamicPlayCaches()
+			filmrepo.RefreshInventoryStatsAsync()
 			return nil
 		}
 	}

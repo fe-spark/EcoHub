@@ -108,9 +108,10 @@ func (h *SpiderHandler) ResetProgressStream(c *gin.Context) {
 	_ = service.SpiderSvc.FollowSiteReset(c.Request.Context(), stream.SendData)
 }
 
-// InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
+// InventoryStats 返回工作台片库规模。refresh=1 时跳过短缓存触发实时重算。
 func (h *SpiderHandler) InventoryStats(c *gin.Context) {
-	stats, err := service.SpiderSvc.InventoryStats(c.Query("scope"))
+	refresh := c.Query("refresh") == "1"
+	stats, err := service.SpiderSvc.InventoryStats(c.Request.Context(), refresh)
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return

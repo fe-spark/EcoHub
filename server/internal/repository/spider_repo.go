@@ -19,11 +19,16 @@ import (
 
 // GetCollectSourceList 获取采集站 API 列表（按排序序号升序）
 func GetCollectSourceList() ([]model.FilmSource, error) {
-	if db.Mdb == nil {
+	return GetCollectSourceListDB(db.Mdb)
+}
+
+// GetCollectSourceListDB 使用指定数据库连接获取采集站 API 列表（按排序序号升序）。
+func GetCollectSourceListDB(connDB *gorm.DB) ([]model.FilmSource, error) {
+	if connDB == nil {
 		return nil, errors.New("数据库未连接")
 	}
 	list := make([]model.FilmSource, 0)
-	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+	if err := connDB.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		return nil, err
 	}
 	return list, nil
@@ -46,22 +51,6 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	}
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		// 保留本库已有站点的实时 film_count；新站置 0，避免把备份里的历史计数写进当前库。
-		var existingRows []struct {
-			Id        string `gorm:"column:id"`
-			FilmCount int64  `gorm:"column:film_count"`
-		}
-		if err := tx.Model(&model.FilmSource{}).Select("id, film_count").Find(&existingRows).Error; err != nil {
-			return err
-		}
-		existingCounts := make(map[string]int64, len(existingRows))
-		for _, row := range existingRows {
-			existingCounts[strings.TrimSpace(row.Id)] = row.FilmCount
-		}
-		for i := range next {
-			next[i].FilmCount = existingCounts[next[i].Id]
-		}
-
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}
@@ -458,8 +447,7 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 			return err
 		}
 	}
-	// 影片数只由入库和删除维护。整行保存不能把请求里缺省的 0 写回去。
-	if err := tx.Omit("FilmCount").Save(&s).Error; err != nil {
+	if err := tx.Save(&s).Error; err != nil {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)

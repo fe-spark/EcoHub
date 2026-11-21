@@ -14,6 +14,7 @@ import (
 	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/service/upgrade"
 	"server/internal/spider"
@@ -235,6 +236,9 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 
 	if req.Modules.FilmSources {
 		syncImportedSourceCategoriesFn()
+	}
+	if req.Modules.FilmSources || req.Modules.MappingRules {
+		filmrepo.RefreshInventoryStatsAsync()
 	}
 
 	return nil

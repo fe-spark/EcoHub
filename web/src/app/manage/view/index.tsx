@@ -12,7 +12,6 @@ import {
 } from "@ant-design/icons";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectOverview from "@/app/manage/collect/view/collect-overview";
-import { type FilmSource } from "@/app/manage/collect/view/types";
 import SubscribeModal from "@/app/manage/components/subscribe-modal";
 import InventoryStats from "./inventory-stats";
 import styles from "./index.module.less";
@@ -31,49 +30,48 @@ const quickEntries: QuickEntryItem[] = [
     key: "film",
     icon: VideoCameraOutlined,
     title: "影片列表",
-    description: "按采集源查看、更新和编辑影片。",
+    description: "查找、更新和编辑主站影片。",
     href: "/manage/film",
   },
   {
     key: "collect",
     icon: DatabaseOutlined,
     title: "采集中心",
-    description: "配置采集站顺序、主站与批量采集任务。",
+    description: "管理采集站，开始或停止采集。",
     href: "/manage/collect",
   },
   {
     key: "category",
     icon: AppstoreOutlined,
     title: "分类管理",
-    description: "按采集站查看分类、显示状态和排序。",
+    description: "调整分类排序，以及是否在前台显示。",
     href: "/manage/collect/category",
   },
   {
     key: "category-rules",
     icon: DatabaseOutlined,
     title: "分类规则",
-    description: "配置来源分类到展示分类的合并映射。",
+    description: "把采集站的分类对应到前台显示的名称。",
     href: "/manage/collect/category/rules",
   },
   {
     key: "assets",
     icon: PictureOutlined,
     title: "素材中心",
-    description: "上传、预览和整理站内会用到的封面图与素材图。",
+    description: "管理上传的海报和封面。",
     href: "/manage/file",
   },
   {
     key: "subscribe",
     icon: LinkOutlined,
     title: "订阅地址",
-    description: "TVBox 订阅与播放器 API 接口。",
+    description: "复制 TVBox、MacCMS 和客户端订阅地址。",
     isAction: true,
   },
 ];
 
 export default function ManagePageView() {
   const [subscribeModalOpen, setSubscribeModalOpen] = useState(false);
-  const [primarySource, setPrimarySource] = useState<FilmSource | null>(null);
 
   return (
     <div className={styles.dashboard}>
@@ -90,11 +88,9 @@ export default function ManagePageView() {
         }
       />
 
-      <CollectOverview onPrimaryChange={setPrimarySource} />
+      <CollectOverview />
 
-      {primarySource?.id ? (
-        <InventoryStats key={primarySource.id} primaryId={primarySource.id} />
-      ) : null}
+      <InventoryStats />
 
       <Card
         className={styles.panelCard}

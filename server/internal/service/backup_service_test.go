@@ -482,7 +482,7 @@ func TestImportConfig_IgnoresDeprecatedCronTasks(t *testing.T) {
 	}
 }
 
-func TestImportConfig_FilmSources_PreservesLiveFilmCountAndRejectsDuplicateURI(t *testing.T) {
+func TestImportConfig_FilmSources_ReplacesAndRejectsDuplicateURI(t *testing.T) {
 	gdb := setupBackupTestDB(t)
 
 	prevFn := syncImportedSourceCategoriesFn
@@ -492,12 +492,11 @@ func TestImportConfig_FilmSources_PreservesLiveFilmCountAndRejectsDuplicateURI(t
 	})
 
 	if err := gdb.Create(&model.FilmSource{
-		Id:        "src_live",
-		Name:      "线上主站",
-		Uri:       "http://live.test/api",
-		State:     true,
-		Sort:      0,
-		FilmCount: 1135,
+		Id:    "src_live",
+		Name:  "线上主站",
+		Uri:   "http://live.test/api",
+		State: true,
+		Sort:  0,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -517,14 +516,14 @@ func TestImportConfig_FilmSources_PreservesLiveFilmCountAndRejectsDuplicateURI(t
 		t.Fatal("expected error for duplicate source uri")
 	}
 
-	// 2. 导入同名站点（备份带旧 FilmCount=0）与新站点（备份带脏 FilmCount=999）
+	// 2. 正常导入采集站替换生效
 	req := model.ConfigBackupImportRequest{
 		Modules: model.ConfigBackupModules{FilmSources: true},
 		Backup: model.ConfigBackup{
 			Version: model.ConfigBackupVersion,
 			FilmSources: []model.FilmSource{
-				{Id: "src_live", Name: "线上主站-更新", Uri: "http://live.test/api", State: true, FilmCount: 0},
-				{Id: "src_new", Name: "新站点", Uri: "http://new.test/api", State: true, FilmCount: 999},
+				{Id: "src_live", Name: "线上主站-更新", Uri: "http://live.test/api", State: true},
+				{Id: "src_new", Name: "新站点", Uri: "http://new.test/api", State: true},
 			},
 		},
 	}
@@ -533,11 +532,11 @@ func TestImportConfig_FilmSources_PreservesLiveFilmCountAndRejectsDuplicateURI(t
 	}
 
 	gotLive := repository.FindCollectSourceById("src_live")
-	if gotLive == nil || gotLive.FilmCount != 1135 {
-		t.Fatalf("expected live FilmCount=1135 preserved, got %+v", gotLive)
+	if gotLive == nil || gotLive.Name != "线上主站-更新" {
+		t.Fatalf("expected updated live source, got %+v", gotLive)
 	}
 	gotNew := repository.FindCollectSourceById("src_new")
-	if gotNew == nil || gotNew.FilmCount != 0 {
-		t.Fatalf("expected new source FilmCount=0 instead of backup stale count, got %+v", gotNew)
+	if gotNew == nil || gotNew.Name != "新站点" {
+		t.Fatalf("expected new source created, got %+v", gotNew)
 	}
 }

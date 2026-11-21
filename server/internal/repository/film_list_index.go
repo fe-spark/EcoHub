@@ -17,7 +17,7 @@ import (
 // FilmCategoryScoreIndex 排片按分类键、评分取前几部。
 const FilmCategoryScoreIndex = "idx_film_index_cat_score"
 
-// FilmSourceDeletedIndex 启动统计各采集站未删除影片数走覆盖索引，避免全表回表超时。
+// FilmSourceDeletedIndex 统计各采集站未删除影片数走覆盖索引，避免全表回表超时。
 const FilmSourceDeletedIndex = "idx_film_index_source_del"
 
 // CollectRecordFilmSourceIndex 让删站清理历史采集影片清单按 source_id 走索引，避免全表扫删。
@@ -29,7 +29,7 @@ func EnsureFilmCategoryScoreIndex() error {
 	return ensureTableIndex(model.TableFilmIndex, FilmCategoryScoreIndex, "category_key, score, hits, mid")
 }
 
-// EnsureFilmSourceDeletedIndex 让 RefreshFilmCounts 的 GROUP BY first_source_id 走覆盖索引。
+// EnsureFilmSourceDeletedIndex 让按 first_source_id 统计未删除影片数的 GROUP BY 查询走覆盖索引。
 // 不写进模型标签，避免启动时用 30 秒读超时去建这个索引；若表上已有同列前缀索引（如手动建的 idx_sourceid_del）则跳过。
 func EnsureFilmSourceDeletedIndex() error {
 	if db.Mdb == nil || db.Mdb.Dialector.Name() != "mysql" {
@@ -76,7 +76,7 @@ func ensureTableIndex(tableName, name, columns string) error {
 		return nil
 	}
 	log.Printf("[Init] 正在建立索引 %s.%s，数据较大时会久一些", tableName, name)
-	conn, err := openLongReadConn(config.MysqlDsn)
+	conn, err := OpenLongReadConn(config.MysqlDsn)
 	if err != nil {
 		return err
 	}
@@ -96,7 +96,8 @@ func ensureTableIndex(tableName, name, columns string) error {
 	return err
 }
 
-func openLongReadConn(dsn string) (*sql.DB, error) {
+// OpenLongReadConn 建立带长读超时的直连 MySQL 连接（30 分钟），供建索引与大表统计使用。
+func OpenLongReadConn(dsn string) (*sql.DB, error) {
 	if parsed, err := mysql.ParseDSN(dsn); err == nil {
 		parsed.ReadTimeout = 30 * time.Minute
 		parsed.WriteTimeout = 30 * time.Minute

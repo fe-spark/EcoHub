@@ -122,3 +122,48 @@ func TestBatchUsesClaimTokens_NotRetryTakenAfterStopAll(t *testing.T) {
 	}
 	progress.MarkStopped(src.Id)
 }
+
+func TestStopAllCancelsInflightProbeImmediately(t *testing.T) {
+	src := model.FilmSource{Id: "probe-cancel-fast", Name: "fast"}
+	entered := make(chan struct{})
+	canceled := make(chan struct{})
+	prev := fetchProbePageCount
+	fetchProbePageCount = func(ctx context.Context, _ *model.FilmSource, _ int) (int, error) {
+		close(entered)
+		<-ctx.Done()
+		close(canceled)
+		return 0, ctx.Err()
+	}
+	t.Cleanup(func() { fetchProbePageCount = prev })
+
+	claim, err := claimCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil || len(claim.Sources) != 1 {
+		t.Fatalf("claim failed: %v", err)
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claim.Sources, time.Now()).withClaim(claim)
+	defer batch.close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runSourcesGroupWithLimit(claim.Sources, 24, "Batch-Collect", 1, stopAllVersion.Load(), batch)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe did not start")
+	}
+
+	StopAllCollect("测试立即取消探页")
+	select {
+	case <-canceled:
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("StopAllCollect should cancel inflight probe ctx without polling delay")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("batch dispatch did not finish after probe cancel")
+	}
+}
