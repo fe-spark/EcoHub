@@ -77,6 +77,22 @@ const ALL_MODULES: ConfigBackupModules = {
   analytics: true,
 };
 
+function availableModulesFromBackup(backup: ConfigBackup | null): ConfigBackupModules {
+  if (!backup) {
+    return { ...ALL_MODULES };
+  }
+  return {
+    site: Boolean(backup.site),
+    filmSources: Array.isArray(backup.filmSources),
+    banners: Array.isArray(backup.bannerSlots) || Array.isArray(backup.banners),
+    notify: Boolean(backup.notify),
+    mappingRules: Array.isArray(backup.mappingRules),
+    proxy: Boolean(backup.proxy),
+    tmdb: Boolean(backup.tmdb),
+    analytics: Boolean(backup.analytics),
+  };
+}
+
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], {
     type: "application/json;charset=utf-8",
@@ -149,6 +165,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
   const [backup, setBackup] = useState<ConfigBackup | null>(null);
   const [fileName, setFileName] = useState("");
 
+  const availableModules = useMemo(() => availableModulesFromBackup(backup), [backup]);
   const backupSummary = useMemo(() => summarizeBackup(backup), [backup]);
 
   const openExport = () => {
@@ -196,6 +213,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
           return;
         }
         setBackup(parsed);
+        setModules(availableModulesFromBackup(parsed));
         setFileName(file.name);
         setPassword("");
         setImportOpen(true);
@@ -328,7 +346,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         onOk={() => void confirmImport()}
         okText="确认导入"
         confirmLoading={importing}
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, disabled: !Object.values(modules).some(Boolean) }}
         destroyOnHidden
         width={520}
       >
@@ -345,6 +363,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
                 <Checkbox
                   key={item.key}
                   checked={modules[item.key]}
+                  disabled={!availableModules[item.key]}
                   onChange={(e) =>
                     setModules((prev) => ({ ...prev, [item.key]: e.target.checked }))
                   }

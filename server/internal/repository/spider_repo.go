@@ -31,38 +31,58 @@ func GetCollectSourceList() ([]model.FilmSource, error) {
 
 // ReplaceCollectSources 用备份列表整体替换采集站（事务清空后写入）
 func ReplaceCollectSources(list []model.FilmSource) error {
+	next := append([]model.FilmSource(nil), list...)
+	now := time.Now()
+	for i := range next {
+		next[i].Id = strings.TrimSpace(next[i].Id)
+		next[i].Uri = strings.TrimSpace(next[i].Uri)
+		if next[i].Id == "" && next[i].Uri != "" {
+			next[i].Id = utils.GenerateHashKey(next[i].Uri)
+		}
+		if next[i].CreatedAt.IsZero() {
+			next[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
+		}
+		normalizeCollectSourceDefaults(&next[i])
+	}
+
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		// 保留本库已有站点的实时 film_count；新站置 0，避免把备份里的历史计数写进当前库。
+		var existingRows []struct {
+			Id        string `gorm:"column:id"`
+			FilmCount int64  `gorm:"column:film_count"`
+		}
+		if err := tx.Model(&model.FilmSource{}).Select("id, film_count").Find(&existingRows).Error; err != nil {
+			return err
+		}
+		existingCounts := make(map[string]int64, len(existingRows))
+		for _, row := range existingRows {
+			existingCounts[strings.TrimSpace(row.Id)] = row.FilmCount
+		}
+		for i := range next {
+			next[i].FilmCount = existingCounts[next[i].Id]
+		}
+
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}
-		if len(list) == 0 {
+		if len(next) == 0 {
 			return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerSlot{}).Error
 		}
-		now := time.Now()
-		for i := range list {
-			if list[i].Id == "" && list[i].Uri != "" {
-				list[i].Id = utils.GenerateHashKey(list[i].Uri)
-			}
-			if list[i].CreatedAt.IsZero() {
-				list[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
-			}
-			normalizeCollectSourceDefaults(&list[i])
-		}
 		// 不在新列表里的站点，它们的轮播一并删除。
-		ids := make([]string, 0, len(list))
-		for _, s := range list {
+		ids := make([]string, 0, len(next))
+		for _, s := range next {
 			ids = append(ids, s.Id)
 		}
 		if err := tx.Where("source_id NOT IN ?", ids).Delete(&model.BannerSlot{}).Error; err != nil {
 			return err
 		}
-		return insertFilmSources(tx, list)
+		return insertFilmSources(tx, next)
 	})
 	if err != nil {
 		return err
 	}
 	// 备份导入整体替换站点：存储的主站不在新列表时清空，由懒初始化按新列表重选
-	support.ReconcilePrimaryAfterSourceReplace(list)
+	support.ReconcilePrimaryAfterSourceReplace(next)
 	InvalidatePublicSourceCache()
 	return RefreshCollectSourceCatalog()
 }

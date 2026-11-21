@@ -130,13 +130,16 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	needCategoryRefresh := false
+	primaryChanged := false
 
 	if req.Modules.Site {
 		if err := repository.SaveSiteBasic(*backup.Site); err != nil {
 			return fmt.Errorf("导入网站配置失败: %w", err)
 		}
 		InvalidateMediaProxyMemoryCache()
-		filmsnapshot.BumpSearchCacheVersion()
+		if !req.Modules.FilmSources && !req.Modules.MappingRules {
+			filmsnapshot.BumpSearchCacheVersion()
+		}
 	}
 
 	if req.Modules.FilmSources {
@@ -164,13 +167,11 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if replaceErr != nil {
 			return replaceErr
 		}
-		applyPrimaryChanged(oldPrimaryBeforeImport, repository.CurrentPrimarySource())
+		primaryChanged = applyPrimaryChanged(oldPrimaryBeforeImport, repository.CurrentPrimarySource())
 		spider.ClearAllCMSSearchUnsupported()
 		clearProvideNetworkConfigCache()
-		filmsnapshot.BumpSearchCacheVersion()
 		filmsnapshot.ClearDynamicPlayCaches()
 		filmsnapshot.ClearDerivedFilmListCaches()
-		repository.ClearIndexPageCache()
 		needCategoryRefresh = true
 	}
 
@@ -218,8 +219,11 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 			syslog.Errorf("[Backup] 刷新来源分类映射失败: %v", err)
 		}
-		if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
-			syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
+		// applyPrimaryChanged 已执行过 RefreshAccessDataCaches，避免重复扫删 Redis 前缀
+		if !primaryChanged {
+			if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
+				syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
+			}
 		}
 	}
 	if req.Modules.Analytics {
@@ -246,13 +250,19 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 			return errors.New("备份中缺少采集站")
 		}
 		seenID := make(map[string]struct{}, len(b.FilmSources))
+		seenURI := make(map[string]struct{}, len(b.FilmSources))
 		for _, src := range b.FilmSources {
-			if !utils.ValidURL(src.Uri) {
+			uri := strings.TrimSpace(src.Uri)
+			if !utils.ValidURL(uri) {
 				return fmt.Errorf("采集站 %q 接口地址无效", src.Name)
 			}
+			if _, dup := seenURI[uri]; dup {
+				return fmt.Errorf("备份中包含重复采集站地址: %s", uri)
+			}
+			seenURI[uri] = struct{}{}
 			id := strings.TrimSpace(src.Id)
 			if id == "" {
-				id = utils.GenerateHashKey(src.Uri)
+				id = utils.GenerateHashKey(uri)
 			}
 			if _, dup := seenID[id]; dup {
 				return fmt.Errorf("备份中包含重复采集站 ID: %s", id)
