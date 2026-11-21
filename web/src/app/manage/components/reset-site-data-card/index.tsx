@@ -275,6 +275,10 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             placeholder="请输入管理密码"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
+            onPressEnter={() => {
+              if (!resetting) void confirmReset();
+            }}
+            autoComplete="current-password"
           />
         </Flex>
       </Modal>
