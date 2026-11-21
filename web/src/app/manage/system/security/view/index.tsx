@@ -363,6 +363,9 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             placeholder="请输入管理密码"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            onPressEnter={() => {
+              if (!importing) void confirmImport();
+            }}
             autoComplete="current-password"
           />
         </Flex>
@@ -388,6 +391,9 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             placeholder="请输入管理密码"
             value={exportPassword}
             onChange={(e) => setExportPassword(e.target.value)}
+            onPressEnter={() => {
+              if (!exporting) void confirmExport();
+            }}
             autoComplete="current-password"
           />
         </Flex>

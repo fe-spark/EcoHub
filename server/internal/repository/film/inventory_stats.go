@@ -49,7 +49,10 @@ func GetLibraryInventory() (LibraryInventory, error) {
 	if err != nil {
 		return library, err
 	}
-	library.Films = primarySource.FilmCount
+	// CurrentPrimarySource 走内存缓存，采集增减或重算 film_count 不会刷新该缓存，这里回查数据库以与各站统计保持一致。
+	if latest := repository.FindCollectSourceById(primary); latest != nil {
+		library.Films = latest.FilmCount
+	}
 	library.Categories = categories
 	if _, bySource, err := repository.CountTodayCollectFailures(time.Now()); err == nil {
 		library.Failures = bySource[primary]

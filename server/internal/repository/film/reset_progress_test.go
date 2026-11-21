@@ -123,3 +123,28 @@ func TestGetLibraryInventory_PrimaryOnly(t *testing.T) {
 		t.Fatalf("other source = %+v", other)
 	}
 }
+
+func TestGetLibraryInventory_ReflectsFilmCountAfterPrimaryCacheWarmed(t *testing.T) {
+	gdb := setupResetStatsDB(t)
+
+	gdb.Create(&model.FilmSource{Id: "src_a", Name: "首选站A", Uri: "http://a.test", State: true, Sort: 0, FilmCount: 0})
+	// 先预热主站内存缓存，模拟采集前已读取过主站
+	if primary := repository.CurrentPrimarySource(); primary == nil || primary.FilmCount != 0 {
+		t.Fatalf("expected warmed primary with FilmCount=0, got %+v", primary)
+	}
+
+	// 模拟采集入库后仅更新数据库中的 film_count
+	if err := gdb.Transaction(func(tx *gorm.DB) error {
+		return repository.AddFilmCountTx(tx, "src_a", 1135)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := GetLibraryInventory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Films != 1135 {
+		t.Fatalf("expected library films 1135 after count update, got %d", stats.Films)
+	}
+}
