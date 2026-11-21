@@ -1,3 +1,21 @@
+测试版 **v3.1.2-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.2`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.2-beta.2 更新内容
+
+- **跨源线路匹配**：分类名缺失时不再按各站本地 Pid 合并；「剧」「片」结尾不再自动归成电视剧或电影。
+- **片库规模**：采集中跳过的统计改为记脏，采集结束后再算；单片采集结束也会刷新。
+- **配置导入**：主站 ID 未变时仍失效搜索与首页缓存；重复采集站地址忽略主机大小写和结尾斜杠。
+- **停止采集**：先把任务标为停止再取消探页，避免刚登记的探页漏取消。
+
+---
+
 测试版 **v3.1.2-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

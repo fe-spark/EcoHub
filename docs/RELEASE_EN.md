@@ -1,3 +1,21 @@
+Pre-release **v3.1.2-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.2`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.2-beta.2` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.2-beta.2 changes
+
+- **Cross-source matching**: missing category names no longer match on each site's local Pid. Names ending in 剧 or 片 are no longer folded into TV or movie automatically.
+- **Library size**: refreshes skipped during collection are marked dirty and recomputed when collection ends. Single-film collection also refreshes stats.
+- **Config import**: search and homepage caches are cleared even when the primary source ID stays the same. Duplicate source addresses ignore host case and a trailing slash.
+- **Stop collection**: tasks are marked stopped before in-flight probes are canceled, so a probe registered in that gap is not left running.
+
+---
+
 Pre-release **v3.1.2-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
