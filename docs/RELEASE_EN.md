@@ -1,51 +1,18 @@
-Pre-release **v3.1.2-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.2`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
+Release **v3.1.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.2-beta.2` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.1.2-beta.2 changes
+### v3.1.2 changes
 
-- **Cross-source matching**: missing category names no longer match on each site's local Pid. Names ending in 剧 or 片 are no longer folded into TV or movie automatically.
-- **Library size**: refreshes skipped during collection are marked dirty and recomputed when collection ends. Single-film collection also refreshes stats.
-- **Config import**: search and homepage caches are cleared even when the primary source ID stays the same. Duplicate source addresses ignore host case and a trailing slash.
-- **Stop collection**: tasks are marked stopped before in-flight probes are canceled, so a probe registered in that gap is not left running.
-
----
-
-Pre-release **v3.1.2-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
-
-[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
-
-### Upgrade notes
-
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.2-beta.1` in your install directory, then run `docker compose pull && docker compose up -d`.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.1.2-beta.1 changes
-
-- **Library size**: removed incremental count caches in favor of async recalculation after collection finishes, showing ingesting/computing states in the UI.
-- **Collection stop**: enabled immediate probe cancellation, drops fetched pages when canceled before queue submission, and skips synchronous publish lock waits for stopped sources.
-- **Cross-source matching (#110)**: compares normalized root category semantics instead of per-source local `Pid`s when matching peer playlists and posters.
-
----
-
-Pre-release **v3.1.2-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
-
-[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
-
-### Upgrade notes
-
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.2-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.1.2-beta.0 changes
-
-- **Config import keeps live film counts (#109)**: replacing collect sources keeps the live film count for sources that already exist with the same ID; new sources start at 0. Import rejects duplicate source URIs. Modules absent from a backup cannot be selected.
-- **Library size sums every source (#108, #109)**: the workbench totals for films, categories, and today's failed pages now sum every collect source and match the per-source rows. The primary source film count no longer comes from a stale cache.
+- **Config import (#109)**: replacing collect sources keeps the live film count for sources that already exist with the same ID; new sources start at 0. Import rejects duplicate source addresses, ignoring host case and a trailing slash. Modules absent from a backup cannot be selected. Search and homepage caches are cleared even when the primary source ID stays the same.
+- **Library size (#108, #109)**: workbench totals for films, categories, and today's failed pages now sum every collect source. Incremental count caches are gone; stats recompute asynchronously after collection, with ingesting and computing states in the UI. Refreshes skipped during collection are marked dirty, and single-film collection also refreshes stats.
+- **Cross-source matching (#110)**: peer playlists and posters compare normalized root categories instead of each site's local Pid. Missing category names do not match. Names ending in 剧 or 片 are no longer folded into TV or movie automatically.
+- **Collection stop**: in-flight probes cancel immediately, fetched pages dropped before queueing are discarded, and stopped sources skip the synchronous publish lock. Tasks are marked stopped before probes are canceled.
 - **Admin UI**: the header primary-source selector labels the current primary and fixes alignment; the admin password confirm dialog submits on Enter (#108).
 
 ---

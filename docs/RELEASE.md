@@ -1,51 +1,18 @@
-测试版 **v3.1.2-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
+正式版 **v3.1.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
 
 ### 升级说明
 
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.2`，然后执行 `docker compose pull && docker compose up -d`。
+- v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
-### v3.1.2-beta.2 更新内容
+### v3.1.2 更新内容
 
-- **跨源线路匹配**：分类名缺失时不再按各站本地 Pid 合并；「剧」「片」结尾不再自动归成电视剧或电影。
-- **片库规模**：采集中跳过的统计改为记脏，采集结束后再算；单片采集结束也会刷新。
-- **配置导入**：主站 ID 未变时仍失效搜索与首页缓存；重复采集站地址忽略主机大小写和结尾斜杠。
-- **停止采集**：先把任务标为停止再取消探页，避免刚登记的探页漏取消。
-
----
-
-测试版 **v3.1.2-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
-
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.1`，然后执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.1.2-beta.1 更新内容
-
-- **片库规模**：移除增量计数缓存，改为采集结束后异步查库重算，前台展示「数据入库中」「计算中」状态。
-- **采集停止**：支持探页即时取消与抓取命中取消直接丢弃，已停站点跳过同步发布锁以缩短停止等待。
-- **跨源线路匹配（#110）**：跨源补全线路与海报时改为比对归一化一级大类语义，修复各站本地分类 ID 不同导致的误过滤。
-
----
-
-测试版 **v3.1.2-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
-
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`，然后执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.1.2-beta.0 更新内容
-
-- **配置导入保留片库计数（#109）**：替换采集站时，本库已有同 ID 站点保留实时影片数，新站记为 0；导入拒绝重复采集站地址；备份里没有的模块不可勾选。
-- **片库规模按全站汇总（#108、#109）**：工作台顶部影片、分类与当天失败页改为汇总全部采集站，与下方各站明细一致；主站影片数不再读过期缓存。
+- **配置导入（#109）**：替换采集站时，本库已有同 ID 站点保留实时影片数，新站记为 0；导入拒绝重复采集站地址（忽略主机大小写和结尾斜杠）；备份里没有的模块不可勾选。主站 ID 未变时仍失效搜索与首页缓存。
+- **片库规模（#108、#109）**：工作台顶部影片、分类与当天失败页改为汇总全部采集站；移除增量计数缓存，采集结束后异步查库重算，前台展示「数据入库中」「计算中」。采集中跳过的统计记脏，单片采集结束也会刷新。
+- **跨源线路匹配（#110）**：跨源补全线路与海报时比对归一化一级大类，不再用各站本地 Pid；分类名缺失不合并，「剧」「片」结尾不再自动归成电视剧或电影。
+- **采集停止**：探页可即时取消，已抓取但未入队的页面在取消后丢弃；已停站点跳过同步发布锁。停止时先标停止再取消探页。
 - **管理端交互**：顶栏主站选择器标明当前主站并修正对齐；管理密码确认弹窗支持回车提交（#108）。
 
 ---
