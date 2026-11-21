@@ -8,6 +8,7 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/spider/progress"
@@ -267,6 +268,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource, clearCate
 		filmsnapshot.RefreshAccessDataCaches()
 		filmsnapshot.ClearSearchCache()
 	}
+	filmrepo.RefreshInventoryStatsAsync()
 	return nil
 }
 
@@ -318,6 +320,7 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 			// D5：主站为空时，被启用的站经懒初始化自动成为主站
 			applyPrimaryChanged(oldPrimary, repository.CurrentPrimarySource())
 		}
+		filmrepo.RefreshInventoryStatsAsync()
 		return nil
 	})
 }
@@ -342,6 +345,7 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 			// D5：主站为空时新增的启用站自动成为主站
 			applyPrimaryChanged(nil, repository.CurrentPrimarySource())
 		}
+		filmrepo.RefreshInventoryStatsAsync()
 		return nil
 	})
 }

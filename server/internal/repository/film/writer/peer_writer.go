@@ -35,9 +35,6 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 	if err := tx.Create(&fi).Error; err != nil {
 		return nil, err
 	}
-	if err := repository.AddFilmCountTx(tx, sourceID, 1); err != nil {
-		return nil, err
-	}
 
 	pid := fi.Pid
 	if pid <= 0 {

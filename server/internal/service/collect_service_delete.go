@@ -8,6 +8,7 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/spider/progress"
@@ -308,5 +309,6 @@ func (s *CollectService) delFilmSource(id string) (int, error) {
 		return 0, err
 	}
 	spider.DropSourceRuntime(id)
+	filmrepo.RefreshInventoryStatsAsync()
 	return deletedCount, nil
 }

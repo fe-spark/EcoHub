@@ -33,6 +33,7 @@ func clearCategorySyncRedisCaches() {
 func finalizeCategorySync() {
 	repository.RefreshCategoryCache()
 	clearCategorySyncRedisCaches()
+	filmrepo.RefreshInventoryStatsAsync()
 }
 
 // StartCollect 执行对指定站点的采集任务
@@ -234,23 +235,9 @@ func (s *SpiderService) FollowSiteReset(ctx context.Context, onEvent func(any) e
 	}
 }
 
-// InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
-func (s *SpiderService) InventoryStats(scope string) (filmrepo.InventoryStats, error) {
-	stats := filmrepo.InventoryStats{Sources: []filmrepo.SourceInventory{}}
-	if scope == "sources" {
-		sources, err := filmrepo.GetSourceInventories()
-		if err != nil {
-			return stats, err
-		}
-		stats.Sources = sources
-		return stats, nil
-	}
-	library, err := filmrepo.GetLibraryInventory()
-	if err != nil {
-		return stats, err
-	}
-	stats.Library = library
-	return stats, nil
+// InventoryStats 返回工作台片库规模（顶部为全部已启用站点汇总，明细为各站真实已采集数据）。
+func (s *SpiderService) InventoryStats(ctx context.Context, refresh bool) (filmrepo.InventoryStats, error) {
+	return filmrepo.GetInventoryStats(ctx, refresh)
 }
 
 // CollectFilms 触发主站影片采集同步（兼容单个与批量）

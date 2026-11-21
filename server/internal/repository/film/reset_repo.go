@@ -119,4 +119,5 @@ func clearAllRuntimeAndRedisCaches() {
 		)
 		cache.ClearPatterns(config.TVBoxNetworkConfigCacheKey + ":*")
 	}
+	RefreshInventoryStatsAsync()
 }

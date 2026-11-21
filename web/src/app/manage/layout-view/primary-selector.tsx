@@ -76,13 +76,46 @@ export default function PrimarySelector({ isAdmin }: { isAdmin?: boolean }) {
   return (
     <Select
       value={displayPrimary?.id}
+      variant="filled"
       prefix={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <SwapOutlined />
-          当前主站
+          <span>当前主站</span>
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-block",
+              width: 1,
+              height: 12,
+              marginInlineStart: 2,
+              background: "var(--ant-color-border-secondary)",
+            }}
+          />
         </span>
       }
-      styles={{ prefix: { color: "var(--ant-color-text-secondary)" } }}
+      styles={{
+        root: {
+          borderRadius: 8,
+          minHeight: 32,
+          paddingBlock: 0,
+          alignItems: "center",
+        },
+        prefix: {
+          color: "var(--ant-color-text-tertiary)",
+          display: "inline-flex",
+          alignItems: "center",
+          lineHeight: 1.25,
+          marginInlineEnd: 8,
+        },
+        content: {
+          fontWeight: 500,
+          lineHeight: 1.25,
+          alignItems: "center",
+        },
+        placeholder: {
+          lineHeight: 1.25,
+        },
+      }}
       placeholder={loading ? undefined : "未配置"}
       loading={loading || switching || isDeletingPrimary}
       disabled={isAdmin !== true || loading || switching || isDeletingPrimary}

@@ -34,7 +34,7 @@ func ListFilmIndexBrief(mids []int64) ([]model.FilmIndex, error) {
 		return nil, ErrDatabaseUnavailable
 	}
 	var films []model.FilmIndex
-	err := db.Mdb.Select("mid", "first_source_id", "db_id", "name", "pid").Where("mid IN ?", mids).Find(&films).Error
+	err := db.Mdb.Select("mid", "first_source_id", "db_id", "name", "pid", "original_category", "c_name").Where("mid IN ?", mids).Find(&films).Error
 	return films, err
 }
 

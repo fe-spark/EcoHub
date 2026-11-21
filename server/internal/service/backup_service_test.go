@@ -481,3 +481,62 @@ func TestImportConfig_IgnoresDeprecatedCronTasks(t *testing.T) {
 		t.Fatal("deprecated task should not be imported")
 	}
 }
+
+func TestImportConfig_FilmSources_ReplacesAndRejectsDuplicateURI(t *testing.T) {
+	gdb := setupBackupTestDB(t)
+
+	prevFn := syncImportedSourceCategoriesFn
+	syncImportedSourceCategoriesFn = func() {}
+	t.Cleanup(func() {
+		syncImportedSourceCategoriesFn = prevFn
+	})
+
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_live",
+		Name:  "线上主站",
+		Uri:   "http://live.test/api",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. 备份中包含重复 Uri 时应在前置校验拦截，不覆盖现有站点
+	dupReq := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{FilmSources: true},
+		Backup: model.ConfigBackup{
+			Version: model.ConfigBackupVersion,
+			FilmSources: []model.FilmSource{
+				{Id: "a", Name: "站1", Uri: "http://dup.test/api"},
+				{Id: "b", Name: "站2", Uri: "http://dup.test/api"},
+			},
+		},
+	}
+	if err := BackupSvc.ImportConfig(dupReq); err == nil {
+		t.Fatal("expected error for duplicate source uri")
+	}
+
+	// 2. 正常导入采集站替换生效
+	req := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{FilmSources: true},
+		Backup: model.ConfigBackup{
+			Version: model.ConfigBackupVersion,
+			FilmSources: []model.FilmSource{
+				{Id: "src_live", Name: "线上主站-更新", Uri: "http://live.test/api", State: true},
+				{Id: "src_new", Name: "新站点", Uri: "http://new.test/api", State: true},
+			},
+		},
+	}
+	if err := BackupSvc.ImportConfig(req); err != nil {
+		t.Fatalf("import config failed: %v", err)
+	}
+
+	gotLive := repository.FindCollectSourceById("src_live")
+	if gotLive == nil || gotLive.Name != "线上主站-更新" {
+		t.Fatalf("expected updated live source, got %+v", gotLive)
+	}
+	gotNew := repository.FindCollectSourceById("src_new")
+	if gotNew == nil || gotNew.Name != "新站点" {
+		t.Fatalf("expected new source created, got %+v", gotNew)
+	}
+}

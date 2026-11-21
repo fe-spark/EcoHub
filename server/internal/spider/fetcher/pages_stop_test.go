@@ -76,3 +76,32 @@ func TestCollectPages_EmptyListPageTreatedAsSuccess(t *testing.T) {
 		t.Fatalf("expected no failed pages, got: %v", failedPages)
 	}
 }
+
+func TestCollectPages_DropsFetchedPageWhenCanceledBeforeSubmit(t *testing.T) {
+	oldDeps := deps
+	t.Cleanup(func() { deps = oldDeps })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	saveCalls := 0
+	deps.WaitTurn = func(context.Context, *model.FilmSource, string) (func(error), error) {
+		return func(error) {}, nil
+	}
+	deps.GetFilmDetail = func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
+		// 模拟抓取刚拿到响应时用户刚好点了停止，返回前 ctx 已取消。
+		cancel()
+		return []model.MovieDetail{{Id: 101, Name: "取消前拿到的数据"}}, nil
+	}
+	deps.SavePage = func(context.Context, *model.FilmSource, int, []model.MovieDetail) (scheduler.Mids, error) {
+		saveCalls++
+		return scheduler.Mids{}, nil
+	}
+
+	source := &model.FilmSource{Id: "test_drop_on_cancel", Name: "取消丢弃"}
+	hasWrites, succ, _, _, err := CollectPages(ctx, 1, nil, source, 24, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if hasWrites || succ != 0 || saveCalls != 0 {
+		t.Fatalf("canceled fetch must not submit save: hasWrites=%v succ=%d saveCalls=%d", hasWrites, succ, saveCalls)
+	}
+}

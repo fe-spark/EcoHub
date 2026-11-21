@@ -295,7 +295,7 @@ function ManageLayoutInner({
       ) : null}
       <Layout className={styles.mainLayout}>
         <Header className={styles.header}>
-          <Space size="small" split={<span className={styles.headerDivider} />}>
+          <Space size="small" separator={<span className={styles.headerDivider} />}>
             <Button
               type="text"
               icon={

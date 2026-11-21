@@ -8,6 +8,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -220,13 +222,18 @@ func processIncidentRecords(rows []model.CollectRecord, states map[string]*incid
 // CountTodayCollectFailures 统计北京时间当天采集的失败页。
 // 失败请求没有返回影片列表，库里没有失败部数，所以按失败页合计。进行中的批次也算。
 func CountTodayCollectFailures(now time.Time) (int64, map[string]int64, error) {
+	return CountTodayCollectFailuresDB(db.Mdb, now)
+}
+
+// CountTodayCollectFailuresDB 使用指定数据库连接统计北京时间当天采集的失败页。
+func CountTodayCollectFailuresDB(connDB *gorm.DB, now time.Time) (int64, map[string]int64, error) {
 	bySource := map[string]int64{}
-	if db.Mdb == nil {
+	if connDB == nil {
 		return 0, bySource, errors.New("数据库未连接")
 	}
 	start, end := shanghaiDayRange(now)
 	var rows []model.CollectRecord
-	err := db.Mdb.Select("page_failed", "detail_json").
+	err := connDB.Select("page_failed", "detail_json").
 		Where("started_at >= ? AND started_at < ?", start, end).
 		Find(&rows).Error
 	if err != nil {

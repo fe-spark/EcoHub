@@ -32,11 +32,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
 }
 
 /** 工作台：运行概览 + 当前主站（进入页面拉取一次） */
-interface CollectOverviewProps {
-  onPrimaryChange?: (primary: FilmSource | null) => void;
-}
-
-export default function CollectOverview({ onPrimaryChange }: CollectOverviewProps = {}) {
+export default function CollectOverview() {
   const { primary, loading: primaryLoading } = usePrimarySource();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,12 +93,6 @@ export default function CollectOverview({ onPrimaryChange }: CollectOverviewProp
     () => siteList.find((item) => item.isPrimary) ?? null,
     [siteList],
   );
-
-  useEffect(() => {
-    if (!loading) {
-      onPrimaryChange?.(topSite);
-    }
-  }, [topSite, loading, onPrimaryChange]);
 
   const summaryCardClassNames = {
     header: styles.summaryCardHead,

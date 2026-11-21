@@ -312,5 +312,6 @@ func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {
 	}
 	filmcache.ClearTVBoxConfigCache()
 	filmcache.ClearTVBoxListCache()
+	filmrepo.RefreshInventoryStatsAsync()
 	return nil
 }

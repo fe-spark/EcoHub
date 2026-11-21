@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -178,7 +177,7 @@ var fetchProbePageCount = func(ctx context.Context, s *model.FilmSource, hours i
 
 // probeSourcePageCount 探总页并写进度。有批次时只写本批次那一代的进度：
 // 一键终止后同站可能已开了新的重试，旧批次探页晚回来不能改掉重试的状态或总页。
-func probeSourcePageCount(s *model.FilmSource, h int, trigger string, batchCtx *collectBatchContext) error {
+func probeSourcePageCount(parentCtx context.Context, s *model.FilmSource, h int, trigger string, batchCtx *collectBatchContext) error {
 	if progress.IsStopped(s.Id) || progress.IsStopping(s.Id) {
 		return nil
 	}
@@ -193,28 +192,8 @@ func probeSourcePageCount(s *model.FilmSource, h int, trigger string, batchCtx *
 	if resolved == 0 {
 		return errors.New("采集时长不能为 0")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := progress.WithStopCancel(parentCtx, s.Id)
 	defer cancel()
-	stopCheck := time.NewTicker(200 * time.Millisecond)
-	defer stopCheck.Stop()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				syslog.Errorf("[Spider] 站点 %s 探页停止监听 panic: %v\n%s", s.Name, r, debug.Stack())
-			}
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stopCheck.C:
-				if progress.IsStopped(s.Id) || progress.IsStopping(s.Id) {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
 	pageCount, err := fetchProbePageCount(ctx, s, resolved)
 	if progress.IsStopped(s.Id) || progress.IsStopping(s.Id) {
 		return nil
@@ -315,7 +294,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			targetPages := batchCtx.getTargetPages(fs.Id)
 			if len(targetPages) > 0 {
 				batchCtx.setSourcePageTotal(fs.Id, len(targetPages))
-			} else if err := probeSourcePageCount(&fs, h, trigger, batchCtx); err != nil {
+			} else if err := probeSourcePageCount(context.Background(), &fs, h, trigger, batchCtx); err != nil {
 				syslog.Errorf("[%s] 站点 %s 总页探测失败: %v", tag, fs.Name, err)
 				if batchCtx != nil {
 					batchCtx.RecordSourceError(fs.Id, err.Error())
