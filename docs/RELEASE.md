@@ -1,13 +1,13 @@
-正式版 **v3.1.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+测试版 **v3.1.2-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.1。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
 
 ### 升级说明
 
-- v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`，然后执行 `docker compose pull && docker compose up -d`。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
-### v3.1.2 更新内容
+### v3.1.2-beta.0 更新内容
 
 - **配置导入保留片库计数（#109）**：替换采集站时，本库已有同 ID 站点保留实时影片数，新站记为 0；导入拒绝重复采集站地址；备份里没有的模块不可勾选。
 - **片库规模按全站汇总（#108、#109）**：工作台顶部影片、分类与当天失败页改为汇总全部采集站，与下方各站明细一致；主站影片数不再读过期缓存。

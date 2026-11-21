@@ -1,13 +1,13 @@
-Release **v3.1.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+Pre-release **v3.1.2-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.2-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.1 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.2-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.1.2 changes
+### v3.1.2-beta.0 changes
 
 - **Config import keeps live film counts (#109)**: replacing collect sources keeps the live film count for sources that already exist with the same ID; new sources start at 0. Import rejects duplicate source URIs. Modules absent from a backup cannot be selected.
 - **Library size sums every source (#108, #109)**: the workbench totals for films, categories, and today's failed pages now sum every collect source and match the per-source rows. The primary source film count no longer comes from a stale cache.
