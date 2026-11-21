@@ -7,17 +7,6 @@ import (
 	"server/internal/model"
 )
 
-// countPrimaryCategories 当前主站已映射、且展示分类还在的分类数。
-func countPrimaryCategories(primary string) (int64, error) {
-	var n int64
-	err := db.Mdb.Model(&model.CategoryMapping{}).
-		Where("source_id = ? AND category_id > 0", primary).
-		Where("category_id IN (?)", db.Mdb.Model(&model.Category{}).Select("id")).
-		Distinct("category_id").
-		Count(&n).Error
-	return n, err
-}
-
 type sourceCount struct {
 	SourceID string `gorm:"column:source_id"`
 	N        int64  `gorm:"column:n"`

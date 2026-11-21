@@ -29,9 +29,9 @@ interface InventoryStatsData {
 }
 
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
-  { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
-  { key: "categories", label: "分类", hint: "已映射且分类还在" },
-  { key: "failures", label: "采集失败页数", hint: "当天" },
+  { key: "films", label: "片库影片", hint: "全部采集站合计", lead: true },
+  { key: "categories", label: "分类", hint: "各站已映射且分类还在" },
+  { key: "failures", label: "采集失败页数", hint: "当天各站合计" },
 ];
 
 function formatCount(value: number | undefined) {

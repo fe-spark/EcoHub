@@ -9,8 +9,8 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
-// LibraryInventory 工作台片库规模，只含当前主站。
-// 分类是该站已映射且展示分类还在的节点。失败数是该站北京时间当天的采集失败页。
+// LibraryInventory 工作台片库规模，汇总全部采集站。
+// 影片、分类与当天失败页均为下方各采集站对应指标之和。
 type LibraryInventory struct {
 	Films      int64 `json:"films"`
 	Categories int64 `json:"categories"`
@@ -28,34 +28,23 @@ type SourceInventory struct {
 	Failures   int64  `json:"failures"`
 }
 
-// InventoryStats 工作台片库规模。首屏只填当前主站，展开时再填各站。
+// InventoryStats 工作台片库规模。首屏只填汇总指标，展开时再填各站。
 type InventoryStats struct {
 	Library LibraryInventory  `json:"library"`
 	Sources []SourceInventory `json:"sources"`
 }
 
-// GetLibraryInventory 统计当前主站的档案、分类和当天采集失败页。
+// GetLibraryInventory 汇总全部采集站的档案总数、分类总数和当天采集失败页总数。
 func GetLibraryInventory() (LibraryInventory, error) {
 	var library LibraryInventory
-	if db.Mdb == nil {
-		return library, filmsnapshot.ErrSearchIndexMissing
-	}
-	primarySource := repository.CurrentPrimarySource()
-	if primarySource == nil || strings.TrimSpace(primarySource.Id) == "" {
-		return library, nil
-	}
-	primary := strings.TrimSpace(primarySource.Id)
-	categories, err := countPrimaryCategories(primary)
+	sources, err := GetSourceInventories()
 	if err != nil {
 		return library, err
 	}
-	// CurrentPrimarySource 走内存缓存，采集增减或重算 film_count 不会刷新该缓存，这里回查数据库以与各站统计保持一致。
-	if latest := repository.FindCollectSourceById(primary); latest != nil {
-		library.Films = latest.FilmCount
-	}
-	library.Categories = categories
-	if _, bySource, err := repository.CountTodayCollectFailures(time.Now()); err == nil {
-		library.Failures = bySource[primary]
+	for _, source := range sources {
+		library.Films += source.Films
+		library.Categories += source.Categories
+		library.Failures += source.Failures
 	}
 	return library, nil
 }

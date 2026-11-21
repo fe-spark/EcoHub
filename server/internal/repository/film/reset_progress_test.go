@@ -38,7 +38,7 @@ func setupResetStatsDB(t *testing.T) *gorm.DB {
 	return gdb
 }
 
-func TestGetLibraryInventory_PrimaryOnly(t *testing.T) {
+func TestGetLibraryInventory_TotalsAcrossSources(t *testing.T) {
 	gdb := setupResetStatsDB(t)
 
 	gdb.Create(&model.FilmSource{Id: "src_a", Name: "首选站A", Uri: "http://a.test", State: true, Sort: 0})
@@ -103,7 +103,7 @@ func TestGetLibraryInventory_PrimaryOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Films != 4 || stats.Categories != 2 || stats.Failures != 4 {
+	if stats.Films != 5 || stats.Categories != 3 || stats.Failures != 6 {
 		t.Fatalf("library = %+v", stats)
 	}
 
@@ -128,6 +128,7 @@ func TestGetLibraryInventory_ReflectsFilmCountAfterPrimaryCacheWarmed(t *testing
 	gdb := setupResetStatsDB(t)
 
 	gdb.Create(&model.FilmSource{Id: "src_a", Name: "首选站A", Uri: "http://a.test", State: true, Sort: 0, FilmCount: 0})
+	gdb.Create(&model.FilmSource{Id: "src_b", Name: "备用站B", Uri: "http://b.test", State: true, Sort: 1, FilmCount: 500})
 	// 先预热主站内存缓存，模拟采集前已读取过主站
 	if primary := repository.CurrentPrimarySource(); primary == nil || primary.FilmCount != 0 {
 		t.Fatalf("expected warmed primary with FilmCount=0, got %+v", primary)
@@ -144,7 +145,7 @@ func TestGetLibraryInventory_ReflectsFilmCountAfterPrimaryCacheWarmed(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Films != 1135 {
-		t.Fatalf("expected library films 1135 after count update, got %d", stats.Films)
+	if stats.Films != 1635 {
+		t.Fatalf("expected library films 1635 after count update, got %d", stats.Films)
 	}
 }
