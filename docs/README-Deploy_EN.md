@@ -8,7 +8,7 @@ Image tags:
 
 | Tag | Points to | Use case |
 | --- | --- | --- |
-| `:v3.1.3`, etc. | A fixed release | Recommended. Change the tag manually to upgrade |
+| `:v3.1.4`, etc. | A fixed release | Recommended. Change the tag manually to upgrade |
 | `:latest` | The latest release, updated on every release | Always tracking the latest version |
 | Tags ending in `-beta` | Test builds | Not for production use. Deleted automatically after the next release |
 
@@ -37,7 +37,7 @@ openssl rand -hex 32
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.3 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.4 sh
 ```
 
 The script performs the following steps:
@@ -55,7 +55,7 @@ Variables must be placed before `sh`. Variables placed before `curl` are not pas
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.3 \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.4 \
     JWT_SECRET="$(openssl rand -hex 32)" \
     ECOHUB_ADMIN_PASSWORD='use-a-strong-password' \
     MYSQL_ROOT_PASSWORD='use-a-strong-password' \
@@ -143,7 +143,7 @@ Run `ecohub restart` afterwards.
 3. Set the environment variables:
 
 ```env
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.3
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.4
 WEB_PORT=3000
 SERVER_PORT=18080
 JWT_SECRET=replace-with-a-long-random-string
@@ -184,7 +184,7 @@ JWT_SECRET="$(openssl rand -hex 32)"
 
 docker pull mysql:8.4
 docker pull redis:7.4-alpine
-docker pull ghcr.io/fe-spark/ecohub:v3.1.3
+docker pull ghcr.io/fe-spark/ecohub:v3.1.4
 
 docker run -d --name Eco-mysql --restart always --network Eco-network \
   -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -221,7 +221,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -e REDIS_DB=0 \
   -v ~/ecohub/data/uploads:/app/static/upload \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/fe-spark/ecohub:v3.1.3
+  ghcr.io/fe-spark/ecohub:v3.1.4
 ```
 
 - Inside the app container, the database hosts are the container names `Eco-mysql` and `Eco-redis`.
