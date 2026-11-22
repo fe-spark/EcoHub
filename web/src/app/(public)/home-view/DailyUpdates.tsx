@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { SyncOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
+import { redirectToClientLogin } from "@/lib/client-api";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { playDailyIonSwap } from "./dailyIon";
 import { bindPixelHover } from "./pixelHover";
@@ -26,6 +27,10 @@ async function fetchDailyUpdates(exclude: string): Promise<DailyFilm[]> {
     params.set("exclude", exclude);
   }
   const res = await fetch(`/api/daily-updates?${params.toString()}`, { cache: "no-store" });
+  if (res.status === 401) {
+    redirectToClientLogin();
+    throw new Error("401");
+  }
   if (!res.ok) {
     throw new Error(String(res.status));
   }

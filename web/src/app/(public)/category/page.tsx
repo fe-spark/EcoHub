@@ -1,19 +1,41 @@
 import CategoryPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
-import { serverGet } from "@/lib/server-api";
+import {
+  getPublicServerErrorMessage,
+  isServerUnauthorizedError,
+  redirectToLogin,
+  serverGet,
+} from "@/lib/server-api";
 import { Alert } from "antd";
 
-async function getCategoryData(pid: string) {
+type CategoryLoadResult =
+  | { status: "ok"; data: any }
+  | { status: "invalid"; message: string }
+  | { status: "unauthorized" }
+  | { status: "error"; message: string };
+
+async function getCategoryData(pid: string): Promise<CategoryLoadResult> {
   try {
     const response = await serverGet<any>("/categories/overview", { pid });
     if (response.code === 0) {
-      return response.data;
+      return { status: "ok", data: response.data };
     }
-  } catch {
-    // 后端未就绪时走空态
+    if (response.msg === "主分类信息获取异常") {
+      return { status: "invalid", message: response.msg };
+    }
+    return {
+      status: "error",
+      message: response.msg || "分类页面数据获取失败",
+    };
+  } catch (error) {
+    if (isServerUnauthorizedError(error)) {
+      return { status: "unauthorized" };
+    }
+    return {
+      status: "error",
+      message: getPublicServerErrorMessage(error),
+    };
   }
-
-  return null;
 }
 
 export default async function CategoryPage({
@@ -25,7 +47,23 @@ export default async function CategoryPage({
   const pidValue = resolvedSearchParams.pid || resolvedSearchParams.Pid;
   const pid = Array.isArray(pidValue) ? pidValue[0] : pidValue;
 
-  const data = await getCategoryData(pid || "");
+  const result = await getCategoryData(pid || "");
+  if (result.status === "unauthorized") {
+    await redirectToLogin();
+  }
+
+  if (result.status === "error") {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        title="分类页面数据获取失败"
+        description={result.message}
+      />
+    );
+  }
+
+  const data = result.status === "ok" ? result.data : null;
   if (!data || !data.title || data.title.id === undefined || data.title.id === null) {
     if (pid) {
       return (

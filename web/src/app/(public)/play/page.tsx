@@ -1,6 +1,10 @@
 import PlayPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
-import { serverGet } from "@/lib/server-api";
+import {
+  isServerUnauthorizedError,
+  redirectToLogin,
+  serverGet,
+} from "@/lib/server-api";
 
 function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -39,10 +43,14 @@ export default async function PlayPage({
   }
 
   let playPageData: any = null;
+  let loadErrorMessage = "";
   try {
     playPageData = await getPlayData(filmId, sourceId, episodeIdx);
-  } catch {
-    // 后端未就绪时走空态
+  } catch (error) {
+    if (isServerUnauthorizedError(error)) {
+      await redirectToLogin();
+    }
+    loadErrorMessage = "服务连接异常，请稍后刷新重试。";
   }
 
   if (!playPageData) {
@@ -50,7 +58,10 @@ export default async function PlayPage({
       <PlayPageView
         data={null}
         filmId={filmId}
-        emptyMessage="当前影片播放数据不存在或已失效，请切换片源或返回详情页重试。"
+        emptyMessage={
+          loadErrorMessage ||
+          "当前影片播放数据不存在或已失效，请切换片源或返回详情页重试。"
+        }
       />
     );
   }

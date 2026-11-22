@@ -67,7 +67,7 @@ export default async function RootLayout({
 
   const cookieStore = await cookies();
   const savedMode = cookieStore.get(THEME_COOKIE_KEY)?.value;
-  const initialHasAuth = cookieStore.has("ecohub_auth_token");
+  const initialHasAuth = Boolean(cookieStore.get("ecohub_auth_token")?.value?.trim());
   const initialMode = isThemeMode(savedMode) ? savedMode : "dark";
   let initialEffective: "dark" | "light";
   if (initialMode !== "system") {
