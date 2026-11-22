@@ -13,6 +13,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func clearAuthCookieIfPresent(c *gin.Context) {
+	if cookieToken, err := c.Cookie(config.AuthCookieName); err == nil && cookieToken != "" {
+		ClearAuthCookie(c)
+	}
+}
+
 // PrivateAccessGuard 动态私有化守卫
 // 当后台开启「私有化访问」时，前台业务接口必须携带有效登录态或有效的订阅密钥（X-Provide-Key / ?key=）
 func PrivateAccessGuard() gin.HandlerFunc {
@@ -65,6 +71,7 @@ func PrivateAccessGuard() gin.HandlerFunc {
 						return
 					}
 					if status != 0 {
+						clearAuthCookieIfPresent(c)
 						dto.CustomResult(http.StatusUnauthorized, dto.FAILED, gin.H{"private_access": true}, "账号已被禁用", c)
 						c.Abort()
 						return
@@ -77,6 +84,8 @@ func PrivateAccessGuard() gin.HandlerFunc {
 					return
 				}
 			}
+			// 仅当请求携带了登录 Cookie 且校验失效时清理残留 Cookie，避免无 Cookie 的 Header 调用多出 Set-Cookie
+			clearAuthCookieIfPresent(c)
 		}
 
 		// 4. 既未提供有效 key，又无有效登录态，明确提示私有化

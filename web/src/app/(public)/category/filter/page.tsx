@@ -1,20 +1,33 @@
 import CategoryFilterPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
-import { serverGet } from "@/lib/server-api";
+import {
+  getPublicServerErrorMessage,
+  isServerUnauthorizedError,
+  redirectToLogin,
+  serverGet,
+} from "@/lib/server-api";
 import { Alert } from "antd";
 
 async function getCategoryFilterData(params: Record<string, string>) {
   try {
     const response = await serverGet<any>("/films/filter", params);
     if (response.code === 0) {
-      return { data: response.data, error: "" };
+      return { data: response.data, error: "", unauthorized: false };
     }
 
-    return { data: null, error: response.msg || "分类筛选数据获取失败" };
-  } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : "分类筛选数据获取失败",
+      error: response.msg || "分类筛选数据获取失败",
+      unauthorized: false,
+    };
+  } catch (error) {
+    if (isServerUnauthorizedError(error)) {
+      return { data: null, error: "", unauthorized: true };
+    }
+    return {
+      data: null,
+      error: getPublicServerErrorMessage(error, "分类筛选数据获取失败"),
+      unauthorized: false,
     };
   }
 }
@@ -38,7 +51,10 @@ export default async function CategoryFilterPage({
     }),
   );
 
-  const { data, error } = await getCategoryFilterData(currentParams);
+  const { data, error, unauthorized } = await getCategoryFilterData(currentParams);
+  if (unauthorized) {
+    await redirectToLogin();
+  }
   if (!data) {
     return (
       <Alert type="error" showIcon title={error || "分类筛选数据获取失败"} />

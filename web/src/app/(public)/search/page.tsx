@@ -1,10 +1,16 @@
+import { Alert } from "antd";
 import SearchPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
-import { serverGet } from "@/lib/server-api";
+import {
+  getPublicServerErrorMessage,
+  isServerUnauthorizedError,
+  redirectToLogin,
+  serverGet,
+} from "@/lib/server-api";
 
 async function getSearchData(keyword: string, sort?: string) {
   if (!keyword) {
-    return null;
+    return { data: null, error: "", unauthorized: false };
   }
 
   try {
@@ -16,25 +22,44 @@ async function getSearchData(keyword: string, sort?: string) {
     });
 
     if (response.code === 0) {
-      return response.data;
+      return { data: response.data, error: "", unauthorized: false };
     }
-  } catch {
-    // 后端未就绪时走空结果
-  }
 
-  return null;
+    return {
+      data: null,
+      error: response.msg || "搜索服务暂不可用",
+      unauthorized: false,
+    };
+  } catch (error) {
+    if (isServerUnauthorizedError(error)) {
+      return { data: null, error: "", unauthorized: true };
+    }
+    return {
+      data: null,
+      error: getPublicServerErrorMessage(error),
+      unauthorized: false,
+    };
+  }
 }
 
-async function getHotKeywordsData(): Promise<string[]> {
+async function getHotKeywordsData(): Promise<{
+  keywords: string[];
+  unauthorized: boolean;
+}> {
   try {
-    const response = await serverGet<string[]>("/search/hot-keywords", { limit: 8 });
+    const response = await serverGet<string[]>("/search/hot-keywords", {
+      limit: 8,
+    });
     if (response.code === 0 && Array.isArray(response.data)) {
-      return response.data;
+      return { keywords: response.data, unauthorized: false };
     }
-  } catch {
+  } catch (error) {
+    if (isServerUnauthorizedError(error)) {
+      return { keywords: [], unauthorized: true };
+    }
     // 热词失败时用空列表
   }
-  return [];
+  return { keywords: [], unauthorized: false };
 }
 
 export default async function SearchPage({
@@ -48,19 +73,37 @@ export default async function SearchPage({
   const keyword = Array.isArray(search) ? search[0] : (search ?? "");
   const currentSort = Array.isArray(sortParam) ? sortParam[0] : (sortParam ?? "");
 
-  const [data, hotKeywords] = await Promise.all([
+  const [searchResult, hotResult] = await Promise.all([
     getSearchData(keyword, currentSort),
     getHotKeywordsData(),
   ]);
 
+  if (searchResult.unauthorized || hotResult.unauthorized) {
+    await redirectToLogin();
+  }
+
+  if (searchResult.error) {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        title="搜索服务暂时不可用"
+        description={searchResult.error}
+      />
+    );
+  }
+
   return (
     <>
-      <TrackPageView action={keyword.trim() ? "search" : "browse"} resource={keyword} />
+      <TrackPageView
+        action={keyword.trim() ? "search" : "browse"}
+        resource={keyword}
+      />
       <SearchPageView
-        data={data}
+        data={searchResult.data}
         keyword={keyword}
         sort={currentSort}
-        hotKeywords={hotKeywords}
+        hotKeywords={hotResult.keywords}
       />
     </>
   );

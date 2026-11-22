@@ -131,14 +131,38 @@ func TestPrivateAccessGuard(t *testing.T) {
 			t.Errorf("expected 200 with provide key, got %d", w2.Code)
 		}
 
-		// 4. 携带仅 JWT 签名合法但 Redis 无凭据的伪造/注销 Token -> 401
+		// 4. 携带仅 JWT 签名合法但 Redis 无凭据的伪造/注销 Token -> 401，且携带 Cookie 时清理失效 Cookie
 		forgedToken, _ := utils.GenToken(999, "fakeUser", 2)
 		w3 := httptest.NewRecorder()
 		req3, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
-		req3.Header.Set("Authorization", "Bearer "+forgedToken)
+		req3.AddCookie(&http.Cookie{Name: config.AuthCookieName, Value: forgedToken})
 		r.ServeHTTP(w3, req3)
 		if w3.Code != http.StatusUnauthorized {
 			t.Errorf("expected 401 for token not present in redis, got %d", w3.Code)
+		}
+		cleared := false
+		for _, ck := range w3.Result().Cookies() {
+			if ck.Name == config.AuthCookieName && ck.MaxAge < 0 {
+				cleared = true
+				break
+			}
+		}
+		if !cleared {
+			t.Errorf("expected stale %s cookie to be cleared on 401", config.AuthCookieName)
+		}
+
+		// 4b. 仅携带 Authorization 头且无 Cookie 时，不额外下发清除 Cookie 头
+		w3b := httptest.NewRecorder()
+		req3b, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
+		req3b.Header.Set("Authorization", "Bearer "+forgedToken)
+		r.ServeHTTP(w3b, req3b)
+		if w3b.Code != http.StatusUnauthorized {
+			t.Errorf("expected 401 for forged bearer token, got %d", w3b.Code)
+		}
+		for _, ck := range w3b.Result().Cookies() {
+			if ck.Name == config.AuthCookieName {
+				t.Errorf("did not expect Set-Cookie for %s when request carried no cookie", config.AuthCookieName)
+			}
 		}
 
 		// 5. 携带 Redis 同步有效的合法 Token -> 200，且 user_id 为 uint 999

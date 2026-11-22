@@ -1,11 +1,34 @@
 import "server-only";
 import { headers as nextHeaders } from "next/headers";
+import { redirect } from "next/navigation";
 import { buildBackendApiUrl } from "@/lib/api-base";
+import {
+  ServerApiError,
+  buildHttpServerApiError,
+  buildLoginRedirectTarget,
+  getPublicServerErrorMessage,
+  isServerUnauthorizedError,
+} from "@/lib/server-api-error";
+
+export { ServerApiError, getPublicServerErrorMessage, isServerUnauthorizedError };
 
 export interface ApiResponse<T = any> {
   code: number;
   msg: string;
   data: T;
+}
+
+export async function redirectToLogin(): Promise<never> {
+  try {
+    const headerStore = await nextHeaders();
+    redirect(buildLoginRedirectTarget(headerStore.get("x-current-path")));
+  } catch (error) {
+    // Next.js redirect() 通过抛错中断渲染，不能被当作读取请求头异常吞掉
+    if (error && typeof error === "object" && "digest" in error) {
+      throw error;
+    }
+  }
+  redirect("/login");
 }
 
 const serverFetchTimeoutMs = 15000;
@@ -80,22 +103,32 @@ export async function serverGet<T = any>(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`服务端请求超时: ${apiUrl}`);
+      throw new ServerApiError({
+        message: `服务端请求超时: ${apiUrl}`,
+        status: 0,
+        isNetworkError: true,
+      });
     }
     // 连接失败是 TypeError("fetch failed")，Next 会当成未处理异常打到 Console overlay。
-    // 转成普通 Error，由各页面 catch 后降级。
-    throw new Error(`服务端请求失败: ${apiUrl}; ${reason}`);
+    // 转成 ServerApiError，由各页面按鉴权/网络/空态分别处理。
+    throw new ServerApiError({
+      message: `服务端请求失败: ${apiUrl}; ${reason}`,
+      status: 0,
+      isNetworkError: true,
+    });
   } finally {
     clearTimeout(timeout);
   }
 
   if (!response) {
-    throw new Error(`服务端请求失败: ${apiUrl}`);
+    throw new ServerApiError({
+      message: `服务端请求失败: ${apiUrl}`,
+      status: 0,
+      isNetworkError: true,
+    });
   }
   if (!response.ok) {
-    throw new Error(
-      `服务端请求失败: ${response.status} ${response.statusText} ${body.slice(0, 200)}`.trim(),
-    );
+    throw buildHttpServerApiError(response.status, response.statusText, body);
   }
 
   if (!body.trim()) {

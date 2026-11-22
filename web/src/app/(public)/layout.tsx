@@ -1,7 +1,10 @@
-import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import PublicLayoutView from "./layout-view";
-import { serverGet } from "@/lib/server-api";
+import {
+  isServerUnauthorizedError,
+  redirectToLogin,
+  serverGet,
+} from "@/lib/server-api";
 import type { SiteConfig } from "@/components/common/SiteGuard";
 
 interface NavItem {
@@ -11,8 +14,11 @@ interface NavItem {
 
 async function verifyPublicAccess() {
   const cookieStore = await cookies();
-  const hasAuth = cookieStore.has("ecohub_auth_token");
-  if (hasAuth) return;
+  const authToken = cookieStore.get("ecohub_auth_token")?.value?.trim();
+  if (authToken) {
+    // 令牌是否有效由下方受 PrivateAccessGuard 保护的 /categories 请求一并校验，避免额外请求
+    return;
+  }
 
   let isPrivate = false;
   try {
@@ -25,27 +31,24 @@ async function verifyPublicAccess() {
   }
 
   if (isPrivate) {
-    const headerStore = await headers();
-    const currentPath = headerStore.get("x-current-path");
-    if (currentPath && currentPath.startsWith("/") && !currentPath.startsWith("//")) {
-      redirect(`/login?redirect=${encodeURIComponent(currentPath)}`);
-    } else {
-      redirect("/login");
-    }
+    await redirectToLogin();
   }
 }
 
-async function getNavList(): Promise<NavItem[]> {
+async function getNavList(): Promise<{ items: NavItem[]; unauthorized: boolean }> {
   try {
     const response = await serverGet<NavItem[]>("/categories");
     if (response.code === 0 && Array.isArray(response.data)) {
-      return response.data;
+      return { items: response.data, unauthorized: false };
     }
-  } catch {
+  } catch (error) {
+    if (isServerUnauthorizedError(error)) {
+      return { items: [], unauthorized: true };
+    }
     // 导航失败时用空列表，避免把可恢复错误打到客户端 overlay
   }
 
-  return [];
+  return { items: [], unauthorized: false };
 }
 
 export default async function PublicLayout({
@@ -55,7 +58,10 @@ export default async function PublicLayout({
 }) {
   await verifyPublicAccess();
 
-  const navList = await getNavList();
+  const navResult = await getNavList();
+  if (navResult.unauthorized) {
+    await redirectToLogin();
+  }
 
-  return <PublicLayoutView navList={navList}>{children}</PublicLayoutView>;
+  return <PublicLayoutView navList={navResult.items}>{children}</PublicLayoutView>;
 }

@@ -7,6 +7,13 @@ export interface ApiResponse<T = any> {
   data: T;
 }
 
+export function redirectToClientLogin() {
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    const current = `${window.location.pathname}${window.location.search}`;
+    window.location.href = `/login?redirect=${encodeURIComponent(current)}`;
+  }
+}
+
 const instance: AxiosInstance = axios.create({
   baseURL: "/api",
   timeout: 80000,
@@ -28,7 +35,7 @@ instance.interceptors.response.use(
     }
     if (error.response?.status === 401) {
       message.error(error.response.data?.msg || "请先登录");
-      window.location.href = "/login";
+      redirectToClientLogin();
     } else if (error.response?.status === 403) {
       message.error(error.response.data?.msg || "无访问权限");
     } else {
