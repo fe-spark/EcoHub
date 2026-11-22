@@ -48,10 +48,13 @@ func (s *NotifyService) EnsureBotPoller() {
 	if cfg.Enabled {
 		token = strings.TrimSpace(cfg.BotToken)
 	}
-	_, proxyURL, err := repository.ResolveNotifyProxy()
+	ok, proxyURL, err := repository.ResolveNotifyProxy()
 	if err != nil {
 		syslog.Errorf("[Notify] 读取通知代理失败，保持轮询状态: %v", err)
 		return
+	}
+	if !ok {
+		proxyURL = ""
 	}
 	ensurePollerState(token, strings.TrimSpace(proxyURL))
 }
@@ -251,57 +254,64 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 	ctx, cancel := context.WithTimeout(parentCtx, 12*time.Second)
 	defer cancel()
 
+	// 独立短超时回答回调，避免 editTelegramMessage 超时取消 ctx 后客户端按钮一直转圈
+	answerCallback := func(text string, showAlert bool) {
+		ansCtx, ansCancel := context.WithTimeout(parentCtx, 5*time.Second)
+		defer ansCancel()
+		_ = answerTelegramCallback(ansCtx, token, cb.ID, text, showAlert)
+	}
+
 	batchID, action, catIdx, page, ok := parseNotifyCallback(cb.Data)
 	if !ok {
-		_ = answerTelegramCallback(ctx, token, cb.ID, "无效操作", false)
+		answerCallback("无效操作", false)
 		return
 	}
 
 	sess, err := repository.LoadNotifyBatchSession(batchID)
 	if err != nil {
-		_ = answerTelegramCallback(ctx, token, cb.ID, "该批次记录已过期", true)
+		answerCallback("该批次记录已过期", true)
 		return
 	}
 
 	switch action {
 	case "noop":
-		_ = answerTelegramCallback(ctx, token, cb.ID, "已经到底啦", false)
+		answerCallback("已经到底啦", false)
 		return
 	case "info":
-		_ = answerTelegramCallback(ctx, token, cb.ID, fmt.Sprintf("本次共更新 %d 部影片", len(sess.AllFilms)), false)
+		answerCallback(fmt.Sprintf("本次共更新 %d 部影片", len(sess.AllFilms)), false)
 		return
 	case "back":
 		if cb.Message == nil || cb.Message.Chat == nil {
-			_ = answerTelegramCallback(ctx, token, cb.ID, "无法定位原消息", true)
+			answerCallback("无法定位原消息", true)
 			return
 		}
 		chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
 		markup := buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
 		if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, sess.OverviewHTML, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
 			log.Printf("[Notify] 返回汇总失败: %v", err)
-			_ = answerTelegramCallback(ctx, token, cb.ID, "返回失败", false)
+			answerCallback("返回失败", false)
 			return
 		}
-		_ = answerTelegramCallback(ctx, token, cb.ID, "已返回采集汇总", false)
+		answerCallback("已返回采集汇总", false)
 		return
 	}
 
 	if cb.Message == nil || cb.Message.Chat == nil {
-		_ = answerTelegramCallback(ctx, token, cb.ID, "无法定位原消息", true)
+		answerCallback("无法定位原消息", true)
 		return
 	}
 	chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
 	text, totalPages, err := formatFilmListPageHTML(sess, catIdx, page)
 	if err != nil {
 		log.Printf("[Notify] 读取站点配置失败: %v", err)
-		_ = answerTelegramCallback(ctx, token, cb.ID, "翻页失败", false)
+		answerCallback("翻页失败", false)
 		return
 	}
 	markup := buildPagedKeyboard(sess.BatchID, catIdx, page, totalPages)
 	if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
 		log.Printf("[Notify] 翻页更新失败: %v", err)
-		_ = answerTelegramCallback(ctx, token, cb.ID, "翻页失败", false)
+		answerCallback("翻页失败", false)
 		return
 	}
-	_ = answerTelegramCallback(ctx, token, cb.ID, fmt.Sprintf("第 %d/%d 页", page, totalPages), false)
+	answerCallback(fmt.Sprintf("第 %d/%d 页", page, totalPages), false)
 }

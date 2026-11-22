@@ -526,3 +526,46 @@ func TestFetchStreak_AbandonAfterPauseWakesAndStopsBlockedWorker(t *testing.T) {
 		t.Fatal("tryBegin() remained deadlocked after last worker abandon()")
 	}
 }
+
+// 页都抓到了但一页都没入库时，也要立刻通知。连续抓取计数这时是成功的。
+func TestCollectPages_SaveFailureZeroSuccessNotifies(t *testing.T) {
+	env := setupFetchTest(t, func(int) bool { return false })
+	deps.SavePage = func(context.Context, *model.FilmSource, int, []model.MovieDetail) (scheduler.Mids, error) {
+		return scheduler.Mids{}, errors.New("db down")
+	}
+	var notified atomic.Int32
+	deps.OnSourceFailed = func(id, name, reason string) { notified.Add(1) }
+	source := &model.FilmSource{Id: "save_dead", Name: "入库全失败"}
+
+	has, succ, fail, _, err := CollectPages(context.Background(), 3, nil, source, 24, nil)
+	if has || succ != 0 || fail != 3 || err == nil {
+		t.Fatalf("has=%v succ=%d fail=%d err=%v", has, succ, fail, err)
+	}
+	if notified.Load() != 1 {
+		t.Fatalf("notified=%d, want 1", notified.Load())
+	}
+	pages, _ := env.snapshot()
+	if uniquePages(pages) != 3 {
+		t.Fatalf("requested %d pages, want 3", uniquePages(pages))
+	}
+}
+
+// 总页数少于连续失败阈值但 0 成功全失败时，仍应触发单源失败通知。
+func TestCollectPages_ShortBatchZeroSuccessNotifies(t *testing.T) {
+	env := setupFetchTest(t, func(int) bool { return true })
+	var notified atomic.Int32
+	deps.OnSourceFailed = func(id, name, reason string) { notified.Add(1) }
+	source := &model.FilmSource{Id: "short_dead", Name: "短死站"}
+
+	has, succ, fail, _, err := CollectPages(context.Background(), 3, nil, source, 24, nil)
+	if has || succ != 0 || fail != 3 || err == nil {
+		t.Fatalf("has=%v succ=%d fail=%d err=%v", has, succ, fail, err)
+	}
+	if notified.Load() != 1 {
+		t.Fatalf("notified=%d, want 1", notified.Load())
+	}
+	pages, _ := env.snapshot()
+	if uniquePages(pages) != 3 {
+		t.Fatalf("requested %d pages, want 3", uniquePages(pages))
+	}
+}

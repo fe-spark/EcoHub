@@ -37,7 +37,7 @@ func TestExecuteLogCleanTask(t *testing.T) {
 		Remark: "自动清理过期运行日志",
 	}
 	// Should execute without panic
-	executeLogCleanTask(ft)
+	executeLogCleanTask(ft, false)
 
 	// Test with empty remark fallback
 	ft2 := model.FilmCollectTask{
@@ -46,7 +46,7 @@ func TestExecuteLogCleanTask(t *testing.T) {
 		State:  true,
 		Remark: "",
 	}
-	executeLogCleanTask(ft2)
+	executeLogCleanTask(ft2, false)
 }
 
 func TestExecuteOrphanCleanTask_YieldsInFlightCollect(t *testing.T) {
@@ -68,7 +68,7 @@ func TestExecuteOrphanCleanTask_YieldsInFlightCollect(t *testing.T) {
 		time.Sleep(40 * time.Millisecond)
 		collectLifecycle.endSource("test_busy_src")
 	}()
-	executeOrphanCleanTask(ft)
+	executeOrphanCleanTask(ft, false)
 
 	if err := collectLifecycle.beginSource("after_clean"); err != nil {
 		t.Fatalf("collect should resume after clean: %v", err)
@@ -88,7 +88,7 @@ func TestFinishOrphanClean_NotifiesExecutedFailure(t *testing.T) {
 			reason = got
 		},
 	})
-	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", errors.New("刷新读模型失败"))
+	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, false, "片库清理", errors.New("刷新读模型失败"))
 	if reason != "刷新读模型失败" {
 		t.Fatalf("expected executed-failure notify, got %q", reason)
 	}
@@ -102,7 +102,7 @@ func TestFinishMaintenance_WriteWaitNotifies(t *testing.T) {
 		OnCronFailed: func(_, _, got string) { reason = got },
 	})
 	err := fmt.Errorf("等待在途写入结束失败: %w", context.DeadlineExceeded)
-	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, "片库清理", err)
+	finishMaintenance(model.FilmCollectTask{Id: "sys_cron_orphan_clean"}, false, "片库清理", err)
 	if reason != err.Error() {
 		t.Fatalf("reason = %q", reason)
 	}

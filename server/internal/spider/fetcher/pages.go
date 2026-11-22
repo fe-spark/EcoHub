@@ -431,7 +431,13 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	}
 	if stats.failed > 0 {
 		errMsg := formatFailedPagesError(stats.failedPages, stats.failed, stats.lastErr)
-		return stats.success > 0, stats.success, stats.failed, stats.failedPages, fmt.Errorf("站点 %s %s", s.Name, errMsg)
+		err := fmt.Errorf("站点 %s %s", s.Name, errMsg)
+		// 一页都没入库就通知。抓取成功但入库失败也算，不能看连续抓取计数。
+		// giveUp 已在 stopErr 分支返回，这里不会再发一次。
+		if stats.success == 0 && deps.OnSourceFailed != nil {
+			deps.OnSourceFailed(s.Id, s.Name, err.Error())
+		}
+		return stats.success > 0, stats.success, stats.failed, stats.failedPages, err
 	}
 	return stats.success > 0, stats.success, stats.failed, stats.failedPages, nil
 }

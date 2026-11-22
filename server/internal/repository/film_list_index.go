@@ -20,6 +20,9 @@ const FilmCategoryScoreIndex = "idx_film_index_cat_score"
 // FilmSourceDeletedIndex 统计各采集站未删除影片数走覆盖索引，避免全表回表超时。
 const FilmSourceDeletedIndex = "idx_film_index_source_del"
 
+// FilmCategoryDeletedIndex 统计各分类未删除影片数走覆盖索引，避免非主站百万数据回表。
+const FilmCategoryDeletedIndex = "idx_film_index_cat_del"
+
 // CollectRecordFilmSourceIndex 让删站清理历史采集影片清单按 source_id 走索引，避免全表扫删。
 const CollectRecordFilmSourceIndex = "idx_crf_source_id"
 
@@ -32,7 +35,17 @@ func EnsureFilmCategoryScoreIndex() error {
 // EnsureFilmSourceDeletedIndex 让按 first_source_id 统计未删除影片数的 GROUP BY 查询走覆盖索引。
 // 不写进模型标签，避免启动时用 30 秒读超时去建这个索引；若表上已有同列前缀索引（如手动建的 idx_sourceid_del）则跳过。
 func EnsureFilmSourceDeletedIndex() error {
-	if db.Mdb == nil || db.Mdb.Dialector.Name() != "mysql" {
+	return ensureTablePrefixIndex(model.TableFilmIndex, FilmSourceDeletedIndex, "first_source_id,deleted_at", "first_source_id, deleted_at")
+}
+
+// EnsureFilmCategoryDeletedIndex 让按 category_key 统计未删除影片数的 GROUP BY 查询走覆盖索引。
+// 不写进模型标签，避免启动时用 30 秒读超时去建这个索引；若表上已有同列前缀索引则跳过。
+func EnsureFilmCategoryDeletedIndex() error {
+	return ensureTablePrefixIndex(model.TableFilmIndex, FilmCategoryDeletedIndex, "category_key,deleted_at", "category_key, deleted_at")
+}
+
+func ensureTablePrefixIndex(tableName, name, colPrefix, columns string) error {
+	if db.Mdb == nil || db.Mdb.Dialector == nil || db.Mdb.Dialector.Name() != "mysql" {
 		return nil
 	}
 	var n int64
@@ -40,18 +53,18 @@ func EnsureFilmSourceDeletedIndex() error {
 		SELECT COUNT(*) FROM (
 			SELECT index_name
 			FROM information_schema.statistics
-			WHERE table_schema = DATABASE() AND table_name = 'film_index'
+			WHERE table_schema = DATABASE() AND table_name = ?
 			GROUP BY index_name
-			HAVING GROUP_CONCAT(column_name ORDER BY seq_in_index) LIKE 'first_source_id,deleted_at%'
+			HAVING GROUP_CONCAT(column_name ORDER BY seq_in_index) LIKE ?
 		) AS matched
-	`).Scan(&n).Error
+	`, tableName, colPrefix+"%").Scan(&n).Error
 	if err != nil {
 		return err
 	}
 	if n > 0 {
 		return nil
 	}
-	return ensureTableIndex(model.TableFilmIndex, FilmSourceDeletedIndex, "first_source_id, deleted_at")
+	return ensureTableIndex(tableName, name, columns)
 }
 
 // EnsureCollectRecordFilmSourceIndex 为 collect_record_film_items 补建 source_id 索引。

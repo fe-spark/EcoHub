@@ -152,17 +152,18 @@ func emitBatchNotify(b *collectBatchContext) {
 			}
 		}
 		results = append(results, model.SourceNotifyResult{
-			SourceID:    detail.SourceID,
-			SourceName:  detail.SourceName,
-			Sort:        src.Sort,
-			Status:      detail.Status,
-			Error:       detail.Error,
-			PageTotal:   detail.PageTotal,
-			PageCurrent: detail.PageCurrent,
-			SuccessCnt:  detail.SuccessCnt,
-			FailedCnt:   detail.FailedCnt,
-			FailedPages: copyFailedPages(detail.FailedPages),
-			FilmsTotal:  detail.FilmsTotal,
+			SourceID:     detail.SourceID,
+			SourceName:   detail.SourceName,
+			Sort:         src.Sort,
+			Status:       detail.Status,
+			Error:        detail.Error,
+			PageTotal:    detail.PageTotal,
+			PageCurrent:  detail.PageCurrent,
+			SuccessCnt:   detail.SuccessCnt,
+			FailedCnt:    detail.FailedCnt,
+			FailedPages:  copyFailedPages(detail.FailedPages),
+			FilmsTotal:   detail.FilmsTotal,
+			CategorySkip: b.CategorySkip(src.Id),
 		})
 	}
 	persistCollectRecord(b, results)
@@ -172,13 +173,33 @@ func emitBatchNotify(b *collectBatchContext) {
 		return
 	}
 
+	notifyResults := make([]model.SourceNotifyResult, len(results))
+	for i, r := range results {
+		r.Error = stripCategorySkipError(r.Error, r.CategorySkip)
+		notifyResults[i] = r
+	}
+
 	d.OnBatchSummary(model.CollectBatchNotifyPayload{
 		Trigger:    trigger,
 		StartedAt:  startedAt,
 		FinishedAt: time.Now(),
-		Sources:    results,
+		Sources:    notifyResults,
 		NotifyMIDs: mids,
 	})
+}
+
+func stripCategorySkipError(errMsg string, unmapped int) string {
+	if unmapped <= 0 || errMsg == "" {
+		return errMsg
+	}
+	skipMsg := formatCategorySkip(unmapped)
+	if errMsg == skipMsg {
+		return ""
+	}
+	if strings.HasSuffix(errMsg, "；"+skipMsg) {
+		return strings.TrimSuffix(errMsg, "；"+skipMsg)
+	}
+	return errMsg
 }
 
 func formatCategorySkip(unmapped int) string {

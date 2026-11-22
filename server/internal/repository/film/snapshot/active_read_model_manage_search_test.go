@@ -129,3 +129,39 @@ func detachGlobalDB(t *testing.T) {
 	db.Mdb = nil
 	t.Cleanup(func() { db.Mdb = prev })
 }
+
+func TestCountFilmsByCategoryKeys(t *testing.T) {
+	prevIdx := activeFilmSearchMetas.Load()
+	t.Cleanup(func() { activeFilmSearchMetas.Store(prevIdx) })
+
+	activeFilmSearchMetas.Store(nil)
+	if _, ok := CountFilmsByCategoryKeys("src_a"); ok {
+		t.Fatal("nil search index must report ok=false")
+	}
+
+	emptyIdx := sealSearchMetaIndex("v-empty", nil)
+	emptyIdx.PrimaryID = "src_a"
+	activeFilmSearchMetas.Store(emptyIdx)
+	if _, ok := CountFilmsByCategoryKeys("src_a"); ok {
+		t.Fatal("empty search index must report ok=false so live DB counts are used")
+	}
+
+	idx := sealSearchMetaIndex("v-cat-count", []FilmSearchMeta{
+		{Mid: 1, FirstSourceId: "src_a", CategoryKey: "source:src_a:6"},
+		{Mid: 2, FirstSourceId: "src_a", CategoryKey: "source:src_a:6"},
+		{Mid: 3, FirstSourceId: "src_a", CategoryKey: "source:src_a:7"},
+	})
+	idx.PrimaryID = "src_a"
+	activeFilmSearchMetas.Store(idx)
+
+	if _, ok := CountFilmsByCategoryKeys("src_b"); ok {
+		t.Fatal("non-primary source must report ok=false")
+	}
+	counts, ok := CountFilmsByCategoryKeys("src_a")
+	if !ok {
+		t.Fatal("primary source should hit in-memory index")
+	}
+	if counts["source:src_a:6"] != 2 || counts["source:src_a:7"] != 1 || len(counts) != 2 {
+		t.Fatalf("unexpected category counts: %#v", counts)
+	}
+}

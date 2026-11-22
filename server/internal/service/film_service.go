@@ -8,6 +8,7 @@ import (
 	filmcache "server/internal/repository/film/cache"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/film/writer"
+	"server/internal/spider"
 	"server/internal/spider/converter"
 	"strings"
 	"sync/atomic"
@@ -222,7 +223,22 @@ func (s *FilmService) GetClassTreeScope(sourceID string) (ClassTreeScope, error)
 	}
 	tree := model.CategoryTree{}
 	if targetID != "" {
-		tree = repository.GetSourceBoundCategoryTree(targetID)
+		var (
+			keyCounts map[string]int64
+			ok        bool
+		)
+		// 采集中或待检索封口期间内存快照尚未纳入新入库影片，主站同样实时回源统计。
+		if !spider.IsCollecting() {
+			keyCounts, ok = filmsnapshot.CountFilmsByCategoryKeys(targetID)
+		}
+		if !ok {
+			dbCounts, err := repository.SourceCategoryFilmCountsFromDB(targetID)
+			if err != nil {
+				return ClassTreeScope{}, err
+			}
+			keyCounts = dbCounts
+		}
+		tree = repository.GetSourceBoundCategoryTreeWithCounts(targetID, keyCounts)
 	}
 	return ClassTreeScope{
 		Tree:            tree,

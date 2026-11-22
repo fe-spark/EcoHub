@@ -62,4 +62,5 @@ type CategoryTree struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 	Children  []*CategoryTree `json:"children"`            // 子分類信息
 	MemberIds []int64         `json:"memberIds,omitempty"` // 规则合并后同一展示节点覆盖的分类 ID
+	FilmCount int64           `json:"filmCount"`           // 该分类对应影视数量（一级含下属子类汇总）
 }

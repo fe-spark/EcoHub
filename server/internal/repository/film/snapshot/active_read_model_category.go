@@ -426,6 +426,23 @@ func listedCategoryID(sourceID string, id int64) int64 {
 	return support.ResolveCategoryID(id)
 }
 
+// CountFilmsByCategoryKeys 若当前内存检索索引非空且与目标采集站（主站）匹配，直接返回按 category_key 汇总的影片数，零 SQL 开销。
+// 若快照尚未封入任何分类（如首采/重建前空快照），返回 ok=false 交由调用方回源查询数据库，避免把新入库影片误统计为 0。
+func CountFilmsByCategoryKeys(sourceID string) (map[string]int64, bool) {
+	sourceID = strings.TrimSpace(sourceID)
+	idx := activeFilmSearchMetas.Load()
+	if idx == nil || sourceID == "" || strings.TrimSpace(idx.PrimaryID) != sourceID || len(idx.Items) == 0 || len(idx.ByCategory) == 0 {
+		return nil, false
+	}
+	out := make(map[string]int64, len(idx.ByCategory))
+	for key, list := range idx.ByCategory {
+		if len(list) > 0 {
+			out[key] = int64(len(list))
+		}
+	}
+	return out, true
+}
+
 func dialectName(conn *gorm.DB) string {
 	if conn == nil || conn.Dialector == nil {
 		return ""

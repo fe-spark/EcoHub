@@ -154,8 +154,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ...savedDanmaku,
               fontSize: initialDanmakuLayout.fontSize,
               margin: initialDanmakuLayout.margin,
-              // 插件类型声明把档位值写成 string | number，实际是 [上边距, 下边距]
-              MARGIN: initialDanmakuLayout.MARGIN as never,
               // 中、窄播放器上固定弹幕按滚动显示，和滚动弹幕一起避让
               beforeVisible: smallPlayerScrollOnly(() => art?.template?.$player),
               synchronousPlayback: true,

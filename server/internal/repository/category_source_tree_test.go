@@ -226,3 +226,82 @@ func TestSaveSourceCategoryOrder_KeepsOtherSource(t *testing.T) {
 		t.Fatal("category from another source should be rejected")
 	}
 }
+
+func TestSourceCategoryFilmCountsFromDB_IsolationAndDeleted(t *testing.T) {
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { support.StoreMappingSnapshotForTest(prev) })
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}, &model.FilmIndex{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	seedSourceBoundTree(t, gdb)
+	ReloadMappingRules()
+	if err := gdb.Create([]model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:6"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:6"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:7"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:6"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 5, FirstSourceId: "src_a_2"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a_2:6"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 6, FirstSourceId: "src_b"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_b:2"}},
+	}).Error; err != nil {
+		t.Fatalf("seed FilmIndex: %v", err)
+	}
+	// 软删除 mid=4 后不应计入统计；同时验证 src_a 与 src_a_2、src_b 之间完全隔离。
+	if err := gdb.Where("mid = ?", 4).Delete(&model.FilmIndex{}).Error; err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+
+	counts, err := SourceCategoryFilmCountsFromDB("src_a")
+	if err != nil {
+		t.Fatalf("SourceCategoryFilmCountsFromDB: %v", err)
+	}
+	if counts["source:src_a:6"] != 2 || counts["source:src_a:7"] != 1 {
+		t.Fatalf("unexpected counts for src_a: %#v", counts)
+	}
+	if _, ok := counts["source:src_a_2:6"]; ok {
+		t.Fatalf("src_a_2 leaked into src_a counts: %#v", counts)
+	}
+	if _, ok := counts["source:src_b:2"]; ok {
+		t.Fatalf("src_b leaked into src_a counts: %#v", counts)
+	}
+}
+
+func TestGetSourceBoundCategoryTreeWithCounts_DeduplicatedSum(t *testing.T) {
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { support.StoreMappingSnapshotForTest(prev) })
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	seedSourceBoundTree(t, gdb)
+	// 追加一个已隐藏子类（typeId=8）及合并规则（将 6 与 8 合并后只算作同一组内去重 typeId）。
+	gdb.Create(&model.Category{Id: 12, Pid: 9, Name: "隐藏片", StableKey: "a-hidden", Show: false, Sort: 3})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 8, CategoryId: 12})
+	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 8, ParentSourceTypeId: 1, RawName: "隐藏片", Sort: 3, Depth: 1})
+	ReloadMappingRules()
+
+	keyCounts := map[string]int64{
+		"source:src_a:1": 5,
+		"source:src_a:6": 12,
+		"source:src_a:7": 8,
+		"source:src_a:8": 3,
+	}
+	tree := GetSourceBoundCategoryTreeWithCounts("src_a", keyCounts)
+	if len(tree.Children) != 1 {
+		t.Fatalf("unexpected roots: %+v", tree.Children)
+	}
+	root := tree.Children[0]
+	// 一级分类应汇总自身 + 所有可见/隐藏子类（5 + 12 + 8 + 3 = 28）。
+	if root.FilmCount != 28 {
+		t.Fatalf("root FilmCount=%d, want 28", root.FilmCount)
+	}
+	gotChild := map[int64]int64{}
+	for _, ch := range root.Children {
+		gotChild[ch.Id] = ch.FilmCount
+	}
+	if gotChild[10] != 12 || gotChild[11] != 8 || gotChild[12] != 3 {
+		t.Fatalf("child FilmCounts=%#v, want 10->12 11->8 12->3", gotChild)
+	}
+}

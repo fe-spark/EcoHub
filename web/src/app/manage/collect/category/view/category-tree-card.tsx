@@ -1,10 +1,11 @@
 import React, { useCallback, useMemo, useRef } from "react";
-import { Empty, Space, Switch, Table, Tag, Typography } from "antd";
+import { Empty, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   FolderOpenOutlined,
   HolderOutlined,
+  QuestionCircleOutlined,
   SubnodeOutlined,
 } from "@ant-design/icons";
 import {
@@ -219,6 +220,27 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
           return <Typography.Text strong={count > 0}>{count}</Typography.Text>;
         }
         return <Typography.Text type="secondary">-</Typography.Text>;
+      },
+    },
+    {
+      title: (
+        <Space size={4}>
+          <span>影片数</span>
+          <Tooltip title="主站统计全量分类影片，一级含子类汇总；非主站仅统计该站独立入库影片">
+            <QuestionCircleOutlined />
+          </Tooltip>
+        </Space>
+      ),
+      dataIndex: "filmCount",
+      width: 105,
+      align: "center",
+      render: (filmCount?: number) => {
+        const count = filmCount ?? 0;
+        return (
+          <Typography.Text strong={count > 0} type={count > 0 ? undefined : "secondary"}>
+            {count}
+          </Typography.Text>
+        );
       },
     },
     {

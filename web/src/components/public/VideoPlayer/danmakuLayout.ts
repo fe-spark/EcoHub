@@ -1,20 +1,22 @@
 /**
  * 弹幕按播放器尺寸排版。
  *
- * 插件的字号是固定像素（默认 25px），显示区域按整个播放器高度的百分比算。
- * 手机上播放页把播放器撑高（≤480px 宽时最小 360px 高），16:9 的画面上下留黑边：
- * 25px 字、按 360px 算的「半屏」会铺满画面并压到上方黑边。
- * 这里按播放器宽度缩放字号，按画面实际所在的区域换算显示区域，不看浏览器标识。
+ * 插件的字号是固定像素（默认 25px），这里以常规桌面小屏（BASE_WIDTH=960）为 1x 基准动态缩放字号：
+ * 手机/窄屏按比例缩小，全屏只略放大（1080p 约 1.2 倍，再大也不超过这个上限）；
+ * 显示区域沿用插件原生的 [上边距, 下边距]（如 [10, "50%"]），全屏与小屏均从播放器顶部起算，
+ * 存在上下黑边时可充分利用黑边空间，减少对正片画面的遮挡。
  */
 import { WIDE_FROM } from "./playerLayout";
 
 export type Size = number | `${number}%`;
 
-/** 播放器宽度达到这个值时用原始字号，更窄时按比例缩小 */
-export const FULL_SIZE_WIDTH = 575;
-/** 缩放下限：343px 宽约 0.6，25px 缩到 15px */
+/** 基准播放器宽度（常规桌面小屏约 960×540 时使用 1x 原始字号，窄屏按比例缩小、全屏最多 1.2 倍） */
+export const BASE_WIDTH = 960;
 const MIN_SCALE = 0.5;
+const MAX_SCALE = 1.2;
+const UP_SCALE_FACTOR = 0.2;
 const MIN_FONT_SIZE = 12;
+const MAX_FONT_SIZE = 120;
 export const DEFAULT_FONT_SIZE = 25;
 export const DEFAULT_MARGIN: [Size, Size] = [10, "50%"];
 /**
@@ -23,66 +25,35 @@ export const DEFAULT_MARGIN: [Size, Size] = [10, "50%"];
  */
 export const SCROLL_ONLY_WIDTH = WIDE_FROM;
 
-export function danmakuScale(playerWidth: number): number {
-  if (!(playerWidth > 0)) return 1;
-  return Math.min(1, Math.max(MIN_SCALE, playerWidth / FULL_SIZE_WIDTH));
+export function danmakuScale(playerWidth: number, playerHeight = 0): number {
+  // 按 16:9 等效宽度取宽高的较小约束，避免超宽屏/竖屏单边过大导致字号失真
+  const effectiveWidth = playerHeight > 0 ? Math.min(playerWidth, playerHeight * (16 / 9)) : playerWidth;
+  if (!(effectiveWidth > 0)) return 1;
+  const ratio = effectiveWidth / BASE_WIDTH;
+  const raw = ratio > 1 ? 1 + (ratio - 1) * UP_SCALE_FACTOR : ratio;
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, raw));
 }
 
-/** 小播放器上字号上限：约每 22px 宽 1px 字，343px 宽约 16px，不管保存的字号多大 */
+/** 窄屏字号上限：约每 22px 宽 1px 字，避免用户调大字号后在小屏撑满屏幕 */
 const SMALL_PLAYER_CHARS_PER_PX = 22;
 
 /**
- * 用户设定的字号（按大播放器计）换算成当前播放器上的像素。
- * 百分比字号按画面高度算（不是整个播放器高度，窄屏播放器上下有黑边）。
+ * 用户设定的字号（按 1x 基准播放器计）换算成当前播放器上的像素。
+ * 百分比字号按当前播放器高度换算。
  */
-export function effectiveFontSize(base: Size, playerWidth: number, contentHeight: number): number {
-  const px = typeof base === "number" ? base : (Number.parseFloat(base) / 100) * contentHeight;
-  let size = px * danmakuScale(playerWidth);
-  if (playerWidth > 0 && playerWidth < FULL_SIZE_WIDTH) size = Math.min(size, playerWidth / SMALL_PLAYER_CHARS_PER_PX);
-  return Math.max(MIN_FONT_SIZE, Math.round(size));
+export function effectiveFontSize(base: Size, playerWidth: number, playerHeight: number): number {
+  const px = typeof base === "number" ? base : (Number.parseFloat(base) / 100) * playerHeight;
+  let size = px * danmakuScale(playerWidth, playerHeight);
+  if (playerWidth > 0 && playerWidth < BASE_WIDTH) size = Math.min(size, playerWidth / SMALL_PLAYER_CHARS_PER_PX);
+  return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(size)));
 }
 
-/** 当前播放器上的像素字号反算回大播放器上的字号，用于保存 */
-export function baseFontSize(px: number, playerWidth: number): number {
-  return Math.round(px / danmakuScale(playerWidth));
+/** 当前播放器上的像素字号反算回 1x 基准播放器字号，用于保存 */
+export function baseFontSize(px: number, playerWidth: number, playerHeight = 0): number {
+  return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(px / danmakuScale(playerWidth, playerHeight))));
 }
 
-/** 画面在播放器里的上下位置（object-fit: contain）。不知道视频尺寸时按 16:9 算 */
-export function videoContentBox(
-  playerWidth: number,
-  playerHeight: number,
-  videoWidth?: number,
-  videoHeight?: number,
-): { top: number; height: number } {
-  const ratio = videoWidth && videoHeight ? videoHeight / videoWidth : 9 / 16;
-  const height = Math.min(playerHeight, Math.round(playerWidth * ratio));
-  return { top: Math.max(0, Math.round((playerHeight - height) / 2)), height };
-}
-
-const resolve = (v: Size, total: number) => (typeof v === "number" ? v : (Number.parseFloat(v) / 100) * total);
-
-/**
- * 用户选的显示区域（如 [10, "50%"]，含义是相对画面）换算成插件要的、相对整个播放器的像素边距。
- * 画面上下有黑边时，弹幕只出现在画面范围内。
- */
-export function effectiveMargin(
-  base: [Size, Size],
-  playerHeight: number,
-  box: { top: number; height: number },
-): [number, number] {
-  const bottomBand = Math.max(0, playerHeight - box.top - box.height);
-  return [Math.round(box.top + resolve(base[0], box.height)), Math.round(bottomBand + resolve(base[1], box.height))];
-}
-
-/** 插件「显示区域」滑块的四档（与插件默认相同），含义改为相对画面 */
-export const MARGIN_STEPS: { name: string; value: [Size, Size] }[] = [
-  { name: "1/4", value: [10, "75%"] },
-  { name: "半屏", value: [10, "50%"] },
-  { name: "3/4", value: [10, "25%"] },
-  { name: "满屏", value: [10, 10] },
-];
-
-/** 用户设定：字号按大播放器计，显示区域相对画面 */
+/** 用户设定：字号按大播放器计，显示区域相对播放器 */
 export interface DanmakuBase {
   fontSize: Size;
   margin: [Size, Size];
@@ -90,35 +61,28 @@ export interface DanmakuBase {
 
 export interface DanmakuLayoutOptions {
   fontSize: number;
-  margin: [number, number];
-  MARGIN: { steps: { name: string; value: [number, number] }[] };
+  margin: [Size, Size];
 }
 
 export function computeDanmakuLayout(
   base: DanmakuBase,
   playerWidth: number,
   playerHeight: number,
-  videoWidth?: number,
-  videoHeight?: number,
 ): DanmakuLayoutOptions {
-  const box = videoContentBox(playerWidth, playerHeight, videoWidth, videoHeight);
   return {
-    fontSize: effectiveFontSize(base.fontSize, playerWidth, box.height),
-    margin: effectiveMargin(base.margin, playerHeight, box),
-    // 滑块按值找当前档位，档位值也换算成像素，否则显示「未知」
-    MARGIN: { steps: MARGIN_STEPS.map((s) => ({ name: s.name, value: effectiveMargin(s.value, playerHeight, box) })) },
+    fontSize: effectiveFontSize(base.fontSize, playerWidth, playerHeight),
+    margin: base.margin,
   };
 }
 
 interface DanmakuPluginLike {
-  option: Record<string, unknown> & { margin?: unknown; fontSize?: unknown; MARGIN?: unknown };
+  option: Record<string, unknown> & { fontSize?: unknown };
   config(option: Record<string, unknown>): unknown;
   reset?(): unknown;
 }
 
 interface ArtLike {
   template: { $player?: HTMLElement };
-  video?: HTMLVideoElement;
   plugins: unknown;
   on(name: string, fn: (...args: any[]) => void): unknown;
 }
@@ -127,9 +91,9 @@ const plugin = (art: ArtLike) =>
   (art.plugins as { artplayerPluginDanmuku?: DanmakuPluginLike } | undefined)?.artplayerPluginDanmuku;
 
 /**
- * 播放器尺寸变化（窗口缩放、旋转、全屏、视频尺寸就绪）时重新换算字号和显示区域。
+ * 播放器尺寸变化（窗口缩放、旋转、全屏）时重新换算字号。
  * 换算出来的值只给插件用，不当成用户设置保存。
- * onUserChange 收到用户在设置面板里真正改动的字段（字号、显示区域已换回用户设定的含义）。
+ * onUserChange 收到用户在设置面板里真正改动的字段（字号已换回大播放器基准）。
  */
 export function bindDanmakuLayout(
   art: ArtLike,
@@ -149,20 +113,16 @@ export function bindDanmakuLayout(
     const p = plugin(art);
     const { w, h } = size();
     if (!p || !w || !h) return;
-    const next = computeDanmakuLayout(base, w, h, art.video?.videoWidth, art.video?.videoHeight);
+    const next = computeDanmakuLayout(base, w, h);
     // 尺寸变了：屏幕上正在飞的弹幕还按旧宽度、旧行位排着，换算后会和新弹幕叠在一起，清掉重新发
     const sizeKey = `${w}x${h}`;
     const resized = lastSize !== "" && lastSize !== sizeKey;
     lastSize = sizeKey;
     if (resized) p.reset?.();
-    const patch: Record<string, unknown> = {};
-    if (p.option.fontSize !== next.fontSize) patch.fontSize = next.fontSize;
-    if (JSON.stringify(p.option.margin) !== JSON.stringify(next.margin)) patch.margin = next.margin;
-    if (JSON.stringify(p.option.MARGIN) !== JSON.stringify(next.MARGIN)) patch.MARGIN = next.MARGIN;
-    if (Object.keys(patch).length === 0) return;
+    if (p.option.fontSize === next.fontSize) return;
     applying = true;
     try {
-      p.config(patch);
+      p.config({ fontSize: next.fontSize });
     } finally {
       applying = false;
     }
@@ -172,27 +132,14 @@ export function bindDanmakuLayout(
     const changed = diff(last, next);
     last = next;
     if (applying) return;
-    let relayout = false;
     if (typeof changed.fontSize === "number") {
-      base.fontSize = baseFontSize(changed.fontSize, size().w);
+      const { w, h } = size();
+      base.fontSize = baseFontSize(changed.fontSize, w, h);
       changed.fontSize = base.fontSize;
-      relayout = true;
-    }
-    if (changed.margin) {
-      const steps = (plugin(art)?.option.MARGIN as DanmakuLayoutOptions["MARGIN"] | undefined)?.steps ?? [];
-      const idx = steps.findIndex((s) => JSON.stringify(s.value) === JSON.stringify(changed.margin));
-      if (idx >= 0) {
-        base.margin = MARGIN_STEPS[idx].value;
-        changed.margin = base.margin;
-      } else {
-        delete changed.margin;
-      }
-      relayout = true;
     }
     if (Object.keys(changed).length) onUserChange(changed);
-    if (relayout) queueMicrotask(apply);
   });
-  for (const name of ["ready", "resize", "fullscreen", "fullscreenWeb", "video:loadedmetadata"]) art.on(name, apply);
+  for (const name of ["ready", "resize", "fullscreen", "fullscreenWeb"]) art.on(name, apply);
   // 只改容器尺寸（侧栏开合、页面排版变化）时窗口不触发 resize，另外盯住播放器本身
   if (typeof ResizeObserver !== "undefined" && art.template.$player) {
     let raf = 0;

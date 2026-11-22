@@ -14,6 +14,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
 	"server/internal/spider"
 	"server/internal/spider/progress"
@@ -272,10 +273,10 @@ func (s *NotifyService) PublishCronFailed(taskID, remark, reason string) {
 		title = taskID
 	}
 	text := fmt.Sprintf(
-		"<b>%s 定时任务失败告警</b>\n📌 任务：<b>%s</b>\n⚠️ 原因：<code>%s</code>\n🕒 时间：<code>%s</code>",
+		"<b>%s 定时任务失败告警</b>\n📌 任务：<b>%s</b>\n⚠️ 原因：%s\n🕒 时间：<code>%s</code>",
 		formatTitlePrefix(siteName),
-		html.EscapeString(title),
-		html.EscapeString(truncateReasonLines(reason, cronReasonLineMax, cronReasonTotalMax)),
+		html.EscapeString(singleLine(title)),
+		formatReasonCodeLines(reason, cronReasonLineMax, cronReasonTotalMax),
 		time.Now().Format("2006-01-02 15:04:05"),
 	)
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
@@ -302,6 +303,52 @@ func (s *NotifyService) PublishPrimaryChange(oldPrimary, newPrimary *model.FilmS
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
 }
 
+// PublishSourceOrderChange 发送采集站排序调整通知（复用 SourceOrderChange 事件开关）。
+func (s *NotifyService) PublishSourceOrderChange(enabledSources []model.FilmSource) {
+	cfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
+		return
+	}
+	if !cfg.Enabled || !cfg.Events.SourceOrderChange || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
+		return
+	}
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+		return
+	}
+	text := formatSourceOrderChangeHTML(basic.SiteName, enabledSources)
+	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+}
+
+func formatEnabledOrderLine(enabledSources []model.FilmSource) string {
+	var orderNames []string
+	for i, src := range enabledSources {
+		name := strings.TrimSpace(src.Name)
+		if name == "" {
+			name = src.Id
+		}
+		if i == 0 {
+			orderNames = append(orderNames, "<b>"+html.EscapeString(singleLine(name))+"</b>")
+		} else {
+			orderNames = append(orderNames, html.EscapeString(singleLine(name)))
+		}
+	}
+	if len(orderNames) == 0 {
+		return "无"
+	}
+	return strings.Join(orderNames, " → ")
+}
+
+func formatSourceOrderChangeHTML(siteName string, enabledSources []model.FilmSource) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>%s 采集站排序已调整</b>\n", formatTitlePrefix(siteName))
+	fmt.Fprintf(&b, "📋 启用顺序：%s\n", formatEnabledOrderLine(enabledSources))
+	fmt.Fprintf(&b, "🕒 时间：<code>%s</code>", time.Now().Format("2006-01-02 15:04:05"))
+	return b.String()
+}
+
 func formatPrimaryChangeHTML(siteName string, oldPrimary, newPrimary *model.FilmSource, enabledSources []model.FilmSource) string {
 	oldName := "无"
 	if oldPrimary != nil {
@@ -315,31 +362,15 @@ func formatPrimaryChangeHTML(siteName string, oldPrimary, newPrimary *model.Film
 			newName = name
 		}
 	}
-
-	var orderNames []string
-	for i, src := range enabledSources {
-		name := strings.TrimSpace(src.Name)
-		if name == "" {
-			name = src.Id
-		}
-		if i == 0 {
-			orderNames = append(orderNames, "<b>"+html.EscapeString(name)+"</b>")
-		} else {
-			orderNames = append(orderNames, html.EscapeString(name))
-		}
-	}
-	orderLine := "无"
-	if len(orderNames) > 0 {
-		orderLine = strings.Join(orderNames, " → ")
-	}
+	orderLine := formatEnabledOrderLine(enabledSources)
 
 	var b strings.Builder
 	if newPrimary == nil {
 		fmt.Fprintf(&b, "<b>%s 主站已置空</b>\n", formatTitlePrefix(siteName))
-		fmt.Fprintf(&b, "⚠️ 主站：<b>%s</b> → 无\n", html.EscapeString(oldName))
+		fmt.Fprintf(&b, "⚠️ 主站：<b>%s</b> → 无\n", html.EscapeString(singleLine(oldName)))
 	} else {
 		fmt.Fprintf(&b, "<b>%s 主站已切换</b>\n", formatTitlePrefix(siteName))
-		fmt.Fprintf(&b, "🔄 主站：<b>%s</b> → <b>%s</b>\n", html.EscapeString(oldName), html.EscapeString(newName))
+		fmt.Fprintf(&b, "🔄 主站：<b>%s</b> → <b>%s</b>\n", html.EscapeString(singleLine(oldName)), html.EscapeString(singleLine(newName)))
 	}
 	fmt.Fprintf(&b, "📋 启用顺序：%s\n", orderLine)
 	fmt.Fprintf(&b, "🕒 时间：<code>%s</code>", time.Now().Format("2006-01-02 15:04:05"))
@@ -425,14 +456,22 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 		}
 	}
 
+	visible := filmsnapshot.SourceCategoryVisibility(activeSourceID)
 	allFilms := make([]model.NotifyFilmItem, 0, len(metas))
 	buckets := make(map[int64][]model.NotifyFilmItem, len(nav))
 	var others []model.NotifyFilmItem
 
 	for _, m := range metas {
+		if !visible(m.CategoryKey, m.RootCategoryKey, m.Cid, m.Pid) {
+			continue
+		}
 		item := model.NotifyFilmItem{Mid: m.Mid, Name: m.Name}
 		allFilms = append(allFilms, item)
 		if rootID, ok := keyToRoot[m.CategoryKey]; ok && rootID > 0 {
+			buckets[rootID] = append(buckets[rootID], item)
+			continue
+		}
+		if rootID, ok := keyToRoot[m.RootCategoryKey]; ok && rootID > 0 {
 			buckets[rootID] = append(buckets[rootID], item)
 			continue
 		}

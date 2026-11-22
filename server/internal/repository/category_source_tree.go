@@ -5,11 +5,17 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 )
 
 // GetSourceBoundCategoryTree 分类管理树。分组、排序、显示与前台同一套规则。
 // 节点 ID 仍是 film_category.id，供保存；规则新合成的父组拥有独立合成行，不再借用首个子项 ID。
 func GetSourceBoundCategoryTree(sourceID string) model.CategoryTree {
+	return GetSourceBoundCategoryTreeWithCounts(sourceID, nil)
+}
+
+// GetSourceBoundCategoryTreeWithCounts 构建分类管理树，并按传入的 category_key 计数映射填充各节点影视数量。
+func GetSourceBoundCategoryTreeWithCounts(sourceID string, keyCounts map[string]int64) model.CategoryTree {
 	root := model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
 		Children: make([]*model.CategoryTree, 0),
@@ -22,8 +28,67 @@ func GetSourceBoundCategoryTree(sourceID string) model.CategoryTree {
 	if err != nil || len(view.Groups) == 0 {
 		return root
 	}
-	root.Children = adminTreeFromGroups(view.Groups, 0, loadSourceTypeCategories(sourceID), loadSyntheticRootCategories(sourceID))
+	root.Children = adminTreeFromGroups(view.Groups, 0, sourceID, keyCounts, loadSourceTypeCategories(sourceID), loadSyntheticRootCategories(sourceID))
 	return root
+}
+
+// SourceCategoryFilmCountsFromDB 从 film_index 按分类树实际使用的 category_key 精确集合聚合统计指定采集站各分类影片数。
+// 使用 IN (精确 key) 替代字符区间 [prefix:, prefix;) 比较，避免 MySQL utf8mb4_unicode_ci 下 ';' 排在 ':' 之前导致区间恒空。
+func SourceCategoryFilmCountsFromDB(sourceID string) (map[string]int64, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	out := make(map[string]int64)
+	if db.Mdb == nil || sourceID == "" {
+		return out, nil
+	}
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil || len(view.Groups) == 0 {
+		return out, err
+	}
+	keys := collectSourceTreeCategoryKeys(sourceID, view.Groups)
+	if len(keys) == 0 {
+		return out, nil
+	}
+	const batchSize = 500
+	for start := 0; start < len(keys); start += batchSize {
+		end := start + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		var rows []struct {
+			CategoryKey string `gorm:"column:category_key"`
+			Total       int64  `gorm:"column:total"`
+		}
+		if err := db.Mdb.Table(model.TableFilmIndex).
+			Select("category_key, COUNT(*) AS total").
+			Where("deleted_at IS NULL AND category_key IN ?", keys[start:end]).
+			Group("category_key").
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if key := strings.TrimSpace(r.CategoryKey); key != "" {
+				out[key] += r.Total
+			}
+		}
+	}
+	return out, nil
+}
+
+// collectSourceTreeCategoryKeys 汇总分类树所有分组关联的去重 category_key 列表。
+func collectSourceTreeCategoryKeys(sourceID string, groups []publicTypeGroup) []string {
+	seen := make(map[string]struct{}, len(groups)*4)
+	keys := make([]string, 0, len(groups)*4)
+	for _, group := range groups {
+		for _, typeID := range collectGroupAllTypeIDs(group) {
+			key := support.BuildSourceCategoryKey(sourceID, typeID)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 func loadSyntheticRootCategories(sourceID string) map[int64]model.Category {
@@ -77,21 +142,57 @@ func loadSourceTypeCategories(sourceID string) map[int64]model.Category {
 	return out
 }
 
-func adminTreeFromGroups(groups []publicTypeGroup, parentID int64, typeToCat map[int64]model.Category, syntheticCats map[int64]model.Category) []*model.CategoryTree {
+func collectGroupAllTypeIDs(group publicTypeGroup) []int64 {
+	seen := make(map[int64]struct{}, len(group.Members)+len(group.Children)*2)
+	out := make([]int64, 0, len(group.Members)+len(group.Children)*2)
+	var walk func(g publicTypeGroup)
+	walk = func(g publicTypeGroup) {
+		for _, id := range g.Members {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+		for _, child := range g.Children {
+			walk(child)
+		}
+	}
+	walk(group)
+	return out
+}
+
+func countGroupFilms(sourceID string, group publicTypeGroup, keyCounts map[string]int64) int64 {
+	if len(keyCounts) == 0 || sourceID == "" {
+		return 0
+	}
+	var total int64
+	for _, typeID := range collectGroupAllTypeIDs(group) {
+		if key := support.BuildSourceCategoryKey(sourceID, typeID); key != "" {
+			total += keyCounts[key]
+		}
+	}
+	return total
+}
+
+func adminTreeFromGroups(groups []publicTypeGroup, parentID int64, sourceID string, keyCounts map[string]int64, typeToCat map[int64]model.Category, syntheticCats map[int64]model.Category) []*model.CategoryTree {
 	out := make([]*model.CategoryTree, 0, len(groups))
 	for _, group := range groups {
-		node, memberIDs, ok := adminNodeFromGroup(group, parentID, typeToCat, syntheticCats)
+		node, memberIDs, ok := adminNodeFromGroup(group, parentID, sourceID, keyCounts, typeToCat, syntheticCats)
 		if !ok {
 			continue
 		}
-		node.Children = adminTreeFromGroups(group.Children, node.Id, typeToCat, syntheticCats)
+		node.Children = adminTreeFromGroups(group.Children, node.Id, sourceID, keyCounts, typeToCat, syntheticCats)
 		node.MemberIds = leftoverMemberIDs(node, memberIDs)
 		out = append(out, node)
 	}
 	return out
 }
 
-func adminNodeFromGroup(group publicTypeGroup, parentID int64, typeToCat map[int64]model.Category, syntheticCats map[int64]model.Category) (*model.CategoryTree, []int64, bool) {
+func adminNodeFromGroup(group publicTypeGroup, parentID int64, sourceID string, keyCounts map[string]int64, typeToCat map[int64]model.Category, syntheticCats map[int64]model.Category) (*model.CategoryTree, []int64, bool) {
 	var (
 		item      model.Category
 		memberIDs []int64
@@ -116,6 +217,7 @@ func adminNodeFromGroup(group publicTypeGroup, parentID int64, typeToCat map[int
 		CreatedAt: item.CreatedAt,
 		UpdatedAt: item.UpdatedAt,
 		Children:  make([]*model.CategoryTree, 0),
+		FilmCount: countGroupFilms(sourceID, group, keyCounts),
 	}, memberIDs, true
 }
 
