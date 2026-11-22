@@ -550,6 +550,34 @@ func TestCollectPages_SaveFailureZeroSuccessNotifies(t *testing.T) {
 	}
 }
 
+// 先抓到一页但入库失败，随后连续抓取失败被中断：入库数为 0，仍要通知一次。
+func TestCollectPages_FetchedThenSaveFailGiveUpNotifies(t *testing.T) {
+	shortenFailPause(t)
+	env := setupFetchTest(t, func(pg int) bool { return pg != 1 })
+	deps.SavePage = func(context.Context, *model.FilmSource, int, []model.MovieDetail) (scheduler.Mids, error) {
+		return scheduler.Mids{}, errors.New("db down")
+	}
+	var notified atomic.Int32
+	deps.OnSourceFailed = func(string, string, string) { notified.Add(1) }
+	source := &model.FilmSource{Id: "save_then_giveup", Name: "先抓到再中断"}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{*source}, "q-save-giveup")
+
+	has, succ, _, _, err := CollectPages(context.Background(), 100, nil, source, 24, nil)
+	if has || succ != 0 {
+		t.Fatalf("has=%v succ=%d, want 0 success", has, succ)
+	}
+	if err == nil || err.Error() != interruptReason {
+		t.Fatalf("err=%v", err)
+	}
+	if notified.Load() != 1 {
+		t.Fatalf("notified=%d, want 1", notified.Load())
+	}
+	pages, _ := env.snapshot()
+	if uniquePages(pages) != 41 {
+		t.Fatalf("requested %d pages, want 41", uniquePages(pages))
+	}
+}
+
 // 总页数少于连续失败阈值但 0 成功全失败时，仍应触发单源失败通知。
 func TestCollectPages_ShortBatchZeroSuccessNotifies(t *testing.T) {
 	env := setupFetchTest(t, func(int) bool { return true })

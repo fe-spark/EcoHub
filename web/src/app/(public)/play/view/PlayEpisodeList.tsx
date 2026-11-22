@@ -89,7 +89,8 @@ export default function PlayEpisodeList({
 
   const rangeCount = linkList.length > RANGE_THRESHOLD ? Math.ceil(linkList.length / RANGE_SIZE) : 1;
   const autoRange = activeIndex >= 0 ? Math.floor(activeIndex / RANGE_SIZE) : 0;
-  const rangeKey = `${viewingSourceId}:${activeIndex}:${linkList.length}`;
+  // 手选段只跟片源和集数走。放进正在播的集，连播一集就会丢掉倒序跳到的最后一段。
+  const rangeKey = `${viewingSourceId}:${linkList.length}`;
   const [pickedRange, setPickedRange] = useState<{ key: string; range: number } | null>(null);
   const rangeIndex = Math.min(
     rangeCount - 1,

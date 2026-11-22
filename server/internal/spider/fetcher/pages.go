@@ -147,10 +147,6 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 			if batch != nil {
 				batch.RecordSourceError(s.Id, reason)
 			}
-			proven := streak.succeeded()
-			if !proven && deps.OnSourceFailed != nil {
-				deps.OnSourceFailed(s.Id, s.Name, reason)
-			}
 			cancel()
 		})
 	}
@@ -423,6 +419,10 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 				cur.Status = progress.StatusFailed
 				cur.QueueId = ""
 			})
+			// 抓取曾经成功但一页都没入库时，不能靠连续抓取计数把通知吞掉。
+			if deps.OnSourceFailed != nil {
+				deps.OnSourceFailed(s.Id, s.Name, stopErr.Error())
+			}
 		}
 		return stats.success > 0, stats.success, stats.failed, stats.failedPages, stopErr
 	}
