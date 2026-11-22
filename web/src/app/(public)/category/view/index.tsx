@@ -1,8 +1,10 @@
 "use client";
 
 import React from "react";
+import { Empty } from "antd";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import FilmList from "@/components/public/FilmList";
+import EmptyCollectGuide from "@/components/public/EmptyCollectGuide";
 import {
   AppstoreOutlined,
   ClockCircleOutlined,
@@ -19,6 +21,7 @@ interface CategoryData {
     name?: string;
     pid?: number;
   };
+  indexReady?: boolean;
   content?: {
     news?: any[];
     top?: any[];
@@ -33,9 +36,14 @@ export default function CategoryPageView({
   data: CategoryData;
   pid: string;
 }) {
-  const { title, content } = data || {};
+  const { title, content, indexReady } = data || {};
   const { navigate } = useContentNavigate();
   const categoryName = title?.name || "分类";
+  const hasMovies =
+    (Array.isArray(content?.news) && content.news.length > 0) ||
+    (Array.isArray(content?.top) && content.top.length > 0) ||
+    (Array.isArray(content?.recent) && content.recent.length > 0);
+  const isIndexNotReady = indexReady === false;
 
   const handleNavigate = (url: string, label: string = "页面加载中") => {
     navigate(url, label);
@@ -120,28 +128,43 @@ export default function CategoryPageView({
         </div>
       </header>
 
-      {/* 3 大精选专题板块 */}
+      {/* 3 大精选专题板块或空态引导 */}
       <div className={styles.content}>
-        {renderSection(
-          "最新上映",
-          "院线精选与全网新上线内容",
-          <ClockCircleOutlined />,
-          content?.news,
-          "year",
-        )}
-        {renderSection(
-          "热度排行",
-          "全网高评分与观众热门推荐榜",
-          <FireOutlined />,
-          content?.top,
-          "hits",
-        )}
-        {renderSection(
-          "最近更新",
-          "最新收录与更新进度追踪",
-          <SyncOutlined />,
-          content?.recent,
-          "update_stamp",
+        {hasMovies ? (
+          <>
+            {renderSection(
+              "最新上映",
+              "院线精选与全网新上线内容",
+              <ClockCircleOutlined />,
+              content?.news,
+              "year",
+            )}
+            {renderSection(
+              "热度排行",
+              "全网高评分与观众热门推荐榜",
+              <FireOutlined />,
+              content?.top,
+              "hits",
+            )}
+            {renderSection(
+              "最近更新",
+              "最新收录与更新进度追踪",
+              <SyncOutlined />,
+              content?.recent,
+              "update_stamp",
+            )}
+          </>
+        ) : isIndexNotReady ? (
+          <EmptyCollectGuide
+            compact
+            badgeText={`${categoryName} · 片库待采集`}
+            title="片库尚未同步 · 从开启采集开始"
+            description={`当前「${categoryName}」分类已就绪，但片库检索索引尚未构建。前往采集中心同步片源后，即可浏览最新上映与热门榜单。`}
+          />
+        ) : (
+          <div className={styles.emptyState}>
+            <Empty description={`当前「${categoryName}」分类下暂无影片`} />
+          </div>
         )}
       </div>
     </div>

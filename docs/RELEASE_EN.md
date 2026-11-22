@@ -14,6 +14,7 @@ Release **v3.1.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2` (`:latest` also point
 - **Cross-source matching (#110)**: peer playlists and posters compare normalized root categories instead of each site's local Pid. Missing category names do not match. Names ending in 剧 or 片 are no longer folded into TV or movie automatically.
 - **Collection stop**: in-flight probes cancel immediately, fetched pages dropped before queueing are discarded, and stopped sources skip the synchronous publish lock. Tasks are marked stopped before probes are canceled.
 - **Admin UI**: the header primary-source selector labels the current primary and fixes alignment; the admin password confirm dialog submits on Enter (#108).
+- **Empty library & category guide**: show the collect-center guide on the homepage and valid category/filter pages when the search index is not ready yet; only report invalid category when the category does not exist or is hidden.
 
 ---
 

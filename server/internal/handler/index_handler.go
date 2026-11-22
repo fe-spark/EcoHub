@@ -254,6 +254,26 @@ func (h *IndexHandler) HotKeywords(c *gin.Context) {
 	dto.Success(list, "热门搜索获取成功", c)
 }
 
+func buildFilterParamsMap(pidStr, cidStr, yStr string, params model.SearchTagsVO) map[string]string {
+	return map[string]string{
+		"pid":      pidStr,
+		"category": cidStr,
+		"plot":     params.Plot,
+		"area":     params.Area,
+		"language": params.Language,
+		"year":     yStr,
+		"sort":     params.Sort,
+	}
+}
+
+func emptyClassifyContent() map[string]any {
+	return map[string]any{
+		"news":   []model.MovieBasicInfo{},
+		"top":    []model.MovieBasicInfo{},
+		"recent": []model.MovieBasicInfo{},
+	}
+}
+
 // FilmTagSearch 通过tag获取满足条件的对应影片 (GET /api/films/filter)
 func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params := model.SearchTagsVO{}
@@ -279,21 +299,6 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	}
 
 	cat := service.IndexSvc.GetPidCategory(params.Pid, params.SourceId)
-
-	list, err := service.IndexSvc.GetFilmsByTags(params, page)
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	if list == nil {
-		list = make([]model.MovieBasicInfo, 0)
-	}
-	searchTags, err := service.IndexSvc.SearchTags(params)
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-
 	var titleObj *model.Category
 	if cat != nil {
 		titleObj = &model.Category{
@@ -307,25 +312,53 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 			UpdatedAt: cat.UpdatedAt,
 		}
 	}
+	paramsMap := buildFilterParamsMap(pidStr, cidStr, yStr, params)
+	respondSuccess := func(title *model.Category, list []model.MovieBasicInfo, searchTags map[string]any, indexReady *bool, msg string) {
+		if list == nil {
+			list = make([]model.MovieBasicInfo, 0)
+		}
+		payload := gin.H{
+			"title":  title,
+			"list":   list,
+			"params": paramsMap,
+			"page":   page,
+		}
+		if indexReady != nil {
+			payload["indexReady"] = *indexReady
+		}
+		if hasSearchOptions(searchTags) {
+			payload["search"] = searchTags
+		}
+		dto.Success(service.WrapFilmTagSearchResult(payload), msg, c)
+	}
+	boolPtr := func(v bool) *bool { return &v }
 
-	response := gin.H{
-		"title": titleObj,
-		"list":  list,
-		"params": map[string]string{
-			"pid":      pidStr,
-			"category": cidStr,
-			"plot":     params.Plot,
-			"area":     params.Area,
-			"language": params.Language,
-			"year":     yStr,
-			"sort":     params.Sort,
-		},
-		"page": page,
+	// 分类不存在或已隐藏时直接返回空 title，避免被未就绪的检索索引报错掩盖失效状态
+	if titleObj == nil {
+		respondSuccess(nil, nil, nil, nil, "分类影片数据获取成功")
+		return
 	}
-	if hasSearchOptions(searchTags) {
-		response["search"] = searchTags
+
+	list, err := service.IndexSvc.GetFilmsByTags(params, page)
+	if err != nil {
+		if service.IsSearchIndexNotReadyError(err) {
+			respondSuccess(titleObj, nil, nil, boolPtr(false), "检索索引未就绪")
+			return
+		}
+		dto.Failed(err.Error(), c)
+		return
 	}
-	dto.Success(service.WrapFilmTagSearchResult(response), "分类影片数据获取成功", c)
+	searchTags, err := service.IndexSvc.SearchTags(params)
+	if err != nil {
+		if service.IsSearchIndexNotReadyError(err) {
+			respondSuccess(titleObj, list, nil, boolPtr(false), "检索索引未就绪")
+			return
+		}
+		dto.Failed(err.Error(), c)
+		return
+	}
+
+	respondSuccess(titleObj, list, searchTags, boolPtr(true), "分类影片数据获取成功")
 }
 
 // FilmClassify 影片分类首页数据展示 (GET /api/categories/overview)
@@ -360,11 +393,20 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 	}
 	content, err := service.IndexSvc.GetFilmClassify(pid, page, sourceId)
 	if err != nil {
+		if service.IsSearchIndexNotReadyError(err) {
+			dto.Success(gin.H{
+				"title":      title,
+				"indexReady": false,
+				"content":    service.WrapFilmClassifyContent(emptyClassifyContent()),
+			}, "检索索引未就绪", c)
+			return
+		}
 		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(gin.H{
-		"title":   title,
-		"content": service.WrapFilmClassifyContent(content),
+		"title":      title,
+		"indexReady": true,
+		"content":    service.WrapFilmClassifyContent(content),
 	}, "分类影片信息获取成功", c)
 }
