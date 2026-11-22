@@ -103,6 +103,16 @@ const EVENT_ITEMS: {
   },
 ];
 
+function isValidChatTarget(raw: string): boolean {
+  const target = raw.trim();
+  if (!target) return false;
+  const idx = target.indexOf(":");
+  if (idx < 0) return true;
+  if (idx === 0) return false;
+  const threadPart = target.slice(idx + 1).trim();
+  return /^[1-9]\d*$/.test(threadPart);
+}
+
 function normalizeNotifyConfig(raw?: Partial<NotifyConfigValues>): NotifyConfigValues {
   return {
     enabled: Boolean(raw?.enabled),
@@ -145,11 +155,15 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
         setServerData(normalized);
         form.setFieldsValue(normalized);
         setBaseline(normalized);
+      } else {
+        message.error(resp.msg || "获取通知配置失败");
       }
+    } catch {
+      message.error("获取通知配置失败");
     } finally {
       setFetching(false);
     }
-  }, [form, setBaseline]);
+  }, [form, message, setBaseline]);
 
   useEffect(() => {
     void fetchConfig();
@@ -188,6 +202,11 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
     }
     if (chatIds.length === 0) {
       message.error("请至少填写一个 Chat ID");
+      return;
+    }
+    const invalid = chatIds.find((id) => !isValidChatTarget(String(id)));
+    if (invalid) {
+      message.error(`Chat ID 格式无效: ${invalid}`);
       return;
     }
     setTesting(true);
@@ -301,11 +320,20 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                           <Form.Item
                             label="接收 Chat ID 列表"
                             name="chatIds"
-                            rules={
-                              isEnabled
+                            rules={[
+                              ...(isEnabled
                                 ? [{ required: true, message: "请至少输入一个 Chat ID" }]
-                                : []
-                            }
+                                : []),
+                              {
+                                validator: (_, val: string[] | undefined) => {
+                                  const invalid = (val || []).find((item) => !isValidChatTarget(String(item)));
+                                  if (invalid) {
+                                    return Promise.reject(new Error(`Chat ID 格式无效: ${invalid}`));
+                                  }
+                                  return Promise.resolve();
+                                },
+                              },
+                            ]}
                             tooltip="输入个人/群组/频道 ID 回车添加；群话题支持 chatId:threadId 格式"
                           >
                             <Select

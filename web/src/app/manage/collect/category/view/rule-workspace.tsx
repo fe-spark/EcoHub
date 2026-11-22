@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Form, Input, Pagination, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { PlusOutlined, ReloadOutlined, SearchOutlined, SlidersOutlined } from "@ant-design/icons";
@@ -12,29 +12,26 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import { usePrimarySource } from "@/lib/manage-primary";
 import {
-  checkCategoryRuleConflict,
   deleteCategoryRule,
+  getCategoryRuleContext,
   getCategoryRules,
-  getCategoryRuleTotals,
   getFilmClassTree,
-  previewCategoryRule,
   saveCategoryRule,
+  type CategoryRuleContextData,
 } from "./api";
 import RuleEditorDrawer from "./rule-editor-drawer";
+import { buildFinalCategoryPreview, buildNextRawInput, findLocalRuleConflicts } from "./rule-preview-engine";
 import styles from "./index.module.less";
 import {
   ALL_CATEGORY_GROUP,
   CATEGORY_FILTER_GROUPS,
   CATEGORY_GROUPS,
-  emptyRuleMergePreview,
   ROOT_GROUP,
   SUB_GROUP,
   resolveGroupLabel,
-  type ConflictCheckResult,
   type MappingRuleRecord,
   type PagingState,
   type RuleFormValues,
-  type RuleMergePreview,
 } from "./types";
 
 interface RuleWorkspaceProps {
@@ -56,8 +53,6 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   const [paging, setPaging] = useState<PagingState>({ current: 1, pageSize: 10, total: 0 });
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingRule, setEditingRule] = useState<MappingRuleRecord | null>(null);
-  const [checkingConflict, setCheckingConflict] = useState(false);
-  const [conflictRules, setConflictRules] = useState<ConflictCheckResult[]>([]);
   const [ruleForm] = Form.useForm<RuleFormValues>();
   const watchedGroup = Form.useWatch("group", ruleForm);
   const watchedRaw = Form.useWatch("raw", ruleForm);
@@ -65,28 +60,16 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   const watchedMatchType = Form.useWatch("matchType", ruleForm);
   const [sources, setSources] = useState<{ id: string; name: string; state?: boolean }[]>([]);
   const [sourceId, setSourceId] = useState("");
-  const [mergePreview, setMergePreview] = useState<RuleMergePreview>(emptyRuleMergePreview);
-
-  const fetchRuleTotals = useCallback(
-    async (nextSourceId: string) => {
-      if (!nextSourceId) {
-        onRuleTotalsChange({ [ROOT_GROUP]: 0, [SUB_GROUP]: 0 });
-        return;
-      }
-      try {
-        onRuleTotalsChange(await getCategoryRuleTotals(nextSourceId));
-      } catch {
-        // 规则统计只用于摘要展示，失败不阻断主流程。
-      }
-    },
-    [onRuleTotalsChange],
-  );
+  const [contextLoading, setContextLoading] = useState(false);
+  const [ruleContexts, setRuleContexts] = useState<Record<string, CategoryRuleContextData>>({});
+  const contextCacheRef = useRef<Record<string, CategoryRuleContextData>>({});
 
   const fetchRules = useCallback(
     async (page: number, pageSize: number, nextKeyword: string, nextGroup: string, nextSourceId: string) => {
       if (!nextSourceId) {
         setRules([]);
         setPaging({ current: 1, pageSize, total: 0 });
+        onRuleTotalsChange({ [ROOT_GROUP]: 0, [SUB_GROUP]: 0 });
         return;
       }
       setRulesLoading(true);
@@ -98,12 +81,48 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         }
         setRules(parsed.rules.filter((item) => CATEGORY_GROUPS.includes(item.group)));
         setPaging(parsed.paging);
+        if (parsed.totals) {
+          onRuleTotalsChange(parsed.totals);
+        }
       } finally {
         setRulesLoading(false);
       }
     },
+    [message, onRuleTotalsChange],
+  );
+
+  const ensureRuleContext = useCallback(
+    async (targetSourceId: string, force = false) => {
+      if (!targetSourceId) return;
+      if (!force && contextCacheRef.current[targetSourceId]) {
+        return;
+      }
+      setContextLoading(true);
+      try {
+        const { resp, context } = await getCategoryRuleContext(targetSourceId);
+        if (resp.code !== 0) {
+          message.error(resp.msg || "当前分类拉取失败");
+          return;
+        }
+        contextCacheRef.current[targetSourceId] = context;
+        setRuleContexts((prev) => ({ ...prev, [targetSourceId]: context }));
+      } finally {
+        setContextLoading(false);
+      }
+    },
     [message],
   );
+
+  const invalidateRuleContext = useCallback((targetSourceId: string) => {
+    if (!targetSourceId) return;
+    delete contextCacheRef.current[targetSourceId];
+    setRuleContexts((prev) => {
+      if (!(targetSourceId in prev)) return prev;
+      const next = { ...prev };
+      delete next[targetSourceId];
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -118,67 +137,56 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   }, [message]);
 
   useEffect(() => {
-    void fetchRuleTotals(sourceId);
-  }, [fetchRuleTotals, sourceId]);
-
-  useEffect(() => {
     if (!sourceId) {
       return;
     }
     void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId);
   }, [fetchRules, keyword, paging.pageSize, ruleGroup, sourceId]);
 
-  useEffect(() => {
-    if (!editorVisible) {
-      setCheckingConflict(false);
-      setConflictRules([]);
-      setMergePreview(emptyRuleMergePreview);
-      return;
+  const activeContext = sourceId ? ruleContexts[sourceId] : undefined;
+
+  // 弹窗打开时按需拉取一次当前分类与全量规则，输入过程中纯本地计算冲突与最终全部分类预览
+  const conflictRules = useMemo(() => {
+    if (!editorVisible || !activeContext) {
+      return [];
     }
-    const group = String(watchedGroup || "").trim();
-    const raw = String(watchedRaw || "").trim();
-    const matchType = String(watchedMatchType || "").trim();
-    const target = String(watchedTarget || "").trim();
-    if (!group || !raw || !matchType || !sourceId) {
-      setCheckingConflict(false);
-      setConflictRules([]);
-      setMergePreview(emptyRuleMergePreview);
-      return;
-    }
-    const timer = window.setTimeout(async () => {
-      setCheckingConflict(true);
-      setMergePreview((prev) => ({ ...prev, loading: true }));
-      try {
-        const [{ resp, rules: conflictList }, previewResult] = await Promise.all([
-          checkCategoryRuleConflict({ id: editingRule?.id, sourceId, group, raw, matchType }),
-          previewCategoryRule({ sourceId, group, raw, matchType, target }),
-        ]);
-        if (resp.code === 0) {
-          setConflictRules(conflictList);
-        }
-        setMergePreview(previewResult.preview);
-      } finally {
-        setCheckingConflict(false);
-      }
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [editorVisible, editingRule?.id, sourceId, watchedGroup, watchedRaw, watchedMatchType, watchedTarget]);
+    return findLocalRuleConflicts(activeContext.rules, {
+      editingId: editingRule?.id,
+      group: String(watchedGroup || ROOT_GROUP),
+      raw: String(watchedRaw || ""),
+      matchType: String(watchedMatchType || "exact"),
+    });
+  }, [activeContext, editingRule?.id, editorVisible, watchedGroup, watchedMatchType, watchedRaw]);
+
+  const fullPreview = useMemo(() => {
+    return buildFinalCategoryPreview({
+      rawCategories: activeContext?.rawCategories || [],
+      savedRules: activeContext?.rules || [],
+      draft: {
+        editingId: editingRule?.id,
+        group: String(watchedGroup || ROOT_GROUP),
+        matchType: String(watchedMatchType || "exact"),
+        raw: String(watchedRaw || ""),
+        target: String(watchedTarget || ""),
+      },
+    });
+  }, [activeContext, editingRule?.id, watchedGroup, watchedMatchType, watchedRaw, watchedTarget]);
 
   const openCreateModal = () => {
     setEditingRule(null);
     setEditorVisible(true);
+    void ensureRuleContext(sourceId);
   };
 
   const openEditRuleModal = (record: MappingRuleRecord) => {
     setEditingRule(record);
     setEditorVisible(true);
+    void ensureRuleContext(sourceId);
   };
 
   const closeRuleEditor = () => {
     setEditorVisible(false);
     setEditingRule(null);
-    setConflictRules([]);
-    setMergePreview(emptyRuleMergePreview);
     ruleForm.resetFields();
   };
 
@@ -198,6 +206,13 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
     }
     const defaultGroup = ruleGroup === ALL_CATEGORY_GROUP ? ROOT_GROUP : ruleGroup;
     ruleForm.setFieldsValue({ group: defaultGroup, raw: "", target: "", matchType: "exact", remarks: "" });
+  };
+
+  const handlePickRawName = (clickedName: string) => {
+    const currentRaw = String(ruleForm.getFieldValue("raw") || "");
+    const matchType = (ruleForm.getFieldValue("matchType") || "exact") as "exact" | "regex";
+    const nextRaw = buildNextRawInput(currentRaw, matchType, clickedName);
+    ruleForm.setFieldValue("raw", nextRaw);
   };
 
   const handleRuleSubmit = async () => {
@@ -222,6 +237,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         return;
       }
       message.success(resp.msg || "分类规则已保存");
+      invalidateRuleContext(sourceId);
       closeRuleEditor();
       // 若当前仅筛选了另一规则分组，自动切换到所保存的分组以免刚新增的规则被过滤隐藏
       const nextGroup =
@@ -229,7 +245,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       if (nextGroup !== ruleGroup) {
         setRuleGroup(nextGroup);
       }
-      await Promise.all([fetchRules(1, paging.pageSize, keyword, nextGroup, sourceId), fetchRuleTotals(sourceId)]);
+      await fetchRules(1, paging.pageSize, keyword, nextGroup, sourceId);
     } finally {
       setRulesSubmitting(false);
     }
@@ -242,8 +258,9 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       return;
     }
     message.success(resp.msg || "分类规则已删除");
+    invalidateRuleContext(sourceId);
     const nextPage = paging.current > 1 && rules.length === 1 ? paging.current - 1 : paging.current;
-    await Promise.all([fetchRules(nextPage, paging.pageSize, keyword, ruleGroup, sourceId), fetchRuleTotals(sourceId)]);
+    await fetchRules(nextPage, paging.pageSize, keyword, ruleGroup, sourceId);
   };
 
   const ruleColumns: ColumnsType<MappingRuleRecord> = [
@@ -326,6 +343,9 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
     },
   ];
 
+  const currentSourceName =
+    activeContext?.sourceName || sources.find((s) => s.id === sourceId)?.name || "";
+
   return (
     <ContentPageShell
       title="分类规则"
@@ -391,12 +411,10 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
           <Space size={8} wrap>
             <Button
               icon={<ReloadOutlined />}
-              onClick={() =>
-                void Promise.all([
-                  fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId),
-                  fetchRuleTotals(sourceId),
-                ])
-              }
+              onClick={() => {
+                invalidateRuleContext(sourceId);
+                void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId);
+              }}
             >
               刷新规则
             </Button>
@@ -436,12 +454,14 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       <RuleEditorDrawer
         open={editorVisible}
         loading={rulesSubmitting}
+        contextLoading={contextLoading}
+        sourceName={currentSourceName}
         editingRule={editingRule}
         form={ruleForm}
         conflictRules={conflictRules}
-        checkingConflict={checkingConflict}
-        watchedRaw={watchedRaw}
-        mergePreview={mergePreview}
+        watchedGroup={watchedGroup}
+        preview={fullPreview}
+        onPickRawName={handlePickRawName}
         onSubmit={() => {
           if (!canWrite) return;
           void handleRuleSubmit();

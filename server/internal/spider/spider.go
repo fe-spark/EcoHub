@@ -90,6 +90,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	var collectCtx context.Context
 	statsOwned := false
 	releasedPreparedOccupy := false
+	collectPagesStarted := false
 	defer func() {
 		if collectCtx != nil {
 			progress.FinishRun(collectCtx, id, retErr)
@@ -164,6 +165,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		}
 		if originalErr != nil && batchCtx != nil && !errors.Is(originalErr, context.Canceled) {
 			batchCtx.RecordSourceError(s.Id, originalErr.Error())
+		}
+		if !collectPagesStarted && originalErr != nil && !skipSourceFailedNotify(originalErr) {
+			if batchCtx == nil || batchCtx.ownsOccupy(s.Id) {
+				emitSourceFailedNotify(s.Id, s.Name, originalErr.Error())
+			}
 		}
 		runOK := shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id)
 		trigger := ""
@@ -272,14 +278,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	case errors.Is(err, progress.ErrDispatchStopped):
 		reason := currentStopAllReason()
 		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
-		return fmt.Errorf("停止采集：%s", reason)
+		return fmt.Errorf("停止采集：%s: %w", reason, progress.ErrDispatchStopped)
 	case errors.Is(err, progress.ErrStopRequested):
 		reason := collectStopReason(id)
 		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
-		return fmt.Errorf("停止采集：%s", reason)
+		return fmt.Errorf("停止采集：%s: %w", reason, progress.ErrStopRequested)
 	case errors.Is(err, progress.ErrTaskExists):
 		log.Printf("[Spider] 站点 %s 已有任务正在运行，跳过本次采集...\n", id)
-		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", id)
+		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集: %w", id, progress.ErrTaskExists)
 	case err != nil:
 		return err
 	}
@@ -357,6 +363,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 	}
 
+	collectPagesStarted = true
 	hadWrites, successPagesCount, failedPagesCount, failedPagesList, err = collectPagesFn(collectCtx, pageCount, targetPages, s, h, batchCtx)
 	// 有成功页的失败也进待检索。零成功直接失败。停止中由 MarkSourceSealingIfRun 拒绝。
 	if err != nil && !hadWrites {
@@ -442,6 +449,14 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 
 // beforeRegisterCollectRunHook 仅供测试：登记运行之前调用，用于在这个窗口里模拟单站停止 + 重试。
 var beforeRegisterCollectRunHook func(id string)
+
+// skipSourceFailedNotify 用户停止、派发终止、同站已在跑都不是采集源故障，不发异常告警。
+func skipSourceFailedNotify(err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, progress.ErrDispatchStopped) ||
+		errors.Is(err, progress.ErrStopRequested) ||
+		errors.Is(err, progress.ErrTaskExists)
+}
 
 // canRegisterCollectRun 登记运行前（任务表锁内）复核本次运行仍可开跑：
 // 一键终止过则不开；有批次时占用令牌和进度代次都必须还是本批次的。

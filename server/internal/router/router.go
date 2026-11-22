@@ -133,8 +133,7 @@ func SetupRouter() *gin.Engine {
 		{
 			mapping.GET(`/group/list`, handler.ManageHd.MappingRuleGroups)
 			mapping.GET(`/rule/list`, handler.ManageHd.MappingRuleList)
-			mapping.POST(`/rule/check`, handler.ManageHd.MappingRuleCheck)
-			mapping.POST(`/rule/preview`, handler.ManageHd.MappingRulePreview)
+			mapping.GET(`/rule/context`, handler.ManageHd.MappingRuleContext)
 			mapping.POST(`/rule/save`, handler.ManageHd.MappingRuleSave)
 			mapping.POST(`/rule/delete`, handler.ManageHd.MappingRuleDelete)
 			mapping.POST(`/rule/reload`, handler.ManageHd.MappingRuleReload)

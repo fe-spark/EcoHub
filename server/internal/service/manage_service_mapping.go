@@ -14,11 +14,7 @@ import (
 type MappingRuleListResult struct {
 	List   []model.MappingRule `json:"list"`
 	Paging dto.Page            `json:"paging"`
-}
-
-type MappingRuleConflictResult struct {
-	HasConflict bool                `json:"hasConflict"`
-	Rules       []model.MappingRule `json:"rules"`
+	Totals map[string]int      `json:"totals,omitempty"`
 }
 
 func (s *ManageService) ListMappingRules(group, keyword, sourceID string, paging *dto.Page) (MappingRuleListResult, error) {
@@ -32,11 +28,31 @@ func (s *ManageService) ListMappingRules(group, keyword, sourceID string, paging
 	if err != nil {
 		return MappingRuleListResult{}, err
 	}
+	var totals map[string]int
+	if query.SourceId != "" {
+		if (query.Group == "" || query.Group == "CategoryAll") && query.Keyword == "" {
+			totals = map[string]int{
+				"CategoryRoot": 0,
+				"CategorySub":  0,
+			}
+			for _, item := range allList {
+				if item.Group == "CategoryRoot" || item.Group == "CategorySub" {
+					totals[item.Group]++
+				}
+			}
+		} else {
+			totals, err = repository.CountCategoryMappingRulesByGroup(query.SourceId)
+			if err != nil {
+				return MappingRuleListResult{}, err
+			}
+		}
+	}
 	page := resolveCustomMappingRulesPage(paging, len(allList))
 	pagedList := sliceCustomMappingRulesPage(allList, page)
 	return MappingRuleListResult{
 		List:   pagedList,
 		Paging: page,
+		Totals: totals,
 	}, nil
 }
 
@@ -104,26 +120,9 @@ func (s *ManageService) DeleteMappingRule(id uint) error {
 	return refreshProjectedReadModelAfterMappingRuleChange(rule.Group)
 }
 
-func (s *ManageService) CheckMappingRuleConflict(rule model.MappingRule) (MappingRuleConflictResult, error) {
-	prepareMappingRule(&rule)
-	if rule.Group == "" || rule.Raw == "" {
-		return MappingRuleConflictResult{}, nil
-	}
-	if repository.IsCategoryMappingGroup(rule.Group) && rule.SourceId == "" {
-		return MappingRuleConflictResult{}, nil
-	}
-	conflicts, err := repository.FindMappingRulesByEffectPoint(rule.SourceId, rule.Group, rule.Raw, rule.MatchType, rule.ID)
-	if err != nil {
-		return MappingRuleConflictResult{}, err
-	}
-	return MappingRuleConflictResult{
-		HasConflict: len(conflicts) > 0,
-		Rules:       conflicts,
-	}, nil
-}
-
-func (s *ManageService) PreviewMappingRule(sourceID, group, raw, matchType, target string) (repository.MappingRulePreviewResult, error) {
-	return repository.PreviewMappingRule(sourceID, group, raw, matchType, target)
+// GetMappingRuleContext 获取指定采集站的原始分类及全部分类映射规则
+func (s *ManageService) GetMappingRuleContext(sourceID string) (repository.MappingRuleContextResult, error) {
+	return repository.GetMappingRuleContext(sourceID)
 }
 
 func refreshProjectedReadModelAfterMappingRuleChange(groups ...string) error {

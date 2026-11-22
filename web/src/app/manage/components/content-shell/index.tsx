@@ -78,6 +78,12 @@ export function ContentSourceSelect({
       <Select
         placeholder="选择采集源"
         className={styles.sourceSelect}
+        // 选中值用 1 倍行高才能和前缀齐，但行高一变选择器会被内容撑矮，高度要钉回 token
+        styles={{
+          root: { height: "var(--ant-select-height)" },
+          prefix: { display: "flex", alignItems: "center" },
+          content: { lineHeight: 1 },
+        }}
         prefix={
           <span className={styles.sourcePrefix}>
             <DatabaseOutlined />

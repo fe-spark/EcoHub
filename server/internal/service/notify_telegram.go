@@ -185,7 +185,7 @@ func editTelegramMessage(ctx context.Context, token, chatID string, messageID in
 	if markup != nil && len(markup.InlineKeyboard) > 0 {
 		body["reply_markup"] = markup
 	}
-	_, err := callTelegramJSON(ctx, token, "editMessageText", body, 15*time.Second)
+	_, err := callTelegramJSON(ctx, token, "editMessageText", body, 10*time.Second)
 	return err
 }
 
@@ -270,7 +270,7 @@ func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPa
 	} else {
 		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个\n", successSrc)
 	}
-	fmt.Fprintf(&b, "🎬 本次更新：<b>%d</b> 部影片\n", updatedCount)
+	fmt.Fprintf(&b, "🎬 前台可见：<b>%d</b> 部\n", updatedCount)
 
 	if len(payload.Sources) > 0 {
 		b.WriteString("\n<b>站点明细：</b>\n")
@@ -284,13 +284,16 @@ func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPa
 			} else if src.Status == progress.StatusStopped {
 				icon = "⏹"
 			}
-			line := fmt.Sprintf("%s <b>%s</b> (%d 部", icon, html.EscapeString(src.SourceName), src.FilmsTotal)
+			line := fmt.Sprintf("%s <b>%s</b> (入库 %d 部", icon, html.EscapeString(singleLine(src.SourceName)), src.FilmsTotal)
 			if src.FailedCnt > 0 {
 				line += fmt.Sprintf("，失败 %d 页", src.FailedCnt)
 			}
+			if src.CategorySkip > 0 {
+				line += fmt.Sprintf("，跳过未映射 %d 部", src.CategorySkip)
+			}
 			line += ")"
 			if src.Error != "" {
-				line += " — <code>" + html.EscapeString(truncateRunes(src.Error, 80)) + "</code>"
+				line += " — <code>" + html.EscapeString(truncateRunes(singleLine(src.Error), 80)) + "</code>"
 			}
 			lineRunes := utf8.RuneCountInString(line) + 1
 			if writtenRunes+lineRunes > overviewSoftLimit {
@@ -480,6 +483,26 @@ const (
 	cronReasonLineMax  = 200
 	cronReasonTotalMax = 600
 )
+
+func singleLine(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
+}
+
+// formatReasonCodeLines 按行截断并各自包裹 <code>，保证多行错误被 safeTruncateHTML 截断后标签仍自闭合。
+func formatReasonCodeLines(s string, lineMax, totalMax int) string {
+	text := truncateReasonLines(s, lineMax, totalMax)
+	if text == "" {
+		return "<code></code>"
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = "<code>" + html.EscapeString(line) + "</code>"
+	}
+	return strings.Join(lines, "\n")
+}
 
 // truncateReasonLines 按行截断（按 rune 计数，不会截坏中文），再整体截断。空行丢弃。
 func truncateReasonLines(s string, lineMax, totalMax int) string {

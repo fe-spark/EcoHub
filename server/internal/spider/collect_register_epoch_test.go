@@ -1,6 +1,8 @@
 package spider
 
 import (
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,4 +103,70 @@ func TestSingleStopThenRetry_OldBatchDoesNotRegisterOverRetry(t *testing.T) {
 		t.Fatal("old batch must not release the retry occupy")
 	}
 	progress.MarkStopped(src.Id)
+}
+
+func TestStopAndAlreadyRunningDoNotNotifySourceFailed(t *testing.T) {
+	prev := db.Mdb
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CategoryMapping{}, &model.Category{}, &model.SourceCategory{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "notify-skip-stop", Name: "不告警", Uri: "http://127.0.0.1:1/api", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 9}).Error; err != nil {
+		t.Fatalf("seed mapping: %v", err)
+	}
+
+	prevNotify := getNotifyDispatcher()
+	var notified atomic.Int32
+	RegisterNotifyDispatcher(NotifyDispatcher{
+		OnSourceFailed: func(string, string, string) { notified.Add(1) },
+	})
+	t.Cleanup(func() {
+		RegisterNotifyDispatcher(prevNotify)
+		beforeRegisterCollectRunHook = nil
+		if progress.UnregisterTask(src.Id, "holder") {
+			progress.RequestStop(src.Id)
+		}
+	})
+
+	t.Run("stop during register", func(t *testing.T) {
+		notified.Store(0)
+		beforeRegisterCollectRunHook = func(id string) {
+			if id == src.Id {
+				stopAllVersion.Add(1)
+			}
+		}
+		ver := stopAllVersion.Load()
+		err := handleCollectWithStopVersion(src.Id, 24, &ver, nil)
+		if !errors.Is(err, progress.ErrDispatchStopped) {
+			t.Fatalf("got %v", err)
+		}
+		if notified.Load() != 0 {
+			t.Fatalf("stop must not notify, count=%d", notified.Load())
+		}
+	})
+
+	t.Run("already running", func(t *testing.T) {
+		notified.Store(0)
+		beforeRegisterCollectRunHook = nil
+		if _, err := progress.TryRegisterTask(src.Id, "holder", nil); err != nil {
+			t.Fatal(err)
+		}
+		err := handleCollectWithStopVersion(src.Id, 24, nil, nil)
+		if !errors.Is(err, progress.ErrTaskExists) {
+			t.Fatalf("got %v", err)
+		}
+		if notified.Load() != 0 {
+			t.Fatalf("skip must not notify, count=%d", notified.Load())
+		}
+	})
 }

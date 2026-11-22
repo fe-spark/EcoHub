@@ -154,6 +154,9 @@ func (s *InitService) TableInit() error {
 	if err := repository.EnsureFilmSourceDeletedIndex(); err != nil {
 		return fmt.Errorf("采集站统计索引失败: %w", err)
 	}
+	if err := repository.EnsureFilmCategoryDeletedIndex(); err != nil {
+		return fmt.Errorf("分类统计索引失败: %w", err)
+	}
 	if err := repository.EnsureCollectRecordFilmSourceIndex(); err != nil {
 		return fmt.Errorf("采集清单站点索引失败: %w", err)
 	}

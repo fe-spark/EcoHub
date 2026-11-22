@@ -207,13 +207,13 @@ func runTaskBody(ft model.FilmCollectTask, manual bool) {
 		runAutoCollectTask(ft, manual)
 		log.Println("执行一次已启用站点采集")
 	case model.TaskModelOrphanClean:
-		executeOrphanCleanTask(ft)
+		executeOrphanCleanTask(ft, manual)
 		return
 	case model.TaskModelLogClean:
-		executeLogCleanTask(ft)
+		executeLogCleanTask(ft, manual)
 		return
 	case model.TaskModelCollectClean:
-		executeCollectRecordCleanTask(ft)
+		executeCollectRecordCleanTask(ft, manual)
 		return
 	default:
 		errMsg := fmt.Sprintf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
@@ -293,7 +293,7 @@ func rejectManualRun(ft model.FilmCollectTask) error {
 	return nil
 }
 
-func executeMaintenance(ft model.FilmCollectTask, fallback string, action func(remark string, startedAt time.Time) error) {
+func executeMaintenance(ft model.FilmCollectTask, manual bool, fallback string, action func(remark string, startedAt time.Time) error) {
 	runningMaintenanceTasks.Store(ft.Id, struct{}{})
 	defer runningMaintenanceTasks.Delete(ft.Id)
 
@@ -307,19 +307,21 @@ func executeMaintenance(ft model.FilmCollectTask, fallback string, action func(r
 		log.Printf("[Maintenance] 采集已让行，开始执行：%s（%s）", remark, ft.Id)
 		return action(remark, startedAt)
 	})
-	finishMaintenance(ft, remark, err)
+	finishMaintenance(ft, manual, remark, err)
 }
 
-func finishMaintenance(ft model.FilmCollectTask, remark string, err error) {
+func finishMaintenance(ft model.FilmCollectTask, manual bool, remark string, err error) {
 	if err == nil {
 		return
 	}
 	syslog.Errorf("[Maintenance] %s 失败: %v", remark, err)
-	emitCronFailedNotify(ft.Id, remark, err.Error())
+	if !manual {
+		emitCronFailedNotify(ft.Id, remark, err.Error())
+	}
 }
 
-func executeOrphanCleanTask(ft model.FilmCollectTask) {
-	executeMaintenance(ft, "片库冗余数据与孤儿清理", func(remark string, startedAt time.Time) error {
+func executeOrphanCleanTask(ft model.FilmCollectTask, manual bool) {
+	executeMaintenance(ft, manual, "片库冗余数据与孤儿清理", func(remark string, startedAt time.Time) error {
 		if db.Mdb == nil {
 			return nil
 		}
@@ -362,8 +364,8 @@ const (
 	failureRecordRetention = 7 * 24 * time.Hour
 )
 
-func executeLogCleanTask(ft model.FilmCollectTask) {
-	executeMaintenance(ft, "清理过期运行日志", func(remark string, startedAt time.Time) error {
+func executeLogCleanTask(ft model.FilmCollectTask, manual bool) {
+	executeMaintenance(ft, manual, "清理过期运行日志", func(remark string, startedAt time.Time) error {
 		n, err := syslog.PruneExpiredLogs(logRetention)
 		if err != nil {
 			return err
@@ -373,8 +375,8 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 	})
 }
 
-func executeCollectRecordCleanTask(ft model.FilmCollectTask) {
-	executeMaintenance(ft, "定期清理超过 30 天的采集运行记录与快照", func(remark string, startedAt time.Time) error {
+func executeCollectRecordCleanTask(ft model.FilmCollectTask, manual bool) {
+	executeMaintenance(ft, manual, "定期清理超过 30 天的采集运行记录与快照", func(remark string, startedAt time.Time) error {
 		if err := repository.CleanOldCollectRecords(30); err != nil {
 			return err
 		}

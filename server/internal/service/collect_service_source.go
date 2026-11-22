@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"server/internal/infra/syslog"
@@ -30,6 +31,26 @@ func withPrimaryMutation(fn func(searchBusy bool) error) error {
 	})
 }
 
+func enabledSources(sources []model.FilmSource) []model.FilmSource {
+	out := make([]model.FilmSource, 0, len(sources))
+	for _, src := range sources {
+		if src.State {
+			out = append(out, src)
+		}
+	}
+	return out
+}
+
+func sourceIDOrder(sources []model.FilmSource) []string {
+	out := make([]string, 0, len(sources))
+	for _, src := range sources {
+		if id := strings.TrimSpace(src.Id); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func (s *CollectService) SortFilmSources(ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -40,11 +61,23 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 		if primary != nil && strings.TrimSpace(ids[0]) != primary.Id {
 			return errors.New("当前主站必须保持在首位")
 		}
+		beforeList, err := repository.GetCollectSourceList()
+		if err != nil {
+			return err
+		}
 		if err := repository.SortCollectSources(ids); err != nil {
 			return err
 		}
 		filmsnapshot.ClearDynamicPlayCaches()
 		clearProvideNetworkConfigCache()
+
+		afterList, err := repository.GetCollectSourceList()
+		if err == nil {
+			afterEnabled := enabledSources(afterList)
+			if !slices.Equal(sourceIDOrder(enabledSources(beforeList)), sourceIDOrder(afterEnabled)) {
+				NotifySvc.PublishSourceOrderChange(afterEnabled)
+			}
+		}
 		return nil
 	})
 }

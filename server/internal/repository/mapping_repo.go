@@ -151,6 +151,35 @@ func ListAllMappingRules(query MappingRuleQuery) ([]model.MappingRule, error) {
 	return list, err
 }
 
+// CountCategoryMappingRulesByGroup 统计指定采集站的一级/二级分类规则总数
+func CountCategoryMappingRulesByGroup(sourceID string) (map[string]int, error) {
+	totals := map[string]int{
+		"CategoryRoot": 0,
+		"CategorySub":  0,
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return totals, nil
+	}
+	var rows []struct {
+		Group string `gorm:"column:group"`
+		Total int64  `gorm:"column:total"`
+	}
+	err := db.Mdb.Unscoped().Model(&model.MappingRule{}).
+		Select("`group`, COUNT(*) AS total").
+		Where("deleted_at IS NULL").
+		Where("source_id = ? AND `group` IN ?", sourceID, []string{"CategoryRoot", "CategorySub"}).
+		Group("`group`").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		totals[r.Group] = int(r.Total)
+	}
+	return totals, nil
+}
+
 func FindMappingRulesByEffectPoint(sourceID, group, raw, matchType string, excludeID uint) ([]model.MappingRule, error) {
 	list := make([]model.MappingRule, 0)
 	query := db.Mdb.Unscoped().Model(&model.MappingRule{}).

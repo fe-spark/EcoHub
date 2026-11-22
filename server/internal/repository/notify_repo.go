@@ -263,11 +263,13 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 
 // NotifyFilmMeta 影片通知归类与排序元数据
 type NotifyFilmMeta struct {
-	Mid         int64
-	Name        string
-	Pid         int64
-	CategoryKey string
-	UpdateStamp int64
+	Mid             int64
+	Name            string
+	Pid             int64
+	Cid             int64
+	CategoryKey     string
+	RootCategoryKey string
+	UpdateStamp     int64
 }
 
 // LoadNotifyFilmMetas 查询变更影片的标题、分类与更新时间戳，并按与前台每日更新一致的顺序（update_stamp DESC, mid DESC）返回
@@ -297,29 +299,36 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 			end = len(uniq)
 		}
 		var rows []struct {
-			Mid         int64          `gorm:"column:mid"`
-			Name        string         `gorm:"column:name"`
-			Pid         sql.NullInt64  `gorm:"column:pid"`
-			CategoryKey sql.NullString `gorm:"column:category_key"`
-			UpdateStamp int64          `gorm:"column:update_stamp"`
+			Mid             int64          `gorm:"column:mid"`
+			Name            string         `gorm:"column:name"`
+			Pid             sql.NullInt64  `gorm:"column:pid"`
+			Cid             sql.NullInt64  `gorm:"column:cid"`
+			CategoryKey     sql.NullString `gorm:"column:category_key"`
+			RootCategoryKey sql.NullString `gorm:"column:root_category_key"`
+			UpdateStamp     int64          `gorm:"column:update_stamp"`
 		}
 		if err := db.Mdb.Table(model.TableFilmIndex).
-			Select("mid, name, pid, category_key, update_stamp").
+			Select("mid, name, pid, cid, category_key, root_category_key, update_stamp").
 			Where("mid IN ?", uniq[start:end]).
 			Scan(&rows).Error; err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
-			var pid int64
+			var pid, cid int64
 			if r.Pid.Valid {
 				pid = r.Pid.Int64
 			}
+			if r.Cid.Valid {
+				cid = r.Cid.Int64
+			}
 			out = append(out, NotifyFilmMeta{
-				Mid:         r.Mid,
-				Name:        strings.TrimSpace(r.Name),
-				Pid:         pid,
-				CategoryKey: strings.TrimSpace(r.CategoryKey.String),
-				UpdateStamp: r.UpdateStamp,
+				Mid:             r.Mid,
+				Name:            strings.TrimSpace(r.Name),
+				Pid:             pid,
+				Cid:             cid,
+				CategoryKey:     strings.TrimSpace(r.CategoryKey.String),
+				RootCategoryKey: strings.TrimSpace(r.RootCategoryKey.String),
+				UpdateStamp:     r.UpdateStamp,
 			})
 		}
 	}

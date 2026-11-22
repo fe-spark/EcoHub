@@ -451,13 +451,57 @@ func TestMappingRule_ListCategoryAllIncludesRootAndSub(t *testing.T) {
 	}
 	raw, _ := json.Marshal(resp.Data)
 	var data struct {
-		List []model.MappingRule `json:"list"`
+		List   []model.MappingRule `json:"list"`
+		Totals map[string]int      `json:"totals"`
 	}
 	if err := json.Unmarshal(raw, &data); err != nil {
 		t.Fatalf("unmarshal data: %v", err)
 	}
 	if len(data.List) != 2 || data.List[0].Group != "CategoryRoot" || data.List[1].Group != "CategorySub" {
 		t.Fatalf("CategoryAll list = %+v, want root + sub for src_cat only", data.List)
+	}
+	if data.Totals["CategoryRoot"] != 1 || data.Totals["CategorySub"] != 1 {
+		t.Fatalf("CategoryAll totals = %+v, want 1/1", data.Totals)
+	}
+}
+
+func TestMappingRule_ContextReturnsSourceCategoriesAndRules(t *testing.T) {
+	setupManageConfigDB(t)
+	gdb := db.Mdb
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.Category{}, &model.CategoryMapping{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_ctx", Name: "上下文站", Uri: "http://ctx.test", State: true}).Error; err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	if err := gdb.Create(&model.SourceCategory{SourceId: "src_ctx", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0}).Error; err != nil {
+		t.Fatalf("seed source category: %v", err)
+	}
+	if err := gdb.Create(&model.MappingRule{SourceId: "src_ctx", Group: "CategoryRoot", Raw: "电影", Target: "电影", MatchType: "exact"}).Error; err != nil {
+		t.Fatalf("seed rule: %v", err)
+	}
+
+	h := &ManageHandler{}
+	c, w := testContext(http.MethodGet, "/api/manage/mapping/rule/context?sourceId=src_ctx")
+	h.MappingRuleContext(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("MappingRuleContext failed: %+v", resp)
+	}
+	raw, _ := json.Marshal(resp.Data)
+	var data struct {
+		SourceName    string `json:"sourceName"`
+		RawCategories []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"rawCategories"`
+		Rules []model.MappingRule `json:"rules"`
+	}
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatalf("unmarshal context: %v", err)
+	}
+	if data.SourceName != "上下文站" || len(data.RawCategories) != 1 || len(data.Rules) != 1 {
+		t.Fatalf("unexpected context data: %+v", data)
 	}
 }
 

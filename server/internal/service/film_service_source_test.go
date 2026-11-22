@@ -11,6 +11,7 @@ import (
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
+	"server/internal/spider/progress"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -120,6 +121,115 @@ func TestFilmService_GetClassTreeScope(t *testing.T) {
 
 	if _, err := srv.GetClassTreeScope("missing"); err == nil {
 		t.Fatal("expected error for unknown source")
+	}
+}
+
+func TestFilmService_GetClassTreeScope_WithFilmCounts(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src_b", Name: "站点B", Uri: "http://b", State: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "电影", StableKey: "a-movie", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 10, Pid: 9, Name: "动作片", StableKey: "a-action", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电视剧", StableKey: "b-tv", Show: true, Sort: 1})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 9})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 6, CategoryId: 10})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 2, CategoryId: 1})
+	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0})
+	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 6, ParentSourceTypeId: 1, RawName: "动作片", Sort: 1, Depth: 1})
+	gdb.Create(&model.SourceCategory{SourceId: "src_b", SourceTypeId: 2, ParentSourceTypeId: 0, RawName: "电视剧", Sort: 1, Depth: 0})
+	gdb.Create([]model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:6"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:1"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103, FirstSourceId: "src_b"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_b:2"}},
+	})
+	gdb.Create([]model.FilmSourcePlaylist{
+		{Mid: 101, SourceId: "src_a", LineKind: model.LineKindPlay, GroupIndex: 0, Content: `[{"episode":"1","link":"http://a/101"}]`},
+		{Mid: 102, SourceId: "src_a", LineKind: model.LineKindPlay, GroupIndex: 0, Content: `[{"episode":"1","link":"http://a/102"}]`},
+		{Mid: 103, SourceId: "src_b", LineKind: model.LineKindPlay, GroupIndex: 0, Content: `[{"episode":"1","link":"http://b/103"}]`},
+	})
+	_ = filmsnapshot.SetActiveSnapshotVersion("live")
+	if err := filmsnapshot.LoadActiveFilmReadModel("live"); err != nil {
+		t.Fatalf("LoadActiveFilmReadModel: %v", err)
+	}
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
+	// 封口后再软删除主站 1 条库记录，验证主站直接命中内存快照（仍为 2），而非查库。
+	if err := gdb.Where("mid = ?", 102).Delete(&model.FilmIndex{}).Error; err != nil {
+		t.Fatalf("soft delete primary film: %v", err)
+	}
+
+	srv := new(FilmService)
+	viewA, err := srv.GetClassTreeScope("")
+	if err != nil {
+		t.Fatalf("GetClassTreeScope primary: %v", err)
+	}
+	if len(viewA.Tree.Children) != 1 || viewA.Tree.Children[0].FilmCount != 2 {
+		t.Fatalf("primary root count mismatch (expected memory snapshot 2): %+v", viewA.Tree.Children)
+	}
+	if len(viewA.Tree.Children[0].Children) != 1 || viewA.Tree.Children[0].Children[0].FilmCount != 1 {
+		t.Fatalf("primary child count mismatch: %+v", viewA.Tree.Children[0].Children)
+	}
+
+	viewB, err := srv.GetClassTreeScope("src_b")
+	if err != nil {
+		t.Fatalf("GetClassTreeScope src_b: %v", err)
+	}
+	if len(viewB.Tree.Children) != 1 || viewB.Tree.Children[0].FilmCount != 1 {
+		t.Fatalf("peer root count mismatch: %+v", viewB.Tree.Children)
+	}
+}
+
+func TestFilmService_GetClassTreeScope_CollectingAndEmptySnapshotFallbackToDB(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0})
+	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "电影", StableKey: "a-movie", Show: true, Sort: 1})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 9})
+	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0})
+
+	// 1. 库为空时封口一次，模拟刚启动/建站时的空检索快照，随后写入新影片但尚未重封口。
+	_ = filmsnapshot.SetActiveSnapshotVersion("live")
+	if err := filmsnapshot.LoadActiveFilmReadModel("live"); err != nil {
+		t.Fatalf("LoadActiveFilmReadModel empty: %v", err)
+	}
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 201, FirstSourceId: "src_a"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:1"},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 201, SourceId: "src_a", LineKind: model.LineKindPlay, GroupIndex: 0, Content: `[{"episode":"1","link":"http://a/201"}]`,
+	})
+
+	srv := new(FilmService)
+	scope, err := srv.GetClassTreeScope("")
+	if err != nil {
+		t.Fatalf("GetClassTreeScope empty snapshot fallback: %v", err)
+	}
+	if len(scope.Tree.Children) != 1 || scope.Tree.Children[0].FilmCount != 1 {
+		t.Fatalf("expected DB count 1 when snapshot is empty, got %+v", scope.Tree.Children)
+	}
+
+	// 2. 非空快照状态下若正在采集中，新增入库影片也应实时反映数据库最新数量。
+	if err := filmsnapshot.LoadActiveFilmReadModel("live"); err != nil {
+		t.Fatalf("LoadActiveFilmReadModel populated: %v", err)
+	}
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 202, FirstSourceId: "src_a"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:1"},
+	})
+	if _, err := progress.TryRegisterTask("src_a", "test-collecting", nil); err != nil {
+		t.Fatalf("TryRegisterTask: %v", err)
+	}
+	t.Cleanup(func() {
+		progress.UnregisterTask("src_a", "test-collecting")
+	})
+
+	collectingScope, err := srv.GetClassTreeScope("")
+	if err != nil {
+		t.Fatalf("GetClassTreeScope while collecting: %v", err)
+	}
+	if len(collectingScope.Tree.Children) != 1 || collectingScope.Tree.Children[0].FilmCount != 2 {
+		t.Fatalf("expected live DB count 2 while collecting, got %+v", collectingScope.Tree.Children)
 	}
 }
 

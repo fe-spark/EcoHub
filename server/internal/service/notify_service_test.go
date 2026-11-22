@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/repository/support"
 	"server/internal/spider/progress"
 	"server/internal/testutil"
 
@@ -268,7 +270,7 @@ func TestFormatBatchOverviewHTML(t *testing.T) {
 		},
 	}
 	out := formatBatchOverviewHTML("EcoHub", payload, 12)
-	if !strings.Contains(out, "定时任务") || !strings.Contains(out, "1分5秒") || !strings.Contains(out, "资源站A</b> (9 部)") || !strings.Contains(out, "connection timeout") {
+	if !strings.Contains(out, "定时任务") || !strings.Contains(out, "1分5秒") || !strings.Contains(out, "前台可见：<b>12</b> 部") || !strings.Contains(out, "资源站A</b> (入库 9 部)") || !strings.Contains(out, "connection timeout") {
 		t.Fatalf("unexpected overview HTML: %s", out)
 	}
 }
@@ -338,5 +340,165 @@ func TestSafeTruncateHTMLAndOverviewLimit(t *testing.T) {
 	}
 	if !strings.Contains(overview, "已省略") {
 		t.Fatalf("expected omitted hint in oversized overview: %s", overview)
+	}
+}
+
+func TestFormatOverviewCategorySkipAndMultilineSafe(t *testing.T) {
+	now := time.Now()
+	payload := model.CollectBatchNotifyPayload{
+		Trigger:    model.CollectTriggerCron,
+		StartedAt:  now.Add(-5 * time.Second),
+		FinishedAt: now,
+		Sources: []model.SourceNotifyResult{
+			{
+				SourceID:     "s1",
+				SourceName:   "站\n名",
+				Status:       progress.StatusDone,
+				FilmsTotal:   8,
+				CategorySkip: 2,
+			},
+			{
+				SourceID:   "s2",
+				SourceName: "报错站",
+				Status:     progress.StatusFailed,
+				Error:      "line1\nline2",
+			},
+		},
+	}
+	out := formatBatchOverviewHTML("EcoHub", payload, 8)
+	if !strings.Contains(out, "✅ <b>站 名</b> (入库 8 部，跳过未映射 2 部)") {
+		t.Fatalf("category skip should stay success icon without error: %s", out)
+	}
+	if !strings.Contains(out, "成功 <b>1</b> 个，失败 <b>1</b> 个") {
+		t.Fatalf("unexpected source counts: %s", out)
+	}
+	if strings.Contains(out, "line1\nline2") || !strings.Contains(out, "<code>line1 line2</code>") {
+		t.Fatalf("multiline error should be single-lined inside <code>: %s", out)
+	}
+
+	reasonHTML := formatReasonCodeLines("first error\nsecond error", 200, 600)
+	if reasonHTML != "<code>first error</code>\n<code>second error</code>" {
+		t.Fatalf("unexpected reason code lines: %s", reasonHTML)
+	}
+	cut := safeTruncateHTML(reasonHTML, 32)
+	if strings.Count(cut, "<code>") != strings.Count(cut, "</code>") {
+		t.Fatalf("truncated multiline code tags unbalanced: %s", cut)
+	}
+
+	orderHTML := formatSourceOrderChangeHTML("EcoHub", []model.FilmSource{
+		{Id: "s1", Name: "主站", State: true},
+		{Id: "s2", Name: "备站", State: true},
+	})
+	if !strings.Contains(orderHTML, "采集站排序已调整") || !strings.Contains(orderHTML, "<b>主站</b> → 备站") {
+		t.Fatalf("unexpected order change HTML: %s", orderHTML)
+	}
+}
+
+func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
+	setupNotifyConfigDB(t)
+	gdb := db.Mdb
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.Category{}, &model.SourceCategory{}, &model.CategoryMapping{}, &model.PrimaryState{}, &model.MappingRule{}); err != nil {
+		t.Fatal(err)
+	}
+	prevRdb := db.Rdb
+	db.Rdb = nil
+	prevSnap := support.CurrentMappingSnapshotForTest()
+	support.InvalidatePrimarySourceCache()
+	repository.InvalidatePublicSourceCache()
+	repository.MarkCategoryChanged()
+	t.Cleanup(func() {
+		db.Rdb = prevRdb
+		support.StoreMappingSnapshotForTest(prevSnap)
+		support.InvalidatePrimarySourceCache()
+		repository.InvalidatePublicSourceCache()
+		repository.MarkCategoryChanged()
+	})
+
+	if err := gdb.Create(&model.FilmSource{Id: "src_notify_hide", Name: "主站", Uri: "http://1", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: "src_notify_hide"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.Category{Id: 10, Pid: 0, Name: "电影", StableKey: "cat_10", Show: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.Category{Id: 20, Pid: 0, Name: "隐藏区", StableKey: "cat_20", Show: true, Sort: 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 20).Update("show", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.SourceCategory{SourceId: "src_notify_hide", SourceTypeId: 1, RawName: "电影"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.SourceCategory{SourceId: "src_notify_hide", SourceTypeId: 2, RawName: "隐藏区"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_notify_hide", SourceTypeId: 1, CategoryId: 10}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_notify_hide", SourceTypeId: 2, CategoryId: 20}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "src_notify_hide"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_notify_hide:1", RootCategoryKey: "source:src_notify_hide:1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "可见电影", UpdateStamp: 200},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "src_notify_hide"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, Cid: 20, CategoryKey: "source:src_notify_hide:2", RootCategoryKey: "source:src_notify_hide:2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "隐藏电影", UpdateStamp: 200},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_ = repository.RefreshCollectSourceCatalog()
+	repository.ReloadMappingRules()
+	repository.RefreshCategoryCache()
+	support.InvalidatePrimarySourceCache()
+	repository.InvalidatePublicSourceCache()
+	repository.MarkCategoryChanged()
+
+	sess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
+		NotifyMIDs: []int64{101, 102},
+	}, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.AllFilms) != 1 || sess.AllFilms[0].Mid != 101 {
+		t.Fatalf("expected only visible film 101, got %+v", sess.AllFilms)
+	}
+	if len(sess.Categories) != 1 || sess.Categories[0].CategoryName != "电影" {
+		t.Fatalf("unexpected categories: %+v", sess.Categories)
+	}
+}
+
+func TestEnabledSourceOrderIgnoresDisabledReorder(t *testing.T) {
+	before := []model.FilmSource{
+		{Id: "s1", State: true},
+		{Id: "d1", State: false},
+		{Id: "s2", State: true},
+		{Id: "d2", State: false},
+	}
+	afterDisabledMoved := []model.FilmSource{
+		{Id: "s1", State: true},
+		{Id: "d2", State: false},
+		{Id: "d1", State: false},
+		{Id: "s2", State: true},
+	}
+	if !slices.Equal(sourceIDOrder(enabledSources(before)), sourceIDOrder(enabledSources(afterDisabledMoved))) {
+		t.Fatal("disabled source reorder must keep enabled source order equal")
+	}
+	afterEnabledMoved := []model.FilmSource{
+		{Id: "s2", State: true},
+		{Id: "s1", State: true},
+		{Id: "d1", State: false},
+	}
+	if slices.Equal(sourceIDOrder(enabledSources(before)), sourceIDOrder(enabledSources(afterEnabledMoved))) {
+		t.Fatal("enabled source reorder must be detected")
 	}
 }

@@ -2,116 +2,89 @@ package repository
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/support"
 )
 
-type MappingRulePreviewHit struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+// MappingRuleSourceCategory 分类规则预览上下文中的采集站原始分类项
+type MappingRuleSourceCategory struct {
+	ID       int64  `json:"id"`
+	ParentID int64  `json:"parentId"`
+	Name     string `json:"name"`
+	Sort     int    `json:"sort"`
+	Show     bool   `json:"show"`
 }
 
-type MappingRulePreviewResult struct {
-	SourceName string                  `json:"sourceName"`
-	Hits       []MappingRulePreviewHit `json:"hits"`
-	Target     string                  `json:"target"`
-	Keep       []MappingRulePreviewHit `json:"keep"`
+// MappingRuleContextResult 分类规则配置弹窗所需的采集站原始分类与已保存规则集合
+type MappingRuleContextResult struct {
+	SourceName    string                      `json:"sourceName"`
+	RawCategories []MappingRuleSourceCategory `json:"rawCategories"`
+	Rules         []model.MappingRule         `json:"rules"`
 }
 
-func PreviewMappingRule(sourceID, group, raw, matchType, target string) (MappingRulePreviewResult, error) {
+// GetMappingRuleContext 一次性拉取指定采集站的原始分类及全部分类映射规则，供前端本地计算冲突与全量分类树预览。
+func GetMappingRuleContext(sourceID string) (MappingRuleContextResult, error) {
 	sourceID = strings.TrimSpace(sourceID)
-	group = strings.TrimSpace(group)
-	raw = strings.TrimSpace(raw)
-	matchType = strings.TrimSpace(matchType)
-	target = strings.TrimSpace(target)
-	empty := MappingRulePreviewResult{Hits: []MappingRulePreviewHit{}, Keep: []MappingRulePreviewHit{}, Target: target}
+	empty := MappingRuleContextResult{
+		RawCategories: []MappingRuleSourceCategory{},
+		Rules:         []model.MappingRule{},
+	}
 	if sourceID == "" {
 		return empty, errors.New("分类规则必须指定采集站")
-	}
-	if !IsCategoryMappingGroup(group) {
-		return empty, errors.New("仅一级/二级分类规则支持合并预览")
-	}
-	if raw == "" {
-		return empty, errors.New("原始值不能为空")
-	}
-	if matchType != "exact" && matchType != "regex" {
-		return empty, errors.New("不支持的匹配方式")
-	}
-
-	var matcher func(string) bool
-	if matchType == "regex" {
-		pattern, err := regexp.Compile(raw)
-		if err != nil {
-			return empty, errors.New("正则表达式不合法")
-		}
-		matcher = pattern.MatchString
-	} else {
-		matcher = func(name string) bool { return name == raw }
 	}
 
 	var source model.FilmSource
 	if err := db.Mdb.Where("id = ?", sourceID).First(&source).Error; err != nil {
 		return empty, errors.New("采集站不存在")
 	}
-	empty.SourceName = strings.TrimSpace(source.Name)
 
 	var allRows []model.SourceCategory
-	if err := db.Mdb.Where("source_id = ?", sourceID).Order("sort ASC, source_type_id ASC").Find(&allRows).Error; err != nil {
+	if err := db.Mdb.Where("source_id = ?", sourceID).
+		Order("depth ASC, sort ASC, source_type_id ASC").
+		Find(&allRows).Error; err != nil {
 		return empty, err
 	}
-	rows := make([]model.SourceCategory, 0, len(allRows))
-	for _, row := range allRows {
-		name := strings.TrimSpace(row.RawName)
-		if name == "" {
-			continue
-		}
-		if group == "CategoryRoot" {
-			if row.ParentSourceTypeId == 0 {
-				rows = append(rows, row)
-			}
-			continue
-		}
-		// 二级规则同时作用于原生二级分类，以及已被一级规则改名下沉为二级展示的原一级分类。
-		if row.ParentSourceTypeId > 0 {
-			rows = append(rows, row)
-			continue
-		}
-		if mapped := strings.TrimSpace(support.NormalizeRootCategoryName(sourceID, name)); mapped != "" && mapped != name {
-			rows = append(rows, row)
-		}
+
+	placements, err := sourceTypePlacements(sourceID)
+	if err != nil {
+		return empty, err
 	}
 
-	hits := make([]MappingRulePreviewHit, 0)
-	hitIDs := map[int64]struct{}{}
-	for _, row := range rows {
+	rawCategories := make([]MappingRuleSourceCategory, 0, len(allRows))
+	for _, row := range allRows {
 		name := strings.TrimSpace(row.RawName)
-		if name == "" || !matcher(name) {
+		if row.SourceTypeId <= 0 || name == "" {
 			continue
 		}
-		hits = append(hits, MappingRulePreviewHit{ID: row.SourceTypeId, Name: name})
-		hitIDs[row.SourceTypeId] = struct{}{}
-	}
-	keep := make([]MappingRulePreviewHit, 0)
-	if target != "" {
-		for _, row := range rows {
-			name := strings.TrimSpace(row.RawName)
-			if name != target {
-				continue
-			}
-			if _, ok := hitIDs[row.SourceTypeId]; ok {
-				continue
-			}
-			keep = append(keep, MappingRulePreviewHit{ID: row.SourceTypeId, Name: name})
+		sortVal := row.Sort
+		showVal := true
+		if placement, ok := placements[row.SourceTypeId]; ok {
+			sortVal = placement.Sort
+			showVal = placement.Show
 		}
+		rawCategories = append(rawCategories, MappingRuleSourceCategory{
+			ID:       row.SourceTypeId,
+			ParentID: row.ParentSourceTypeId,
+			Name:     name,
+			Sort:     sortVal,
+			Show:     showVal,
+		})
 	}
-	return MappingRulePreviewResult{
-		SourceName: empty.SourceName,
-		Hits:       hits,
-		Target:     target,
-		Keep:       keep,
+
+	rules := make([]model.MappingRule, 0)
+	if err := db.Mdb.Unscoped().Model(&model.MappingRule{}).
+		Where("deleted_at IS NULL").
+		Where("source_id = ? AND `group` IN ?", sourceID, []string{"CategoryRoot", "CategorySub"}).
+		Order("id ASC").
+		Find(&rules).Error; err != nil {
+		return empty, err
+	}
+
+	return MappingRuleContextResult{
+		SourceName:    strings.TrimSpace(source.Name),
+		RawCategories: rawCategories,
+		Rules:         rules,
 	}, nil
 }

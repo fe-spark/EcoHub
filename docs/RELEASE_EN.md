@@ -1,3 +1,21 @@
+Release **v3.1.5**, image `ghcr.io/fe-spark/ecohub:v3.1.5` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.5 changes
+
+- **Category film counts**: category management shows film counts per source. A failed count returns an error instead of a fallback number.
+- **Mapping rule preview**: preview now runs in the browser. When several exact-name rules match, only the last one applies.
+- **Collect notification**: Telegram is sent immediately when a collect run stores no pages, including when pages were fetched but every save failed and the run was then stopped.
+- **Play page**: episode list and source switching are split apart. With more than 100 episodes, reverse order stays on the last group while playback continues. Speed tests run one source at a time.
+
+---
+
 Release **v3.1.4**, image `ghcr.io/fe-spark/ecohub:v3.1.4` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

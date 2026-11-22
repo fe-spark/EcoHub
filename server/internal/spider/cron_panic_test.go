@@ -217,3 +217,31 @@ func TestPublishStreamWindowGuarded_PanicReleasesLock(t *testing.T) {
 	}
 	publishMu.Unlock()
 }
+
+func TestFinishMaintenance_ManualDoesNotNotify(t *testing.T) {
+	mu, got := captureNotify(t)
+	ft := model.FilmCollectTask{Id: "clean_1", Remark: "清理孤儿"}
+	finishMaintenance(ft, true, ft.Remark, context.DeadlineExceeded)
+	mu.Lock()
+	if len(*got) != 0 {
+		mu.Unlock()
+		t.Fatalf("manual maintenance failure must not notify, got %v", *got)
+	}
+	mu.Unlock()
+
+	finishMaintenance(ft, false, ft.Remark, context.DeadlineExceeded)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(*got) != 1 || !strings.Contains((*got)[0], "clean_1|清理孤儿|") {
+		t.Fatalf("cron maintenance failure must notify, got %v", *got)
+	}
+}
+
+func TestStripCategorySkipError(t *testing.T) {
+	if got := stripCategorySkipError("分类未映射，跳过 3 部", 3); got != "" {
+		t.Fatalf("expected empty error for pure category skip, got %q", got)
+	}
+	if got := stripCategorySkipError("连接超时；分类未映射，跳过 3 部", 3); got != "连接超时" {
+		t.Fatalf("expected real error preserved, got %q", got)
+	}
+}

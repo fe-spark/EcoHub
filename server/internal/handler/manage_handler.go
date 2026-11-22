@@ -385,19 +385,14 @@ func (h *ManageHandler) MappingRuleReload(c *gin.Context) {
 	dto.SuccessOnlyMsg("映射规则已重载", c)
 }
 
-// MappingRuleCheck 检查映射规则冲突
-func (h *ManageHandler) MappingRuleCheck(c *gin.Context) {
-	var rule model.MappingRule
-	if err := c.ShouldBindJSON(&rule); err != nil {
-		dto.Failed("映射规则参数异常", c)
-		return
-	}
-	result, err := service.ManageSvc.CheckMappingRuleConflict(rule)
+// MappingRuleContext 获取指定采集站的原始分类及已保存分类规则，供弹窗本地实时预览
+func (h *ManageHandler) MappingRuleContext(c *gin.Context) {
+	result, err := service.ManageSvc.GetMappingRuleContext(c.Query("sourceId"))
 	if err != nil {
-		dto.Failed(fmt.Sprintf("映射规则冲突检查失败: %v", err), c)
+		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.Success(result, "映射规则冲突检查成功", c)
+	dto.Success(result, "映射规则上下文获取成功", c)
 }
 
 // MappingRuleSave 保存映射规则（支持新增或更新）
@@ -448,27 +443,6 @@ func (h *ManageHandler) MappingRuleDelete(c *gin.Context) {
 		}
 	}
 	dto.SuccessOnlyMsg("映射规则删除成功", c)
-}
-
-// MappingRulePreview 用该站真实分类预览本条规则的合并命中。
-func (h *ManageHandler) MappingRulePreview(c *gin.Context) {
-	var req struct {
-		SourceId  string `json:"sourceId"`
-		Group     string `json:"group"`
-		Raw       string `json:"raw"`
-		MatchType string `json:"matchType"`
-		Target    string `json:"target"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("映射规则参数异常", c)
-		return
-	}
-	result, err := service.ManageSvc.PreviewMappingRule(req.SourceId, req.Group, req.Raw, req.MatchType, req.Target)
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.Success(result, "映射规则预览成功", c)
 }
 
 // ------------------------------------------------------ 参数校验 ------------------------------------------------------

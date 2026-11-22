@@ -5,6 +5,7 @@ export interface FilmClassNode {
   alias?: string;
   show: boolean;
   sort?: number;
+  filmCount?: number;
   children?: FilmClassNode[];
   memberIds?: number[];
 }
@@ -25,14 +26,6 @@ export interface PagingState {
   total: number;
 }
 
-export interface ConflictCheckResult {
-  id: number;
-  group: string;
-  raw: string;
-  target: string;
-  matchType: string;
-}
-
 export interface RuleFormValues {
   group: string;
   raw: string;
@@ -41,19 +34,49 @@ export interface RuleFormValues {
   remarks?: string;
 }
 
-export interface RulePreviewHit {
+export interface RawSourceCategory {
   id: number;
+  parentId: number;
   name: string;
+  sort: number;
+  show: boolean;
 }
 
-export interface RuleMergePreview {
-  loading: boolean;
+export interface PreviewCategoryChild {
+  key: string;
+  id: number;
+  name: string;
+  rawNames: string[];
+  fromRoot: boolean;
+  show: boolean;
+  sort: number;
+  affected: boolean;
+  hitByDraft: boolean;
+}
+
+export interface PreviewCategoryRoot {
+  key: string;
+  id: number;
+  name: string;
+  rawNames: string[];
+  synthetic: boolean;
+  show: boolean;
+  sort: number;
+  affected: boolean;
+  hitByDraft: boolean;
+  children: PreviewCategoryChild[];
+}
+
+export interface RuleFullPreview {
+  hasDraftRaw: boolean;
+  hasDraftTarget: boolean;
+  draftTarget: string;
   valid: boolean;
   error: string;
-  sourceName: string;
-  target: string;
-  hits: RulePreviewHit[];
-  keep: RulePreviewHit[];
+  hitCount: number;
+  rootCount: number;
+  subCount: number;
+  tree: PreviewCategoryRoot[];
 }
 
 export const ALL_CATEGORY_GROUP = "CategoryAll";
@@ -62,14 +85,16 @@ export const SUB_GROUP = "CategorySub";
 export const CATEGORY_GROUPS = [ROOT_GROUP, SUB_GROUP];
 export const CATEGORY_FILTER_GROUPS = [ALL_CATEGORY_GROUP, ROOT_GROUP, SUB_GROUP];
 
-export const emptyRuleMergePreview: RuleMergePreview = {
-  loading: false,
+export const emptyRuleFullPreview: RuleFullPreview = {
+  hasDraftRaw: false,
+  hasDraftTarget: false,
+  draftTarget: "",
   valid: true,
   error: "",
-  sourceName: "",
-  target: "",
-  hits: [],
-  keep: [],
+  hitCount: 0,
+  rootCount: 0,
+  subCount: 0,
+  tree: [],
 };
 
 const groupLabelMap: Record<string, string> = {
@@ -94,7 +119,7 @@ export function normalizeRuleRecord(record: Record<string, unknown>): MappingRul
   };
 }
 
-export function normalizePreviewHits(list: unknown): RulePreviewHit[] {
+export function normalizeRawSourceCategories(list: unknown): RawSourceCategory[] {
   if (!Array.isArray(list)) {
     return [];
   }
@@ -102,7 +127,10 @@ export function normalizePreviewHits(list: unknown): RulePreviewHit[] {
     const row = (item || {}) as Record<string, unknown>;
     return {
       id: Number(row.id ?? row.ID ?? 0),
+      parentId: Number(row.parentId ?? row.ParentID ?? 0),
       name: String(row.name ?? row.Name ?? ""),
+      sort: Number(row.sort ?? row.Sort ?? 0),
+      show: row.show !== false,
     };
   });
 }
@@ -216,8 +244,16 @@ export function parseRuleList(resp: Record<string, any>, current: number, pageSi
       : Array.isArray(data.items)
         ? data.items
         : [];
+  const totalsRaw = data.totals as Record<string, unknown> | undefined;
+  const totals = totalsRaw
+    ? {
+        [ROOT_GROUP]: Number(totalsRaw[ROOT_GROUP] ?? 0),
+        [SUB_GROUP]: Number(totalsRaw[SUB_GROUP] ?? 0),
+      }
+    : undefined;
   return {
     rules: list.map((item: Record<string, unknown>) => normalizeRuleRecord(item)),
+    totals,
     paging: {
       current: Number(data.current ?? data.page ?? current),
       pageSize: Number(data.pageSize ?? data.size ?? pageSize),

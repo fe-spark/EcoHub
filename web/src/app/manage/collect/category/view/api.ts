@@ -1,13 +1,12 @@
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import {
-  CATEGORY_GROUPS,
-  emptyRuleMergePreview,
-  normalizePreviewHits,
+  normalizeRawSourceCategories,
   normalizeRuleRecord,
   normalizeTree,
   parseRuleList,
   type FilmClassNode,
-  type RuleMergePreview,
+  type MappingRuleRecord,
+  type RawSourceCategory,
 } from "./types";
 
 export async function getFilmClassTree(sourceId = "") {
@@ -50,68 +49,25 @@ export async function getCategoryRules(page: number, pageSize: number, keyword: 
   };
 }
 
-export async function getCategoryRuleTotals(sourceId: string) {
-  const [rootResp, subResp] = await Promise.all(
-    CATEGORY_GROUPS.map((group) =>
-      ApiGet("/manage/mapping/rule/list", {
-        current: 1,
-        pageSize: 1,
-        group,
-        keyword: "",
-        sourceId,
-      }),
-    ),
-  );
-  return CATEGORY_GROUPS.reduce<Record<string, number>>((totals, group, index) => {
-    totals[group] = parseRuleList(index === 0 ? rootResp : subResp, 1, 1).paging.total;
-    return totals;
-  }, {});
+export interface CategoryRuleContextData {
+  sourceName: string;
+  rawCategories: RawSourceCategory[];
+  rules: MappingRuleRecord[];
 }
 
-export async function checkCategoryRuleConflict(payload: {
-  id?: number;
-  sourceId: string;
-  group: string;
-  raw: string;
-  matchType: string;
-}) {
-  const resp = await ApiPost("/manage/mapping/rule/check", payload);
-  const list = Array.isArray(resp.data?.rules) ? resp.data.rules : Array.isArray(resp.data) ? resp.data : [];
-  return {
-    resp,
-    rules: list.map((item: Record<string, unknown>) => normalizeRuleRecord(item)),
-  };
-}
-
-export async function previewCategoryRule(payload: {
-  sourceId: string;
-  group: string;
-  raw: string;
-  matchType: string;
-  target: string;
-}): Promise<{ resp: Awaited<ReturnType<typeof ApiPost>>; preview: RuleMergePreview }> {
-  const resp = await ApiPost("/manage/mapping/rule/preview", payload);
-  if (resp.code !== 0) {
-    return {
-      resp,
-      preview: {
-        ...emptyRuleMergePreview,
-        valid: false,
-        error: String(resp.msg || "预览失败"),
-      },
-    };
-  }
+export async function getCategoryRuleContext(sourceId: string): Promise<{
+  resp: Awaited<ReturnType<typeof ApiGet>>;
+  context: CategoryRuleContextData;
+}> {
+  const resp = await ApiGet("/manage/mapping/rule/context", { sourceId });
   const data = (resp.data || {}) as Record<string, unknown>;
+  const rulesList = Array.isArray(data.rules) ? data.rules : [];
   return {
     resp,
-    preview: {
-      loading: false,
-      valid: true,
-      error: "",
+    context: {
       sourceName: String(data.sourceName ?? ""),
-      target: String(data.target ?? payload.target),
-      hits: normalizePreviewHits(data.hits),
-      keep: normalizePreviewHits(data.keep),
+      rawCategories: normalizeRawSourceCategories(data.rawCategories),
+      rules: rulesList.map((item) => normalizeRuleRecord(item as Record<string, unknown>)),
     },
   };
 }
