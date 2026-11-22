@@ -1,3 +1,21 @@
+测试版 **v3.1.5-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.5-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.4。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.5-beta.0`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.5-beta.0 更新内容
+
+- **分类影片数**：分类管理按站点显示影片数，统计失败直接返回错误。
+- **映射规则预览**：预览改到浏览器本地计算，同名精确规则只认最后一条。
+- **采集通知**：采集一页都没入库时立刻发 Telegram。
+- **播放页**：选集和换源拆开；倒序时跳到最后一段；测速改为串行。
+
+---
+
 正式版 **v3.1.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.4`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

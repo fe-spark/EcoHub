@@ -1,3 +1,21 @@
+Pre-release **v3.1.5-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.5-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.4 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.5-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.5-beta.0 changes
+
+- **Category film counts**: category management shows film counts per source. A failed count returns an error instead of a fallback number.
+- **Mapping rule preview**: preview now runs in the browser. When several exact-name rules match, only the last one applies.
+- **Collect notification**: Telegram is sent immediately when a collect run stores no pages.
+- **Play page**: episode list and source switching are split apart. Reverse order jumps to the last episode group. Speed tests run one source at a time.
+
+---
+
 Release **v3.1.4**, image `ghcr.io/fe-spark/ecohub:v3.1.4` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
