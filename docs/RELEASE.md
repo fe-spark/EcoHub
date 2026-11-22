@@ -1,3 +1,18 @@
+正式版 **v3.1.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.3`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.3 更新内容
+
+- **空库与分类引导（#112）**：分类已同步但片库尚未采集时，首页及有效分类、筛选页展示「前往采集中心」引导；仅分类不存在或隐藏时提示分类失效。
+
+---
+
 正式版 **v3.1.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
@@ -14,7 +29,6 @@
 - **跨源线路匹配（#110）**：跨源补全线路与海报时比对归一化一级大类，不再用各站本地 Pid；分类名缺失不合并，「剧」「片」结尾不再自动归成电视剧或电影。
 - **采集停止**：探页可即时取消，已抓取但未入队的页面在取消后丢弃；已停站点跳过同步发布锁。停止时先标停止再取消探页。
 - **管理端交互**：顶栏主站选择器标明当前主站并修正对齐；管理密码确认弹窗支持回车提交（#108）。
-- **空库与分类引导**：分类已同步但片库尚未采集时，首页及有效分类、筛选页展示「前往采集中心」引导；仅分类不存在或隐藏时提示分类失效。
 
 ---
 
