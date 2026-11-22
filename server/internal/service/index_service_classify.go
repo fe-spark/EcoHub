@@ -123,6 +123,11 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 	return filmshared.BuildMovieBasicInfosFromSnapshots(sl...), nil
 }
 
+// IsSearchIndexNotReadyError 判断错误是否为数据库可用但检索索引尚未就绪（如空库尚未采集）。
+func IsSearchIndexNotReadyError(err error) bool {
+	return db.Mdb != nil && errors.Is(err, filmsnapshot.ErrSearchIndexMissing)
+}
+
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ...string) (map[string]any, error) {
 	var sourceId string

@@ -12,7 +12,7 @@ import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import HomeHero, { type HeroBannerItem } from "./HomeHero";
 import DailyUpdates from "./DailyUpdates";
-import HomeEmptyGuide from "./HomeEmptyGuide";
+import EmptyCollectGuide from "@/components/public/EmptyCollectGuide";
 import styles from "./index.module.less";
 
 interface NavChildItem {
@@ -89,11 +89,16 @@ export default function HomePageView({
 
   const hasContent =
     Array.isArray(data.content) &&
-    data.content.some((section) => section.nav?.show);
+    data.content.some(
+      (section) =>
+        Boolean(section.nav?.show) &&
+        ((Array.isArray(section.movies) && section.movies.length > 0) ||
+          (Array.isArray(section.hot) && section.hot.length > 0)),
+    );
   const isEmpty = heroDeck.length === 0 && !hasContent;
 
   if (isEmpty) {
-    return <HomeEmptyGuide />;
+    return <EmptyCollectGuide />;
   }
 
   return (

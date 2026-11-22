@@ -1,3 +1,18 @@
+Release **v3.1.3**, image `ghcr.io/fe-spark/ecohub:v3.1.3` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.3 changes
+
+- **Empty library & category guide (#112)**: show the collect-center guide on the homepage and valid category/filter pages when the search index is not ready yet; only report invalid category when the category does not exist or is hidden.
+
+---
+
 Release **v3.1.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

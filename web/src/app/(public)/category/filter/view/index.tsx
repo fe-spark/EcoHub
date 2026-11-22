@@ -9,6 +9,7 @@ import {
 import { useRouter } from "next/navigation";
 import { Pagination } from "antd";
 import FilmList from "@/components/public/FilmList";
+import EmptyCollectGuide from "@/components/public/EmptyCollectGuide";
 import AppLoading from "@/components/public/Loading";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import {
@@ -53,6 +54,7 @@ export default function CategoryFilterPageView({
   };
   const safeParams = params ?? {};
   const safePage = page ?? { total: 0, pageSize: 48 };
+  const isIndexNotReady = data?.indexReady === false;
   const pid = safeParams.pid || safeParams.Pid || currentParams.pid || currentParams.Pid || "0";
   const categoryName = title?.name || "分类";
   const categoryKey = [pid, safeParams.category || safeParams.Category || currentParams.category || currentParams.Category || ""].join(":");
@@ -287,6 +289,13 @@ export default function CategoryFilterPageView({
           <div className={styles.listLoading} role="status" aria-live="polite">
             <AppLoading text="列表加载中..." size="default" showHints={false} />
           </div>
+        ) : isIndexNotReady && safeList.length === 0 ? (
+          <EmptyCollectGuide
+            compact
+            badgeText={`${categoryName} · 片库待采集`}
+            title="片库尚未同步 · 从开启采集开始"
+            description={`当前「${categoryName}」分类已就绪，但片库检索索引尚未构建。前往采集中心同步片源后，即可按条件筛选影片。`}
+          />
         ) : (
           <FilmList key={categoryKey} list={safeList} col={6} />
         )}

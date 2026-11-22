@@ -13,6 +13,10 @@
   box-shadow: none;
 }
 
+.compact {
+  padding: 48px 24px 64px;
+}
+
 /* 柔和的环境微光光晕（不突兀，完全融入页面背景） */
 .ambientGlow {
   position: absolute;
@@ -162,6 +166,10 @@ html[data-theme="light"] .ambientGlow {
 @media (max-width: 576px) {
   .container {
     padding: 48px 16px 80px;
+  }
+
+  .compact {
+    padding: 32px 16px 48px;
   }
 
   .title {
