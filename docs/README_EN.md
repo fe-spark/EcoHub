@@ -39,7 +39,7 @@ EcoHub neither provides nor stores any media files; all sources come from collec
 | Server | CloudCone | Hosts the demo; unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
 | Network | LiangXinYun | From ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
 | Network | PeiQian | From ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| Network | DOVE | Reliable backup network service | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
+| Network | QingYu | Reliable backup network service | [Register](https://www.lajiaoyun.xyz/#/register?code=oLA3JOfG) |
 
 ## Main features
 
