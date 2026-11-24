@@ -16,7 +16,7 @@ function makeChunkStream(chunks: Uint8Array[], delayMs = 0) {
   });
 }
 
-test("probePlaySources 串行测速并采样首个变体流", async () => {
+test("probePlaySources 并发测速并采样最高码率变体", async () => {
   const originalFetch = globalThis.fetch;
   const active: string[] = [];
   const seen: string[] = [];
@@ -27,6 +27,7 @@ test("probePlaySources 串行测速并采样首个变体流", async () => {
     seen.push(url);
     active.push(url);
     maxConcurrent = Math.max(maxConcurrent, active.length);
+    await new Promise((resolve) => setTimeout(resolve, 30));
     try {
       if (url === "https://a.test/master.m3u8") {
         return new Response(
@@ -34,14 +35,14 @@ test("probePlaySources 串行测速并采样首个变体流", async () => {
           { status: 200 },
         );
       }
-      if (url === "https://a.test/low.m3u8") {
+      if (url === "https://a.test/high.m3u8") {
         return new Response("#EXTM3U\n#EXTINF:4,\nseg1.ts\n#EXTINF:4,\nseg2.ts\n", { status: 200 });
       }
       if (url.startsWith("https://a.test/seg")) {
-        return new Response(makeChunkStream([new Uint8Array(256 * 1024)], 5), { status: 200 });
+        return new Response(makeChunkStream([new Uint8Array(128 * 1024)], 5), { status: 200 });
       }
       if (url === "https://b.test/video.mp4") {
-        return new Response(makeChunkStream([new Uint8Array(512 * 1024)], 80), { status: 200 });
+        return new Response(makeChunkStream([new Uint8Array(16 * 1024)], 80), { status: 200 });
       }
       return new Response("not found", { status: 404 });
     } finally {
@@ -55,9 +56,9 @@ test("probePlaySources 串行测速并采样首个变体流", async () => {
       { sourceId: "slow", url: "https://b.test/video.mp4" },
       { sourceId: "fast", url: "https://a.test/master.m3u8" },
     ]);
-    assert.equal(maxConcurrent, 1);
-    assert.equal(seen.includes("https://a.test/low.m3u8"), true);
-    assert.equal(seen.includes("https://a.test/high.m3u8"), false);
+    assert.ok(maxConcurrent > 1);
+    assert.equal(seen.includes("https://a.test/low.m3u8"), false);
+    assert.equal(seen.includes("https://a.test/high.m3u8"), true);
     assert.equal(results[0]?.status, "skipped");
     assert.equal(results[1]?.status, "ok");
     assert.equal(results[2]?.status, "ok");
@@ -137,7 +138,7 @@ test("播放列表已返回后慢速正文不再被 1.5s 握手掐断", async ()
   }
 });
 
-test("probePlaySources 在握手超时时在 1.5s 内熔断而非拖满 4s", async () => {
+test("probePlaySources 在握手超时时在 1.2s 内熔断而非拖满总超时", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((_: RequestInfo | URL, init?: RequestInit) =>
     new Promise((_resolve, reject) => {
