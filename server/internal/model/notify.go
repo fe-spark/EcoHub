@@ -42,27 +42,29 @@ func (NotifyConfigRecord) TableName() string {
 
 // SourceNotifyResult 单个采集源在批次中的执行统计
 type SourceNotifyResult struct {
-	SourceID    string `json:"sourceId"`
-	SourceName  string `json:"sourceName"`
-	Sort        int    `json:"sort"`
-	Status      string `json:"status"`
-	Error       string `json:"error,omitempty"`
-	PageTotal   int    `json:"pageTotal"`
-	PageCurrent int    `json:"pageCurrent"`
-	SuccessCnt  int    `json:"successCnt"`
-	FailedCnt   int    `json:"failedCnt"`
-	FailedPages  []int  `json:"failedPages,omitempty"`
-	FilmsTotal   int    `json:"filmsTotal"`
-	CategorySkip int    `json:"categorySkip,omitempty"`
+	SourceID     string  `json:"sourceId"`
+	SourceName   string  `json:"sourceName"`
+	Sort         int     `json:"sort"`
+	Status       string  `json:"status"`
+	Error        string  `json:"error,omitempty"`
+	PageTotal    int     `json:"pageTotal"`
+	PageCurrent  int     `json:"pageCurrent"`
+	SuccessCnt   int     `json:"successCnt"`
+	FailedCnt    int     `json:"failedCnt"`
+	FailedPages  []int   `json:"failedPages,omitempty"`
+	FilmsTotal   int     `json:"filmsTotal"`
+	CategorySkip int     `json:"categorySkip,omitempty"`
+	FilmMIDs     []int64 `json:"filmMids,omitempty"`
 }
 
 // CollectBatchNotifyPayload 采集批次汇总通知载荷
 type CollectBatchNotifyPayload struct {
-	Trigger    string               `json:"trigger"`
-	StartedAt  time.Time            `json:"startedAt"`
-	FinishedAt time.Time            `json:"finishedAt"`
-	Sources    []SourceNotifyResult `json:"sources"`
-	NotifyMIDs []int64              `json:"notifyMids"`
+	CollectBatchID string               `json:"collectBatchId,omitempty"`
+	Trigger        string               `json:"trigger"`
+	StartedAt      time.Time            `json:"startedAt"`
+	FinishedAt     time.Time            `json:"finishedAt"`
+	Sources        []SourceNotifyResult `json:"sources"`
+	NotifyMIDs     []int64              `json:"notifyMids"`
 }
 
 // NotifyFilmItem 通知翻页会话中的单片精简项
@@ -78,14 +80,58 @@ type NotifyCategoryGroup struct {
 	Films        []NotifyFilmItem `json:"films"`
 }
 
+// NotifySourceCategoryGroup 单站分类聚合（优先仅存计数与分类 ID，由采集清单表 SQL 分页；Mids 仅作无清单兜底）
+type NotifySourceCategoryGroup struct {
+	CategoryID   int64   `json:"categoryId"`
+	CategoryName string  `json:"categoryName"`
+	Count        int     `json:"count,omitempty"`
+	Mids         []int64 `json:"mids,omitempty"`
+}
+
+// FilmCount 返回该分类下的影片总数。
+func (g NotifySourceCategoryGroup) FilmCount() int {
+	if g.Count > 0 {
+		return g.Count
+	}
+	return len(g.Mids)
+}
+
+// NotifySourceSession 采集汇总内单个站点的交互会话状态
+type NotifySourceSession struct {
+	SourceID     string                      `json:"sourceId"`
+	SourceName   string                      `json:"sourceName"`
+	IsPrimary    bool                        `json:"isPrimary,omitempty"`
+	Status       string                      `json:"status"`
+	Error        string                      `json:"error,omitempty"`
+	PageTotal    int                         `json:"pageTotal"`
+	SuccessCnt   int                         `json:"successCnt"`
+	FailedCnt    int                         `json:"failedCnt"`
+	FilmsTotal   int                         `json:"filmsTotal"`
+	AllCount     int                         `json:"allCount,omitempty"`
+	CategorySkip int                         `json:"categorySkip,omitempty"`
+	OverviewHTML string                      `json:"overviewHtml"`
+	Categories   []NotifySourceCategoryGroup `json:"categories,omitempty"`
+	AllMids      []int64                     `json:"allMids,omitempty"`
+}
+
+// TotalFilmCount 返回交互片单可用的影片总数。
+func (s NotifySourceSession) TotalFilmCount() int {
+	if s.AllCount > 0 {
+		return s.AllCount
+	}
+	return len(s.AllMids)
+}
+
 // NotifyBatchSession TG 消息内联按钮翻页会话（存于内存 + Redis，TTL 24h）
 type NotifyBatchSession struct {
-	BatchID      string                `json:"batchId"`
-	SiteName     string                `json:"siteName"`
-	OverviewHTML string                `json:"overviewHtml"`
-	PageSize     int                   `json:"pageSize"`
-	Categories   []NotifyCategoryGroup `json:"categories"`
-	AllFilms     []NotifyFilmItem      `json:"allFilms"`
+	BatchID        string                `json:"batchId"`
+	CollectBatchID string                `json:"collectBatchId,omitempty"`
+	SiteName       string                `json:"siteName"`
+	OverviewHTML   string                `json:"overviewHtml"`
+	PageSize       int                   `json:"pageSize"`
+	Categories     []NotifyCategoryGroup `json:"categories"`
+	AllFilms       []NotifyFilmItem      `json:"allFilms"`
+	Sources        []NotifySourceSession `json:"sources,omitempty"`
 }
 
 // NotifyTestReq 测试发送通知请求参数（支持草稿）

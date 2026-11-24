@@ -169,7 +169,6 @@ export default function PlayPageView({
       preferRunIdRef.current = runId;
 
       setIsProbing(true);
-      setProbeReady(false);
       setProbeBySourceId({});
       setProbingSourceIds([]);
 

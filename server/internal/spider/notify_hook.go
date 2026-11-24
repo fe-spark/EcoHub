@@ -72,11 +72,21 @@ func emitBatchNotify(b *collectBatchContext) {
 		}
 	}
 	countBySource := make(map[string]int, len(b.sourceFilmMIDs))
+	midsBySource := make(map[string][]int64, len(b.sourceFilmMIDs))
 	for sid, set := range b.sourceFilmMIDs {
 		if b.sourceDroppedLocked(sid) {
 			continue
 		}
 		countBySource[sid] = len(set)
+		if len(set) > 0 {
+			list := make([]int64, 0, len(set))
+			for mid := range set {
+				if mid > 0 {
+					list = append(list, mid)
+				}
+			}
+			midsBySource[sid] = list
+		}
 	}
 	sourceHours := make(map[string]int, len(b.sourceHours))
 	for sid, hour := range b.sourceHours {
@@ -166,25 +176,41 @@ func emitBatchNotify(b *collectBatchContext) {
 			CategorySkip: b.CategorySkip(src.Id),
 		})
 	}
-	persistCollectRecord(b, results)
+	ledgerSaved := persistCollectRecord(b, results)
 
 	d := getNotifyDispatcher()
 	if d.OnBatchSummary == nil {
 		return
 	}
 
+	const inlineNotifyMidLimit = 2000
+	notifyMIDs := mids
+	if ledgerSaved && len(notifyMIDs) > inlineNotifyMidLimit {
+		// 全量/超大批次已完整落库到 collect_record_films，不再在内存中传递数十万 NotifyMIDs
+		notifyMIDs = nil
+	}
+
 	notifyResults := make([]model.SourceNotifyResult, len(results))
 	for i, r := range results {
 		r.Error = stripCategorySkipError(r.Error, r.CategorySkip)
+		if !ledgerSaved {
+			r.FilmMIDs = midsBySource[r.SourceID]
+		}
 		notifyResults[i] = r
 	}
 
+	collectBatchID := ""
+	if ledgerSaved {
+		collectBatchID = b.batchID
+	}
+
 	d.OnBatchSummary(model.CollectBatchNotifyPayload{
-		Trigger:    trigger,
-		StartedAt:  startedAt,
-		FinishedAt: time.Now(),
-		Sources:    notifyResults,
-		NotifyMIDs: mids,
+		CollectBatchID: collectBatchID,
+		Trigger:        trigger,
+		StartedAt:      startedAt,
+		FinishedAt:     time.Now(),
+		Sources:        notifyResults,
+		NotifyMIDs:     notifyMIDs,
 	})
 }
 
@@ -229,13 +255,13 @@ func settleSourceStatus(status, errMsg string, successCnt int) (string, string) 
 	return status, errMsg
 }
 
-func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyResult) {
+func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyResult) bool {
 	if b == nil || strings.TrimSpace(b.batchID) == "" {
-		return
+		return false
 	}
 	if err := b.recordStart(); err != nil {
 		log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", b.batchID, err)
-		return
+		return false
 	}
 
 	b.recordMu.Lock()
@@ -299,7 +325,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	detailBytes, err := json.Marshal(details)
 	if err != nil {
 		log.Printf("[Spider] 采集明细序列化失败 batchID=%s: %v", b.batchID, err)
-		return
+		return false
 	}
 
 	var errSummary strings.Builder
@@ -345,7 +371,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 			if delErr := repository.DeleteCollectRecordFilms(b.batchID); delErr != nil {
 				log.Printf("[Spider] 清理半截清单失败 batchID=%s err=%v", b.batchID, delErr)
 			}
-			return
+			return false
 		}
 	}
 	if err := repository.CompleteCollectRecord(b.batchID, comp); err != nil {
@@ -353,5 +379,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		if delErr := repository.DeleteCollectRecordFilms(b.batchID); delErr != nil {
 			log.Printf("[Spider] 清理未结算清单失败 batchID=%s err=%v", b.batchID, delErr)
 		}
+		return false
 	}
+	return len(films) > 0
 }

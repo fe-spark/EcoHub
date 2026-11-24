@@ -264,6 +264,7 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 // NotifyFilmMeta 影片通知归类与排序元数据
 type NotifyFilmMeta struct {
 	Mid             int64
+	FirstSourceId   string
 	Name            string
 	Pid             int64
 	Cid             int64
@@ -300,6 +301,7 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 		}
 		var rows []struct {
 			Mid             int64          `gorm:"column:mid"`
+			FirstSourceId   sql.NullString `gorm:"column:first_source_id"`
 			Name            string         `gorm:"column:name"`
 			Pid             sql.NullInt64  `gorm:"column:pid"`
 			Cid             sql.NullInt64  `gorm:"column:cid"`
@@ -308,8 +310,8 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 			UpdateStamp     int64          `gorm:"column:update_stamp"`
 		}
 		if err := db.Mdb.Table(model.TableFilmIndex).
-			Select("mid, name, pid, cid, category_key, root_category_key, update_stamp").
-			Where("mid IN ?", uniq[start:end]).
+			Select("mid, first_source_id, name, pid, cid, category_key, root_category_key, update_stamp").
+			Where("mid IN ? AND deleted_at IS NULL", uniq[start:end]).
 			Scan(&rows).Error; err != nil {
 			return nil, err
 		}
@@ -323,6 +325,7 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 			}
 			out = append(out, NotifyFilmMeta{
 				Mid:             r.Mid,
+				FirstSourceId:   strings.TrimSpace(r.FirstSourceId.String),
 				Name:            strings.TrimSpace(r.Name),
 				Pid:             pid,
 				Cid:             cid,
@@ -341,4 +344,142 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 		return out[i].Mid > out[j].Mid
 	})
 	return out, nil
+}
+
+// BatchSourceCategoryStatRow 表示按站点与影片分类字段聚合后的计数行
+type BatchSourceCategoryStatRow struct {
+	SourceID        string
+	FirstSourceId   string
+	Pid             int64
+	Cid             int64
+	CategoryKey     string
+	RootCategoryKey string
+	Count           int
+}
+
+// BatchSourceCategoryPageQuery 定义账本批次下站点分类分页 SQL 查询条件
+type BatchSourceCategoryPageQuery struct {
+	BatchID         string
+	SourceID        string
+	CategoryAll     bool
+	IsOther         bool
+	UseCategoryKeys bool
+	IncludeKeys     []string
+	KnownKeys       []string
+	IncludePids     []int64
+	KnownPids       []int64
+	Limit           int
+	Offset          int
+}
+
+// HasCollectBatchLedger 检查批次是否已写入 collect_record_films 账本
+func HasCollectBatchLedger(batchID string) (bool, error) {
+	return collectRecordHasLedger(batchID)
+}
+
+// LoadBatchSourceCategoryStats 基于 collect_record_films 账本在数据库侧按分类聚合计数
+func LoadBatchSourceCategoryStats(batchID string) ([]BatchSourceCategoryStatRow, error) {
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" || db.Mdb == nil {
+		return nil, nil
+	}
+	type statRaw struct {
+		SourceID        string
+		FirstSourceId   sql.NullString
+		Pid             sql.NullInt64
+		Cid             sql.NullInt64
+		CategoryKey     sql.NullString
+		RootCategoryKey sql.NullString
+		Count           int64
+	}
+	var rows []statRaw
+	err := db.Mdb.Table("collect_record_films AS crf").
+		Select("crf.source_id, fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key, COUNT(*) AS count").
+		Joins("JOIN film_index AS fi ON fi.mid = crf.mid").
+		Where("crf.batch_id = ? AND fi.deleted_at IS NULL", batchID).
+		Group("crf.source_id, fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BatchSourceCategoryStatRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, BatchSourceCategoryStatRow{
+			SourceID:        strings.TrimSpace(r.SourceID),
+			FirstSourceId:   strings.TrimSpace(r.FirstSourceId.String),
+			Pid:             r.Pid.Int64,
+			Cid:             r.Cid.Int64,
+			CategoryKey:     strings.TrimSpace(r.CategoryKey.String),
+			RootCategoryKey: strings.TrimSpace(r.RootCategoryKey.String),
+			Count:           int(r.Count),
+		})
+	}
+	return out, nil
+}
+
+// LoadBatchSourceCategoryPage 基于 collect_record_films 账本按需查询单页通知影片
+func LoadBatchSourceCategoryPage(q BatchSourceCategoryPageQuery) ([]model.NotifyFilmItem, error) {
+	batchID := strings.TrimSpace(q.BatchID)
+	sourceID := strings.TrimSpace(q.SourceID)
+	if batchID == "" || sourceID == "" || db.Mdb == nil || q.Limit <= 0 {
+		return nil, nil
+	}
+	query := db.Mdb.Table("collect_record_films AS crf").
+		Select("fi.mid, fi.name").
+		Joins("JOIN film_index AS fi ON fi.mid = crf.mid").
+		Where("crf.batch_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", batchID, sourceID)
+
+	if !q.CategoryAll {
+		switch {
+		case q.IsOther && q.UseCategoryKeys:
+			if len(q.KnownKeys) > 0 {
+				query = query.Where(
+					"(fi.category_key IS NULL OR fi.category_key = '' OR fi.category_key NOT IN ?) AND (fi.root_category_key IS NULL OR fi.root_category_key = '' OR fi.root_category_key NOT IN ?)",
+					q.KnownKeys, q.KnownKeys,
+				)
+			}
+		case q.IsOther && !q.UseCategoryKeys:
+			if len(q.KnownPids) > 0 {
+				query = query.Where("(fi.pid IS NULL OR fi.pid <= 0 OR fi.pid NOT IN ?)", q.KnownPids)
+			}
+		case !q.IsOther && q.UseCategoryKeys:
+			if len(q.IncludeKeys) == 0 {
+				return nil, nil
+			}
+			if len(q.KnownKeys) > 0 {
+				query = query.Where(
+					"(fi.category_key IN ? OR ((fi.category_key IS NULL OR fi.category_key = '' OR fi.category_key NOT IN ?) AND fi.root_category_key IN ?))",
+					q.IncludeKeys, q.KnownKeys, q.IncludeKeys,
+				)
+			} else {
+				query = query.Where("(fi.category_key IN ? OR fi.root_category_key IN ?)", q.IncludeKeys, q.IncludeKeys)
+			}
+		default:
+			if len(q.IncludePids) == 0 {
+				return nil, nil
+			}
+			query = query.Where("fi.pid IN ?", q.IncludePids)
+		}
+	}
+
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	type pageRow struct {
+		Mid  int64
+		Name string
+	}
+	var rows []pageRow
+	if err := query.Order("fi.update_stamp DESC, fi.mid DESC").Limit(q.Limit).Offset(offset).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]model.NotifyFilmItem, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, model.NotifyFilmItem{
+			Mid:  r.Mid,
+			Name: strings.TrimSpace(r.Name),
+		})
+	}
+	return items, nil
 }

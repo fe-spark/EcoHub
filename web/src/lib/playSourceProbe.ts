@@ -13,10 +13,11 @@ export type ProbeTarget = {
   url: string;
 };
 
-const DEFAULT_TIMEOUT_MS = 4000;
-const HANDSHAKE_TIMEOUT_MS = 1500;
-const SAMPLE_BYTES = 512 * 1024;
-const MAX_SAMPLE_SEGMENTS = 3;
+const DEFAULT_TIMEOUT_MS = 5000;
+const HANDSHAKE_TIMEOUT_MS = 2500;
+const SAMPLE_BYTES = 128 * 1024;
+const MAX_SAMPLE_SEGMENTS = 2;
+const PROBE_CONCURRENCY = 2;
 
 export function formatSpeedLabel(speedKBps: number): string {
   if (speedKBps >= 1024) {
@@ -104,18 +105,30 @@ function linkTimeoutSignal(timeoutMs: number, handshakeMs: number, outerSignal?:
   };
 }
 
+function parseBandwidth(line: string): number {
+  const matched = /(?:^|[,:\s])BANDWIDTH=(\d+)/i.exec(line);
+  return matched ? Number(matched[1]) : 0;
+}
+
 function parseMasterPlaylistUrl(text: string, baseUrl: string): string | null {
   const lines = text.split(/\r?\n/);
+  let bestUrl = "";
+  let bestBandwidth = -1;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim();
     if (!line.startsWith("#EXT-X-STREAM-INF")) continue;
+    const bandwidth = parseBandwidth(line);
     for (let j = i + 1; j < lines.length; j += 1) {
       const next = lines[j].trim();
       if (!next || next.startsWith("#")) continue;
-      return new URL(next, baseUrl).toString();
+      if (bandwidth > bestBandwidth) {
+        bestBandwidth = bandwidth;
+        bestUrl = new URL(next, baseUrl).toString();
+      }
+      break;
     }
   }
-  return null;
+  return bestUrl || null;
 }
 
 function parseSegmentUrls(text: string, baseUrl: string, limit: number): string[] {
@@ -153,6 +166,7 @@ async function readStreamSample(
   maxBytes: number,
   signal: AbortSignal,
   onHeaders?: () => void,
+  isTimedOut?: () => boolean,
 ) {
   const start = performance.now();
   const response = await fetch(url, { cache: "no-store", signal });
@@ -173,6 +187,11 @@ async function readStreamSample(
         const { done, value } = await reader.read();
         if (done) break;
         bytes += value.byteLength;
+      }
+    } catch (error) {
+      // 已成功拉取部分媒体数据时若触发总超时，按实测已读字节计算速度，避免误判为不可用
+      if (!(isTimedOut?.() && bytes > 0)) {
+        throw error;
       }
     } finally {
       await reader.cancel().catch(() => {});
@@ -202,7 +221,13 @@ async function probeOneUrl(
     const probeStart = performance.now();
 
     if (isProgressiveUrl(url)) {
-      const sample = await readStreamSample(url, SAMPLE_BYTES, linked.signal, linked.clearHandshake);
+      const sample = await readStreamSample(
+        url,
+        SAMPLE_BYTES,
+        linked.signal,
+        linked.clearHandshake,
+        linked.isTimedOut,
+      );
       const speedKBps = sample.bytes / 1024 / (Math.max(sample.downloadMs, 15) / 1000);
       const score = sample.bytes / 1024 / (Math.max(sample.totalMs, 15) / 1000);
       return {
@@ -232,18 +257,27 @@ async function probeOneUrl(
     let firstSegTtfb = 0;
 
     for (const segUrl of segments) {
-      if (totalBytes >= SAMPLE_BYTES) break;
-      const sample = await readStreamSample(
-        segUrl,
-        SAMPLE_BYTES - totalBytes,
-        linked.signal,
-        linked.clearHandshake,
-      );
-      if (firstSegTtfb === 0) {
-        firstSegTtfb = sample.ttfbMs;
+      if (totalBytes >= SAMPLE_BYTES || linked.isTimedOut()) break;
+      try {
+        const sample = await readStreamSample(
+          segUrl,
+          SAMPLE_BYTES - totalBytes,
+          linked.signal,
+          linked.clearHandshake,
+          linked.isTimedOut,
+        );
+        if (firstSegTtfb === 0) {
+          firstSegTtfb = sample.ttfbMs;
+        }
+        totalBytes += sample.bytes;
+        totalDownloadMs += sample.downloadMs;
+      } catch (error) {
+        // 首片已拿到实测数据时，后续分片因总超时中断不再丢弃前序采样结果
+        if (linked.isTimedOut() && totalBytes > 0) {
+          break;
+        }
+        throw error;
       }
-      totalBytes += sample.bytes;
-      totalDownloadMs += sample.downloadMs;
     }
 
     const totalElapsedMs = Math.max(performance.now() - probeStart, 15);
@@ -294,14 +328,11 @@ export async function probePlaySources(
 ): Promise<SourceProbeResult[]> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const signal = options?.signal;
-  const results: SourceProbeResult[] = [];
+  const results: SourceProbeResult[] = new Array(targets.length);
+  let cursor = 0;
 
-  // 逐条串行采样，避免多路同时拉流抢占带宽导致结果失真
-  for (const target of targets) {
-    if (signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-
+  const runOne = async (index: number) => {
+    const target = targets[index];
     const url = String(target.url || "").trim();
     if (!url) {
       const skipped: SourceProbeResult = {
@@ -312,8 +343,8 @@ export async function probePlaySources(
         score: -1,
       };
       options?.onResult?.(skipped);
-      results.push(skipped);
-      continue;
+      results[index] = skipped;
+      return;
     }
 
     options?.onStart?.(target.sourceId);
@@ -325,17 +356,31 @@ export async function probePlaySources(
         ...metrics,
       };
       options?.onResult?.(okResult);
-      results.push(okResult);
+      results[index] = okResult;
     } catch (error) {
       if (signal?.aborted) {
         throw error;
       }
       const failure = toFailureResult(target.sourceId, error);
       options?.onResult?.(failure);
-      results.push(failure);
+      results[index] = failure;
     }
-  }
+  };
 
+  const worker = async () => {
+    while (!signal?.aborted) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= targets.length) return;
+      await runOne(index);
+    }
+  };
+
+  const workers = Math.min(PROBE_CONCURRENCY, targets.length);
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
   return results;
 }
 
