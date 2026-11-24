@@ -455,6 +455,30 @@ func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_peer_other", Name: "非主站", Uri: "http://2", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.SourceCategory{SourceId: "src_peer_other", SourceTypeId: 99, RawName: "电影"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_peer_other", SourceTypeId: 99, CategoryId: 10}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103, FirstSourceId: "src_peer_other"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_peer_other:99", RootCategoryKey: "source:src_peer_other:99"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "非主站电影", UpdateStamp: 300},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 主站内存在未知分类键的影片，即使其本地 Pid 数值恰好等于主站某 source_type_id，也不应误归桶
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 104, FirstSourceId: "src_notify_hide"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 1, CategoryKey: "source:src_notify_hide:999", RootCategoryKey: "source:src_notify_hide:999"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "未映射主站影片", UpdateStamp: 150},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	_ = repository.RefreshCollectSourceCatalog()
 	repository.ReloadMappingRules()
@@ -464,16 +488,40 @@ func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
 	repository.MarkCategoryChanged()
 
 	sess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
-		NotifyMIDs: []int64{101, 102},
+		NotifyMIDs: []int64{101, 102, 103, 104},
 	}, 15)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sess.AllFilms) != 1 || sess.AllFilms[0].Mid != 101 {
-		t.Fatalf("expected only visible film 101, got %+v", sess.AllFilms)
+	if len(sess.AllFilms) != 2 || sess.AllFilms[0].Mid != 101 || sess.AllFilms[1].Mid != 104 {
+		t.Fatalf("expected only primary visible films [101 104], got %+v", sess.AllFilms)
 	}
-	if len(sess.Categories) != 1 || sess.Categories[0].CategoryName != "电影" {
+	if !strings.Contains(sess.OverviewHTML, "前台可见：<b>2</b> 部") {
+		t.Fatalf("expected overview count 2, got: %s", sess.OverviewHTML)
+	}
+	if len(sess.Categories) != 2 || sess.Categories[0].CategoryName != "电影" || len(sess.Categories[0].Films) != 1 || sess.Categories[1].CategoryName != "其他" || len(sess.Categories[1].Films) != 1 {
 		t.Fatalf("unexpected categories: %+v", sess.Categories)
+	}
+
+	// 置空主站时，前台可见应严格为 0
+	if err := gdb.Where("id = ?", 1).Delete(&model.PrimaryState{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&model.FilmSource{}).Where("1 = 1").Update("state", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	support.InvalidatePrimarySourceCache()
+	emptySess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
+		NotifyMIDs: []int64{101, 102, 103},
+	}, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptySess.AllFilms) != 0 || len(emptySess.Categories) != 0 {
+		t.Fatalf("expected empty session without primary source, got films=%+v cats=%+v", emptySess.AllFilms, emptySess.Categories)
+	}
+	if !strings.Contains(emptySess.OverviewHTML, "前台可见：<b>0</b> 部") {
+		t.Fatalf("expected overview count 0 without primary source, got: %s", emptySess.OverviewHTML)
 	}
 }
 

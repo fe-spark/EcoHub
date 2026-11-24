@@ -264,6 +264,7 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 // NotifyFilmMeta 影片通知归类与排序元数据
 type NotifyFilmMeta struct {
 	Mid             int64
+	FirstSourceId   string
 	Name            string
 	Pid             int64
 	Cid             int64
@@ -300,6 +301,7 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 		}
 		var rows []struct {
 			Mid             int64          `gorm:"column:mid"`
+			FirstSourceId   sql.NullString `gorm:"column:first_source_id"`
 			Name            string         `gorm:"column:name"`
 			Pid             sql.NullInt64  `gorm:"column:pid"`
 			Cid             sql.NullInt64  `gorm:"column:cid"`
@@ -308,8 +310,8 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 			UpdateStamp     int64          `gorm:"column:update_stamp"`
 		}
 		if err := db.Mdb.Table(model.TableFilmIndex).
-			Select("mid, name, pid, cid, category_key, root_category_key, update_stamp").
-			Where("mid IN ?", uniq[start:end]).
+			Select("mid, first_source_id, name, pid, cid, category_key, root_category_key, update_stamp").
+			Where("mid IN ? AND deleted_at IS NULL", uniq[start:end]).
 			Scan(&rows).Error; err != nil {
 			return nil, err
 		}
@@ -323,6 +325,7 @@ func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
 			}
 			out = append(out, NotifyFilmMeta{
 				Mid:             r.Mid,
+				FirstSourceId:   strings.TrimSpace(r.FirstSourceId.String),
 				Name:            strings.TrimSpace(r.Name),
 				Pid:             pid,
 				Cid:             cid,

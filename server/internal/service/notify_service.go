@@ -427,79 +427,93 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 		return model.NotifyBatchSession{}, err
 	}
 	siteName := basic.SiteName
-	metas, err := repository.LoadNotifyFilmMetas(payload.NotifyMIDs)
-	if err != nil {
-		return model.NotifyBatchSession{}, err
-	}
 
 	var activeSourceID string
 	if active := repository.CurrentPrimarySource(); active != nil {
 		activeSourceID = strings.TrimSpace(active.Id)
 	}
-	nav, err := film.NavTopCategories(activeSourceID)
-	if err != nil {
-		return model.NotifyBatchSession{}, err
-	}
-	navSet := make(map[int64]struct{}, len(nav))
-	keyToRoot := make(map[string]int64, len(nav)*4)
-	for _, c := range nav {
-		if c.Id <= 0 {
-			continue
+
+	var (
+		allFilms   []model.NotifyFilmItem
+		categories []model.NotifyCategoryGroup
+	)
+	if activeSourceID != "" && len(payload.NotifyMIDs) > 0 {
+		metas, err := repository.LoadNotifyFilmMetas(payload.NotifyMIDs)
+		if err != nil {
+			return model.NotifyBatchSession{}, err
 		}
-		navSet[c.Id] = struct{}{}
-		if activeSourceID != "" {
+		nav, err := film.NavTopCategories(activeSourceID)
+		if err != nil {
+			return model.NotifyBatchSession{}, err
+		}
+		navSet := make(map[int64]struct{}, len(nav))
+		keyToRoot := make(map[string]int64, len(nav)*4)
+		for _, c := range nav {
+			if c.Id <= 0 {
+				continue
+			}
+			navSet[c.Id] = struct{}{}
 			for _, typeID := range repository.PublicSourceTypeIDs(activeSourceID, "pid", c.Id) {
 				if k := support.BuildSourceCategoryKey(activeSourceID, typeID); k != "" {
 					keyToRoot[k] = c.Id
 				}
 			}
 		}
-	}
+		useSourceKeys := len(keyToRoot) > 0
 
-	visible := filmsnapshot.SourceCategoryVisibility(activeSourceID)
-	allFilms := make([]model.NotifyFilmItem, 0, len(metas))
-	buckets := make(map[int64][]model.NotifyFilmItem, len(nav))
-	var others []model.NotifyFilmItem
+		visible := filmsnapshot.SourceCategoryVisibility(activeSourceID)
+		allFilms = make([]model.NotifyFilmItem, 0, len(metas))
+		buckets := make(map[int64][]model.NotifyFilmItem, len(nav))
+		var others []model.NotifyFilmItem
 
-	for _, m := range metas {
-		if !visible(m.CategoryKey, m.RootCategoryKey, m.Cid, m.Pid) {
-			continue
-		}
-		item := model.NotifyFilmItem{Mid: m.Mid, Name: m.Name}
-		allFilms = append(allFilms, item)
-		if rootID, ok := keyToRoot[m.CategoryKey]; ok && rootID > 0 {
-			buckets[rootID] = append(buckets[rootID], item)
-			continue
-		}
-		if rootID, ok := keyToRoot[m.RootCategoryKey]; ok && rootID > 0 {
-			buckets[rootID] = append(buckets[rootID], item)
-			continue
-		}
-		if m.Pid > 0 {
-			if _, ok := navSet[m.Pid]; ok {
-				buckets[m.Pid] = append(buckets[m.Pid], item)
+		for _, m := range metas {
+			// 与实际前台（检索索引 / 每日更新）保持一致：仅统计当前主站且分类可见的影片
+			if strings.TrimSpace(m.FirstSourceId) != activeSourceID {
 				continue
 			}
+			if !visible(m.CategoryKey, m.RootCategoryKey, m.Cid, m.Pid) {
+				continue
+			}
+			item := model.NotifyFilmItem{Mid: m.Mid, Name: m.Name}
+			allFilms = append(allFilms, item)
+			if useSourceKeys {
+				if rootID, ok := keyToRoot[m.CategoryKey]; ok && rootID > 0 {
+					buckets[rootID] = append(buckets[rootID], item)
+					continue
+				}
+				if rootID, ok := keyToRoot[m.RootCategoryKey]; ok && rootID > 0 {
+					buckets[rootID] = append(buckets[rootID], item)
+					continue
+				}
+				others = append(others, item)
+				continue
+			}
+			if m.Pid > 0 {
+				if _, ok := navSet[m.Pid]; ok {
+					buckets[m.Pid] = append(buckets[m.Pid], item)
+					continue
+				}
+			}
+			others = append(others, item)
 		}
-		others = append(others, item)
-	}
 
-	categories := make([]model.NotifyCategoryGroup, 0, len(nav)+1)
-	for _, c := range nav {
-		if list := buckets[c.Id]; len(list) > 0 {
+		categories = make([]model.NotifyCategoryGroup, 0, len(nav)+1)
+		for _, c := range nav {
+			if list := buckets[c.Id]; len(list) > 0 {
+				categories = append(categories, model.NotifyCategoryGroup{
+					CategoryID:   c.Id,
+					CategoryName: c.Name,
+					Films:        list,
+				})
+			}
+		}
+		if len(others) > 0 {
 			categories = append(categories, model.NotifyCategoryGroup{
-				CategoryID:   c.Id,
-				CategoryName: c.Name,
-				Films:        list,
+				CategoryID:   0,
+				CategoryName: "其他",
+				Films:        others,
 			})
 		}
-	}
-	if len(others) > 0 {
-		categories = append(categories, model.NotifyCategoryGroup{
-			CategoryID:   0,
-			CategoryName: "其他",
-			Films:        others,
-		})
 	}
 
 	batchID, err := utils.GenerateSalt()
