@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -184,40 +185,47 @@ func (s *NotifyService) SendTest(req model.NotifyTestReq) (model.NotifyTestResul
 	return res, nil
 }
 
-// PublishBatchSummary 异步构建并推送采集批次完成汇总（含与前台同源的分类更新片单及内联翻页）
+// PublishBatchSummary 异步构建并推送采集批次完成汇总（含各站分类与内联翻页）
 func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
-	cfg, err := repository.GetNotifyConfig()
-	if err != nil {
-		syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
-		return
-	}
-	if !cfg.Enabled || !cfg.Events.CollectBatchSummary || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
-		return
-	}
-
-	failedSources := 0
-	for _, src := range payload.Sources {
-		if src.Status == progress.StatusFailed || src.Error != "" {
-			failedSources++
+	goSafe("NotifyBatchSummary", func() {
+		cfg, err := repository.GetNotifyConfig()
+		if err != nil {
+			syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
+			return
 		}
-	}
+		if !cfg.Enabled || !cfg.Events.CollectBatchSummary || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
+			return
+		}
 
-	sess, err := buildNotifyBatchSession(payload, cfg.MaxFilmsInMessage)
-	if err != nil {
-		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
-		return
-	}
-	if cfg.OnlyNotifyOnUpdate && len(sess.AllFilms) == 0 && failedSources == 0 {
-		return
-	}
+		failedSources := 0
+		totalStored := 0
+		for _, src := range payload.Sources {
+			if src.Status == progress.StatusFailed || src.Error != "" {
+				failedSources++
+			}
+			totalStored += src.FilmsTotal
+		}
+		if cfg.OnlyNotifyOnUpdate && totalStored == 0 && len(payload.NotifyMIDs) == 0 && failedSources == 0 {
+			return
+		}
 
-	var markup *InlineKeyboardMarkup
-	if len(sess.AllFilms) > 0 {
-		_ = repository.SaveNotifyBatchSession(sess)
-		markup = buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
-	}
+		sess, visibleCount, err := buildNotifyBatchSessionWithCount(payload, cfg.MaxFilmsInMessage)
+		if err != nil {
+			syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+			return
+		}
+		if cfg.OnlyNotifyOnUpdate && totalStored == 0 && visibleCount == 0 && failedSources == 0 {
+			return
+		}
 
-	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, sess.OverviewHTML, markup)
+		var markup *InlineKeyboardMarkup
+		if len(sess.Sources) > 0 || len(sess.AllFilms) > 0 {
+			_ = repository.SaveNotifyBatchSession(sess)
+			markup = buildOverviewKeyboard(sess, 1)
+		}
+
+		broadcastTelegram(cfg.BotToken, cfg.ChatIDs, sess.OverviewHTML, markup)
+	})
 }
 
 // PublishSourceFailed 发送单源采集失败告警
@@ -417,6 +425,11 @@ func broadcastTelegram(token string, chatIDs []string, htmlText string, markup *
 
 // buildNotifyBatchSession 按前台「每日更新」同源分类树与排序规则构建批次翻页会话
 func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize int) (model.NotifyBatchSession, error) {
+	sess, _, err := buildNotifyBatchSessionWithCount(payload, pageSize)
+	return sess, err
+}
+
+func buildNotifyBatchSessionWithCount(payload model.CollectBatchNotifyPayload, pageSize int) (model.NotifyBatchSession, int, error) {
 	if pageSize <= 0 {
 		pageSize = model.DefaultNotifyPageSize
 	} else if pageSize > model.MaxNotifyPageSize {
@@ -424,113 +437,432 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 	}
 	basic, err := repository.GetSiteBasic()
 	if err != nil {
-		return model.NotifyBatchSession{}, err
+		return model.NotifyBatchSession{}, 0, err
 	}
 	siteName := basic.SiteName
 
-	var activeSourceID string
+	var activeSourceID, activeSourceName string
 	if active := repository.CurrentPrimarySource(); active != nil {
 		activeSourceID = strings.TrimSpace(active.Id)
+		activeSourceName = strings.TrimSpace(active.Name)
+		if activeSourceName == "" {
+			activeSourceName = activeSourceID
+		}
+	}
+
+	collectBatchID := strings.TrimSpace(payload.CollectBatchID)
+	useLedger := false
+	var statsBySource map[string][]repository.BatchSourceCategoryStatRow
+	if collectBatchID != "" {
+		hasLedger, err := repository.HasCollectBatchLedger(collectBatchID)
+		if err != nil {
+			return model.NotifyBatchSession{}, 0, err
+		}
+		if hasLedger {
+			statsRows, err := repository.LoadBatchSourceCategoryStats(collectBatchID)
+			if err != nil {
+				return model.NotifyBatchSession{}, 0, err
+			}
+			useLedger = true
+			statsBySource = make(map[string][]repository.BatchSourceCategoryStatRow)
+			for _, r := range statsRows {
+				sid := strings.TrimSpace(r.SourceID)
+				statsBySource[sid] = append(statsBySource[sid], r)
+			}
+		}
 	}
 
 	var (
-		allFilms   []model.NotifyFilmItem
-		categories []model.NotifyCategoryGroup
+		metaByMid map[int64]repository.NotifyFilmMeta
+		orderRank map[int64]int
 	)
-	if activeSourceID != "" && len(payload.NotifyMIDs) > 0 {
-		metas, err := repository.LoadNotifyFilmMetas(payload.NotifyMIDs)
+	if !(useLedger && len(payload.Sources) > 0) {
+		uniqueMIDs := collectBatchUniqueMIDs(payload)
+		metaByMid = make(map[int64]repository.NotifyFilmMeta, len(uniqueMIDs))
+		orderRank = make(map[int64]int, len(uniqueMIDs))
+		if len(uniqueMIDs) > 0 {
+			metas, err := repository.LoadNotifyFilmMetas(uniqueMIDs)
+			if err != nil {
+				return model.NotifyBatchSession{}, 0, err
+			}
+			for idx, m := range metas {
+				metaByMid[m.Mid] = m
+				orderRank[m.Mid] = idx
+			}
+		}
+	}
+
+	// 有 Sources 时每个站点已各自保存轻量化计数或 ID 列表，不再把主站全量片名重复写入 AllFilms/Categories
+	var (
+		allFilms     []model.NotifyFilmItem
+		categories   []model.NotifyCategoryGroup
+		visibleCount int
+	)
+	if len(payload.Sources) > 0 {
+		if useLedger {
+			visibleCount = countPrimaryVisibleFromStats(activeSourceID, statsBySource[activeSourceID])
+		} else {
+			visibleCount = len(filterPrimaryVisibleMetas(activeSourceID, payload.NotifyMIDs, metaByMid, orderRank))
+		}
+	} else {
+		allFilms, categories, err = buildPrimaryVisibleGroups(activeSourceID, payload.NotifyMIDs, metaByMid, orderRank)
 		if err != nil {
-			return model.NotifyBatchSession{}, err
+			return model.NotifyBatchSession{}, 0, err
 		}
-		nav, err := film.NavTopCategories(activeSourceID)
+		visibleCount = len(allFilms)
+	}
+
+	sources := make([]model.NotifySourceSession, 0, len(payload.Sources))
+	for _, src := range payload.Sources {
+		srcID := strings.TrimSpace(src.SourceID)
+		isPrimary := activeSourceID != "" && srcID == activeSourceID
+		var (
+			srcCats     []model.NotifySourceCategoryGroup
+			srcAllMids  []int64
+			srcAllCount int
+		)
+		if useLedger {
+			srcCats, srcAllCount, err = buildSourceCategoryCountsFromStats(srcID, statsBySource[srcID])
+		} else {
+			srcMetas := resolveOrderedMetas(src.FilmMIDs, metaByMid, orderRank)
+			srcCats, srcAllMids, err = buildSourceCategoryMids(srcID, srcMetas)
+			srcAllCount = len(srcAllMids)
+		}
 		if err != nil {
-			return model.NotifyBatchSession{}, err
+			return model.NotifyBatchSession{}, 0, err
 		}
-		navSet := make(map[int64]struct{}, len(nav))
-		keyToRoot := make(map[string]int64, len(nav)*4)
-		for _, c := range nav {
-			if c.Id <= 0 {
-				continue
-			}
-			navSet[c.Id] = struct{}{}
-			for _, typeID := range repository.PublicSourceTypeIDs(activeSourceID, "pid", c.Id) {
-				if k := support.BuildSourceCategoryKey(activeSourceID, typeID); k != "" {
-					keyToRoot[k] = c.Id
-				}
-			}
+		displayTotal := src.FilmsTotal
+		if srcAllCount > displayTotal {
+			displayTotal = srcAllCount
 		}
-		useSourceKeys := len(keyToRoot) > 0
-
-		visible := filmsnapshot.SourceCategoryVisibility(activeSourceID)
-		allFilms = make([]model.NotifyFilmItem, 0, len(metas))
-		buckets := make(map[int64][]model.NotifyFilmItem, len(nav))
-		var others []model.NotifyFilmItem
-
-		for _, m := range metas {
-			// 与实际前台（检索索引 / 每日更新）保持一致：仅统计当前主站且分类可见的影片
-			if strings.TrimSpace(m.FirstSourceId) != activeSourceID {
-				continue
-			}
-			if !visible(m.CategoryKey, m.RootCategoryKey, m.Cid, m.Pid) {
-				continue
-			}
-			item := model.NotifyFilmItem{Mid: m.Mid, Name: m.Name}
-			allFilms = append(allFilms, item)
-			if useSourceKeys {
-				if rootID, ok := keyToRoot[m.CategoryKey]; ok && rootID > 0 {
-					buckets[rootID] = append(buckets[rootID], item)
-					continue
-				}
-				if rootID, ok := keyToRoot[m.RootCategoryKey]; ok && rootID > 0 {
-					buckets[rootID] = append(buckets[rootID], item)
-					continue
-				}
-				others = append(others, item)
-				continue
-			}
-			if m.Pid > 0 {
-				if _, ok := navSet[m.Pid]; ok {
-					buckets[m.Pid] = append(buckets[m.Pid], item)
-					continue
-				}
-			}
-			others = append(others, item)
-		}
-
-		categories = make([]model.NotifyCategoryGroup, 0, len(nav)+1)
-		for _, c := range nav {
-			if list := buckets[c.Id]; len(list) > 0 {
-				categories = append(categories, model.NotifyCategoryGroup{
-					CategoryID:   c.Id,
-					CategoryName: c.Name,
-					Films:        list,
-				})
-			}
-		}
-		if len(others) > 0 {
-			categories = append(categories, model.NotifyCategoryGroup{
-				CategoryID:   0,
-				CategoryName: "其他",
-				Films:        others,
-			})
-		}
+		sources = append(sources, model.NotifySourceSession{
+			SourceID:     srcID,
+			SourceName:   strings.TrimSpace(src.SourceName),
+			IsPrimary:    isPrimary,
+			Status:       src.Status,
+			Error:        src.Error,
+			PageTotal:    src.PageTotal,
+			SuccessCnt:   src.SuccessCnt,
+			FailedCnt:    src.FailedCnt,
+			FilmsTotal:   displayTotal,
+			AllCount:     srcAllCount,
+			CategorySkip: src.CategorySkip,
+			OverviewHTML: formatSourceDetailHTML(siteName, src, isPrimary, srcAllCount),
+			Categories:   srcCats,
+			AllMids:      srcAllMids,
+		})
 	}
 
 	batchID, err := utils.GenerateSalt()
 	if err != nil {
-		return model.NotifyBatchSession{}, err
+		return model.NotifyBatchSession{}, 0, err
 	}
 	if len(batchID) > 10 {
 		batchID = batchID[:10]
 	}
-	overview := formatBatchOverviewHTML(siteName, payload, len(allFilms))
+	overview := formatBatchOverviewHTML(siteName, payload, activeSourceName, visibleCount)
 
+	sessionCollectBatchID := ""
+	if useLedger {
+		sessionCollectBatchID = collectBatchID
+	}
 	return model.NotifyBatchSession{
-		BatchID:      batchID,
-		SiteName:     siteName,
-		OverviewHTML: overview,
-		PageSize:     pageSize,
-		Categories:   categories,
-		AllFilms:     allFilms,
-	}, nil
+		BatchID:        batchID,
+		CollectBatchID: sessionCollectBatchID,
+		SiteName:       siteName,
+		OverviewHTML:   overview,
+		PageSize:       pageSize,
+		Categories:     categories,
+		AllFilms:       allFilms,
+		Sources:        sources,
+	}, visibleCount, nil
+}
+
+func collectBatchUniqueMIDs(payload model.CollectBatchNotifyPayload) []int64 {
+	seen := make(map[int64]struct{}, len(payload.NotifyMIDs))
+	out := make([]int64, 0, len(payload.NotifyMIDs))
+	add := func(mids []int64) {
+		for _, mid := range mids {
+			if mid <= 0 {
+				continue
+			}
+			if _, ok := seen[mid]; ok {
+				continue
+			}
+			seen[mid] = struct{}{}
+			out = append(out, mid)
+		}
+	}
+	add(payload.NotifyMIDs)
+	for _, src := range payload.Sources {
+		add(src.FilmMIDs)
+	}
+	return out
+}
+
+func resolveOrderedMetas(mids []int64, metaByMid map[int64]repository.NotifyFilmMeta, orderRank map[int64]int) []repository.NotifyFilmMeta {
+	if len(mids) == 0 || len(metaByMid) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(mids))
+	out := make([]repository.NotifyFilmMeta, 0, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		m, exists := metaByMid[mid]
+		if !exists {
+			continue
+		}
+		seen[mid] = struct{}{}
+		out = append(out, m)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return orderRank[out[i].Mid] < orderRank[out[j].Mid]
+	})
+	return out
+}
+
+func filterPrimaryVisibleMetas(activeSourceID string, notifyMIDs []int64, metaByMid map[int64]repository.NotifyFilmMeta, orderRank map[int64]int) []repository.NotifyFilmMeta {
+	if activeSourceID == "" || len(notifyMIDs) == 0 {
+		return nil
+	}
+	metas := resolveOrderedMetas(notifyMIDs, metaByMid, orderRank)
+	if len(metas) == 0 {
+		return nil
+	}
+	visible := filmsnapshot.SourceCategoryVisibility(activeSourceID)
+	filtered := make([]repository.NotifyFilmMeta, 0, len(metas))
+	for _, m := range metas {
+		if strings.TrimSpace(m.FirstSourceId) != activeSourceID {
+			continue
+		}
+		if !visible(m.CategoryKey, m.RootCategoryKey, m.Cid, m.Pid) {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	return filtered
+}
+
+func buildPrimaryVisibleGroups(activeSourceID string, notifyMIDs []int64, metaByMid map[int64]repository.NotifyFilmMeta, orderRank map[int64]int) ([]model.NotifyFilmItem, []model.NotifyCategoryGroup, error) {
+	filtered := filterPrimaryVisibleMetas(activeSourceID, notifyMIDs, metaByMid, orderRank)
+	if len(filtered) == 0 {
+		return nil, nil, nil
+	}
+	srcCats, allMids, err := buildSourceCategoryMids(activeSourceID, filtered)
+	if err != nil {
+		return nil, nil, err
+	}
+	allFilms := make([]model.NotifyFilmItem, 0, len(allMids))
+	for _, mid := range allMids {
+		m := metaByMid[mid]
+		allFilms = append(allFilms, model.NotifyFilmItem{Mid: m.Mid, Name: m.Name})
+	}
+	categories := make([]model.NotifyCategoryGroup, 0, len(srcCats))
+	for _, sc := range srcCats {
+		items := make([]model.NotifyFilmItem, 0, len(sc.Mids))
+		for _, mid := range sc.Mids {
+			m := metaByMid[mid]
+			items = append(items, model.NotifyFilmItem{Mid: m.Mid, Name: m.Name})
+		}
+		categories = append(categories, model.NotifyCategoryGroup{
+			CategoryID:   sc.CategoryID,
+			CategoryName: sc.CategoryName,
+			Films:        items,
+		})
+	}
+	return allFilms, categories, nil
+}
+
+type sourceCategoryMatcher struct {
+	nav           []model.Category
+	navSet        map[int64]struct{}
+	keyToRoot     map[string]int64
+	keysByRoot    map[int64][]string
+	allKeys       []string
+	allPids       []int64
+	useSourceKeys bool
+}
+
+func loadSourceCategoryMatcher(sourceID string) (sourceCategoryMatcher, error) {
+	nav, err := film.NavTopCategories(sourceID)
+	if err != nil {
+		return sourceCategoryMatcher{}, err
+	}
+	m := sourceCategoryMatcher{
+		nav:        nav,
+		navSet:     make(map[int64]struct{}, len(nav)),
+		keyToRoot:  make(map[string]int64, len(nav)*4),
+		keysByRoot: make(map[int64][]string, len(nav)),
+	}
+	for _, c := range nav {
+		if c.Id <= 0 {
+			continue
+		}
+		m.navSet[c.Id] = struct{}{}
+		m.allPids = append(m.allPids, c.Id)
+		if sourceID != "" {
+			for _, typeID := range repository.PublicSourceTypeIDs(sourceID, "pid", c.Id) {
+				if k := support.BuildSourceCategoryKey(sourceID, typeID); k != "" {
+					if _, exists := m.keyToRoot[k]; !exists {
+						m.keyToRoot[k] = c.Id
+						m.keysByRoot[c.Id] = append(m.keysByRoot[c.Id], k)
+						m.allKeys = append(m.allKeys, k)
+					}
+				}
+			}
+		}
+	}
+	m.useSourceKeys = len(m.keyToRoot) > 0
+	return m, nil
+}
+
+func (m sourceCategoryMatcher) matchRootID(categoryKey, rootCategoryKey string, pid int64) (int64, bool) {
+	if m.useSourceKeys {
+		if rootID, ok := m.keyToRoot[categoryKey]; ok && rootID > 0 {
+			return rootID, true
+		}
+		if rootID, ok := m.keyToRoot[rootCategoryKey]; ok && rootID > 0 {
+			return rootID, true
+		}
+		return 0, false
+	}
+	if pid > 0 {
+		if _, ok := m.navSet[pid]; ok {
+			return pid, true
+		}
+	}
+	return 0, false
+}
+
+func (m sourceCategoryMatcher) buildPageQuery(batchID, sourceID string, catIdx int, cat model.NotifySourceCategoryGroup, limit, offset int) repository.BatchSourceCategoryPageQuery {
+	q := repository.BatchSourceCategoryPageQuery{
+		BatchID:         batchID,
+		SourceID:        sourceID,
+		UseCategoryKeys: m.useSourceKeys,
+		KnownKeys:       m.allKeys,
+		KnownPids:       m.allPids,
+		Limit:           limit,
+		Offset:          offset,
+	}
+	if catIdx < 0 {
+		q.CategoryAll = true
+		return q
+	}
+	if cat.CategoryID == 0 {
+		q.IsOther = true
+		return q
+	}
+	q.IncludeKeys = m.keysByRoot[cat.CategoryID]
+	q.IncludePids = []int64{cat.CategoryID}
+	return q
+}
+
+func countPrimaryVisibleFromStats(activeSourceID string, rows []repository.BatchSourceCategoryStatRow) int {
+	if activeSourceID == "" || len(rows) == 0 {
+		return 0
+	}
+	visible := filmsnapshot.SourceCategoryVisibility(activeSourceID)
+	total := 0
+	for _, r := range rows {
+		if r.Count <= 0 || strings.TrimSpace(r.FirstSourceId) != activeSourceID {
+			continue
+		}
+		if visible(r.CategoryKey, r.RootCategoryKey, r.Cid, r.Pid) {
+			total += r.Count
+		}
+	}
+	return total
+}
+
+func buildSourceCategoryCountsFromStats(sourceID string, rows []repository.BatchSourceCategoryStatRow) ([]model.NotifySourceCategoryGroup, int, error) {
+	if len(rows) == 0 {
+		return nil, 0, nil
+	}
+	matcher, err := loadSourceCategoryMatcher(sourceID)
+	if err != nil {
+		return nil, 0, err
+	}
+	allCount := 0
+	buckets := make(map[int64]int, len(matcher.nav))
+	otherCount := 0
+	for _, r := range rows {
+		if r.Count <= 0 {
+			continue
+		}
+		allCount += r.Count
+		if rootID, ok := matcher.matchRootID(r.CategoryKey, r.RootCategoryKey, r.Pid); ok {
+			buckets[rootID] += r.Count
+		} else {
+			otherCount += r.Count
+		}
+	}
+	if allCount == 0 {
+		return nil, 0, nil
+	}
+	groups := make([]model.NotifySourceCategoryGroup, 0, len(matcher.nav)+1)
+	for _, c := range matcher.nav {
+		if cnt := buckets[c.Id]; cnt > 0 {
+			groups = append(groups, model.NotifySourceCategoryGroup{
+				CategoryID:   c.Id,
+				CategoryName: c.Name,
+				Count:        cnt,
+			})
+		}
+	}
+	if otherCount > 0 {
+		groups = append(groups, model.NotifySourceCategoryGroup{
+			CategoryID:   0,
+			CategoryName: "其他",
+			Count:        otherCount,
+		})
+	}
+	return groups, allCount, nil
+}
+
+func buildSourceCategoryMids(sourceID string, metas []repository.NotifyFilmMeta) ([]model.NotifySourceCategoryGroup, []int64, error) {
+	if len(metas) == 0 {
+		return nil, nil, nil
+	}
+	matcher, err := loadSourceCategoryMatcher(sourceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	allMids := make([]int64, 0, len(metas))
+	buckets := make(map[int64][]int64, len(matcher.nav))
+	var others []int64
+	for _, m := range metas {
+		allMids = append(allMids, m.Mid)
+		if rootID, ok := matcher.matchRootID(m.CategoryKey, m.RootCategoryKey, m.Pid); ok {
+			buckets[rootID] = append(buckets[rootID], m.Mid)
+		} else {
+			others = append(others, m.Mid)
+		}
+	}
+
+	groups := make([]model.NotifySourceCategoryGroup, 0, len(matcher.nav)+1)
+	for _, c := range matcher.nav {
+		if list := buckets[c.Id]; len(list) > 0 {
+			groups = append(groups, model.NotifySourceCategoryGroup{
+				CategoryID:   c.Id,
+				CategoryName: c.Name,
+				Count:        len(list),
+				Mids:         list,
+			})
+		}
+	}
+	if len(others) > 0 {
+		groups = append(groups, model.NotifySourceCategoryGroup{
+			CategoryID:   0,
+			CategoryName: "其他",
+			Count:        len(others),
+			Mids:         others,
+		})
+	}
+	return groups, allMids, nil
 }

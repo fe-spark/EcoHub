@@ -353,6 +353,10 @@ func filmQuery(batchID, sourceID string) *gorm.DB {
 }
 
 func collectRecordHasLedger(batchID string) (bool, error) {
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" || db.Mdb == nil {
+		return false, nil
+	}
 	var rec model.CollectRecord
 	err := db.Mdb.Select("ledger").Where("batch_id = ?", batchID).Take(&rec).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

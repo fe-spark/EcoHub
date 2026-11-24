@@ -25,6 +25,8 @@ const (
 	telegramAPIBase       = "https://api.telegram.org"
 	telegramCallbackPref  = "nfp"
 	telegramMaxMessageLen = 4096
+	notifyInfoPrimary     = -1
+	notifyInfoAllSources  = -2
 )
 
 // InlineKeyboardButton Telegram 内联键盘按钮
@@ -58,8 +60,9 @@ type tgCallbackQuery struct {
 }
 
 type tgMessage struct {
-	MessageID int64   `json:"message_id"`
-	Chat      *tgChat `json:"chat,omitempty"`
+	MessageID       int64   `json:"message_id"`
+	MessageThreadID int64   `json:"message_thread_id,omitempty"`
+	Chat            *tgChat `json:"chat,omitempty"`
 }
 
 type tgChat struct {
@@ -173,6 +176,26 @@ func sendTelegramMessage(ctx context.Context, token, target, htmlText string, ma
 	return err
 }
 
+func sendTelegramReplyMessage(ctx context.Context, token, chatID string, threadID, replyToMsgID int64, htmlText string, markup *InlineKeyboardMarkup) error {
+	htmlText = safeTruncateHTML(htmlText, telegramMaxMessageLen)
+	body := map[string]any{
+		"chat_id":                     chatID,
+		"text":                        htmlText,
+		"parse_mode":                  "HTML",
+		"disable_web_page_preview":    true,
+		"reply_to_message_id":         replyToMsgID,
+		"allow_sending_without_reply": true,
+	}
+	if threadID > 0 {
+		body["message_thread_id"] = threadID
+	}
+	if markup != nil && len(markup.InlineKeyboard) > 0 {
+		body["reply_markup"] = markup
+	}
+	_, err := callTelegramJSON(ctx, token, "sendMessage", body, 15*time.Second)
+	return err
+}
+
 func editTelegramMessage(ctx context.Context, token, chatID string, messageID int64, htmlText string, markup *InlineKeyboardMarkup) error {
 	htmlText = safeTruncateHTML(htmlText, telegramMaxMessageLen)
 	body := map[string]any{
@@ -245,18 +268,19 @@ func formatDurationSec(sec int64) string {
 	return fmt.Sprintf("%d时%d分", h, rm)
 }
 
-func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPayload, updatedCount int) string {
+func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPayload, primaryName string, updatedCount int) string {
 	durSec := int64(payload.FinishedAt.Sub(payload.StartedAt).Seconds())
 	if durSec < 0 {
 		durSec = 0
 	}
-	successSrc, failedSrc := 0, 0
+	successSrc, failedSrc, totalStored := 0, 0, 0
 	for _, s := range payload.Sources {
 		if s.Status == progress.StatusFailed || s.Error != "" {
 			failedSrc++
 		} else {
 			successSrc++
 		}
+		totalStored += s.FilmsTotal
 	}
 
 	var b strings.Builder
@@ -266,45 +290,69 @@ func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPa
 		html.EscapeString(formatDurationSec(durSec)),
 	)
 	if failedSrc > 0 {
-		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个，失败 <b>%d</b> 个\n", successSrc, failedSrc)
+		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个，失败 <b>%d</b> 个 · 共入库 <b>%d</b> 部\n", successSrc, failedSrc, totalStored)
 	} else {
-		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个\n", successSrc)
+		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个 · 共入库 <b>%d</b> 部\n", successSrc, totalStored)
 	}
-	fmt.Fprintf(&b, "🎬 前台可见：<b>%d</b> 部\n", updatedCount)
-
+	if name := strings.TrimSpace(primaryName); name != "" {
+		fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 前台可见 <b>%d</b> 部\n", html.EscapeString(singleLine(name)), updatedCount)
+	} else {
+		fmt.Fprintf(&b, "🎬 前台可见：<b>%d</b> 部\n", updatedCount)
+	}
 	if len(payload.Sources) > 0 {
-		b.WriteString("\n<b>站点明细：</b>\n")
-		// 预留长度给末尾省略提示，避免触及 Telegram 4096 字符上限导致标签截断
-		const overviewSoftLimit = telegramMaxMessageLen - 200
-		writtenRunes := utf8.RuneCountInString(b.String())
-		for i, src := range payload.Sources {
-			icon := "✅"
-			if src.Status == progress.StatusFailed || src.Error != "" {
-				icon = "❌"
-			} else if src.Status == progress.StatusStopped {
-				icon = "⏹"
-			}
-			line := fmt.Sprintf("%s <b>%s</b> (入库 %d 部", icon, html.EscapeString(singleLine(src.SourceName)), src.FilmsTotal)
-			if src.FailedCnt > 0 {
-				line += fmt.Sprintf("，失败 %d 页", src.FailedCnt)
-			}
-			if src.CategorySkip > 0 {
-				line += fmt.Sprintf("，跳过未映射 %d 部", src.CategorySkip)
-			}
-			line += ")"
-			if src.Error != "" {
-				line += " — <code>" + html.EscapeString(truncateRunes(singleLine(src.Error), 80)) + "</code>"
-			}
-			lineRunes := utf8.RuneCountInString(line) + 1
-			if writtenRunes+lineRunes > overviewSoftLimit {
-				fmt.Fprintf(&b, "<i>… 其余 %d 个站点已省略</i>\n", len(payload.Sources)-i)
-				break
-			}
-			b.WriteString(line + "\n")
-			writtenRunes += lineRunes
-		}
+		b.WriteString("\n👇 点击站点查看分类与片单")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func sourceStatusIconAndLabel(status, errMsg string) (string, string) {
+	if status == progress.StatusFailed || errMsg != "" {
+		return "❌", "失败"
+	}
+	if status == progress.StatusStopped {
+		return "⏹", "已停止"
+	}
+	return "✅", "完成"
+}
+
+func formatSourceDetailHTML(siteName string, src model.SourceNotifyResult, isPrimary bool, filmCount int) string {
+	icon, statusLabel := sourceStatusIconAndLabel(src.Status, src.Error)
+	title := html.EscapeString(singleLine(src.SourceName))
+	if title == "" {
+		title = html.EscapeString(singleLine(src.SourceID))
+	}
+	primaryBadge := ""
+	if isPrimary {
+		primaryBadge = "⭐ "
+	}
+	displayTotal := src.FilmsTotal
+	if filmCount > displayTotal {
+		displayTotal = filmCount
 	}
 
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>%s 站点明细 · %s%s</b>\n", formatTitlePrefix(siteName), primaryBadge, title)
+	fmt.Fprintf(&b, "%s 状态：%s · 🎬 入库：<b>%d</b> 部", icon, statusLabel, displayTotal)
+	if src.PageTotal > 0 {
+		fmt.Fprintf(&b, " · 📄 页数：%d/%d", src.SuccessCnt, src.PageTotal)
+	}
+	b.WriteString("\n")
+	if src.FailedCnt > 0 || src.CategorySkip > 0 {
+		var extras []string
+		if src.FailedCnt > 0 {
+			extras = append(extras, fmt.Sprintf("失败 %d 页", src.FailedCnt))
+		}
+		if src.CategorySkip > 0 {
+			extras = append(extras, fmt.Sprintf("跳过未映射 %d 部", src.CategorySkip))
+		}
+		b.WriteString("ℹ️ " + strings.Join(extras, "，") + "\n")
+	}
+	if strings.TrimSpace(src.Error) != "" {
+		fmt.Fprintf(&b, "⚠️ 原因：<code>%s</code>\n", html.EscapeString(truncateRunes(singleLine(src.Error), 300)))
+	}
+	if filmCount > 0 {
+		b.WriteString("\n👇 选择分类查看片单")
+	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
@@ -313,54 +361,49 @@ func isTelegramSupportedWebURL(raw string) bool {
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
-func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (string, int, error) {
-	var films []model.NotifyFilmItem
-	catTitle := "全部"
-	if catIdx >= 0 && catIdx < len(sess.Categories) {
-		films = sess.Categories[catIdx].Films
-		catTitle = sess.Categories[catIdx].CategoryName
-	} else {
-		films = sess.AllFilms
-	}
-
-	pageSize := sess.PageSize
+func clampPageRange(total, pageSize, page int) (curPage, totalPages, start, end int) {
 	if pageSize <= 0 {
 		pageSize = model.DefaultNotifyPageSize
 	}
-	total := len(films)
-	totalPages := 1
+	totalPages = 1
 	if total > 0 {
 		totalPages = (total + pageSize - 1) / pageSize
 	}
-	if page < 1 {
-		page = 1
+	curPage = page
+	if curPage < 1 {
+		curPage = 1
 	}
-	if page > totalPages {
-		page = totalPages
+	if curPage > totalPages {
+		curPage = totalPages
 	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 更新片单 · %s</b>\n", formatTitlePrefix(sess.SiteName), html.EscapeString(catTitle))
 	if total == 0 {
-		b.WriteString("<i>暂无更新影片</i>\n")
-		return b.String(), 1, nil
+		return curPage, totalPages, 0, 0
 	}
-
-	start := (page - 1) * pageSize
-	end := start + pageSize
+	start = (curPage - 1) * pageSize
+	end = start + pageSize
 	if end > total {
 		end = total
 	}
+	return curPage, totalPages, start, end
+}
+
+func formatFilmItemsPageHTML(siteName, title string, page, totalPages, start, total int, items []model.NotifyFilmItem) (string, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>%s 更新片单 · %s</b>\n", formatTitlePrefix(siteName), html.EscapeString(title))
+	if total == 0 {
+		b.WriteString("<i>暂无更新影片</i>\n")
+		return b.String(), nil
+	}
 	fmt.Fprintf(&b, "📄 第 <b>%d/%d</b> 页 · <code>%d–%d</code> / 共 <b>%d</b> 部\n\n",
-		page, totalPages, start+1, end, total)
+		page, totalPages, start+1, start+len(items), total)
 
 	basic, err := repository.GetSiteBasic()
 	if err != nil {
-		return "", 0, err
+		return "", err
 	}
 	siteURL := strings.TrimRight(strings.TrimSpace(basic.SiteURL), "/")
 	canLink := isTelegramSupportedWebURL(siteURL)
-	for _, f := range films[start:end] {
+	for _, f := range items {
 		name := truncateRunes(strings.TrimSpace(f.Name), 60)
 		if name == "" {
 			name = fmt.Sprintf("#%d", f.Mid)
@@ -373,7 +416,158 @@ func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (st
 			fmt.Fprintf(&b, "· %s (<code>#%d</code>)\n", html.EscapeString(name), f.Mid)
 		}
 	}
-	return b.String(), totalPages, nil
+	return b.String(), nil
+}
+
+func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (string, int, error) {
+	var films []model.NotifyFilmItem
+	catTitle := "全部"
+	if catIdx >= 0 && catIdx < len(sess.Categories) {
+		films = sess.Categories[catIdx].Films
+		catTitle = sess.Categories[catIdx].CategoryName
+	} else {
+		films = sess.AllFilms
+	}
+	total := len(films)
+	curPage, totalPages, start, end := clampPageRange(total, sess.PageSize, page)
+	text, err := formatFilmItemsPageHTML(sess.SiteName, catTitle, curPage, totalPages, start, total, films[start:end])
+	return text, totalPages, err
+}
+
+func formatSourceFilmListPageHTML(sess model.NotifyBatchSession, srcIdx, catIdx, page int) (string, int, error) {
+	if srcIdx < 0 || srcIdx >= len(sess.Sources) {
+		return "", 1, errors.New("站点不存在")
+	}
+	src := sess.Sources[srcIdx]
+	mids := src.AllMids
+	catTitle := "全部"
+	total := src.TotalFilmCount()
+	var selectedCat model.NotifySourceCategoryGroup
+	if catIdx >= 0 && catIdx < len(src.Categories) {
+		selectedCat = src.Categories[catIdx]
+		mids = selectedCat.Mids
+		catTitle = selectedCat.CategoryName
+		total = selectedCat.FilmCount()
+	}
+	curPage, totalPages, start, end := clampPageRange(total, sess.PageSize, page)
+	var items []model.NotifyFilmItem
+	if total > 0 {
+		if len(mids) > 0 {
+			pageMids := mids[start:end]
+			metas, err := repository.LoadNotifyFilmMetas(pageMids)
+			if err != nil {
+				return "", 1, err
+			}
+			nameByMid := make(map[int64]string, len(metas))
+			for _, m := range metas {
+				nameByMid[m.Mid] = m.Name
+			}
+			items = make([]model.NotifyFilmItem, 0, len(pageMids))
+			for _, mid := range pageMids {
+				items = append(items, model.NotifyFilmItem{Mid: mid, Name: nameByMid[mid]})
+			}
+		} else if strings.TrimSpace(sess.CollectBatchID) != "" {
+			matcher, err := loadSourceCategoryMatcher(src.SourceID)
+			if err != nil {
+				return "", 1, err
+			}
+			items, err = repository.LoadBatchSourceCategoryPage(
+				matcher.buildPageQuery(sess.CollectBatchID, src.SourceID, catIdx, selectedCat, end-start, start),
+			)
+			if err != nil {
+				return "", 1, err
+			}
+		}
+	}
+	srcTitle := singleLine(src.SourceName)
+	if srcTitle == "" {
+		srcTitle = src.SourceID
+	}
+	text, err := formatFilmItemsPageHTML(sess.SiteName, fmt.Sprintf("%s · %s", srcTitle, catTitle), curPage, totalPages, start, total, items)
+	return text, totalPages, err
+}
+
+const maxSiteButtonsPerPage = 90
+
+func buildOverviewKeyboard(sess model.NotifyBatchSession, sitePage int) *InlineKeyboardMarkup {
+	if len(sess.Sources) == 0 {
+		return buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
+	}
+	if strings.TrimSpace(sess.BatchID) == "" {
+		return nil
+	}
+	total := len(sess.Sources)
+	curPage, totalPages, start, end := clampPageRange(total, maxSiteButtonsPerPage, sitePage)
+	var rows [][]InlineKeyboardButton
+	var row []InlineKeyboardButton
+	for idx := start; idx < end; idx++ {
+		src := sess.Sources[idx]
+		icon, _ := sourceStatusIconAndLabel(src.Status, src.Error)
+		if src.IsPrimary && icon == "✅" {
+			icon = "⭐"
+		}
+		name := truncateRunes(singleLine(src.SourceName), 16)
+		if name == "" {
+			name = truncateRunes(singleLine(src.SourceID), 16)
+		}
+		label := fmt.Sprintf("%s %s (%d)", icon, name, src.FilmsTotal)
+		if src.Status == progress.StatusFailed || src.Error != "" {
+			if src.FilmsTotal > 0 {
+				label = fmt.Sprintf("%s %s (%d/失败)", icon, name, src.FilmsTotal)
+			} else {
+				label = fmt.Sprintf("%s %s (失败)", icon, name)
+			}
+		}
+		row = append(row, InlineKeyboardButton{
+			Text:         label,
+			CallbackData: fmt.Sprintf("%s:%s:s:%d", telegramCallbackPref, sess.BatchID, idx),
+		})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	if totalPages > 1 {
+		rows = append(rows, buildPagedNavRow(sess.BatchID, curPage, totalPages, notifyInfoAllSources, func(p int) string {
+			return fmt.Sprintf("%s:%s:sp:%d", telegramCallbackPref, sess.BatchID, p)
+		}))
+	}
+	return &InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func buildSourceCategoryKeyboard(batchID string, srcIdx int, cats []model.NotifySourceCategoryGroup, total int) *InlineKeyboardMarkup {
+	if total <= 0 || strings.TrimSpace(batchID) == "" {
+		return nil
+	}
+	var rows [][]InlineKeyboardButton
+	var row []InlineKeyboardButton
+	for idx, c := range cats {
+		cnt := c.FilmCount()
+		if cnt == 0 {
+			continue
+		}
+		row = append(row, InlineKeyboardButton{
+			Text:         fmt.Sprintf("%s (%d)", c.CategoryName, cnt),
+			CallbackData: fmt.Sprintf("%s:%s:sc:%d:%d:1", telegramCallbackPref, batchID, srcIdx, idx),
+		})
+		if len(row) == 2 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	if len(cats) > 1 || len(rows) == 0 {
+		row = append(row, InlineKeyboardButton{
+			Text:         fmt.Sprintf("📋 全部 (%d)", total),
+			CallbackData: fmt.Sprintf("%s:%s:sc:%d:-1:1", telegramCallbackPref, batchID, srcIdx),
+		})
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 // buildCategoryKeyboard 构建采集汇总底部的分类内联翻页按钮（点击进入对应分类的分页片单）
@@ -408,30 +602,50 @@ func buildCategoryKeyboard(batchID string, cats []model.NotifyCategoryGroup, tot
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
+func buildPagedNavRow(batchID string, page, totalPages, infoSrcIdx int, pageCallback func(int) string) []InlineKeyboardButton {
+	prevData := fmt.Sprintf("%s:%s:noop:0", telegramCallbackPref, batchID)
+	prevText := "·"
+	if page > 1 {
+		prevText = "◀ 上一页"
+		prevData = pageCallback(page - 1)
+	}
+	nextData := fmt.Sprintf("%s:%s:noop:0", telegramCallbackPref, batchID)
+	nextText := "·"
+	if page < totalPages {
+		nextText = "下一页 ▶"
+		nextData = pageCallback(page + 1)
+	}
+	return []InlineKeyboardButton{
+		{Text: prevText, CallbackData: prevData},
+		{Text: fmt.Sprintf("%d / %d", page, totalPages), CallbackData: fmt.Sprintf("%s:%s:info:%d", telegramCallbackPref, batchID, infoSrcIdx)},
+		{Text: nextText, CallbackData: nextData},
+	}
+}
+
 func buildPagedKeyboard(batchID string, catIdx, page, totalPages int) *InlineKeyboardMarkup {
 	var rows [][]InlineKeyboardButton
 	if totalPages > 1 {
-		prevData := fmt.Sprintf("%s:%s:noop:0", telegramCallbackPref, batchID)
-		prevText := "·"
-		if page > 1 {
-			prevText = "◀ 上一页"
-			prevData = fmt.Sprintf("%s:%s:%d:%d", telegramCallbackPref, batchID, catIdx, page-1)
-		}
-		nextData := fmt.Sprintf("%s:%s:noop:0", telegramCallbackPref, batchID)
-		nextText := "·"
-		if page < totalPages {
-			nextText = "下一页 ▶"
-			nextData = fmt.Sprintf("%s:%s:%d:%d", telegramCallbackPref, batchID, catIdx, page+1)
-		}
-		rows = append(rows, []InlineKeyboardButton{
-			{Text: prevText, CallbackData: prevData},
-			{Text: fmt.Sprintf("%d / %d", page, totalPages), CallbackData: fmt.Sprintf("%s:%s:info:0", telegramCallbackPref, batchID)},
-			{Text: nextText, CallbackData: nextData},
-		})
+		rows = append(rows, buildPagedNavRow(batchID, page, totalPages, notifyInfoPrimary, func(p int) string {
+			return fmt.Sprintf("%s:%s:%d:%d", telegramCallbackPref, batchID, catIdx, p)
+		}))
 	}
 	rows = append(rows, []InlineKeyboardButton{{
 		Text:         "🔙 返回采集汇总",
 		CallbackData: fmt.Sprintf("%s:%s:back:0", telegramCallbackPref, batchID),
+	}})
+	return &InlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func buildSourcePagedKeyboard(batchID string, srcIdx, catIdx, page, totalPages int) *InlineKeyboardMarkup {
+	var rows [][]InlineKeyboardButton
+	if totalPages > 1 {
+		rows = append(rows, buildPagedNavRow(batchID, page, totalPages, srcIdx, func(p int) string {
+			return fmt.Sprintf("%s:%s:sc:%d:%d:%d", telegramCallbackPref, batchID, srcIdx, catIdx, p)
+		}))
+	}
+	rows = append(rows, []InlineKeyboardButton{{
+		Text:         "🔙 返回站点分类",
+		CallbackData: fmt.Sprintf("%s:%s:sb:%d", telegramCallbackPref, batchID, srcIdx),
 	}})
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
