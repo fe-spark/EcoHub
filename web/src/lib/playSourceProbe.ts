@@ -13,11 +13,11 @@ export type ProbeTarget = {
   url: string;
 };
 
-const DEFAULT_TIMEOUT_MS = 2500;
-const HANDSHAKE_TIMEOUT_MS = 1200;
+const DEFAULT_TIMEOUT_MS = 5000;
+const HANDSHAKE_TIMEOUT_MS = 2500;
 const SAMPLE_BYTES = 128 * 1024;
 const MAX_SAMPLE_SEGMENTS = 2;
-const PROBE_CONCURRENCY = 4;
+const PROBE_CONCURRENCY = 2;
 
 export function formatSpeedLabel(speedKBps: number): string {
   if (speedKBps >= 1024) {
@@ -106,7 +106,7 @@ function linkTimeoutSignal(timeoutMs: number, handshakeMs: number, outerSignal?:
 }
 
 function parseBandwidth(line: string): number {
-  const matched = /BANDWIDTH=(\d+)/i.exec(line);
+  const matched = /(?:^|[,:\s])BANDWIDTH=(\d+)/i.exec(line);
   return matched ? Number(matched[1]) : 0;
 }
 
@@ -121,7 +121,7 @@ function parseMasterPlaylistUrl(text: string, baseUrl: string): string | null {
     for (let j = i + 1; j < lines.length; j += 1) {
       const next = lines[j].trim();
       if (!next || next.startsWith("#")) continue;
-      if (bandwidth >= bestBandwidth) {
+      if (bandwidth > bestBandwidth) {
         bestBandwidth = bandwidth;
         bestUrl = new URL(next, baseUrl).toString();
       }
@@ -166,6 +166,7 @@ async function readStreamSample(
   maxBytes: number,
   signal: AbortSignal,
   onHeaders?: () => void,
+  isTimedOut?: () => boolean,
 ) {
   const start = performance.now();
   const response = await fetch(url, { cache: "no-store", signal });
@@ -186,6 +187,11 @@ async function readStreamSample(
         const { done, value } = await reader.read();
         if (done) break;
         bytes += value.byteLength;
+      }
+    } catch (error) {
+      // 已成功拉取部分媒体数据时若触发总超时，按实测已读字节计算速度，避免误判为不可用
+      if (!(isTimedOut?.() && bytes > 0)) {
+        throw error;
       }
     } finally {
       await reader.cancel().catch(() => {});
@@ -215,7 +221,13 @@ async function probeOneUrl(
     const probeStart = performance.now();
 
     if (isProgressiveUrl(url)) {
-      const sample = await readStreamSample(url, SAMPLE_BYTES, linked.signal, linked.clearHandshake);
+      const sample = await readStreamSample(
+        url,
+        SAMPLE_BYTES,
+        linked.signal,
+        linked.clearHandshake,
+        linked.isTimedOut,
+      );
       const speedKBps = sample.bytes / 1024 / (Math.max(sample.downloadMs, 15) / 1000);
       const score = sample.bytes / 1024 / (Math.max(sample.totalMs, 15) / 1000);
       return {
@@ -245,12 +257,13 @@ async function probeOneUrl(
     let firstSegTtfb = 0;
 
     for (const segUrl of segments) {
-      if (totalBytes >= SAMPLE_BYTES) break;
+      if (totalBytes >= SAMPLE_BYTES || linked.isTimedOut()) break;
       const sample = await readStreamSample(
         segUrl,
         SAMPLE_BYTES - totalBytes,
         linked.signal,
         linked.clearHandshake,
+        linked.isTimedOut,
       );
       if (firstSegTtfb === 0) {
         firstSegTtfb = sample.ttfbMs;

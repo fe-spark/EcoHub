@@ -1,3 +1,12 @@
+测试版 **v3.1.6-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.6-beta.0`。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+### v3.1.6-beta.0 更新内容
+
+- **采集通知**：采集汇总前台可见统计与分类归桶对齐当前主站，支持多站交互片单与账本分页查询。
+- **播放页测速**：改为 2 路并发采样最高码率变体，修复 `AVERAGE-BANDWIDTH` 干扰，放宽超时并在部分分片已读时按实测字节计算速度。
+
+---
+
 正式版 **v3.1.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
