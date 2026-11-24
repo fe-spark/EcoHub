@@ -258,18 +258,26 @@ async function probeOneUrl(
 
     for (const segUrl of segments) {
       if (totalBytes >= SAMPLE_BYTES || linked.isTimedOut()) break;
-      const sample = await readStreamSample(
-        segUrl,
-        SAMPLE_BYTES - totalBytes,
-        linked.signal,
-        linked.clearHandshake,
-        linked.isTimedOut,
-      );
-      if (firstSegTtfb === 0) {
-        firstSegTtfb = sample.ttfbMs;
+      try {
+        const sample = await readStreamSample(
+          segUrl,
+          SAMPLE_BYTES - totalBytes,
+          linked.signal,
+          linked.clearHandshake,
+          linked.isTimedOut,
+        );
+        if (firstSegTtfb === 0) {
+          firstSegTtfb = sample.ttfbMs;
+        }
+        totalBytes += sample.bytes;
+        totalDownloadMs += sample.downloadMs;
+      } catch (error) {
+        // 首片已拿到实测数据时，后续分片因总超时中断不再丢弃前序采样结果
+        if (linked.isTimedOut() && totalBytes > 0) {
+          break;
+        }
+        throw error;
       }
-      totalBytes += sample.bytes;
-      totalDownloadMs += sample.downloadMs;
     }
 
     const totalElapsedMs = Math.max(performance.now() - probeStart, 15);

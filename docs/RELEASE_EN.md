@@ -1,3 +1,19 @@
+Release **v3.1.6**, image `ghcr.io/fe-spark/ecohub:v3.1.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.6 changes
+
+- **Collect notification**: align public-visible summary counts and category buckets with the current primary source, and add multi-source interactive title lists and paginated ledger queries.
+- **Play page speed probe**: switch to 2-way concurrent probing of the highest-bandwidth variant, ignore `AVERAGE-BANDWIDTH` interference, widen timeouts, and compute speed from read bytes when partial segments are fetched before timeout.
+
+---
+
 Release **v3.1.5**, image `ghcr.io/fe-spark/ecohub:v3.1.5` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

@@ -237,3 +237,35 @@ test("分片已读取部分数据后触发总超时时按实测字节返回可�
     globalThis.fetch = originalFetch;
   }
 });
+
+test("首片正常读完但第二片等待首包期间总超时时保留首片测速结果", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "https://seg2-hang.test/index.m3u8") {
+      return new Response("#EXTM3U\n#EXTINF:4,\nseg1.ts\n#EXTINF:4,\nseg2.ts\n", { status: 200 });
+    }
+    if (url === "https://seg2-hang.test/seg1.ts") {
+      return new Response(new Uint8Array(32 * 1024), { status: 200 });
+    }
+    if (url === "https://seg2-hang.test/seg2.ts") {
+      return new Promise((_, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const results = await probePlaySources(
+      [{ sourceId: "seg2-hang", url: "https://seg2-hang.test/index.m3u8" }],
+      { timeoutMs: 300 },
+    );
+    assert.equal(results[0]?.status, "ok");
+    assert.ok((results[0]?.speedKBps ?? 0) > 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
