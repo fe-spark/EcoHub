@@ -413,6 +413,15 @@ func markSealing(ctx context.Context, sourceID, outcome string) bool {
 
 // MarkSealed 封口周期结束，把等检索的站点收成最终状态。已经重开或失败的保持原状。
 func MarkSealed(sourceIDs []string) {
+	finishSealing(sourceIDs, false)
+}
+
+// MarkSealFailed 检索索引重建连续失败达到上限后，释放待检索站点并标为失败。
+func MarkSealFailed(sourceIDs []string) {
+	finishSealing(sourceIDs, true)
+}
+
+func finishSealing(sourceIDs []string, failed bool) {
 	now := time.Now()
 	changed := false
 	for _, sourceID := range sourceIDs {
@@ -423,12 +432,17 @@ func MarkSealed(sourceIDs []string) {
 		state := val.(*progressState)
 		state.mu.Lock()
 		if state.data.Status == StatusSealing {
-			if state.sealOutcome == StatusStopped {
-				state.data.Status = StatusStopped
+			if failed {
+				state.data.Status = StatusFailed
+				state.data.Sealed = false
 			} else {
-				state.data.Status = StatusDone
+				if state.sealOutcome == StatusStopped {
+					state.data.Status = StatusStopped
+				} else {
+					state.data.Status = StatusDone
+				}
+				state.data.Sealed = true
 			}
-			state.data.Sealed = true
 			state.sealOutcome = ""
 			state.updated = now
 			changed = true

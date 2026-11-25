@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -27,8 +28,8 @@ func (q *searchResealQueue) scheduleIdleRebuildRetryLocked() {
 	if q.rebuildRetries >= maxRebuildSealingRetries {
 		q.rebuildRetries = 0
 		q.stopRetryTimerLocked()
-		log.Printf("[Spider] 检索索引重建连续 %d 次失败，释放待检索站点状态", maxRebuildSealingRetries)
-		go q.complete()
+		syslog.Errorf("[Spider] 检索索引重建连续 %d 次失败，释放待检索站点状态，请手动触发索引重建", maxRebuildSealingRetries)
+		go q.finishSealingCycle(true)
 		return
 	}
 	wait := q.retryWait

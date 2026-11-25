@@ -512,6 +512,24 @@ func TestFilmService_DeletePrimaryFilms_AllowsDuringSearchWarmAndChecksOwnership
 	if count != 0 {
 		t.Fatalf("expected film 301 deleted, count=%d", count)
 	}
+
+	// 已软删除的非主站影片、不存在 ID 或全无效 ID 不得通过主站归属校验，避免后续 Unscoped 硬删越权抹除数据。
+	if err := gdb.Where("mid = ?", 302).Delete(&model.FilmIndex{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.DeletePrimaryFilms([]int64{302}, "src1"); err != ErrPrimaryMismatch {
+		t.Fatalf("expected ErrPrimaryMismatch for soft-deleted non-primary film, got %v", err)
+	}
+	gdb.Unscoped().Model(&model.FilmIndex{}).Where("mid = ?", 302).Count(&count)
+	if count != 1 {
+		t.Fatalf("soft-deleted non-primary film 302 must remain protected, count=%d", count)
+	}
+	if err := srv.DeletePrimaryFilms([]int64{999999}, "src1"); err != ErrPrimaryMismatch {
+		t.Fatalf("expected ErrPrimaryMismatch for nonexistent film, got %v", err)
+	}
+	if err := srv.DeletePrimaryFilms([]int64{0, -1}, "src1"); err != ErrPrimaryMismatch {
+		t.Fatalf("expected ErrPrimaryMismatch for invalid ids, got %v", err)
+	}
 }
 
 func TestFilmService_SaveFilmDetail_RejectsNonPrimaryMid(t *testing.T) {

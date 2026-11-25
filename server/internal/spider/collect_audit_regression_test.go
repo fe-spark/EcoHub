@@ -194,9 +194,15 @@ func TestCollectFilms_MultiMidDoesNotSkipSubsequentWhenSealing(t *testing.T) {
 		seenIDs = append(seenIDs, ids)
 		mu.Unlock()
 		if ids == "2002" {
-			// 验证进入第 2 部时，即使第 1 部已触发 searchReseal.running = true，外层队列仍保护第 2 部不被拦掉。
+			// 验证进入第 2 部时，即使第 1 部已触发 searchReseal.running = true，外层队列仍保护第 2 部不被拦掉且只占 1 个名额。
 			if reason := collectPauseReason(); reason != "" {
 				t.Errorf("第 2 部影片期间不应因封口被拦截: %s", reason)
+			}
+			collectQueues.mu.Lock()
+			qCount := collectQueues.n
+			collectQueues.mu.Unlock()
+			if qCount != 1 {
+				t.Errorf("批量单片采集期间队列计数应为 1，实际=%d", qCount)
 			}
 		}
 		resp := map[string]any{
@@ -276,7 +282,9 @@ func TestSearchResealIdleRetryReleasesSealingAfterMaxRetries(t *testing.T) {
 	progress.Update("idle-max-src", func(p *model.CollectProgress) {
 		p.Status = progress.StatusSealing
 	})
-	searchReseal.addSealing("idle-max-src")
+	searchReseal.mu.Lock()
+	searchReseal.sealing["idle-max-src"] = struct{}{}
+	searchReseal.mu.Unlock()
 
 	// 前 maxRebuildSealingRetries 次 idle 都处于awaitDone后触发重试计数与定时器；第 +1 次达到上限触发 complete。
 	for i := 0; i < maxRebuildSealingRetries; i++ {
@@ -296,13 +304,16 @@ func TestSearchResealIdleRetryReleasesSealingAfterMaxRetries(t *testing.T) {
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		if snap, ok := progress.Snapshot("idle-max-src"); ok && snap.Status == progress.StatusDone {
+		if snap, ok := progress.Snapshot("idle-max-src"); ok && snap.Status == progress.StatusFailed {
+			if snap.Sealed {
+				t.Fatalf("异常释放时 Sealed 必须为 false，got %+v", snap)
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	snap, _ := progress.Snapshot("idle-max-src")
-	t.Fatalf("达到最大重试上限后应自动收口为 done，actual=%q", snap.Status)
+	t.Fatalf("达到最大重试上限后应释放为 failed，actual=%q", snap.Status)
 }
 
 // Fix 6：前置停用/失败站即使后续进度缓存被新一代占用覆盖，本批快照仍保留真实失败/停止状态。

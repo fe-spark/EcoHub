@@ -497,6 +497,10 @@ func (q *searchResealQueue) takePendingLocked() ([]int64, string) {
 
 // complete 把当前等检索的站点收成完成。已经重开的站点保持原状。
 func (q *searchResealQueue) complete() {
+	q.finishSealingCycle(false)
+}
+
+func (q *searchResealQueue) finishSealingCycle(failed bool) {
 	q.mu.Lock()
 	ids := make([]string, 0, len(q.sealing))
 	for id := range q.sealing {
@@ -506,7 +510,11 @@ func (q *searchResealQueue) complete() {
 	q.stopRetryTimerLocked()
 	q.rebuildRetries = 0
 	q.mu.Unlock()
-	progress.MarkSealed(ids)
+	if failed {
+		progress.MarkSealFailed(ids)
+	} else {
+		progress.MarkSealed(ids)
+	}
 	if len(ids) > 0 && !IsCollecting() {
 		triggerCollectDoneHooks()
 	}

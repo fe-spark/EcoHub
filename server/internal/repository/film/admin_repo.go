@@ -133,7 +133,7 @@ func FilmIDsBelongToSource(ids []int64, sourceID string) (bool, error) {
 		unique = append(unique, id)
 	}
 	if len(unique) == 0 {
-		return true, nil
+		return false, nil
 	}
 	var rows []struct {
 		Mid           int64
@@ -144,6 +144,10 @@ func FilmIDsBelongToSource(ids []int64, sourceID string) (bool, error) {
 		Where("mid IN ?", unique).
 		Find(&rows).Error; err != nil {
 		return false, err
+	}
+	// 所有待校验影片必须真实存在且未被软删除，防止通过 Unscoped 硬删绕过主站归属校验。
+	if len(rows) != len(unique) {
+		return false, nil
 	}
 	needPlaylistCheck := make([]int64, 0)
 	for _, row := range rows {
