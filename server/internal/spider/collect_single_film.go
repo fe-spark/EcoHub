@@ -99,18 +99,36 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 }
 
 func CollectFilms(mids []int64) {
+	valid := make([]string, 0, len(mids))
 	for _, id := range mids {
 		if id > 0 {
-			CollectSingleFilm(strconv.FormatInt(id, 10))
+			valid = append(valid, strconv.FormatInt(id, 10))
 		}
+	}
+	if len(valid) == 0 {
+		return
+	}
+	if _, err := tryBeginCollectQueue(); err != nil {
+		log.Printf("[Spider] 批量单片采集跳过：%s", err.Error())
+		return
+	}
+	defer endCollectQueue()
+	for _, id := range valid {
+		CollectSingleFilm(id)
 	}
 }
 
 func CollectSingleFilm(ids string) {
-	if reason := collectPauseReason(); reason != "" {
-		log.Printf("[Spider] 单片采集跳过：%s", reason)
+	if _, err := tryBeginCollectQueue(); err != nil {
+		log.Printf("[Spider] 单片采集跳过：%s", err.Error())
 		return
 	}
+	queueHeld := true
+	defer func() {
+		if queueHeld {
+			endCollectQueue()
+		}
+	}()
 	globalMid, err := strconv.ParseInt(strings.TrimSpace(ids), 10, 64)
 	if err != nil || globalMid <= 0 {
 		log.Printf("[Spider] CollectSingleFilm: 非法影片 ID %q\n", ids)
@@ -203,6 +221,8 @@ func CollectSingleFilm(ids string) {
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[CollectSingleFilm] 缓存刷新失败: %v", err)
 	}
+	endCollectQueue()
+	queueHeld = false
 	triggerCollectDoneHooks()
 	batchCtx.emitSummary()
 }

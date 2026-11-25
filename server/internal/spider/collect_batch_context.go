@@ -76,6 +76,7 @@ type collectBatchContext struct {
 	occupyTokens      map[string]uint64
 	// progressEpochs 建批次时各站的进度代次。停止时只改本代的进度，避免把同站新开的重试标成已停止。
 	progressEpochs map[string]uint64
+	cronTaskID     string
 	runNoted       atomic.Bool
 	recordStarted  bool
 }
@@ -117,7 +118,11 @@ func (b *collectBatchContext) noteCronCollectStarted() {
 	if b == nil || b.trigger != model.CollectTriggerCron || b.runNoted.Swap(true) {
 		return
 	}
-	noteTaskRan("sys_cron_auto_collect", time.Now())
+	taskID := strings.TrimSpace(b.cronTaskID)
+	if taskID == "" {
+		taskID = "sys_cron_auto_collect"
+	}
+	noteTaskRan(taskID, time.Now())
 }
 
 func (b *collectBatchContext) takeAffectedMIDs() []int64 {
@@ -288,6 +293,9 @@ func (b *collectBatchContext) withClaim(claim CollectClaim) *collectBatchContext
 	}
 	for id, epoch := range claim.epochs {
 		b.progressEpochs[id] = epoch
+	}
+	if id := strings.TrimSpace(claim.cronTaskID); id != "" {
+		b.cronTaskID = id
 	}
 	return b
 }

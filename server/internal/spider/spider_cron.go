@@ -226,6 +226,16 @@ func runTaskBody(ft model.FilmCollectTask, manual bool) {
 
 var runningMaintenanceTasks sync.Map
 
+// ValidTaskModel 判断定时任务模型是否受支持。
+func ValidTaskModel(taskModel int) bool {
+	switch taskModel {
+	case model.TaskModelAutoCollect, model.TaskModelOrphanClean, model.TaskModelLogClean, model.TaskModelCollectClean:
+		return true
+	default:
+		return false
+	}
+}
+
 // isMaintenanceModel 维护任务：片库清理、日志清理、采集记录清理。
 // 维护任务进串行队列依次执行，执行时占用维护闸门（停止采集、独占执行），同时段到点的采集跳过。
 func isMaintenanceModel(taskModel int) bool {

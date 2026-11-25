@@ -17,6 +17,8 @@ import (
 
 func resetSearchReseal() {
 	searchReseal.mu.Lock()
+	searchReseal.stopRetryTimerLocked()
+	searchReseal.rebuildRetries = 0
 	searchReseal.pending = map[int64]struct{}{}
 	searchReseal.verifiedPrimary = ""
 	searchReseal.allPendingVerified = false

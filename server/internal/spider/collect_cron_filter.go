@@ -3,6 +3,7 @@ package spider
 import (
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"time"
 
@@ -24,10 +25,20 @@ func AutoCollectTriggered(trigger string, h int) {
 }
 
 // autoCollectFn 定时采集入口。测试替换它，避免真的去拉站点。
-var autoCollectFn = autoCollect
+var (
+	autoCollectFn        = autoCollect
+	defaultAutoCollectFn = reflect.ValueOf(autoCollect).Pointer()
+)
 
 // runAutoCollectTask 跑一轮自动采集。执行期间若又到点，结束后再补采一轮空闲站，不再连环。
 func runAutoCollectTask(ft model.FilmCollectTask, manual bool) {
+	// 占住本轮采集队列名额直到补采判定结束，防止第 1 轮刚释放队列就触发检索封口把补采拦掉。
+	if _, err := tryBeginCollectQueue(); err != nil {
+		log.Printf("[Spider] 定时采集跳过：%s", err.Error())
+		return
+	}
+	defer endCollectQueue()
+
 	report := func(err error) {
 		if err == nil {
 			return
@@ -41,11 +52,17 @@ func runAutoCollectTask(ft model.FilmCollectTask, manual bool) {
 			emitCronFailedNotify(ft.Id, remark, err.Error())
 		}
 	}
-	err := autoCollectFn(model.CollectTriggerCron, ft.Time)
+	runRound := func() error {
+		if reflect.ValueOf(autoCollectFn).Pointer() == defaultAutoCollectFn {
+			return autoCollectForTask(ft.Id, model.CollectTriggerCron, ft.Time)
+		}
+		return autoCollectFn(model.CollectTriggerCron, ft.Time)
+	}
+	err := runRound()
 	report(err)
 	if err == nil && takeCronCollectRerun(ft.Id) {
 		log.Printf("定时采集补采一轮空闲站点: Task[%s]\n", ft.Id)
-		report(autoCollectFn(model.CollectTriggerCron, ft.Time))
+		report(runRound())
 	}
 	// 补采期间又到的点并进这一轮，留给下一次调度，不再开第三条队列。
 	takeCronCollectRerun(ft.Id)
@@ -54,6 +71,10 @@ func runAutoCollectTask(ft model.FilmCollectTask, manual bool) {
 // autoCollect 返回会让本轮采集整体无法开始的错误（例如读取采集站失败），交给定时任务告警。
 // 跳过（维护中、索引更新中、无可采站点）不算错误。
 func autoCollect(trigger string, h int) error {
+	return autoCollectForTask("", trigger, h)
+}
+
+func autoCollectForTask(taskID, trigger string, h int) error {
 	if reason := collectPauseReason(); reason != "" {
 		log.Printf("[Spider] 定时采集跳过：%s", reason)
 		return nil
@@ -104,6 +125,7 @@ func autoCollect(trigger string, h int) error {
 		log.Println("[Spider] 自动采集：没有可采集的就绪站点")
 		return nil
 	}
+	ready.cronTaskID = strings.TrimSpace(taskID)
 	log.Printf("[Spider] 自动采集开启: 共 %d 个站点进入批量采集队列 (trigger=%s, h=%d)", len(ready.Sources), trigger, h)
 	BatchCollectPrepared(trigger, h, ready)
 	return nil

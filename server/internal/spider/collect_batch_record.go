@@ -195,6 +195,54 @@ func (b *collectBatchContext) sourceHour(sourceID string) int {
 	return sourceHourLocked(b, sourceID)
 }
 
+func (b *collectBatchContext) resolvedSourceHour(sourceID string) (int, bool) {
+	if b == nil || strings.TrimSpace(sourceID) == "" {
+		return 0, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	h, ok := b.sourceHours[sourceID]
+	return h, ok && h != 0
+}
+
+// recordSourceStatusSnapshot 在站点提前结束（探页失败、派发/探页被停止等）时把明细锁定到批次快照，
+// 避免随后收尾阶段超过进度保留期后，进度条目被 housekeeping 淘汰导致记录丢失或误判状态。
+func recordSourceStatusSnapshot(batchCtx *collectBatchContext, fs model.FilmSource, status, errMsg string, readOwnedProgress bool) {
+	if batchCtx == nil || strings.TrimSpace(fs.Id) == "" {
+		return
+	}
+	name := strings.TrimSpace(fs.Name)
+	if name == "" {
+		name = fs.Id
+	}
+	detail := model.CollectRecordSourceDetail{
+		SourceID:   fs.Id,
+		SourceName: name,
+		Status:     status,
+		Hour:       batchCtx.sourceHour(fs.Id),
+		Error:      strings.TrimSpace(errMsg),
+	}
+	if readOwnedProgress && batchCtx.ownsOccupy(fs.Id) {
+		if snap, ok := progress.Snapshot(fs.Id); ok {
+			detail.PageTotal = snap.Total
+			detail.PageCurrent = snap.Success
+			detail.SuccessCnt = snap.Success
+			detail.FailedCnt = snap.Failed
+			detail.FailedPages = copyFailedPages(snap.FailedPages)
+			if snap.Status == progress.StatusStopping || snap.Status == progress.StatusStopped {
+				detail.Status = progress.StatusStopped
+				detail.Error = ""
+			} else if status == "" && snap.Status != "" {
+				detail.Status = snap.Status
+			}
+		}
+	}
+	if detail.Status == progress.StatusStopped {
+		detail.Error = ""
+	}
+	batchCtx.recordSourceSnapshot(detail)
+}
+
 func sourceHourLocked(b *collectBatchContext, sourceID string) int {
 	if b == nil {
 		return 0

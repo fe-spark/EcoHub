@@ -124,3 +124,37 @@ func TestSealFrozenRound_RestoresMidsEvenIfProgressChangesWithoutRebuild(t *test
 		t.Fatalf("progress token 变更但不涉及重建时不应丢失 mids, has21=%v has22=%v", has21, has22)
 	}
 }
+
+func TestSearchResealRetryAfterIdle_CompletesOnRebuildDone(t *testing.T) {
+	setupAuditSpiderDB(t)
+	resetSearchReseal()
+	t.Cleanup(func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) && (filmsnapshot.SearchRebuildScheduled() || filmsnapshot.IsSearchIndexBuilding()) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		resetSearchReseal()
+	})
+
+	progress.Ensure("retry-idle-r1", "RetryIdleR1")
+	progress.Update("retry-idle-r1", func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+	searchReseal.mu.Lock()
+	searchReseal.sealing["retry-idle-r1"] = struct{}{}
+	searchReseal.mu.Unlock()
+
+	searchReseal.retryAfterIdle()
+	// 在 500ms 防抖+空表重建结束后，应由 awaitDone 捕获 done 终态并释放 sealing，同时等待重建任务彻底结束。
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		snap, ok := progress.Snapshot("retry-idle-r1")
+		if ok && snap.Status == progress.StatusDone && !filmsnapshot.SearchRebuildScheduled() && !filmsnapshot.IsSearchIndexBuilding() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	snap, _ := progress.Snapshot("retry-idle-r1")
+	t.Fatalf("retryAfterIdle 重建完成后应释放 StatusSealing 且重建变为空闲，status=%q scheduled=%t building=%t",
+		snap.Status, filmsnapshot.SearchRebuildScheduled(), filmsnapshot.IsSearchIndexBuilding())
+}

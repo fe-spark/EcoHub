@@ -130,6 +130,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		if errors.Is(err, errCollectDuringMaintenance) {
 			log.Printf("[Spider] 站点 %s 停止采集：维护任务执行中（%s）", id, maintenanceRunningDetail())
 			progress.MarkStopped(id)
+			recordSourceStatusSnapshot(batchCtx, *s, progress.StatusStopped, "", false)
 			if batchCtx != nil {
 				batchCtx.releaseSourceOccupy(id)
 			} else {
@@ -150,6 +151,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		if batchCtx != nil {
 			batchCtx.RecordSourceError(s.Id, err.Error())
 		}
+		recordSourceStatusSnapshot(batchCtx, *s, progress.StatusFailed, err.Error(), true)
 		retErr = err
 		return err
 	}
@@ -192,9 +194,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 			repository.NoteCollectSourceRun(s.Id, effectiveSuccess)
 		}
 		progress.FlushHotpathSideEffects(s.Id)
-		if originalErr != nil && !hadWrites {
-			return
-		}
 		if batchCtx != nil {
 			snap, _ := progress.Snapshot(s.Id)
 			status := snap.Status
@@ -202,7 +201,10 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 			if originalErr != nil && !errors.Is(originalErr, context.Canceled) {
 				errMsg = originalErr.Error()
 			}
-			if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
+			if status == progress.StatusStopping || status == progress.StatusStopped {
+				status = progress.StatusStopped
+				errMsg = ""
+			} else if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
 				if originalErr != nil {
 					if successPagesCount > 0 {
 						status = model.CollectRecordStatusPartial
@@ -251,6 +253,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 				FilmsTotal:  batchCtx.sourceFilmCount(s.Id),
 				Error:       errMsg,
 			})
+			if originalErr != nil && !hadWrites {
+				return
+			}
 			batchCtx.markSourceFinished(*s)
 			// 被用户停止时不再同步抢 publishMu 刷快照窗口，避免已停站点卡在「停止中」；
 			// 已入库数据会在批次收尾 flushAndFinalize 与 searchReseal 中统一刷新并检索封口。
@@ -260,6 +265,8 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 					log.Printf("[Spider] 站点 %s 封口入队失败: %v", s.Name, err)
 				}
 			}
+		} else if originalErr != nil && !hadWrites {
+			return
 		}
 	}()
 
@@ -320,7 +327,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	if batchCtx != nil && batchCtx.trigger != "" {
 		trigger = batchCtx.trigger
 	}
-	if shouldCatchUpCollectHours(trigger, h) {
+	if already, ok := batchCtx.resolvedSourceHour(s.Id); ok {
+		h = already
+	} else if shouldCatchUpCollectHours(trigger, h) {
 		origH := h
 		last, err := repository.GetLastCollectTime(s.Id)
 		if err != nil {

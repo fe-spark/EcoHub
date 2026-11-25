@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"math"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -306,12 +307,17 @@ func runPeerCollectTx(ctx context.Context, fn func(tx *gorm.DB) error) error {
 }
 
 func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, stored bool, err error) {
+	return saveSinglePeerDetailTxCtx(context.Background(), source, detail)
+}
+
+func saveSinglePeerDetailTxCtx(ctx context.Context, source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, stored bool, err error) {
 	if source != nil {
 		prepareSourceOtherCategory(source.Id)
 	}
 	var linesChanged bool
 	var metaChanged bool
-	err = runPeerCollectTx(context.Background(), func(tx *gorm.DB) error {
+	err = runPeerCollectTxWithRetry(ctx, func(tx *gorm.DB) error {
+		mid, isNew, playLinesChanged, linesChanged, metaChanged = 0, false, false, false, false
 		var existingMapping model.MovieSourceMapping
 		hasMapping := false
 		if err := tx.Where("source_id = ? AND source_mid = ?", source.Id, detail.Id).First(&existingMapping).Error; err == nil && existingMapping.GlobalMid > 0 {
@@ -405,8 +411,9 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 
 // writePeerPage 和 savePeerFilm 默认走批量事务和单片事务。测试可替换它们。
 var (
-	writePeerPage = writePeerPageTx
-	savePeerFilm  = saveSinglePeerDetailTx
+	writePeerPage          = writePeerPageTx
+	savePeerFilm           = saveSinglePeerDetailTx
+	defaultSavePeerFilmPtr = reflect.ValueOf(saveSinglePeerDetailTx).Pointer()
 )
 
 // SaveCollectedPeerDetails 全站平权影片采集入库入口。
@@ -459,7 +466,7 @@ func SaveCollectedPeerDetails(
 	if isDeterministicRowError(err) {
 		log.Printf("[Spider][PeerCollect] 整页因字段超长回滚，改为逐片入库 source=%s page=%d vods=%d err=%v",
 			source.Id, page, len(details), err)
-		return savePeerFilmsIsolated(source, page, details)
+		return savePeerFilmsIsolated(pageCtx, source, page, details)
 	}
 	log.Printf("[Spider][PeerCollect] 整页入库失败 source=%s page=%d vods=%d err=%v",
 		source.Id, page, len(details), err)

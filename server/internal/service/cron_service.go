@@ -73,6 +73,12 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 
 // UpdateFilmCron 更新定时任务的状态信息
 func (s *CronService) UpdateFilmCron(t model.FilmCollectTask) error {
+	if !spider.ValidTaskModel(t.Model) {
+		return fmt.Errorf("不支持的定时任务类型: %d", t.Model)
+	}
+	if t.Model == model.TaskModelAutoCollect && t.Time != -1 && t.Time <= 0 {
+		return fmt.Errorf("自动采集时长必须大于 0 或为 -1（全量）")
+	}
 	prev, prevErr := repository.GetFilmTaskById(t.Id)
 	if err := repository.UpdateFilmTask(t); err != nil {
 		return fmt.Errorf("定时任务保存失败: %w", err)

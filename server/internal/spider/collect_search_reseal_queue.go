@@ -23,9 +23,11 @@ type searchResealQueue struct {
 	pending            map[int64]struct{}
 	verifiedPrimary    string
 	allPendingVerified bool
-	sealing            map[string]struct{}
-	running            bool
-	retryWait          time.Duration
+	sealing        map[string]struct{}
+	running        bool
+	retryWait      time.Duration
+	retryTimer     *time.Timer
+	rebuildRetries int
 	// awaitDone 停等本轮触发的整表重建终态。只有这时才响应 done/idle。
 	awaitDone bool
 }
@@ -265,6 +267,8 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	}
 	q.mu.Lock()
 	q.sealing[sourceID] = struct{}{}
+	q.stopRetryTimerLocked()
+	q.rebuildRetries = 0
 	start := !q.running
 	if start {
 		q.running = true
@@ -499,6 +503,8 @@ func (q *searchResealQueue) complete() {
 		ids = append(ids, id)
 	}
 	q.sealing = map[string]struct{}{}
+	q.stopRetryTimerLocked()
+	q.rebuildRetries = 0
 	q.mu.Unlock()
 	progress.MarkSealed(ids)
 	if len(ids) > 0 && !IsCollecting() {
@@ -506,7 +512,7 @@ func (q *searchResealQueue) complete() {
 	}
 }
 
-// onSearchIndexTerminal 仅在停等本轮重建时处理终态：done 收口，idle 表示失败不收口。
+// onSearchIndexTerminal 仅在停等本轮重建时处理终态：done 收口，idle 调度重试避免永久卡在待检索。
 func (q *searchResealQueue) onSearchIndexTerminal(status string) {
 	q.mu.Lock()
 	if !q.awaitDone {
@@ -514,10 +520,15 @@ func (q *searchResealQueue) onSearchIndexTerminal(status string) {
 		return
 	}
 	q.awaitDone = false
-	q.mu.Unlock()
 	if status == "done" {
+		q.stopRetryTimerLocked()
+		q.rebuildRetries = 0
+		q.mu.Unlock()
 		q.complete()
+		return
 	}
+	q.scheduleIdleRebuildRetryLocked()
+	q.mu.Unlock()
 }
 
 // indexBuildBlocksCollect 索引正在构建、重建已排队，或在等重建终态。

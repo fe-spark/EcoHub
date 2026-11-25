@@ -182,7 +182,9 @@ func probeSourcePageCount(parentCtx context.Context, s *model.FilmSource, h int,
 		return nil
 	}
 	resolved := h
-	if shouldCatchUpCollectHours(trigger, h) {
+	if already, ok := batchCtx.resolvedSourceHour(s.Id); ok {
+		resolved = already
+	} else if shouldCatchUpCollectHours(trigger, h) {
 		last, err := repository.GetLastCollectTime(s.Id)
 		if err != nil {
 			return err
@@ -191,6 +193,9 @@ func probeSourcePageCount(parentCtx context.Context, s *model.FilmSource, h int,
 	}
 	if resolved == 0 {
 		return errors.New("采集时长不能为 0")
+	}
+	if batchCtx != nil {
+		batchCtx.noteSourceHour(s.Id, resolved)
 	}
 	ctx, cancel := progress.WithStopCancel(parentCtx, s.Id)
 	defer cancel()
@@ -224,6 +229,24 @@ func ProbeSitePageTotal(s *model.FilmSource) (int, error) {
 	return fetcher.GetPageCountWithRetry(context.Background(), s, r)
 }
 
+func stopQueuedSource(tag string, fs model.FilmSource, reason string, batchCtx *collectBatchContext, finishScheduler bool) {
+	log.Printf("[%s] 站点 %s 停止采集：%s", tag, fs.Name, reason)
+	recordSourceStatusSnapshot(batchCtx, fs, progress.StatusStopped, "", false)
+	if finishScheduler {
+		scheduler.FinishSource(fs.Id)
+	}
+	abandonQueuedCollectSource(fs, batchCtx)
+}
+
+func dropDisplacedSource(tag string, fs model.FilmSource, msg string, batchCtx *collectBatchContext, finishScheduler bool) {
+	log.Printf("[%s] 站点 %s %s", tag, fs.Name, msg)
+	recordSourceStatusSnapshot(batchCtx, fs, progress.StatusStopped, "", false)
+	if finishScheduler {
+		scheduler.FinishSource(fs.Id)
+	}
+	batchCtx.releaseSourceOccupy(fs.Id)
+}
+
 func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batchCtx *collectBatchContext) {
 	trigger := ""
 	if batchCtx != nil {
@@ -243,16 +266,12 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			reason := currentStopAllReason()
 			log.Printf("[%s] 停止派发剩余站点：%s", tag, reason)
 			for _, skipped := range sources[idx:] {
-				log.Printf("[%s] 站点 %s 停止采集：%s", tag, skipped.Name, reason)
-				scheduler.FinishSource(skipped.Id)
-				abandonQueuedCollectSource(skipped, batchCtx)
+				stopQueuedSource(tag, skipped, reason, batchCtx, true)
 			}
 			break
 		}
 		if batchCtx != nil && !batchCtx.ownsOccupy(src.Id) {
-			log.Printf("[%s] 站点 %s 已从本队列移除，跳过派发", tag, src.Name)
-			scheduler.FinishSource(src.Id)
-			batchCtx.releaseSourceOccupy(src.Id)
+			dropDisplacedSource(tag, src, "已从本队列移除，跳过派发", batchCtx, true)
 			continue
 		}
 		// 独立探页与抓取解耦：直接派发协程，由各站点探完总页后立即开跑，不再被死站阻塞
@@ -274,6 +293,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			defer func() {
 				if r := recover(); r != nil {
 					reason := reportSourcePanic(tag, fs, batchCtx, r)
+					recordSourceStatusSnapshot(batchCtx, fs, progress.StatusFailed, reason, true)
 					// 进度已被新的采集接手时不告警，也不碰新采集的进度。
 					if batchCtx.markSourceFailed(fs.Id) {
 						emitSourceFailedNotify(fs.Id, fs.Name, reason)
@@ -282,13 +302,11 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				}
 			}()
 			if isDispatchStopped(runVersion) {
-				log.Printf("[%s] 站点 %s 停止采集：%s", tag, fs.Name, currentStopAllReason())
-				abandonQueuedCollectSource(fs, batchCtx)
+				stopQueuedSource(tag, fs, currentStopAllReason(), batchCtx, false)
 				return
 			}
 			if batchCtx != nil && !batchCtx.ownsOccupy(fs.Id) {
-				log.Printf("[%s] 站点 %s 已从本队列移除，跳过采集", tag, fs.Name)
-				batchCtx.releaseSourceOccupy(fs.Id)
+				dropDisplacedSource(tag, fs, "已从本队列移除，跳过采集", batchCtx, false)
 				return
 			}
 			targetPages := batchCtx.getTargetPages(fs.Id)
@@ -299,6 +317,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				if batchCtx != nil {
 					batchCtx.RecordSourceError(fs.Id, err.Error())
 				}
+				recordSourceStatusSnapshot(batchCtx, fs, progress.StatusFailed, err.Error(), true)
 				if batchCtx.markSourceFailed(fs.Id) {
 					emitSourceFailedNotify(fs.Id, fs.Name, err.Error())
 				}
@@ -307,20 +326,11 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			}
 			// 探页期间被一键终止并由新采集接手：本批次不再继续，也不碰新采集的进度和占用。
 			if batchCtx != nil && !batchCtx.ownsOccupy(fs.Id) {
-				log.Printf("[%s] 站点 %s 已被新的采集接手，旧队列不再继续", tag, fs.Name)
-				batchCtx.releaseSourceOccupy(fs.Id)
+				dropDisplacedSource(tag, fs, "已被新的采集接手，旧队列不再继续", batchCtx, false)
 				return
 			}
 			if progress.IsStopped(fs.Id) || progress.IsStopping(fs.Id) {
-				log.Printf("[%s] 站点 %s 停止采集：%s", tag, fs.Name, collectStopReason(fs.Id))
-				abandonQueuedCollectSource(fs, batchCtx)
-				return
-			}
-			if progress.PageTotal(fs.Id) <= 0 {
-				log.Printf("[%s] 站点 %s 无页可采，跳过采集", tag, fs.Name)
-				if batchCtx != nil {
-					batchCtx.releaseSourceOccupy(fs.Id)
-				}
+				stopQueuedSource(tag, fs, collectStopReason(fs.Id), batchCtx, false)
 				return
 			}
 			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, batchCtx); err != nil {

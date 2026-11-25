@@ -113,3 +113,59 @@ func TestCronHandler_FilmCronSave_PartialUpdatePreservesStateAndTime(t *testing.
 		t.Fatalf("unexpected task after partial update: %+v", updated)
 	}
 }
+
+func TestCronHandler_FilmCronSave_RejectsInvalidModelAndTime(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.CrontabRecord{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() {
+		spider.RemoveCronByTaskId("task_invalid_1")
+		db.Mdb = prev
+	})
+
+	orig := model.FilmCollectTask{
+		Id:    "task_invalid_1",
+		Spec:  "0 0 * * * *",
+		Model: model.TaskModelAutoCollect,
+		Time:  24,
+		State: true,
+	}
+	if err := repository.SaveFilmTask(orig); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"unsupported_model", `{"id":"task_invalid_1","model":99}`},
+		{"zero_time", `{"id":"task_invalid_1","time":0}`},
+		{"negative_time_not_full", `{"id":"task_invalid_1","time":-2}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, w := testJSONContext(http.MethodPost, "/api/manage/cron/save", tc.body)
+			CronHd.FilmCronSave(c)
+			resp := decodeResponse(t, w)
+			if resp.Code == dto.SUCCESS {
+				t.Fatalf("%s 应被校验拒绝，却返回 SUCCESS", tc.name)
+			}
+		})
+	}
+
+	after, err := repository.GetFilmTaskById("task_invalid_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Model != model.TaskModelAutoCollect || after.Time != 24 {
+		t.Fatalf("非法参数不应修改已存任务，got %+v", after)
+	}
+}

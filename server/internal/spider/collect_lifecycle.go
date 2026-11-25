@@ -246,7 +246,7 @@ func (s *collectLifecycleState) waitStoppedCollect(deadline time.Time) error {
 		s.mu.Lock()
 		idle := s.activeCount == 0 && s.publishing == 0
 		s.mu.Unlock()
-		if idle && activeBatchCount() == 0 {
+		if idle && activeBatchCount() == 0 && SearchWorkBusyReason() == "" {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
@@ -254,7 +254,7 @@ func (s *collectLifecycleState) waitStoppedCollect(deadline time.Time) error {
 			activeCount := s.activeCount
 			publishing := s.publishing
 			s.mu.Unlock()
-			return fmt.Errorf("等待在途写入结束失败: active=%d publishing=%d batches=%d", activeCount, publishing, activeBatchCount())
+			return fmt.Errorf("等待在途写入结束失败: active=%d publishing=%d batches=%d search=%q", activeCount, publishing, activeBatchCount(), SearchWorkBusyReason())
 		}
 		select {
 		case <-ctx.Done():
