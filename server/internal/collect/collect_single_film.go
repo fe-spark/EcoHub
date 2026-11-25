@@ -5,17 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"server/internal/collect/fetcher"
+	"server/internal/collect/progress"
+	"server/internal/collect/scheduler"
+	"server/internal/film/writer"
+	"server/internal/infra/db"
+	"server/internal/infra/syslog"
+	"server/internal/model"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"server/internal/collect/fetcher"
-	"server/internal/collect/progress"
-	"server/internal/collect/scheduler"
-	"server/internal/infra/db"
-	"server/internal/infra/syslog"
-	"server/internal/model"
 )
 
 func singleFilmSourceDetail(src model.FilmSource, changed int, errMsg string) model.CollectRecordSourceDetail {
@@ -247,4 +247,8 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 		return strconv.FormatInt(sourceMid, 10)
 	}
 	return ""
+}
+
+func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (scheduler.Mids, error) {
+	return writer.SaveCollectedPeerDetails(ctx, s, page, list)
 }

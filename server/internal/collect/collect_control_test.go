@@ -1,9 +1,9 @@
 package collect
 
 import (
-	"testing"
-
 	"server/internal/model"
+	"testing"
+	"time"
 )
 
 func TestPrioritizeCollectSourcesSortFirst(t *testing.T) {
@@ -18,5 +18,13 @@ func TestPrioritizeCollectSourcesSortFirst(t *testing.T) {
 	}
 	if out[1].Id != "s1" || out[2].Id != "s2" {
 		t.Fatalf("same sort order should be stable/id-sorted, got %+v", out)
+	}
+}
+
+// 后台采集批次 panic 被兜住，且仍从 backgroundCollects 里摘掉。
+func TestGoBackgroundCollect_RecoversPanic(t *testing.T) {
+	goBackgroundCollect(func() { panic("boom") })
+	if !WaitBackgroundCollects(2 * time.Second) {
+		t.Fatal("panicking background collect must still be marked done")
 	}
 }

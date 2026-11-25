@@ -3,15 +3,16 @@ package collect
 import (
 	"fmt"
 	"log"
+	"runtime/debug"
+	"server/internal/collect/progress"
+	"server/internal/collect/scheduler"
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/infra/syslog"
+	"server/internal/model"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"server/internal/collect/progress"
-	"server/internal/collect/scheduler"
-	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/model"
 )
 
 // deleteStopTimeout 删除前等待本次抓页退出的上限。
@@ -191,4 +192,58 @@ func IsAnyTaskRunning() bool {
 // IsCollecting 是否仍有采集任务、运行队列或待检索封口尚未收尾。
 func IsCollecting() bool {
 	return progress.IsAnyTaskRunning() || collectQueueActive() || collectLifecycle.collecting()
+}
+
+// backgroundCollects 跟踪异步启动的采集批次（例如失败重试），便于测试和退出时等待它们结束。
+var backgroundCollects sync.WaitGroup
+
+// goBackgroundCollect 异步启动一批采集并登记到 backgroundCollects。编排代码 panic 时只记日志，不带崩进程。
+func goBackgroundCollect(fn func()) {
+	backgroundCollects.Add(1)
+	go func() {
+		defer backgroundCollects.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				syslog.Errorf("[Spider] 后台采集批次 panic: %v\n%s", r, debug.Stack())
+			}
+		}()
+		fn()
+	}()
+}
+
+// WaitBackgroundCollects 等待异步启动的采集批次全部结束。超时返回 false。
+func WaitBackgroundCollects(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		backgroundCollects.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func BatchOutcomeMessage(result model.CollectBatchResult, startedVerb, emptyLabel string) string {
+	if len(result.Started) == 0 {
+		if len(result.Skipped) == 0 {
+			return emptyLabel
+		}
+		parts := make([]string, 0, len(result.Skipped))
+		for _, item := range result.Skipped {
+			name := item.Name
+			if name == "" {
+				name = item.Id
+			}
+			parts = append(parts, name+"（"+item.Reason+"）")
+		}
+		return emptyLabel + "：" + strings.Join(parts, "；")
+	}
+	msg := fmt.Sprintf("%s %d 个", startedVerb, len(result.Started))
+	if len(result.Skipped) > 0 {
+		msg += fmt.Sprintf("，跳过 %d 个", len(result.Skipped))
+	}
+	return msg
 }

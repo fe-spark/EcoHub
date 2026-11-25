@@ -1,16 +1,14 @@
 package collect
 
 import (
-	"testing"
-
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/testutil"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"testing"
 )
 
 func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
@@ -204,5 +202,25 @@ func TestBatchCollect_ReleasesOccupyAfterFinished(t *testing.T) {
 
 	if isOccupiedCollectSource(src.Id) {
 		t.Fatal("source should NOT be occupied after BatchCollectPrepared finishes")
+	}
+}
+
+func TestStartCollectMatchesSingleSiteBatch(t *testing.T) {
+	id := "missing-site"
+	batch := SpiderSvc.BatchCollect(-1, []string{id})
+	err := SpiderSvc.StartCollect(id, -1)
+	if err == nil {
+		t.Fatal("missing site should fail")
+	}
+	if len(batch.Started) != 0 || len(batch.Skipped) != 1 || batch.Skipped[0].Reason != err.Error() {
+		t.Fatalf("batch=%+v err=%v", batch, err)
+	}
+
+	many := SpiderSvc.BatchCollect(-1, []string{"missing-a", "missing-b"})
+	if len(many.Started) != 0 || len(many.Skipped) != 2 {
+		t.Fatalf("batch=%+v", many)
+	}
+	if many.Skipped[0].Reason != batch.Skipped[0].Reason || many.Skipped[1].Reason != batch.Skipped[0].Reason {
+		t.Fatalf("single %q batch %q %q", batch.Skipped[0].Reason, many.Skipped[0].Reason, many.Skipped[1].Reason)
 	}
 }

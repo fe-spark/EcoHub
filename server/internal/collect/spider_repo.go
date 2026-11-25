@@ -2,20 +2,18 @@ package collect
 
 import (
 	"errors"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"log"
-	"strings"
-	"time"
-
+	"server/internal/collect/ledger"
 	"server/internal/film/catalog"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/sourcecatalog"
 	"server/internal/taxonomy"
 	"server/internal/utils"
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
-	"server/internal/collect/ledger"
+	"strings"
+	"time"
 )
 
 // --------- Collect Source -----------
@@ -429,4 +427,30 @@ func ExistCollectSourceList() (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// ClearSourceCategoryData 清空一个采集站的分类副本。
+func ClearSourceCategoryData(sourceID string) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	return catalog.ClearSourceCategoryDataTx(db.Mdb, sourceID)
+}
+
+// EnsureDefaultPosterSource 保证存在海报源站。
+func EnsureDefaultPosterSource() error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	return EnsureDefaultPosterSourceTx(db.Mdb)
+}
+
+// UpdateCollectSource 更新采集站。
+func UpdateCollectSource(s model.FilmSource) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return UpdateCollectSourceTx(tx, s)
+	})
 }

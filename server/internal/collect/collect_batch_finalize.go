@@ -1,11 +1,15 @@
 package collect
 
 import (
+	"fmt"
+	"log"
 	"server/internal/collect/progress"
 	filmcache "server/internal/film/cache"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/model"
+	"sort"
 	"strings"
+	"sync"
 )
 
 func (b *collectBatchContext) releaseSourceOccupy(id string) {
@@ -283,4 +287,75 @@ func (b *collectBatchContext) withTargetPages(targetPages map[string][]int) *col
 		b.sourceTargetPages[k] = append([]int(nil), v...)
 	}
 	return b
+}
+
+func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
+	mids := normalizeAffectedMIDs(affectedMIDs)
+	if len(mids) == 0 {
+		if hasSnapshot, err := filmsnapshot.HasPublishedFilmListSnapshot(); err != nil {
+			return "", err
+		} else if !hasSnapshot {
+			return "", nil
+		}
+	}
+	version, _, err := filmsnapshot.TouchActiveSnapshotsByMids(mids...)
+	if err != nil {
+		return "", fmt.Errorf("upsert film list snapshot failed: %w", err)
+	}
+	return version, nil
+}
+
+func normalizeAffectedMIDs(mids []int64) []int64 {
+	if len(mids) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(mids))
+	res := make([]int64, 0, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		res = append(res, mid)
+	}
+	sort.Slice(res, func(i, j int) bool { return res[i] < res[j] })
+	return res
+}
+
+var (
+	collectDoneHooksMu sync.RWMutex
+	collectDoneHooks   []func()
+)
+
+// RegisterCollectDoneHook 注册采集批次全部完成后的全局回调
+func RegisterCollectDoneHook(hook func()) {
+	if hook == nil {
+		return
+	}
+	collectDoneHooksMu.Lock()
+	defer collectDoneHooksMu.Unlock()
+	collectDoneHooks = append(collectDoneHooks, hook)
+}
+
+func triggerCollectDoneHooks() {
+	collectDoneHooksMu.RLock()
+	hooks := make([]func(), len(collectDoneHooks))
+	copy(hooks, collectDoneHooks)
+	collectDoneHooksMu.RUnlock()
+
+	for _, fn := range hooks {
+		if fn != nil {
+			go func(f func()) {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("[Spider] collectDoneHook panic: %v", r)
+					}
+				}()
+				f()
+			}(fn)
+		}
+	}
 }

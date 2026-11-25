@@ -2,10 +2,9 @@ package collect
 
 import (
 	"context"
+	"server/internal/model"
 	"testing"
 	"time"
-
-	"server/internal/model"
 )
 
 func TestShouldCatchUpCollectHoursOnlyCronIncremental(t *testing.T) {
@@ -98,4 +97,10 @@ func TestShouldNoteCronCollectSuccess(t *testing.T) {
 	if shouldNoteCronCollectSuccess(nil, ctx, "missing") {
 		t.Fatal("ctx 已取消不应记成功")
 	}
+}
+
+func TestAutoCollectTriggered_NoSources(t *testing.T) {
+	// DB 为空或无启用站点时应平稳跳过，不 panic
+	AutoCollectTriggered(model.CollectTriggerCron, 24)
+	AutoCollect(24)
 }
