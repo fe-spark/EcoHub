@@ -41,7 +41,7 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	if err := tx.Where("source_id = ?", id).Delete(&model.BannerSlot{}).Error; err != nil {
 		return nil, err
 	}
-	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
+	if err := DeleteFilmCascadeTx(tx, owned); err != nil {
 		return nil, err
 	}
 	return owned, nil
@@ -152,7 +152,8 @@ func DeleteBySourceBatched(modelPtr any, tableName, col, sourceID string) error 
 	return nil
 }
 
-func deleteOwnedFilmsTx(tx *gorm.DB, mids []int64) error {
+// DeleteFilmCascadeTx 在事务内按 mid 分批级联删除影片关联数据（播放源、匹配键、映射、轮播、刮削记录与索引）。
+func DeleteFilmCascadeTx(tx *gorm.DB, mids []int64) error {
 	for i := 0; i < len(mids); i += 1000 {
 		if err := deleteOwnedFilmChunk(tx, mids[i:min(i+1000, len(mids))]); err != nil {
 			return err

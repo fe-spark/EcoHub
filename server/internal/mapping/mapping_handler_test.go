@@ -1,24 +1,19 @@
 package mapping
 
 import (
-	"bytes"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-
-	"server/internal/infra/db"
-	"server/internal/model"
-	"server/internal/model/dto"
-	"server/internal/testutil"
-
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"net/http"
+	"net/http/httptest"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/model/dto"
+	"server/internal/testutil"
+	"testing"
 )
-
-func init() { gin.SetMode(gin.TestMode) }
 
 func setupManageConfigDB(t *testing.T) {
 	t.Helper()
@@ -34,30 +29,6 @@ func setupManageConfigDB(t *testing.T) {
 	t.Cleanup(func() { db.Mdb = prev })
 }
 
-func testJSONContext(method, path, body string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	return c, w
-}
-
-func testContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, nil)
-	return c, w
-}
-
-func decodeResponse(t *testing.T, w *httptest.ResponseRecorder) dto.Response {
-	t.Helper()
-	var resp dto.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-	return resp
-}
-
 func TestMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
 	setupManageConfigDB(t)
 	h := &MappingHandler{}
@@ -69,36 +40,36 @@ func TestMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
 
 	// 3. MappingRuleSave (新增，ID=0)
 	ruleAddBody := `{"raw":"大陆","target":"中国大陆","matchType":"exact","group":"Area"}`
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", ruleAddBody)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", ruleAddBody)
 	h.MappingRuleSave(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected MappingRuleSave success, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	// 4. MappingRuleDelete 批量删除
 	delRuleBody, _ := json.Marshal(map[string][]uint{"ids": {1}})
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/delete", string(delRuleBody))
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/mapping/rule/delete", string(delRuleBody))
 	h.MappingRuleDelete(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected MappingRuleDelete success, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	// 5. 校验：非 Filter 分组不允许空 target；非分类分组不允许 regex；Filter 允许空 target
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"sourceId":"s1","raw":"电影","target":"","matchType":"exact","group":"CategoryRoot"}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"sourceId":"s1","raw":"电影","target":"","matchType":"exact","group":"CategoryRoot"}`)
 	h.MappingRuleSave(c)
-	if resp = decodeResponse(t, w); resp.Code != dto.FAILED {
+	if resp = testutil.DecodeResponse(t, w); resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on empty target for CategoryRoot, got code=%d", resp.Code)
 	}
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"中国.*","target":"中国","matchType":"regex","group":"Area"}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"中国.*","target":"中国","matchType":"regex","group":"Area"}`)
 	h.MappingRuleSave(c)
-	if resp = decodeResponse(t, w); resp.Code != dto.FAILED {
+	if resp = testutil.DecodeResponse(t, w); resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on regex for Area group, got code=%d", resp.Code)
 	}
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"忽略词","target":"","matchType":"exact","group":"Filter"}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"忽略词","target":"","matchType":"exact","group":"Filter"}`)
 	h.MappingRuleSave(c)
-	if resp = decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp = testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS on Filter rule with empty target, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
 }
@@ -117,9 +88,9 @@ func TestMappingRule_ListCategoryAllIncludesRootAndSub(t *testing.T) {
 	}
 
 	h := &MappingHandler{}
-	c, w := testContext(http.MethodGet, "/api/manage/mapping/rule/list?group=CategoryAll&sourceId=src_cat")
+	c, w := testutil.NewTestContext(http.MethodGet, "/api/manage/mapping/rule/list?group=CategoryAll&sourceId=src_cat")
 	h.MappingRuleList(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("MappingRuleList failed: %+v", resp)
 	}
@@ -156,9 +127,9 @@ func TestMappingRule_ContextReturnsSourceCategoriesAndRules(t *testing.T) {
 	}
 
 	h := &MappingHandler{}
-	c, w := testContext(http.MethodGet, "/api/manage/mapping/rule/context?sourceId=src_ctx")
+	c, w := testutil.NewTestContext(http.MethodGet, "/api/manage/mapping/rule/context?sourceId=src_ctx")
 	h.MappingRuleContext(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("MappingRuleContext failed: %+v", resp)
 	}

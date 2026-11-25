@@ -67,14 +67,7 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
-// SetPrimarySourceID 写入主站状态（切换与交接的持久化入口）。
-func SetPrimarySourceID(id string) error {
-	if err := sourcecatalog.SetPrimarySourceID(id); err != nil {
-		return err
-	}
-	return sourcecatalog.RefreshCollectSourceCatalog()
-}
-
+// GetLastCollectTime 获取指定站点的最近采集时间。
 func GetLastCollectTime(sourceID string) (*time.Time, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {

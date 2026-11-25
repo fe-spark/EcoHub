@@ -1,35 +1,29 @@
 package file
 
 import (
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"net/http"
-	"testing"
-
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/utils"
-
-	"bytes"
-	"encoding/json"
-	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-	"net/http/httptest"
 	"server/internal/testutil"
+	"server/internal/utils"
+	"testing"
 )
 
 func TestFileHandler_DelFile_Validation(t *testing.T) {
-	c, w := testJSONContext(http.MethodPost, "/api/manage/file/delete", "invalid-json")
+	c, w := testutil.NewJSONContext(http.MethodPost, "/api/manage/file/delete", "invalid-json")
 	FileHd.DelFile(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on invalid JSON, got %d", resp.Code)
 	}
-	c, w = testJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[]}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[]}`)
 	FileHd.DelFile(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on empty ids, got %d", resp.Code)
 	}
@@ -46,31 +40,31 @@ func TestFileHandler_OwnershipEnforcement(t *testing.T) {
 	}
 	db.Mdb.Create(&file)
 
-	c, w := testJSONContext(http.MethodPost, "/api/manage/file/rename", `{"id":99,"name":"HackedName"}`)
+	c, w := testutil.NewJSONContext(http.MethodPost, "/api/manage/file/rename", `{"id":99,"name":"HackedName"}`)
 	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10002, Role: model.UserRoleNormal})
 	FileHd.RenameFile(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on non-owner rename, got %d", resp.Code)
 	}
 
-	c2, w2 := testJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[99]}`)
+	c2, w2 := testutil.NewJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[99]}`)
 	c2.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10002, Role: model.UserRoleNormal})
 	FileHd.DelFile(c2)
-	if resp2 := decodeResponse(t, w2); resp2.Code != dto.FAILED {
+	if resp2 := testutil.DecodeResponse(t, w2); resp2.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on non-owner delete, got %d", resp2.Code)
 	}
 
-	c3, w3 := testJSONContext(http.MethodPost, "/api/manage/file/rename", `{"id":99,"name":"UpdatedName"}`)
+	c3, w3 := testutil.NewJSONContext(http.MethodPost, "/api/manage/file/rename", `{"id":99,"name":"UpdatedName"}`)
 	c3.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10001, Role: model.UserRoleNormal})
 	FileHd.RenameFile(c3)
-	if resp3 := decodeResponse(t, w3); resp3.Code != dto.SUCCESS {
+	if resp3 := testutil.DecodeResponse(t, w3); resp3.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS on owner rename, got %d msg=%s", resp3.Code, resp3.Msg)
 	}
 
-	c4, w4 := testJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[99]}`)
+	c4, w4 := testutil.NewJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[99]}`)
 	c4.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, Role: model.UserRoleAdmin})
 	FileHd.DelFile(c4)
-	if resp4 := decodeResponse(t, w4); resp4.Code != dto.SUCCESS {
+	if resp4 := testutil.DecodeResponse(t, w4); resp4.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS on admin delete, got %d msg=%s", resp4.Code, resp4.Msg)
 	}
 
@@ -79,10 +73,10 @@ func TestFileHandler_OwnershipEnforcement(t *testing.T) {
 	db.Mdb.Create(&fileOwn)
 	db.Mdb.Create(&fileOther)
 
-	cBatch, wBatch := testJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[101, 102]}`)
+	cBatch, wBatch := testutil.NewJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[101, 102]}`)
 	cBatch.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10001, Role: model.UserRoleNormal})
 	FileHd.DelFile(cBatch)
-	if respBatch := decodeResponse(t, wBatch); respBatch.Code != dto.FAILED {
+	if respBatch := testutil.DecodeResponse(t, wBatch); respBatch.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on batch with unauthorized item, got %d", respBatch.Code)
 	}
 	var checkOwn model.FileInfo
@@ -90,8 +84,6 @@ func TestFileHandler_OwnershipEnforcement(t *testing.T) {
 		t.Fatalf("expected file 101 to remain intact after batch failure, got err: %v", err)
 	}
 }
-
-func init() { gin.SetMode(gin.TestMode) }
 
 func setupManageConfigDB(t *testing.T) {
 	t.Helper()
@@ -105,21 +97,4 @@ func setupManageConfigDB(t *testing.T) {
 	prev := db.Mdb
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
-}
-
-func testJSONContext(method, path, body string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	return c, w
-}
-
-func decodeResponse(t *testing.T, w *httptest.ResponseRecorder) dto.Response {
-	t.Helper()
-	var resp dto.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-	return resp
 }

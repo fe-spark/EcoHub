@@ -3,12 +3,11 @@ package collectctl
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"testing"
-	"time"
-
 	"server/internal/collect/progress"
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -17,40 +16,9 @@ import (
 	"server/internal/sourcecatalog"
 	"server/internal/testutil"
 	"server/internal/utils"
-
-	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"testing"
+	"time"
 )
-
-func init() {
-	gin.SetMode(gin.TestMode)
-}
-
-func testContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, nil)
-	return c, w
-}
-
-func testJSONContext(method, path, body string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	return c, w
-}
-
-func decodeResponse(t *testing.T, w *httptest.ResponseRecorder) dto.Response {
-	t.Helper()
-	var resp dto.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v body=%s", err, w.Body.String())
-	}
-	return resp
-}
 
 func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -110,12 +78,12 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 		},
 	}
 	bodyBytes, _ := json.Marshal(updateBody)
-	c, w := testContext(http.MethodPost, "/api/manage/collect/save")
+	c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/save")
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(bodyBytes))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	h.FilmSourceSave(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected update to succeed when URI unchanged even if unreachable, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
@@ -142,12 +110,12 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 		},
 	}
 	bodyBytes2, _ := json.Marshal(updateBodyUriChanged)
-	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/save")
+	c2, w2 := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/save")
 	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(bodyBytes2))
 	c2.Request.Header.Set("Content-Type", "application/json")
 
 	h.FilmSourceSave(c2)
-	resp2 := decodeResponse(t, w2)
+	resp2 := testutil.DecodeResponse(t, w2)
 	if resp2.Code != dto.SUCCESS {
 		t.Fatalf("expected update to succeed immediately without blocking network probe, got code=%d msg=%s", resp2.Code, resp2.Msg)
 	}
@@ -166,21 +134,21 @@ func TestCollectHandler_FilmSourceSyncCategory_Validations(t *testing.T) {
 	h := &CollectHandler{}
 
 	// 1. 空 ID 校验
-	c, w := testContext(http.MethodPost, "/api/manage/collect/category/sync")
+	c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/category/sync")
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/category/sync", bytes.NewReader([]byte(`{"id":""}`)))
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.FilmSourceSyncCategory(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code == dto.SUCCESS {
 		t.Fatal("expected failure for empty source ID")
 	}
 
 	// 2. 站点不存在校验
-	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/category/sync")
+	c2, w2 := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/category/sync")
 	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/category/sync", bytes.NewReader([]byte(`{"id":"non_existent"}`)))
 	c2.Request.Header.Set("Content-Type", "application/json")
 	h.FilmSourceSyncCategory(c2)
-	resp2 := decodeResponse(t, w2)
+	resp2 := testutil.DecodeResponse(t, w2)
 	if resp2.Code == dto.SUCCESS {
 		t.Fatal("expected failure for non-existent source")
 	}
@@ -204,12 +172,12 @@ func TestCollectHandler_FilmSourceAdd_AsyncCategorySync(t *testing.T) {
 		},
 	}
 	bodyBytes, _ := json.Marshal(body)
-	c, w := testContext(http.MethodPost, "/api/manage/collect/save")
+	c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/save")
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(bodyBytes))
 	c.Request.Header.Set("Content-Type", "application/json")
 
 	h.FilmSourceSave(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected add to succeed immediately, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
@@ -236,11 +204,11 @@ func TestCollectHandler_StateBatchAndRecordOperations(t *testing.T) {
 		State: true,
 	}
 	bodyBytes, _ := json.Marshal(stateReq)
-	c, w := testContext(http.MethodPost, "/api/manage/collect/state")
+	c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/state")
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/state", bytes.NewReader(bodyBytes))
 	c.Request.Header.Set("Content-Type", "application/json")
 	h.FilmSourceBatchChange(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected state update success, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
@@ -257,21 +225,21 @@ func TestCollectHandler_FilmSourceDelCancel_ValidatesJSONAndEmptyResult(t *testi
 	h := &CollectHandler{}
 
 	// 1. 畸形 JSON 应报错拒绝，不能静默退化为全量取消
-	c1, w1 := testContext(http.MethodPost, "/api/manage/collect/delete/cancel")
+	c1, w1 := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/delete/cancel")
 	c1.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/delete/cancel", bytes.NewReader([]byte(`{"ids":"invalid"}`)))
 	c1.Request.Header.Set("Content-Type", "application/json")
 	h.FilmSourceDelCancel(c1)
-	resp1 := decodeResponse(t, w1)
+	resp1 := testutil.DecodeResponse(t, w1)
 	if resp1.Code == dto.SUCCESS {
 		t.Fatalf("expected failure for invalid JSON body, got success: %+v", resp1)
 	}
 
 	// 2. 空对象传参且当前无排队站时，返回明确提示文案
-	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/delete/cancel")
+	c2, w2 := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/delete/cancel")
 	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/delete/cancel", bytes.NewReader([]byte(`{}`)))
 	c2.Request.Header.Set("Content-Type", "application/json")
 	h.FilmSourceDelCancel(c2)
-	resp2 := decodeResponse(t, w2)
+	resp2 := testutil.DecodeResponse(t, w2)
 	if resp2.Code != dto.SUCCESS || resp2.Msg != "当前无排队中的待取消站点" {
 		t.Fatalf("unexpected response for empty cancel queue: %+v", resp2)
 	}
@@ -322,7 +290,7 @@ func TestCollectHandler_PrimaryHandoverRequiresAdminAndCheckAllSkipsPrimary(t *t
 		"state":        false,
 		"newPrimaryId": "src_s",
 	})
-	c1, w1 := testContext(http.MethodPost, "/api/manage/collect/save")
+	c1, w1 := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/save")
 	c1.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleNormal})
 	c1.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/save", bytes.NewReader(saveBody))
 	c1.Request.Header.Set("Content-Type", "application/json")
@@ -336,7 +304,7 @@ func TestCollectHandler_PrimaryHandoverRequiresAdminAndCheckAllSkipsPrimary(t *t
 		"ids":          []string{"src_p"},
 		"newPrimaryId": "src_s",
 	})
-	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/delete")
+	c2, w2 := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/delete")
 	c2.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleNormal})
 	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/delete", bytes.NewReader(delBody))
 	c2.Request.Header.Set("Content-Type", "application/json")
@@ -346,9 +314,9 @@ func TestCollectHandler_PrimaryHandoverRequiresAdminAndCheckAllSkipsPrimary(t *t
 	}
 
 	// 3. FilmSourceCheckAll 必须跳过当前主站，只检测其他站点
-	c3, w3 := testContext(http.MethodPost, "/api/manage/collect/check/all")
+	c3, w3 := testutil.NewTestContext(http.MethodPost, "/api/manage/collect/check/all")
 	h.FilmSourceCheckAll(c3)
-	resp3 := decodeResponse(t, w3)
+	resp3 := testutil.DecodeResponse(t, w3)
 	if resp3.Code != dto.SUCCESS {
 		t.Fatalf("FilmSourceCheckAll failed: %+v", resp3)
 	}
@@ -396,9 +364,9 @@ func TestCollectHandler_PrimaryStateReportsDeletingPrimary(t *testing.T) {
 	progress.SetSourceDeleting("src_del_p", true)
 	defer progress.SetSourceDeleting("src_del_p", false)
 
-	c1, w1 := testContext(http.MethodGet, "/api/manage/primary")
+	c1, w1 := testutil.NewTestContext(http.MethodGet, "/api/manage/primary")
 	h.PrimaryState(c1)
-	resp1 := decodeResponse(t, w1)
+	resp1 := testutil.DecodeResponse(t, w1)
 	if resp1.Code != dto.SUCCESS {
 		t.Fatalf("PrimaryState failed: %+v", resp1)
 	}
@@ -412,9 +380,9 @@ func TestCollectHandler_PrimaryStateReportsDeletingPrimary(t *testing.T) {
 	}
 
 	progress.SetSourceDeleting("src_del_p", false)
-	c2, w2 := testContext(http.MethodGet, "/api/manage/primary")
+	c2, w2 := testutil.NewTestContext(http.MethodGet, "/api/manage/primary")
 	h.PrimaryState(c2)
-	resp2 := decodeResponse(t, w2)
+	resp2 := testutil.DecodeResponse(t, w2)
 	dataMap2, ok := resp2.Data.(map[string]any)
 	if !ok || dataMap2["id"] != "src_del_p" {
 		t.Fatalf("expected restored primary after clearing deleting, got %+v", resp2.Data)

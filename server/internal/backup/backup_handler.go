@@ -1,15 +1,12 @@
 package backup
 
 import (
-	"net/http"
 	"strings"
 
-	"server/internal/config"
 	"server/internal/httpx"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/user"
-	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,14 +17,7 @@ var BackupHd = new(BackupHandler)
 
 // ExportConfigBackup 导出站点配置备份（需管理密码，不含影视库存与账号，仅超级管理员）
 func (h *BackupHandler) ExportConfigBackup(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导出配置备份", c)
+	if _, ok := httpx.RequireAdminClaims(c, "权限不足，仅超级管理员可导出配置备份"); !ok {
 		return
 	}
 	var req model.ConfigBackupExportRequest
@@ -49,14 +39,7 @@ func (h *BackupHandler) ExportConfigBackup(c *gin.Context) {
 
 // ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）
 func (h *BackupHandler) ImportConfigBackup(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导入配置备份", c)
+	if _, ok := httpx.RequireAdminClaims(c, "权限不足，仅超级管理员可导入配置备份"); !ok {
 		return
 	}
 	var req model.ConfigBackupImportRequest

@@ -2,24 +2,22 @@ package admin
 
 import (
 	"encoding/json"
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"net/http"
 	"net/http/httptest"
-	"server/internal/repobase"
-	"strings"
-	"testing"
-
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/middleware"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repobase"
 	"server/internal/testutil"
 	"server/internal/utils"
-
-	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"strings"
+	"testing"
 )
 
 func TestSiteBasicAndDanmakuConfig_RedactsDanmakuApiURLForNonAdmin(t *testing.T) {
@@ -51,9 +49,9 @@ func TestSiteBasicAndDanmakuConfig_RedactsDanmakuApiURLForNonAdmin(t *testing.T)
 	}
 
 	// 1. 匿名请求 SiteBasicConfig 不得暴露 ApiURL/AppID/AppSecret/ProvideKey
-	c, w := testContext(http.MethodGet, "/api/config/basic")
+	c, w := testutil.NewTestContext(http.MethodGet, "/api/config/basic")
 	ManageHd.SiteBasicConfig(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS, got %d", resp.Code)
 	}
@@ -66,20 +64,20 @@ func TestSiteBasicAndDanmakuConfig_RedactsDanmakuApiURLForNonAdmin(t *testing.T)
 	}
 
 	// 2. 访客（非超管）请求 SiteDanmakuConfig 不得暴露 ApiURL
-	c2, w2 := testContext(http.MethodGet, "/api/manage/config/danmaku")
+	c2, w2 := testutil.NewTestContext(http.MethodGet, "/api/manage/config/danmaku")
 	c2.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleVisitor})
 	ManageHd.SiteDanmakuConfig(c2)
-	resp2 := decodeResponse(t, w2)
+	resp2 := testutil.DecodeResponse(t, w2)
 	raw2, _ := json.Marshal(resp2.Data)
 	if strings.Contains(string(raw2), "my-secret-token") {
 		t.Fatalf("non-admin SiteDanmakuConfig leaked ApiURL: %s", string(raw2))
 	}
 
 	// 3. 超管可以看到完整配置
-	c3, w3 := testContext(http.MethodGet, "/api/manage/config/danmaku")
+	c3, w3 := testutil.NewTestContext(http.MethodGet, "/api/manage/config/danmaku")
 	c3.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, Role: model.UserRoleAdmin})
 	ManageHd.SiteDanmakuConfig(c3)
-	resp3 := decodeResponse(t, w3)
+	resp3 := testutil.DecodeResponse(t, w3)
 	raw3, _ := json.Marshal(resp3.Data)
 	if !strings.Contains(string(raw3), "my-secret-token") {
 		t.Fatalf("admin SiteDanmakuConfig should retain ApiURL, got %s", string(raw3))

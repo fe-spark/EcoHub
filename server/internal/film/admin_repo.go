@@ -52,25 +52,7 @@ func DelFilmSearchBatchDB(ids []int64) ([]int64, []int64, error) {
 	_ = db.Mdb.Where("mid IN ?", cleanIds).Find(&indexes)
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Unscoped().Where("mid IN ?", cleanIds).Delete(&model.FilmIndex{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.MovieMatchKey{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("global_mid IN ?", cleanIds).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.BannerSlot{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
-			return err
-		}
-		return nil
+		return catalog.DeleteFilmCascadeTx(tx, cleanIds)
 	})
 	if err != nil {
 		return nil, nil, err

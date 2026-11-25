@@ -163,7 +163,10 @@ func SetPrimarySourceID(id string) error {
 		return moveCollectSourceToFirstTx(tx, id)
 	})
 	if err == nil {
-		InvalidatePrimarySourceCache()
+		// 同步刷新采集站内存目录，保证 sort 顺序与主站状态一致；刷新失败时仍清理主站缓存避免脏读。
+		if refreshErr := RefreshCollectSourceCatalog(); refreshErr != nil {
+			InvalidatePrimarySourceCache()
+		}
 	}
 	return err
 }

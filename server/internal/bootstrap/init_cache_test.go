@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"testing"
 
-	"server/internal/admin"
+	"server/internal/admin/upgrade"
 	"server/internal/collect"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -69,7 +69,7 @@ func TestService_RedisNilSafety(t *testing.T) {
 	}()
 
 	// 2. LoadLatestRelease with nil Rdb (network failure returns error, but no panic on Redis)
-	_, _ = admin.VersionSvc.LoadLatestRelease(false)
+	_, _ = upgrade.VersionSvc.LoadLatestRelease(false)
 }
 
 func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {

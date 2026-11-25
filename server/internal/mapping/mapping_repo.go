@@ -288,14 +288,6 @@ func DeleteMappingRules(ids []uint) error {
 	return nil
 }
 
-func DeleteMappingRulesBySourceTx(tx *gorm.DB, sourceID string) error {
-	sourceID = strings.TrimSpace(sourceID)
-	if tx == nil || sourceID == "" || !tx.Migrator().HasTable(&model.MappingRule{}) {
-		return nil
-	}
-	return tx.Unscoped().Where("source_id = ?", sourceID).Delete(&model.MappingRule{}).Error
-}
-
 // ReplaceMappingRules 用导出规则整体替换映射规则表
 func ReplaceMappingRules(exports []model.MappingRuleExport) error {
 	if err := EnsureMappingRuleIndexes(); err != nil {

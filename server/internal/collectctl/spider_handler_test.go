@@ -3,17 +3,15 @@ package collectctl
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"net/http"
-	"testing"
-
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/testutil"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"testing"
 )
 
 func TestSpiderHandler_InventoryStats(t *testing.T) {
@@ -21,12 +19,12 @@ func TestSpiderHandler_InventoryStats(t *testing.T) {
 	db.Mdb = nil
 	t.Cleanup(func() { db.Mdb = orig })
 
-	c, w := testContext(http.MethodGet, "/api/manage/spider/clear/stats")
+	c, w := testutil.NewTestContext(http.MethodGet, "/api/manage/spider/clear/stats")
 	SpiderHd.InventoryStats(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected code FAILED, got %d msg=%s", resp.Code, resp.Msg)
 	}
@@ -50,7 +48,7 @@ func TestSpiderHandler_InventoryStats_ReadyAndRefresh(t *testing.T) {
 		FilmIndexContent:  model.FilmIndexContent{Name: "片1"},
 	})
 
-	c1, w1 := testContext(http.MethodGet, "/api/manage/spider/clear/stats")
+	c1, w1 := testutil.NewTestContext(http.MethodGet, "/api/manage/spider/clear/stats")
 	SpiderHd.InventoryStats(c1)
 	if w1.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w1.Code)
@@ -76,7 +74,7 @@ func TestSpiderHandler_InventoryStats_ReadyAndRefresh(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_1"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "片2"},
 	})
-	c1b, w1b := testContext(http.MethodGet, "/api/manage/spider/clear/stats")
+	c1b, w1b := testutil.NewTestContext(http.MethodGet, "/api/manage/spider/clear/stats")
 	SpiderHd.InventoryStats(c1b)
 	var payload1b struct {
 		Code int `json:"code"`
@@ -93,7 +91,7 @@ func TestSpiderHandler_InventoryStats_ReadyAndRefresh(t *testing.T) {
 	if payload1b.Code != dto.SUCCESS || payload1b.Data.Status != "ready" || payload1b.Data.Library.Films != 1 {
 		t.Fatalf("expected memory result Films=1 without refresh, got %+v", payload1b)
 	}
-	c2, w2 := testContext(http.MethodGet, "/api/manage/spider/clear/stats?refresh=1")
+	c2, w2 := testutil.NewTestContext(http.MethodGet, "/api/manage/spider/clear/stats?refresh=1")
 	SpiderHd.InventoryStats(c2)
 	var payload2 struct {
 		Code int `json:"code"`
@@ -114,33 +112,33 @@ func TestSpiderHandler_InventoryStats_ReadyAndRefresh(t *testing.T) {
 
 func TestSpiderHandler_StarSpiderAndStopTask_BatchContract(t *testing.T) {
 	// 1. 测试 StarSpider 参数校验（空的 ids 或 0 时间）
-	c, w := testContext(http.MethodPost, "/api/manage/spider/start")
+	c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/spider/start")
 	body, _ := json.Marshal(model.CollectParams{Ids: []string{}, Time: 0})
 	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/spider/start", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	SpiderHd.StarSpider(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on zero time, got %d", resp.Code)
 	}
 
-	c, w = testContext(http.MethodPost, "/api/manage/spider/start")
+	c, w = testutil.NewTestContext(http.MethodPost, "/api/manage/spider/start")
 	body, _ = json.Marshal(model.CollectParams{Ids: []string{}, Time: 24})
 	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/spider/start", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	SpiderHd.StarSpider(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on empty ids, got %d", resp.Code)
 	}
 
 	// 2. 测试 StopTask 参数校验（空的 ids）
-	c, w = testContext(http.MethodPost, "/api/manage/spider/stop")
+	c, w = testutil.NewTestContext(http.MethodPost, "/api/manage/spider/stop")
 	body, _ = json.Marshal(map[string][]string{"ids": {}})
 	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/spider/stop", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 	SpiderHd.StopTask(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on empty ids for StopTask, got %d", resp.Code)
 	}

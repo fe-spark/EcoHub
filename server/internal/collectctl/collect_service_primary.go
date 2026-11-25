@@ -5,7 +5,6 @@ import (
 	"strings"
 	"sync"
 
-	"server/internal/collect"
 	"server/internal/collect/progress"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/model"
@@ -62,7 +61,7 @@ func (s *CollectService) SwitchPrimary(id string) error {
 		if err := validateNewPrimary(id, ""); err != nil {
 			return err
 		}
-		if err := collect.SetPrimarySourceID(id); err != nil {
+		if err := sourcecatalog.SetPrimarySourceID(id); err != nil {
 			return err
 		}
 		applyPrimaryChanged(oldPrimary, sourcecatalog.CurrentPrimarySource())
@@ -134,7 +133,7 @@ func planPrimaryHandoverExcluding(searchBusy bool, excludeIDs map[string]struct{
 // applyPrimaryHandover 站点状态已变更后写入主站交接并触发主站变化处理。
 func applyPrimaryHandover(oldPrimary *model.FilmSource, leavingID, newPrimaryID string, confirmClearPrimary bool) error {
 	if strings.TrimSpace(newPrimaryID) != "" {
-		if err := collect.SetPrimarySourceID(newPrimaryID); err != nil {
+		if err := sourcecatalog.SetPrimarySourceID(newPrimaryID); err != nil {
 			return err
 		}
 		applyPrimaryChanged(oldPrimary, sourcecatalog.CurrentPrimarySource())

@@ -5,6 +5,7 @@ import (
 	"gorm.io/gorm"
 	"log"
 	"server/internal/film/cache"
+	"server/internal/film/catalog"
 	"server/internal/film/snapshot"
 	"server/internal/film/writer"
 	"server/internal/infra/db"
@@ -326,22 +327,7 @@ func deleteFilmCascadeDBBatch(mids []int64) error {
 		return nil
 	}
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Unscoped().Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("global_mid IN ?", mids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid IN ?", mids).Delete(&model.BannerSlot{}).Error; err != nil {
-			return err
-		}
-		return nil
+		return catalog.DeleteFilmCascadeTx(tx, mids)
 	})
 }
 

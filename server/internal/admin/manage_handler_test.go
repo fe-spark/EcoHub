@@ -3,11 +3,12 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"testing"
-
+	"server/internal/admin/upgrade"
 	"server/internal/config"
 	"server/internal/httpx"
 	"server/internal/infra/db"
@@ -16,11 +17,7 @@ import (
 	"server/internal/testutil"
 	"server/internal/user"
 	"server/internal/utils"
-
-	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"testing"
 )
 
 func setupManageConfigDB(t *testing.T) {
@@ -36,34 +33,6 @@ func setupManageConfigDB(t *testing.T) {
 	prev := db.Mdb
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
-}
-
-func init() {
-	gin.SetMode(gin.TestMode)
-}
-
-func testContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, nil)
-	return c, w
-}
-
-func testJSONContext(method, path, body string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, strings.NewReader(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	return c, w
-}
-
-func decodeResponse(t *testing.T, w *httptest.ResponseRecorder) dto.Response {
-	t.Helper()
-	var resp dto.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v body=%s", err, w.Body.String())
-	}
-	return resp
 }
 
 func TestUpgradeAppRejectsNonAdmin(t *testing.T) {
@@ -91,7 +60,7 @@ func TestUpgradeAppRejectsNonAdmin(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c, w := testContext(http.MethodPost, "/api/manage/version/upgrade")
+			c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/version/upgrade")
 			if tc.claims != nil {
 				c.Set(config.AuthUserClaims, tc.claims)
 			}
@@ -99,7 +68,7 @@ func TestUpgradeAppRejectsNonAdmin(t *testing.T) {
 			if w.Code != tc.status {
 				t.Fatalf("status=%d want %d body=%s", w.Code, tc.status, w.Body.String())
 			}
-			resp := decodeResponse(t, w)
+			resp := testutil.DecodeResponse(t, w)
 			if resp.Code != dto.FAILED {
 				t.Fatalf("code=%d want %d", resp.Code, dto.FAILED)
 			}
@@ -112,7 +81,7 @@ func TestUpgradeAppRejectsNonAdmin(t *testing.T) {
 
 func TestAppVersionSkipsUpdateCheckForNonAdmin(t *testing.T) {
 	h := &ManageHandler{}
-	c, w := testContext(http.MethodGet, "/api/manage/version")
+	c, w := testutil.NewTestContext(http.MethodGet, "/api/manage/version")
 	c.Set(config.AuthUserClaims, &utils.UserClaims{
 		UserID:   10001,
 		UserName: "user",
@@ -122,7 +91,7 @@ func TestAppVersionSkipsUpdateCheckForNonAdmin(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d want 200 body=%s", w.Code, w.Body.String())
 	}
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("code=%d want 0", resp.Code)
 	}
@@ -130,7 +99,7 @@ func TestAppVersionSkipsUpdateCheckForNonAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal data: %v", err)
 	}
-	var info AppVersionInfo
+	var info upgrade.AppVersionInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
 		t.Fatalf("decode version info: %v", err)
 	}
@@ -162,7 +131,7 @@ func TestVerifyManagePassword_SafeNoSideEffects(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c, w := testContext(http.MethodPost, "/api/manage/spider/clear")
+			c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/spider/clear")
 			if tc.set {
 				c.Set(config.AuthUserClaims, tc.claims)
 			}
@@ -181,11 +150,11 @@ func TestUpdateSiteAccess_Validation(t *testing.T) {
 	h := &ManageHandler{}
 
 	t.Run("PrivateAccess true requires ProvideKey", func(t *testing.T) {
-		c, w := testContext(http.MethodPost, "/api/manage/config/access")
+		c, w := testutil.NewTestContext(http.MethodPost, "/api/manage/config/access")
 		c.Request.Header.Set("Content-Type", "application/json")
 		c.Request.Body = http.NoBody
 		h.UpdateSiteAccess(c)
-		resp := decodeResponse(t, w)
+		resp := testutil.DecodeResponse(t, w)
 		if resp.Code != dto.FAILED {
 			t.Fatalf("code=%d want %d", resp.Code, dto.FAILED)
 		}
@@ -207,7 +176,7 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c, w := testContext(http.MethodGet, "/api/manage/config/access")
+			c, w := testutil.NewTestContext(http.MethodGet, "/api/manage/config/access")
 			if tc.claims != nil {
 				c.Set(config.AuthUserClaims, tc.claims)
 			}
@@ -215,7 +184,7 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("status=%d want 200", w.Code)
 			}
-			resp := decodeResponse(t, w)
+			resp := testutil.DecodeResponse(t, w)
 			if resp.Code != dto.SUCCESS {
 				t.Fatalf("code=%d want %d", resp.Code, dto.SUCCESS)
 			}
@@ -233,17 +202,17 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 
 func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
 	// 1. 无凭证调用 UserSave -> Failed
-	c, w := testJSONContext(http.MethodPost, "/api/manage/user/save", `{"userName":"test"}`)
+	c, w := testutil.NewJSONContext(http.MethodPost, "/api/manage/user/save", `{"userName":"test"}`)
 	user.UserHd.UserSave(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on unauthenticated UserSave, got %d", resp.Code)
 	}
 
 	// 2. 无凭证调用 UserDelete -> Failed
-	c, w = testJSONContext(http.MethodPost, "/api/manage/user/delete", `{"ids":[100]}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/user/delete", `{"ids":[100]}`)
 	user.UserHd.UserDelete(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on unauthenticated UserDelete, got %d", resp.Code)
 	}
@@ -262,12 +231,12 @@ func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
 	}
 	db.Mdb.Create(&u10005)
 
-	c, w = testContext(http.MethodPost, "/api/manage/user/save")
+	c, w = testutil.NewTestContext(http.MethodPost, "/api/manage/user/save")
 	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, UserName: "admin", Role: model.UserRoleAdmin})
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/save", bytes.NewReader([]byte(`{"id":"10005","nickName":"StringNick"}`)))
 	c.Request.Header.Set("Content-Type", "application/json")
 	user.UserHd.UserSave(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS on string id UserSave, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
@@ -278,12 +247,12 @@ func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
 	}
 
 	// 4. 超管使用大写 ID (number) 更新用户 -> 成功
-	c, w = testContext(http.MethodPost, "/api/manage/user/save")
+	c, w = testutil.NewTestContext(http.MethodPost, "/api/manage/user/save")
 	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, UserName: "admin", Role: model.UserRoleAdmin})
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/save", bytes.NewReader([]byte(`{"ID":10005,"nickName":"CapIDNick"}`)))
 	c.Request.Header.Set("Content-Type", "application/json")
 	user.UserHd.UserSave(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS on uppercase ID UserSave, got code=%d msg=%s", resp.Code, resp.Msg)
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"server/internal/admin/upgrade"
 	"server/internal/danmaku"
 	"server/internal/httpx"
 	"server/internal/mediaproxy"
@@ -35,14 +36,14 @@ func (h *ManageHandler) ManageIndex(c *gin.Context) {
 }
 
 func (h *ManageHandler) AppVersion(c *gin.Context) {
-	dto.Success(VersionSvc.GetAppVersion(httpx.IsAdminRequest(c)), "版本信息获取成功", c)
+	dto.Success(upgrade.VersionSvc.GetAppVersion(httpx.IsAdminRequest(c)), "版本信息获取成功", c)
 }
 
 func (h *ManageHandler) UpgradeApp(c *gin.Context) {
 	if _, ok := httpx.RequireAdminClaims(c, "权限不足，仅超级管理员可执行版本升级"); !ok {
 		return
 	}
-	if err := VersionSvc.StartUpgrade(); err != nil {
+	if err := upgrade.VersionSvc.StartUpgrade(); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}

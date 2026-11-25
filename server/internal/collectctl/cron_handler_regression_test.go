@@ -1,18 +1,16 @@
 package collectctl
 
 import (
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"net/http"
-	"testing"
-
+	"server/internal/collect"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/testutil"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
-	"server/internal/collect"
+	"testing"
 )
 
 func TestCronHandler_FilmCronSave_PartialUpdatePreservesStateAndTime(t *testing.T) {
@@ -45,9 +43,9 @@ func TestCronHandler_FilmCronSave_PartialUpdatePreservesStateAndTime(t *testing.
 	}
 
 	// 仅提交 id、spec、remark（不传 state 和 time），不应覆盖原有 state=true 与 time=24
-	c, w := testJSONContext(http.MethodPost, "/api/manage/cron/save", `{"id":"task_partial_1","spec":"0 30 * * * *","remark":"新备注"}`)
+	c, w := testutil.NewJSONContext(http.MethodPost, "/api/manage/cron/save", `{"id":"task_partial_1","spec":"0 30 * * * *","remark":"新备注"}`)
 	CronHd.FilmCronSave(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
@@ -99,9 +97,9 @@ func TestCronHandler_FilmCronSave_RejectsInvalidModelAndTime(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c, w := testJSONContext(http.MethodPost, "/api/manage/cron/save", tc.body)
+			c, w := testutil.NewJSONContext(http.MethodPost, "/api/manage/cron/save", tc.body)
 			CronHd.FilmCronSave(c)
-			resp := decodeResponse(t, w)
+			resp := testutil.DecodeResponse(t, w)
 			if resp.Code == dto.SUCCESS {
 				t.Fatalf("%s 应被校验拒绝，却返回 SUCCESS", tc.name)
 			}
@@ -119,17 +117,17 @@ func TestCronHandler_FilmCronSave_RejectsInvalidModelAndTime(t *testing.T) {
 
 func TestCronHandler_StateAndRun_Validation(t *testing.T) {
 	// 1. 空 ids 变更状态 -> Failed
-	c, w := testJSONContext(http.MethodPost, "/api/manage/cron/state", `{"ids":[],"state":true}`)
+	c, w := testutil.NewJSONContext(http.MethodPost, "/api/manage/cron/state", `{"ids":[],"state":true}`)
 	CronHd.ChangeTaskState(c)
-	resp := decodeResponse(t, w)
+	resp := testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on empty ids for ChangeTaskState, got %d", resp.Code)
 	}
 
 	// 2. 空 ids 执行任务 -> Failed
-	c, w = testJSONContext(http.MethodPost, "/api/manage/cron/run", `{"ids":[]}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/cron/run", `{"ids":[]}`)
 	CronHd.RunFilmCronTask(c)
-	resp = decodeResponse(t, w)
+	resp = testutil.DecodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on empty ids for RunFilmCronTask, got %d", resp.Code)
 	}

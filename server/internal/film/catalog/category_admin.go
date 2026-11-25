@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -213,7 +214,7 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if tx.Migrator().HasTable(&model.FilmSource{}) {
 			var src model.FilmSource
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", strings.TrimSpace(sourceID)).First(&src).Error; err != nil && !strings.Contains(strings.ToLower(err.Error()), "record not found") {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", strings.TrimSpace(sourceID)).First(&src).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
 		}

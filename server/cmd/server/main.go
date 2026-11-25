@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"server/internal/access"
-	"server/internal/admin"
 	"server/internal/admin/upgrade"
 	"server/internal/bootstrap"
 	"server/internal/collect"
@@ -87,7 +86,7 @@ func waitForMySQL(maxRetries int, interval time.Duration) error {
 
 func main() {
 	if config.IsUpgradeHelper() {
-		if err := admin.RunUpgradeHelper(os.Args[1:]); err != nil {
+		if err := upgrade.RunUpgradeHelper(os.Args[1:]); err != nil {
 			log.SetOutput(os.Stderr)
 			log.Fatal(err)
 		}

@@ -1,25 +1,19 @@
 package banner
 
 import (
-	"bytes"
 	"encoding/json"
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 	"net/http"
-	"net/http/httptest"
-	"testing"
-
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/sourcecatalog"
 	"server/internal/testutil"
-
-	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
+	"testing"
 )
-
-func init() { gin.SetMode(gin.TestMode) }
 
 func setupManageConfigDB(t *testing.T) {
 	t.Helper()
@@ -33,30 +27,6 @@ func setupManageConfigDB(t *testing.T) {
 	prev := db.Mdb
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
-}
-
-func testJSONContext(method, path, body string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	c.Request.Header.Set("Content-Type", "application/json")
-	return c, w
-}
-
-func testContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(method, path, nil)
-	return c, w
-}
-
-func decodeResponse(t *testing.T, w *httptest.ResponseRecorder) dto.Response {
-	t.Helper()
-	var resp dto.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-	return resp
 }
 
 func TestBannerHandlers(t *testing.T) {
@@ -81,9 +51,9 @@ func TestBannerHandlers(t *testing.T) {
 	}
 	list := func() listData {
 		t.Helper()
-		c, w := testContext(http.MethodGet, "/api/manage/banners?sourceId=src1")
+		c, w := testutil.NewTestContext(http.MethodGet, "/api/manage/banners?sourceId=src1")
 		h.BannerList(c)
-		resp := decodeResponse(t, w)
+		resp := testutil.DecodeResponse(t, w)
 		if resp.Code != dto.SUCCESS {
 			t.Fatalf("list code=%d msg=%s", resp.Code, resp.Msg)
 		}
@@ -95,12 +65,12 @@ func TestBannerHandlers(t *testing.T) {
 
 	// 按指定采集站读取：src2 应返回 src2 自身轮播列表（空），并带出所有站点选项。
 	db.Mdb.Create(&model.FilmSource{Id: "src2", Name: "站二", Uri: "http://src2.test", State: true, Sort: 2})
-	c, w := testContext(http.MethodGet, "/api/manage/banners?sourceId=src2")
+	c, w := testutil.NewTestContext(http.MethodGet, "/api/manage/banners?sourceId=src2")
 	h.BannerList(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("src2 list failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	raw, _ := json.Marshal(decodeResponse(t, w).Data)
+	raw, _ := json.Marshal(testutil.DecodeResponse(t, w).Data)
 	var src2List listData
 	_ = json.Unmarshal(raw, &src2List)
 	if src2List.SourceId != "src2" || len(src2List.Items) != 0 {
@@ -113,28 +83,28 @@ func TestBannerHandlers(t *testing.T) {
 		FilmIndexContent:  model.FilmIndexContent{Name: "站二影片", Area: "日本"},
 	})
 	db.Mdb.Create(&model.FilmSourcePlaylist{Mid: 102, SourceId: "src2", LineKind: model.LineKindPlay})
-	c, w = testContext(http.MethodGet, "/api/manage/banners/films?sourceId=src2&name=站二")
+	c, w = testutil.NewTestContext(http.MethodGet, "/api/manage/banners/films?sourceId=src2&name=站二")
 	h.BannerFilms(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("src2 banner films failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":102}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":102}`)
 	h.BannerCreate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("non-primary create failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	// 跨站影片仍拒绝
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":101}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":101}`)
 	h.BannerCreate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.FAILED {
 		t.Fatalf("cross-site create want FAILED, got code=%d body=%s", resp.Code, w.Body.String())
 	}
 
 	// 新增
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src1","mid":101}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src1","mid":101}`)
 	h.BannerCreate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("create code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	before := list()
@@ -144,10 +114,10 @@ func TestBannerHandlers(t *testing.T) {
 	id := before.Items[0].Id
 
 	// 部分更新：只改简介，地区仍来自片库。
-	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/"+id, `{"blurb":"新简介"}`)
+	c, w = testutil.NewJSONContext(http.MethodPatch, "/api/manage/banners/"+id, `{"blurb":"新简介"}`)
 	c.Params = gin.Params{{Key: "id", Value: id}}
 	h.BannerUpdate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("patch code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	after := list()
@@ -157,38 +127,38 @@ func TestBannerHandlers(t *testing.T) {
 
 	// 过期的 revision 保存顺序返回 409。
 	body, _ := json.Marshal(map[string]any{"sourceId": "src1", "revision": before.Revision, "ids": []string{id}})
-	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
+	c, w = testutil.NewJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
 	h.BannerOrder(c)
-	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != http.StatusConflict {
+	if w.Code != http.StatusConflict || testutil.DecodeResponse(t, w).Code != http.StatusConflict {
 		t.Fatalf("stale order want 409, got status=%d body=%s", w.Code, w.Body.String())
 	}
 	body, _ = json.Marshal(map[string]any{"sourceId": "src1", "revision": after.Revision, "ids": []string{id}})
-	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
+	c, w = testutil.NewJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
 	h.BannerOrder(c)
-	if w.Code != http.StatusOK || decodeResponse(t, w).Code != dto.SUCCESS {
+	if w.Code != http.StatusOK || testutil.DecodeResponse(t, w).Code != dto.SUCCESS {
 		t.Fatalf("order want success, got status=%d body=%s", w.Code, w.Body.String())
 	}
 
 	// 发布时 revision 过期也返回 409。
 	body, _ = json.Marshal(map[string]any{"sourceId": "src1", "revision": before.Revision, "items": []map[string]any{{"mid": 101}}})
-	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/deck", string(body))
+	c, w = testutil.NewJSONContext(http.MethodPut, "/api/manage/banners/deck", string(body))
 	h.BannerDeck(c)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("stale deck want 409, got status=%d body=%s", w.Code, w.Body.String())
 	}
 
 	// 一键排片参数不合法时返回业务错误。
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners/generate", `{"sourceId":"src1","strategy":"hot","quotas":[]}`)
+	c, w = testutil.NewJSONContext(http.MethodPost, "/api/manage/banners/generate", `{"sourceId":"src1","strategy":"hot","quotas":[]}`)
 	h.BannerGenerate(c)
-	if resp := decodeResponse(t, w); w.Code != http.StatusOK || resp.Code != dto.FAILED {
+	if resp := testutil.DecodeResponse(t, w); w.Code != http.StatusOK || resp.Code != dto.FAILED {
 		t.Fatalf("invalid generate want FAILED, got status=%d body=%s", w.Code, w.Body.String())
 	}
 
 	// 删除
-	c, w = testContext(http.MethodDelete, "/api/manage/banners/"+id)
+	c, w = testutil.NewTestContext(http.MethodDelete, "/api/manage/banners/"+id)
 	c.Params = gin.Params{{Key: "id", Value: id}}
 	h.BannerDelete(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("delete code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	if len(list().Items) != 0 {
@@ -203,28 +173,28 @@ func TestBannerHandlers(t *testing.T) {
 	if err := db.Mdb.Create(&legacy).Error; err != nil {
 		t.Fatal(err)
 	}
-	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src2", `{"blurb":"x"}`)
+	c, w = testutil.NewJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src2", `{"blurb":"x"}`)
 	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
 	h.BannerUpdate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.FAILED {
 		t.Fatalf("cross-source patch want FAILED, got status=%d body=%s", w.Code, w.Body.String())
 	}
-	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src1", `{"blurb":"x"}`)
+	c, w = testutil.NewJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src1", `{"blurb":"x"}`)
 	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
 	h.BannerUpdate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("source-scoped patch want SUCCESS, got status=%d body=%s", w.Code, w.Body.String())
 	}
-	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src2")
+	c, w = testutil.NewTestContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src2")
 	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
 	h.BannerDelete(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.FAILED {
 		t.Fatalf("cross-source delete want FAILED, got status=%d body=%s", w.Code, w.Body.String())
 	}
-	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src1")
+	c, w = testutil.NewTestContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src1")
 	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
 	h.BannerDelete(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
+	if resp := testutil.DecodeResponse(t, w); resp.Code != dto.SUCCESS {
 		t.Fatalf("source-scoped delete want SUCCESS, got status=%d body=%s", w.Code, w.Body.String())
 	}
 }

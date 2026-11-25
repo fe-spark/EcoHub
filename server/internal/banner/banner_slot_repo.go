@@ -368,22 +368,6 @@ func ReplaceAllBannerSlots(slots []model.BannerSlot) error {
 	return err
 }
 
-// DeleteBannerSlotsByMids 影片档案删除时在同一事务里删掉它们的轮播。
-func DeleteBannerSlotsByMids(tx *gorm.DB, mids []int64) error {
-	if tx == nil || len(mids) == 0 {
-		return nil
-	}
-	return tx.Where("mid IN ?", mids).Delete(&model.BannerSlot{}).Error
-}
-
-// DeleteBannerSlotsBySource 删除一个站点的全部轮播。
-func DeleteBannerSlotsBySource(tx *gorm.DB, sourceID string) error {
-	if tx == nil || strings.TrimSpace(sourceID) == "" {
-		return nil
-	}
-	return tx.Where("source_id = ?", strings.TrimSpace(sourceID)).Delete(&model.BannerSlot{}).Error
-}
-
 // FilmsOnSource 批量判断：影片档案存在，且在该站有播放线路。返回命中的 mid 集合。
 func FilmsOnSource(ctx context.Context, sourceID string, mids []int64) (map[int64]bool, error) {
 	out := make(map[int64]bool, len(mids))
