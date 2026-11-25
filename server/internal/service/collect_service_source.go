@@ -287,8 +287,6 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource, clearCate
 	}
 
 	spider.ClearLimiter(source.Id)
-	spider.ClearCMSSearchUnsupported(old.Uri)
-	spider.ClearCMSSearchUnsupported(source.Uri)
 	if old.State && !source.State {
 		spider.StopCollectSource(source.Id, "采集站已停用")
 	}
@@ -371,7 +369,6 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 			return err
 		}
 		spider.ClearLimiter(source.Id)
-		spider.ClearCMSSearchUnsupported(source.Uri)
 		clearProvideNetworkConfigCache()
 		filmsnapshot.ClearDynamicPlayCaches()
 		if primaryWasEmpty && source.State {

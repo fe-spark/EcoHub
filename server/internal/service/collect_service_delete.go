@@ -268,7 +268,6 @@ func (s *CollectService) delFilmSource(id string) (int, error) {
 		if src == nil {
 			return errors.New("当前资源站信息不存在, 请勿重复操作")
 		}
-		defer spider.ClearCMSSearchUnsupported(src.Uri)
 		if progress.IsTaskRunning(id) {
 			status := ""
 			if snap, ok := progress.Snapshot(id); ok {

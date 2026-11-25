@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gocolly/colly/v2"
 	xproxy "golang.org/x/net/proxy"
 )
 
@@ -44,25 +43,30 @@ const maxProxyTransports = 16
 // GetOrCreateProxyTransport 根据代理地址复用或创建长连接池。
 // http/https 走 CONNECT；socks5/socks5h 走 SOCKS5 拨号。地址无效时请求失败，避免静默改回直连。
 func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
+	t, _ := resolveProxyTransport(proxyStr)
+	return t
+}
+
+func resolveProxyTransport(proxyStr string) (*http.Transport, bool) {
 	proxyStr = normalizeProxyURL(proxyStr)
 	if proxyStr == "" {
-		return sharedTransport
+		return sharedTransport, true
 	}
 	proxyTransportsMu.RLock()
 	if t, ok := proxyTransports[proxyStr]; ok {
 		proxyTransportsMu.RUnlock()
-		return t
+		return t, true
 	}
 	proxyTransportsMu.RUnlock()
 
 	t, err := newProxyTransport(proxyStr)
 	if err != nil {
 		log.Printf("创建代理传输失败: %v", err)
-		t = &http.Transport{
+		return &http.Transport{
 			DialContext: func(context.Context, string, string) (net.Conn, error) {
 				return nil, err
 			},
-		}
+		}, false
 	}
 
 	proxyTransportsMu.Lock()
@@ -71,7 +75,7 @@ func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
 		if t != existing {
 			t.CloseIdleConnections()
 		}
-		return existing
+		return existing, true
 	}
 	if len(proxyTransports) >= maxProxyTransports {
 		for k, old := range proxyTransports {
@@ -81,7 +85,7 @@ func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
 		}
 	}
 	proxyTransports[proxyStr] = t
-	return t
+	return t, true
 }
 
 func normalizeProxyURL(proxyStr string) string {
@@ -90,12 +94,14 @@ func normalizeProxyURL(proxyStr string) string {
 		return ""
 	}
 	if !strings.Contains(proxyStr, "://") {
-		return "http://" + proxyStr
+		proxyStr = "http://" + proxyStr
 	}
-	if idx := strings.Index(proxyStr, "://"); idx > 0 {
-		return strings.ToLower(proxyStr[:idx]) + proxyStr[idx:]
+	u, err := url.Parse(proxyStr)
+	if err != nil || u.Host == "" {
+		return proxyStr
 	}
-	return proxyStr
+	u.Scheme = strings.ToLower(u.Scheme)
+	return u.String()
 }
 
 func newProxyTransport(proxyStr string) (*http.Transport, error) {
@@ -144,8 +150,6 @@ var httpClient = &http.Client{
 	Timeout:   20 * time.Second,
 }
 
-var Client = CreateClient()
-
 // RequestInfo 请求参数结构体
 type RequestInfo struct {
 	Uri           string          `json:"uri"`                // 请求url地址
@@ -193,16 +197,6 @@ func setHTTPRequestHeaders(req *http.Request, customHeader http.Header) {
 			}
 		}
 	}
-}
-
-// CreateClient 初始化 Colly 客户端（保持兼容）
-func CreateClient() *colly.Collector {
-	c := colly.NewCollector()
-	c.MaxDepth = 1
-	c.AllowURLRevisit = true
-	c.SetRequestTimeout(20 * time.Second)
-	c.WithTransport(sharedTransport)
-	return c
 }
 
 // decompressBody 自动检测并解压 Gzip / Deflate 压缩数据
@@ -319,11 +313,43 @@ func CloseIdleHTTPConnections() {
 	}
 }
 
+// ResetProxyTransports 清理并关闭全部代理传输池（代理配置变更或重置时调用）。
+func ResetProxyTransports() {
+	sharedTransport.CloseIdleConnections()
+	sharedInsecureTransport.CloseIdleConnections()
+
+	var stale []*http.Transport
+	proxyTransportsMu.Lock()
+	for k, transport := range proxyTransports {
+		if transport != nil {
+			stale = append(stale, transport)
+		}
+		delete(proxyTransports, k)
+	}
+	proxyTransportsMu.Unlock()
+
+	proxyInsecureTransportsMu.Lock()
+	for k, transport := range proxyInsecureTransports {
+		if transport != nil {
+			stale = append(stale, transport)
+		}
+		delete(proxyInsecureTransports, k)
+	}
+	proxyInsecureTransportsMu.Unlock()
+
+	for _, transport := range stale {
+		transport.CloseIdleConnections()
+	}
+}
+
 // ApiGet 高性能原生 HTTP GET 请求（自动解压 Gzip/Deflate）
 func ApiGet(r *RequestInfo) {
+	if r == nil {
+		return
+	}
 	targetUrl := buildUrl(r.Uri, r.Params)
 	ctx := context.Background()
-	if r != nil && r.Ctx != nil {
+	if r.Ctx != nil {
 		ctx = r.Ctx
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", targetUrl, nil)
@@ -336,15 +362,16 @@ func ApiGet(r *RequestInfo) {
 	setHTTPRequestHeaders(req, r.Header)
 
 	transport := sharedTransport
-	if r != nil && strings.TrimSpace(r.ProxyURL) != "" {
-		transport = GetOrCreateProxyTransport(r.ProxyURL)
+	proxyValid := true
+	if strings.TrimSpace(r.ProxyURL) != "" {
+		transport, proxyValid = resolveProxyTransport(r.ProxyURL)
 	}
-	if r != nil && r.SkipTLSVerify {
+	if r.SkipTLSVerify && proxyValid {
 		transport = getOrCreateInsecureTransport(transport, r.ProxyURL)
 	}
 
 	timeout := 20 * time.Second
-	if r != nil && r.Header != nil {
+	if r.Header != nil {
 		if t, _ := strconv.Atoi(r.Header.Get("timeout")); t > 0 {
 			timeout = time.Duration(t) * time.Second
 		}

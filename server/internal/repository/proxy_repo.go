@@ -140,32 +140,6 @@ func ResolveSpiderProxy() (bool, string, error) {
 	return ok, proxyURL, nil
 }
 
-// ResolveSourceProxy 指定采集源是否走代理。配置或站点查询失败返回错误。
-func ResolveSourceProxy(sourceID string) (bool, string, error) {
-	ok, proxyURL, err := ResolveSpiderProxy()
-	if err != nil || !ok {
-		return false, "", err
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return false, "", errors.New("采集站 ID 为空")
-	}
-	if db.Mdb == nil {
-		return false, "", errors.New("数据库未连接")
-	}
-	var src model.FilmSource
-	if err := db.Mdb.Select("proxy_collect").Where("id = ?", sourceID).First(&src).Error; err != nil {
-		if recordNotFound(err) {
-			return false, "", nil
-		}
-		return false, "", err
-	}
-	if src.ProxyCollect {
-		return true, proxyURL, nil
-	}
-	return false, "", nil
-}
-
 // ResolveTMDBProxy 判断 TMDB 刮削是否启用代理
 func ResolveTMDBProxy() (bool, string, error) {
 	cfg, err := GetProxyConfig()

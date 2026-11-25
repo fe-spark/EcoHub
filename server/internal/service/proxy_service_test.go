@@ -38,14 +38,58 @@ func TestNormalizeProxyConfig(t *testing.T) {
 	}
 }
 
-func TestResolveSourceProxy(t *testing.T) {
-	// 默认未配置或未开启
-	ok, _, err := repository.ResolveSourceProxy("s1")
+func TestUpdateConfig_ValidatesDisabledURLAndPublicHasAuth(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
-		return
+		t.Fatal(err)
 	}
-	if ok {
-		t.Fatal("未配置代理时不能启用")
+	if err := gdb.AutoMigrate(&model.ProxyConfigRecord{}); err != nil {
+		t.Fatal(err)
+	}
+	prevM, prevR := db.Mdb, db.Rdb
+	db.Mdb, db.Rdb = gdb, nil
+	t.Cleanup(func() { db.Mdb, db.Rdb = prevM, prevR })
+
+	// 关闭状态下填写非法协议也应被拦截
+	err = ProxySvc.UpdateConfig(model.ProxyConfig{
+		Enabled:  false,
+		ProxyURL: "ftp://127.0.0.1:21",
+		Modules:  model.ProxyModuleScope{Spider: true},
+	}, false)
+	if err == nil {
+		t.Fatal("expected error for invalid proxyUrl even when disabled")
+	}
+
+	// 保存带认证凭据的代理配置，PublicConfig 应返回 HasAuth=true 且 URL 已脱敏
+	if err := ProxySvc.UpdateConfig(model.ProxyConfig{
+		Enabled:  true,
+		ProxyURL: "http://alice:secret@127.0.0.1:7890",
+		Modules:  model.ProxyModuleScope{Spider: true},
+	}, false); err != nil {
+		t.Fatalf("unexpected UpdateConfig error: %v", err)
+	}
+	pub, err := ProxySvc.PublicConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pub.HasAuth || pub.ProxyURL != "http://127.0.0.1:7890" {
+		t.Fatalf("unexpected PublicConfig: %+v", pub)
+	}
+
+	// 显式清除认证（preserveAuth=false）后 HasAuth 应变为 false
+	if err := ProxySvc.UpdateConfig(model.ProxyConfig{
+		Enabled:  true,
+		ProxyURL: "http://127.0.0.1:7890",
+		Modules:  model.ProxyModuleScope{Spider: true},
+	}, false); err != nil {
+		t.Fatalf("unexpected clear auth UpdateConfig error: %v", err)
+	}
+	pubCleared, err := ProxySvc.PublicConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pubCleared.HasAuth {
+		t.Fatalf("expected HasAuth=false after clearing auth, got %+v", pubCleared)
 	}
 }
 

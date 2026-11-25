@@ -193,6 +193,11 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 	if primary != nil {
 		primaryID = primary.Id
 	}
+	spiderProxyOn, _, err := service.ProxySvc.ResolveSpiderProxy()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 
 	const concurrency = 10
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
@@ -232,6 +237,13 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 			}
 			if spider.IsTaskRunning(src.Id) {
 				item.Reason = "站点正在采集，已跳过检测"
+				mu.Lock()
+				skipped = append(skipped, item)
+				mu.Unlock()
+				return
+			}
+			if src.ProxyCollect && !spiderProxyOn {
+				item.Reason = "全局代理或爬虫代理未开启，已跳过检测"
 				mu.Lock()
 				skipped = append(skipped, item)
 				mu.Unlock()
@@ -470,11 +482,4 @@ func (h *CollectHandler) SwitchPrimary(c *gin.Context) {
 		return
 	}
 	dto.Success(gin.H{"id": primary.Id, "name": primary.Name, "state": primary.State}, "主站已切换", c)
-}
-
-func testFilmSourceAPI(s model.FilmSource, useProxy *bool) error {
-	if useProxy != nil {
-		return spider.CollectApiTestChoosingProxy(s, *useProxy)
-	}
-	return spider.CollectApiTest(s)
 }

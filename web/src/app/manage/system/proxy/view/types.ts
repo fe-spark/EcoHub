@@ -11,3 +11,7 @@ export interface ProxyConfigValues {
   proxyUrl: string;
   modules: ProxyModulesValues;
 }
+
+export interface ProxyConfigResponse extends ProxyConfigValues {
+  hasAuth?: boolean;
+}

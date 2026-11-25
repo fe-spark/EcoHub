@@ -63,7 +63,6 @@ func ClearSpider() error {
 	return collectLifecycle.runExclusive(func() error {
 		ClearAllCrons()
 		ClearAllLimiters()
-		ClearAllCMSSearchUnsupported()
 		repository.ResetCollectStatsCoalescer()
 		return filmrepo.FilmZero()
 	})
@@ -116,25 +115,15 @@ func collectApiTest(ctx context.Context, s model.FilmSource, timeoutSeconds int,
 	if timeoutSeconds > 0 {
 		r.Header = map[string][]string{"timeout": {strconv.Itoa(timeoutSeconds)}}
 	}
-	if proxyChosen {
-		if useProxy {
-			ok, proxy, err := repository.ResolveSpiderProxy()
-			if err != nil {
-				return err
-			}
-			if !ok || strings.TrimSpace(proxy) == "" {
-				return errors.New("测试失败, 全局代理或采集代理模块未开启")
-			}
-			r.ProxyURL = proxy
-		}
-	} else if s.ProxyCollect {
+	if (proxyChosen && useProxy) || (!proxyChosen && s.ProxyCollect) {
 		ok, proxy, err := repository.ResolveSpiderProxy()
 		if err != nil {
 			return err
 		}
-		if ok {
-			r.ProxyURL = proxy
+		if !ok || strings.TrimSpace(proxy) == "" {
+			return errors.New("测试失败, 全局代理或采集代理模块未开启")
 		}
+		r.ProxyURL = proxy
 	}
 	err := utils.ApiTest(&r)
 	if err != nil {

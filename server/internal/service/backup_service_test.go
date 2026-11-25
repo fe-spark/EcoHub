@@ -563,3 +563,24 @@ func TestImportConfig_FilmSources_ReplacesAndRejectsDuplicateURI(t *testing.T) {
 		t.Fatalf("expected new source created, got %+v", gotNew)
 	}
 }
+
+func TestImportConfig_RejectsInvalidProxyConfig(t *testing.T) {
+	setupBackupTestDB(t)
+
+	cases := []model.ProxyConfig{
+		{Enabled: true, ProxyURL: "", Modules: model.ProxyModuleScope{Spider: true}},
+		{Enabled: false, ProxyURL: "ftp://127.0.0.1:21", Modules: model.ProxyModuleScope{Spider: true}},
+	}
+	for _, cfg := range cases {
+		req := model.ConfigBackupImportRequest{
+			Modules: model.ConfigBackupModules{Proxy: true},
+			Backup: model.ConfigBackup{
+				Version: model.ConfigBackupVersion,
+				Proxy:   &cfg,
+			},
+		}
+		if err := BackupSvc.ImportConfig(req); err == nil {
+			t.Fatalf("expected error for invalid backup proxy config: %+v", cfg)
+		}
+	}
+}

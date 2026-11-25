@@ -175,7 +175,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			repository.ClearIndexPageCache()
 			filmsnapshot.BumpSearchCacheVersion()
 		}
-		spider.ClearAllCMSSearchUnsupported()
 		clearProvideNetworkConfigCache()
 		filmsnapshot.ClearDynamicPlayCaches()
 		filmsnapshot.ClearDerivedFilmListCaches()
@@ -201,10 +200,14 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.Proxy {
-		if err := repository.SaveProxyConfig(*backup.Proxy); err != nil {
+		proxyCfg, err := validateAndNormalizeProxyConfig(*backup.Proxy)
+		if err != nil {
 			return fmt.Errorf("导入网络代理配置失败: %w", err)
 		}
-		utils.CloseIdleHTTPConnections()
+		if err := repository.SaveProxyConfig(proxyCfg); err != nil {
+			return fmt.Errorf("导入网络代理配置失败: %w", err)
+		}
+		utils.ResetProxyTransports()
 		NotifySvc.EnsureBotPoller()
 		upgrade.TriggerReleasePoll()
 	}
@@ -293,8 +296,13 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 	if req.Modules.MappingRules && b.MappingRules == nil {
 		return errors.New("备份中缺少映射规则")
 	}
-	if req.Modules.Proxy && b.Proxy == nil {
-		return errors.New("备份中缺少网络代理配置数据")
+	if req.Modules.Proxy {
+		if b.Proxy == nil {
+			return errors.New("备份中缺少网络代理配置数据")
+		}
+		if _, err := validateAndNormalizeProxyConfig(*b.Proxy); err != nil {
+			return fmt.Errorf("网络代理配置无效: %w", err)
+		}
 	}
 	if req.Modules.TMDB && b.TMDB == nil {
 		return errors.New("备份中缺少 TMDB 刮削配置数据")

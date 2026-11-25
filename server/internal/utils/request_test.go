@@ -51,4 +51,44 @@ func TestGetOrCreateProxyTransportRejectsUnknownScheme(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected dial error for unsupported proxy scheme")
 	}
+	proxyTransportsMu.RLock()
+	_, cached := proxyTransports["ftp://127.0.0.1:21"]
+	proxyTransportsMu.RUnlock()
+	if cached {
+		t.Fatal("failed proxy transport must not be cached")
+	}
+}
+
+func TestResetProxyTransportsClearsPool(t *testing.T) {
+	_ = GetOrCreateProxyTransport("http://127.0.0.1:17890")
+	ResetProxyTransports()
+	proxyTransportsMu.RLock()
+	n := len(proxyTransports)
+	proxyTransportsMu.RUnlock()
+	if n != 0 {
+		t.Fatalf("expected proxyTransports to be cleared, got %d", n)
+	}
+}
+
+func TestApiGet_NilRequestSafe(t *testing.T) {
+	ApiGet(nil)
+}
+
+func TestApiGet_InvalidProxyWithSkipTLSVerifyNotCached(t *testing.T) {
+	ResetProxyTransports()
+	r := &RequestInfo{
+		Uri:           "https://127.0.0.1:1",
+		ProxyURL:      "ftp://127.0.0.1:21",
+		SkipTLSVerify: true,
+	}
+	ApiGet(r)
+	if r.Err == "" {
+		t.Fatal("expected error for invalid proxy scheme")
+	}
+	proxyInsecureTransportsMu.RLock()
+	_, cached := proxyInsecureTransports["ftp://127.0.0.1:21"]
+	proxyInsecureTransportsMu.RUnlock()
+	if cached {
+		t.Fatal("failed proxy transport must not be cached in proxyInsecureTransports")
+	}
 }

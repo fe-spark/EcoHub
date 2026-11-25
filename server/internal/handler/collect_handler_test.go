@@ -268,6 +268,16 @@ func TestCollectHandler_PrimaryHandoverRequiresAdminAndCheckAllSkipsPrimary(t *t
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := gdb.Create(&model.FilmSource{
+		Id:           "src_proxy",
+		Name:         "代理站",
+		Uri:          "http://127.0.0.1:59993/proxy",
+		State:        true,
+		Sort:         2,
+		ProxyCollect: true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	_ = repository.RefreshCollectSourceCatalog()
 	if cur := service.CollectSvc.CurrentPrimary(); cur == nil || cur.Id != "src_p" {
 		t.Fatalf("expected primary src_p, got %+v", cur)
@@ -320,13 +330,20 @@ func TestCollectHandler_PrimaryHandoverRequiresAdminAndCheckAllSkipsPrimary(t *t
 	}
 	_ = json.Unmarshal(rawData, &checkRes)
 	foundPrimarySkipped := false
+	foundProxySkipped := false
 	for _, item := range checkRes.Skipped {
 		if item.Id == "src_p" {
 			foundPrimarySkipped = true
 		}
+		if item.Id == "src_proxy" {
+			foundProxySkipped = true
+		}
 	}
 	if !foundPrimarySkipped {
 		t.Fatalf("expected primary src_p in skipped, got skipped=%+v failed=%+v", checkRes.Skipped, checkRes.Failed)
+	}
+	if !foundProxySkipped {
+		t.Fatalf("expected proxy source src_proxy in skipped when global spider proxy disabled, got skipped=%+v failed=%+v", checkRes.Skipped, checkRes.Failed)
 	}
 }
 

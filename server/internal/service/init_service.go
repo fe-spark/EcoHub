@@ -13,6 +13,7 @@ import (
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/service/upgrade"
 	"server/internal/spider"
 	"server/internal/utils"
 
@@ -67,6 +68,8 @@ func (s *InitService) ReinitAfterReset() error {
 	}
 	InvalidateMediaProxyMemoryCache()
 	clearProvideNetworkConfigCache()
+	utils.ResetProxyTransports()
+	upgrade.TriggerReleasePoll()
 	return s.seedRuntimeDefaults(true, false)
 }
 

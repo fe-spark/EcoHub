@@ -74,12 +74,8 @@ export default function SourceFormDrawer(props: SourceFormDrawerProps) {
       return;
     }
     form.resetFields();
-    const effectiveValues: SourceFormValues = {
-      ...initialValues,
-      proxyCollect: globalSpiderProxyReady ? Boolean(initialValues.proxyCollect) : false,
-    };
-    form.setFieldsValue(effectiveValues);
-  }, [open, form, initialValues, globalSpiderProxyReady]);
+    form.setFieldsValue(initialValues);
+  }, [open, form, initialValues]);
 
   return (
     <Drawer
@@ -122,10 +118,10 @@ export default function SourceFormDrawer(props: SourceFormDrawerProps) {
         layout="vertical"
         initialValues={initialValues}
         onFinish={(values) => {
-          if (!globalSpiderProxyReady || !values.proxyCollect) {
-            values.proxyCollect = false;
-          }
-          void onSubmit(values);
+          void onSubmit({
+            ...values,
+            proxyCollect: Boolean(values.proxyCollect),
+          });
         }}
         disabled={loading}
       >

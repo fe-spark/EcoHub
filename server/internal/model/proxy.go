@@ -20,6 +20,12 @@ type ProxyConfig struct {
 	Modules  ProxyModuleScope `json:"modules"`  // 各模块代理开关
 }
 
+// PublicProxyConfig 管理端读取的脱敏代理配置
+type PublicProxyConfig struct {
+	ProxyConfig
+	HasAuth bool `json:"hasAuth"`
+}
+
 // ProxyConfigRecord 代理配置持久化模型 (MySQL)
 type ProxyConfigRecord struct {
 	gorm.Model

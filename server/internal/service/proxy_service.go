@@ -11,7 +11,6 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
-	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/service/upgrade"
 	"server/internal/utils"
 )
@@ -26,14 +25,18 @@ func (s *ProxyService) GetConfig() (model.ProxyConfig, error) {
 	return repository.GetProxyConfig()
 }
 
-// PublicConfig 去掉代理地址里的账号密码，供管理端读取。
-func (s *ProxyService) PublicConfig() (model.ProxyConfig, error) {
+// PublicConfig 去掉代理地址里的账号密码，并标明是否已配置认证凭据，供管理端读取。
+func (s *ProxyService) PublicConfig() (model.PublicProxyConfig, error) {
 	cfg, err := s.GetConfig()
 	if err != nil {
-		return model.ProxyConfig{}, err
+		return model.PublicProxyConfig{}, err
 	}
+	hasAuth := proxyURLHasUser(cfg.ProxyURL)
 	cfg.ProxyURL = RedactProxyURL(cfg.ProxyURL)
-	return cfg, nil
+	return model.PublicProxyConfig{
+		ProxyConfig: cfg,
+		HasAuth:     hasAuth,
+	}, nil
 }
 
 func resolveEffectiveProxyURL(raw string, preserveAuth bool) (string, error) {
@@ -72,31 +75,35 @@ func normalizeAndValidateProxyURL(raw string) (string, error) {
 	}
 }
 
+func validateAndNormalizeProxyConfig(cfg model.ProxyConfig) (model.ProxyConfig, error) {
+	cfg = repository.NormalizeProxyConfig(cfg)
+	if cfg.Enabled && cfg.ProxyURL == "" {
+		return cfg, errors.New("启用代理时代理服务器地址不能为空")
+	}
+	if cfg.ProxyURL != "" {
+		normalized, err := normalizeAndValidateProxyURL(cfg.ProxyURL)
+		if err != nil {
+			return cfg, err
+		}
+		cfg.ProxyURL = normalized
+	}
+	return cfg, nil
+}
+
 func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) error {
 	resolved, err := resolveEffectiveProxyURL(cfg.ProxyURL, preserveAuth)
 	if err != nil {
 		return err
 	}
 	cfg.ProxyURL = resolved
-	if cfg.Enabled {
-		if cfg.ProxyURL == "" {
-			return errors.New("启用代理时代理服务器地址不能为空")
-		}
-		normalized, err := normalizeAndValidateProxyURL(cfg.ProxyURL)
-		if err != nil {
-			return err
-		}
-		cfg.ProxyURL = normalized
-	} else if cfg.ProxyURL != "" {
-		if normalized, err := normalizeAndValidateProxyURL(cfg.ProxyURL); err == nil {
-			cfg.ProxyURL = normalized
-		}
+	cfg, err = validateAndNormalizeProxyConfig(cfg)
+	if err != nil {
+		return err
 	}
 	if err := repository.SaveProxyConfig(cfg); err != nil {
 		return err
 	}
-	utils.CloseIdleHTTPConnections()
-	filmsnapshot.ClearDynamicPlayCaches()
+	utils.ResetProxyTransports()
 	NotifySvc.EnsureBotPoller()
 	upgrade.TriggerReleasePoll()
 	return nil
@@ -151,22 +158,6 @@ func (s *ProxyService) TestProxy(proxyURL string, preserveAuth bool) (int64, err
 
 func (s *ProxyService) ResolveSpiderProxy() (bool, string, error) {
 	return repository.ResolveSpiderProxy()
-}
-
-func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string, error) {
-	return repository.ResolveSourceProxy(sourceID)
-}
-
-func (s *ProxyService) ResolveTMDBProxy() (bool, string, error) {
-	return repository.ResolveTMDBProxy()
-}
-
-func (s *ProxyService) ResolveNotifyProxy() (bool, string, error) {
-	return repository.ResolveNotifyProxy()
-}
-
-func (s *ProxyService) ResolveUpgradeProxy() (bool, string, error) {
-	return repository.ResolveUpgradeProxy()
 }
 
 func RedactProxyURL(raw string) string {

@@ -10,7 +10,7 @@ func TestFormatProvideFilmDetail_LineNameAndPlayURL(t *testing.T) {
 	detail, err := formatProvideFilmDetail(model.FilmListSnapshot{Mid: 1, Name: "片"}, model.MovieDetailVo{
 		List: []model.PlayLinkVo{
 			{Name: "直连站", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://a"}}},
-			{Name: " 代理站 ", Proxy: true, LinkList: []model.MovieUrlInfo{{Episode: "1$2#3", Link: "http://b/x$y#z"}}},
+			{Name: " 代理站 ", LinkList: []model.MovieUrlInfo{{Episode: "1$2#3", Link: "http://b/x$y#z"}}},
 		},
 	}, "")
 	if err != nil {

@@ -463,7 +463,6 @@ type PlayLinkVo struct {
 	Name        string         `json:"name"`
 	IsManual    bool           `json:"isManual"`
 	IsPreferred bool           `json:"isPreferred,omitempty"`
-	Proxy       bool           `json:"proxy,omitempty"`
 	LinkList    []MovieUrlInfo `json:"linkList"`
 }
 
