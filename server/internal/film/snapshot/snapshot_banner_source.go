@@ -17,11 +17,13 @@ import (
 )
 
 const (
-	bannerIndexCatUpdate    = "idx_cat_key_upd_stamp"
-	bannerIndexCatHits      = "idx_cat_key_hits_val"
-	bannerIndexCidUpdate    = "idx_cid_update"
-	bannerIndexCidHits      = "idx_cid_hits"
-	smallSourceFallbackCap  = 2000
+	bannerIndexCatUpdate   = "idx_cat_key_upd_stamp"
+	bannerIndexCatHits     = "idx_cat_key_hits_val"
+	bannerIndexCidUpdate   = "idx_cid_update"
+	bannerIndexCidHits     = "idx_cid_hits"
+	bannerIndexCid         = "idx_film_index_cid"
+	bannerIndexPid         = "idx_film_index_pid"
+	smallSourceFallbackCap = 2000
 )
 
 var bannerReadyIndexes sync.Map
@@ -329,7 +331,7 @@ func bannerStrategyPlan(strategy string, byCID bool) (indexName, order string) {
 		return catalog.FilmCategoryScoreIndex, "score DESC, hits DESC, mid DESC"
 	case "random":
 		if byCID {
-			return "", "mid ASC"
+			return bannerIndexCid, "mid ASC"
 		}
 		return catalog.FilmCategoryDeletedIndex, "mid ASC"
 	default:

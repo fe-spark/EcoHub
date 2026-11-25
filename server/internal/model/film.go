@@ -144,15 +144,15 @@ func (MovieMatchKey) TableName() string {
 
 // FilmIndexIdentity 索引标识层：只负责来源与主键归属。
 type FilmIndexIdentity struct {
-	Mid           int64  `json:"mid" gorm:"primaryKey;autoIncrement;index:idx_root_key_upd_stamp,priority:3;index:idx_root_key_hits_val,priority:3;index:idx_cat_key_upd_stamp,priority:3;index:idx_cat_key_hits_val,priority:3"` // 系统内全局唯一影片 ID
-	FirstSourceId string `json:"firstSourceId" gorm:"size:32"`                                                                                                                                                                    // 首次录入该片的站点 ID
-	DbId          int64  `json:"dbId" gorm:"index"`                                                                                                                                                                               // 豆瓣 ID (用于精准去重)
+	Mid           int64  `json:"mid" gorm:"primaryKey;autoIncrement;index:idx_root_key_upd_stamp,priority:3;index:idx_root_key_hits_val,priority:3;index:idx_cat_key_upd_stamp,priority:3;index:idx_cat_key_hits_val,priority:3;index:idx_cid_update,priority:3;index:idx_cid_hits,priority:3"` // 系统内全局唯一影片 ID
+	FirstSourceId string `json:"firstSourceId" gorm:"size:32"`                                                                                                                                                                                                                                     // 首次录入该片的站点 ID
+	DbId          int64  `json:"dbId" gorm:"index"`                                                                                                                                                                                                                                                // 豆瓣 ID (用于精准去重)
 }
 
 // FilmIndexCategory 分类层：RootCategoryKey/CategoryKey 是来源分类身份；Pid/Cid/CName 仅作写入快照和兼容展示。
 type FilmIndexCategory struct {
-	Cid              int64  `json:"cid" gorm:"index;index:idx_cid_update;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                            // 分类ID
-	Pid              int64  `json:"pid" gorm:"index;index:idx_film_index_pid_update_mid,priority:1;index:idx_cid_update;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
+	Cid              int64  `json:"cid" gorm:"index;index:idx_cid_update,priority:1;index:idx_cid_hits,priority:1;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                          // 分类ID
+	Pid              int64  `json:"pid" gorm:"index;index:idx_film_index_pid_update_mid,priority:1;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
 	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index:idx_root_key_upd_stamp,priority:1;index:idx_root_key_hits_val,priority:1"`
 	CategoryKey      string `json:"categoryKey" gorm:"size:128;index:idx_cat_key_upd_stamp,priority:1;index:idx_cat_key_hits_val,priority:1"`
 	OriginalCategory string `json:"originalCategory" gorm:"size:128;index"` // 采集时固化的来源主类名
@@ -170,9 +170,9 @@ type FilmIndexContent struct {
 	Year               int64   `json:"year" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                                              // 年份
 	Initial            string  `json:"initial"`                                                                                                                                                                                             // 首字母
 	Score              float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                                                                                                                           // 评分
-	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_film_index_pid_update_mid,priority:2;index:idx_root_key_upd_stamp,priority:2;index:idx_cat_key_upd_stamp,priority:2;index:idx_cid_update;index:idx_filter_update"` // 更新时间
-	UpdateReason       string  `json:"updateReason" gorm:"type:varchar(64)"`                                                                                                                                                                // 更新原因
-	Hits               int64   `json:"hits" gorm:"index;index:idx_cid_hits;index:idx_root_key_hits_val,priority:2;index:idx_cat_key_hits_val,priority:2;index:idx_filter_hits"`                                                             // 热度排行
+	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_film_index_pid_update_mid,priority:2;index:idx_root_key_upd_stamp,priority:2;index:idx_cat_key_upd_stamp,priority:2;index:idx_cid_update,priority:2;index:idx_filter_update"` // 更新时间
+	UpdateReason       string  `json:"updateReason" gorm:"type:varchar(64)"`                                                                                                                                                                           // 更新原因
+	Hits               int64   `json:"hits" gorm:"index;index:idx_cid_hits,priority:2;index:idx_root_key_hits_val,priority:2;index:idx_cat_key_hits_val,priority:2;index:idx_filter_hits"`                                                            // 热度排行
 	State              string  `json:"state"`                                                                                                                                                                                               // 状态 正片|预告
 	Remarks            string  `json:"remarks"`                                                                                                                                                                                             // 完结 | 更新至x集
 	Picture            string  `json:"picture" gorm:"type:text"`                                                                                                                                                                            // 本片采集到的竖版封面

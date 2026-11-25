@@ -2,10 +2,18 @@ package snapshot
 
 import (
 	"context"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"server/internal/model"
 	"server/internal/taxonomy"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"gorm.io/gorm/schema"
 )
 
 func bannerCandidateFilm(mid, pid, hits int64, score float64, updateStamp int64, name string) model.FilmIndex {
@@ -253,5 +261,109 @@ func TestScanBannerFallbackRanks_SmallSourceAndBranchUnion(t *testing.T) {
 	}
 	if got := takeBannerRanks("random", bigRandom, 2); len(got) != 2 {
 		t.Fatalf("big random picked %+v", got)
+	}
+}
+
+func TestFilmIndexSchema_CidCompositeIndexOrder(t *testing.T) {
+	s, err := schema.Parse(&model.FilmIndex{}, &sync.Map{}, schema.NamingStrategy{SingularTable: true})
+	if err != nil {
+		t.Fatalf("parse FilmIndex schema: %v", err)
+	}
+	byName := make(map[string][]string)
+	for _, idx := range s.ParseIndexes() {
+		cols := make([]string, 0, len(idx.Fields))
+		for _, f := range idx.Fields {
+			cols = append(cols, f.DBName)
+		}
+		byName[idx.Name] = cols
+	}
+
+	wantIndexes := map[string][]string{
+		bannerIndexCidUpdate: {"cid", "update_stamp", "mid"},
+		bannerIndexCidHits:   {"cid", "hits", "mid"},
+		bannerIndexCid:       {"cid"},
+		bannerIndexPid:       {"pid"},
+	}
+	for name, want := range wantIndexes {
+		got, ok := byName[name]
+		if !ok {
+			t.Fatalf("missing index %s in FilmIndex schema", name)
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("index %s columns = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestBannerMySQLSQLPlans_CidFallbackAndRandomIndexHints(t *testing.T) {
+	gdb, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{
+		DryRun:               true,
+		DisableAutomaticPing: true,
+		Logger:               logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open mysql dry-run: %v", err)
+	}
+
+	cases := []struct {
+		strategy  string
+		extra     string
+		wantIndex string
+		wantOrder string
+	}{
+		{
+			strategy:  "latest_random",
+			wantIndex: "USE INDEX (`idx_cid_update`)",
+			wantOrder: "ORDER BY update_stamp DESC, mid DESC LIMIT ?",
+		},
+		{
+			strategy:  "hot_random",
+			wantIndex: "USE INDEX (`idx_cid_hits`)",
+			wantOrder: "ORDER BY hits DESC, mid DESC LIMIT ?",
+		},
+		{
+			strategy:  "random",
+			extra:     " AND mid >= ?",
+			wantIndex: "USE INDEX (`idx_film_index_cid`)",
+			wantOrder: "ORDER BY mid ASC LIMIT ?",
+		},
+	}
+	for _, tc := range cases {
+		hint := bannerUseIndexClause(gdb, "mysql", tc.strategy, true)
+		_, order := bannerStrategyPlan(tc.strategy, true)
+		sql := bannerBranchSQL("mysql", hint, "cid", order, false, tc.extra, []int64{99})
+		if !strings.Contains(sql, tc.wantIndex) {
+			t.Fatalf("strategy %s missing index hint %q in SQL: %s", tc.strategy, tc.wantIndex, sql)
+		}
+		if !strings.Contains(sql, "FORCE INDEX (PRIMARY)") {
+			t.Fatalf("strategy %s missing playlist FORCE INDEX (PRIMARY) in SQL: %s", tc.strategy, sql)
+		}
+		if !strings.Contains(sql, tc.wantOrder) {
+			t.Fatalf("strategy %s missing order %q in SQL: %s", tc.strategy, tc.wantOrder, sql)
+		}
+	}
+
+	scopedSQL := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		var rows []model.FilmIndex
+		base := applyBannerCategories(tx.Model(&model.FilmIndex{}), "", []int64{1})
+		return buildRandomBannerRangeQuery(base, true, ">=", 500, 30).Find(&rows)
+	})
+	if !strings.Contains(scopedSQL, "USE INDEX (`idx_film_index_pid`)") {
+		t.Fatalf("scoped random banner query must bind idx_film_index_pid, got: %s", scopedSQL)
+	}
+	if strings.Contains(scopedSQL, "`film_index USE INDEX") {
+		t.Fatalf("table name must not swallow USE INDEX, got: %s", scopedSQL)
+	}
+
+	unboundedSQL := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		var rows []model.FilmIndex
+		base := applyBannerCategories(tx.Model(&model.FilmIndex{}), "", nil)
+		return buildRandomBannerRangeQuery(base, false, ">=", 500, 30).Find(&rows)
+	})
+	if strings.Contains(unboundedSQL, "idx_film_index_pid") {
+		t.Fatalf("unbounded random banner query should not force pid index, got: %s", unboundedSQL)
 	}
 }

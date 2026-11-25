@@ -197,7 +197,7 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 	}
 
 	if strategy == "random" {
-		return scanRandomBannerCandidates(ctx, baseQuery(exclude), limit)
+		return scanRandomBannerCandidates(ctx, baseQuery(exclude), len(categoryPids) > 0, limit)
 	}
 
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
@@ -235,28 +235,29 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 	return results, nil
 }
 
-func scanRandomBannerCandidates(ctx context.Context, baseQuery *gorm.DB, limit int) ([]model.FilmListSnapshot, error) {
+func buildRandomBannerRangeQuery(baseQuery *gorm.DB, usePidIndex bool, pivotOp string, pivot int64, fetchLimit int) *gorm.DB {
+	q := baseQuery.Session(&gorm.Session{})
+	if usePidIndex && dialectName(q) == "mysql" {
+		// 限定在目标一级分类二级索引 (pid, mid) 区间内按主键游标顺序扫描，避免优化器误选聚簇主键引发全表扫描。
+		q = q.Clauses(mysqlUseIndexHint{index: bannerIndexPid})
+	}
+	return q.Where("mid "+pivotOp+" ?", pivot).
+		Order("mid ASC").
+		Limit(fetchLimit)
+}
+
+func scanRandomBannerCandidates(ctx context.Context, baseQuery *gorm.DB, usePidIndex bool, limit int) ([]model.FilmListSnapshot, error) {
 	pivot, err := randomBannerPivot(ctx)
 	if err != nil {
 		return nil, err
 	}
 	window := randomBannerWindowSize(limit)
-	results, err := scanListSnapshots(
-		baseQuery.Session(&gorm.Session{}).
-			Where("mid >= ?", pivot).
-			Order("mid ASC").
-			Limit(window),
-	)
+	results, err := scanListSnapshots(buildRandomBannerRangeQuery(baseQuery, usePidIndex, ">=", pivot, window))
 	if err != nil {
 		return nil, err
 	}
 	if len(results) < window {
-		more, fillErr := scanListSnapshots(
-			baseQuery.Session(&gorm.Session{}).
-				Where("mid < ?", pivot).
-				Order("mid ASC").
-				Limit(window - len(results)),
-		)
+		more, fillErr := scanListSnapshots(buildRandomBannerRangeQuery(baseQuery, usePidIndex, "<", pivot, window-len(results)))
 		if fillErr != nil {
 			return nil, fillErr
 		}

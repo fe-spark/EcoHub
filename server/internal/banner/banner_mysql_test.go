@@ -3,10 +3,12 @@ package banner
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"server/internal/film/catalog"
 	"server/internal/infra/db"
 	"server/internal/model"
 
@@ -164,5 +166,100 @@ func TestBannerMySQL_UnavailableAndConcurrentWrites(t *testing.T) {
 	}
 	if ok != 1 {
 		t.Fatalf("concurrent create: want exactly 1 ok, got %d (%v)", ok, errs)
+	}
+}
+
+func TestBannerMySQL_FallbackAndRandomExplainPlans(t *testing.T) {
+	gdb := setupBannerMySQL(t)
+	if err := gdb.Exec(
+		"ALTER TABLE " + model.TableFilmIndex + " ADD INDEX " + catalog.FilmCidScoreIndex + " (cid, score, hits, mid)",
+	).Error; err != nil {
+		t.Fatalf("add cid score index: %v", err)
+	}
+
+	films := make([]model.FilmIndex, 0, 120)
+	lines := make([]model.FilmSourcePlaylist, 0, 120)
+	for mid := int64(1); mid <= 120; mid++ {
+		films = append(films, model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid, FirstSourceId: "src1"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1 + (mid % 3), Cid: 10 + (mid % 4), CName: "动作片"},
+			FilmIndexContent:  model.FilmIndexContent{Name: fmt.Sprintf("影片%d", mid), Hits: mid * 5, Score: 6.5, UpdateStamp: mid * 10},
+		})
+		lines = append(lines, model.FilmSourcePlaylist{Mid: mid, SourceId: "src2", LineKind: model.LineKindPlay})
+	}
+	if err := gdb.Create(&films).Error; err != nil {
+		t.Fatalf("seed films: %v", err)
+	}
+	if err := gdb.Create(&lines).Error; err != nil {
+		t.Fatalf("seed lines: %v", err)
+	}
+	_ = gdb.Exec("ANALYZE TABLE " + model.TableFilmIndex + ", " + model.TableFilmSourcePlaylist)
+
+	type explainRow struct {
+		Table string `gorm:"column:table"`
+		Key   string `gorm:"column:key"`
+		Extra string `gorm:"column:Extra"`
+	}
+	cases := []struct {
+		name    string
+		wantKey string
+		sql     string
+		args    []any
+	}{
+		{
+			name:    "cid_latest",
+			wantKey: "idx_cid_update",
+			sql:     "EXPLAIN SELECT mid, hits, score, update_stamp FROM film_index USE INDEX (`idx_cid_update`) WHERE deleted_at IS NULL AND cid = ? AND EXISTS (SELECT 1 FROM film_source_playlist AS p FORCE INDEX (PRIMARY) WHERE p.mid = film_index.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY update_stamp DESC, mid DESC LIMIT ?",
+			args:    []any{10, "src2", model.LineKindPlay, 5},
+		},
+		{
+			name:    "cid_hot",
+			wantKey: "idx_cid_hits",
+			sql:     "EXPLAIN SELECT mid, hits, score, update_stamp FROM film_index USE INDEX (`idx_cid_hits`) WHERE deleted_at IS NULL AND cid = ? AND EXISTS (SELECT 1 FROM film_source_playlist AS p FORCE INDEX (PRIMARY) WHERE p.mid = film_index.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY hits DESC, mid DESC LIMIT ?",
+			args:    []any{10, "src2", model.LineKindPlay, 5},
+		},
+		{
+			name:    "cid_score",
+			wantKey: catalog.FilmCidScoreIndex,
+			sql:     "EXPLAIN SELECT mid, hits, score, update_stamp FROM film_index USE INDEX (`" + catalog.FilmCidScoreIndex + "`) WHERE deleted_at IS NULL AND cid = ? AND score >= ? AND EXISTS (SELECT 1 FROM film_source_playlist AS p FORCE INDEX (PRIMARY) WHERE p.mid = film_index.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY score DESC, hits DESC, mid DESC LIMIT ?",
+			args:    []any{10, 6.0, "src2", model.LineKindPlay, 5},
+		},
+		{
+			name:    "cid_random",
+			wantKey: "idx_film_index_cid",
+			sql:     "EXPLAIN SELECT mid, hits, score, update_stamp FROM film_index USE INDEX (`idx_film_index_cid`) WHERE deleted_at IS NULL AND cid = ? AND mid >= ? AND EXISTS (SELECT 1 FROM film_source_playlist AS p FORCE INDEX (PRIMARY) WHERE p.mid = film_index.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY mid ASC LIMIT ?",
+			args:    []any{10, 50, "src2", model.LineKindPlay, 30},
+		},
+		{
+			name:    "pid_random_unscoped",
+			wantKey: "idx_film_index_pid",
+			sql:     "EXPLAIN SELECT mid FROM `film_index` USE INDEX (`idx_film_index_pid`) WHERE `film_index`.`deleted_at` IS NULL AND pid IN (?) AND mid >= ? ORDER BY mid ASC LIMIT ?",
+			args:    []any{1, 50, 30},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rows []explainRow
+			if err := gdb.Raw(tc.sql, tc.args...).Scan(&rows).Error; err != nil {
+				t.Fatalf("explain failed: %v", err)
+			}
+			matched := false
+			for _, r := range rows {
+				if r.Table != model.TableFilmIndex {
+					continue
+				}
+				matched = true
+				if r.Key != tc.wantKey {
+					t.Fatalf("expected index %q on film_index, got %q (extra=%q)", tc.wantKey, r.Key, r.Extra)
+				}
+				if strings.Contains(r.Extra, "Using filesort") {
+					t.Fatalf("unexpected filesort on %s: key=%q extra=%q", tc.name, r.Key, r.Extra)
+				}
+			}
+			if !matched {
+				t.Fatalf("film_index row not found in explain output: %+v", rows)
+			}
+		})
 	}
 }
