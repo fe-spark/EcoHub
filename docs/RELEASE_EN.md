@@ -1,3 +1,20 @@
+Pre-release **v3.1.7-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.1` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.7-beta.1 changes
+
+- **Quick banner generation**: add the random strategy and align `cid` fallback queries with composite index ordering to reduce query timeouts.
+- **Content & proxy**: tighten content management boundaries and fix proxy validation, credential state, transport cache resets, and stream publish test races.
+- **Server layout (#117)**: reorganize internal packages by domain, wire cross-package hooks explicitly, and consolidate cascade cleanup and auth helpers.
+
+---
+
 Pre-release **v3.1.7-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

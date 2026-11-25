@@ -1,3 +1,20 @@
+测试版 **v3.1.7-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.7-beta.1 更新内容
+
+- **一键排片**：新增「随机排片」策略，优化大站兜底查询索引与 `cid` 复合索引列序以降低超时风险。
+- **内容与代理**：完善内容管理边界校验，修复网络代理全链路校验、凭据状态、传输池缓存及流式发布并发竞态。
+- **服务端结构（#117）**：按业务域重组服务端包结构并显式装配跨包钩子，收拢级联清理与统一鉴权辅助。
+
+---
+
 测试版 **v3.1.7-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
