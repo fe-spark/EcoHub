@@ -34,10 +34,32 @@ type streamPublishBuffer struct {
 var (
 	streamBuf             = newStreamPublishBuffer()
 	streamFlushOnce       sync.Once
+	streamHooksMu         sync.RWMutex
 	publishStreamWindowFn = publishStreamWindowReal
 	preferredSourceIDFn   = lookupPreferredSourceID
 	streamNowFn           = time.Now
 )
+
+func currentStreamNow() time.Time {
+	streamHooksMu.RLock()
+	fn := streamNowFn
+	streamHooksMu.RUnlock()
+	return fn()
+}
+
+func currentPreferredSourceID() string {
+	streamHooksMu.RLock()
+	fn := preferredSourceIDFn
+	streamHooksMu.RUnlock()
+	return fn()
+}
+
+func callPublishStreamWindow(mids []int64) error {
+	streamHooksMu.RLock()
+	fn := publishStreamWindowFn
+	streamHooksMu.RUnlock()
+	return fn(mids)
+}
 
 func newStreamPublishBuffer() *streamPublishBuffer {
 	now := time.Now()
@@ -46,6 +68,17 @@ func newStreamPublishBuffer() *streamPublishBuffer {
 		lastPref:   now,
 		lastBackup: now,
 	}
+}
+
+func (b *streamPublishBuffer) reset(now time.Time) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pending = make(map[int64]bool)
+	b.lastPref = now
+	b.lastBackup = now
 }
 
 func lookupPreferredSourceID() string {
@@ -61,7 +94,7 @@ func isPreferredCollectSource(id string) bool {
 	if id == "" {
 		return false
 	}
-	return preferredSourceIDFn() == id
+	return currentPreferredSourceID() == id
 }
 
 func (b *streamPublishBuffer) add(preferred bool, mids []int64) {
@@ -221,10 +254,10 @@ func drainStreamPublish(force bool) error {
 func drainStreamPublishLocked(force, acquire bool) (int, error) {
 	totalDrained := 0
 	for {
-		mids, flags := streamBuf.take(streamNowFn(), force)
+		mids, flags := streamBuf.take(currentStreamNow(), force)
 		if len(mids) == 0 {
 			if !force && streamBuf.pendingCount() >= streamBackpressureN {
-				mids, flags = streamBuf.take(streamNowFn(), true)
+				mids, flags = streamBuf.take(currentStreamNow(), true)
 			}
 			if len(mids) == 0 {
 				return totalDrained, nil
@@ -261,7 +294,7 @@ func publishStreamWindowGuarded(mids []int64, acquire bool) (err error) {
 			err = fmt.Errorf("发布窗口 panic: %v", r)
 		}
 	}()
-	return publishStreamWindowFn(mids)
+	return callPublishStreamWindow(mids)
 }
 
 func enqueueStreamPublish(sourceID string, mids []int64) error {
@@ -314,5 +347,35 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 }
 
 func resetStreamPublishBufferForTest() {
-	streamBuf = newStreamPublishBuffer()
+	// 等待后台定时刷窗的当前发布窗口结束后，在锁内原位清空缓冲。
+	publishMu.Lock()
+	defer publishMu.Unlock()
+	streamBuf.reset(currentStreamNow())
+}
+
+// setStreamPublishHooksForTest 在发布锁与钩子锁保护下替换流式发布测试桩，并返回恢复函数。
+func setStreamPublishHooksForTest(pub func([]int64) error, pref func() string) func() {
+	publishMu.Lock()
+	streamHooksMu.Lock()
+	origPub := publishStreamWindowFn
+	origPref := preferredSourceIDFn
+	if pub != nil {
+		publishStreamWindowFn = pub
+	}
+	if pref != nil {
+		preferredSourceIDFn = pref
+	}
+	streamBuf.reset(streamNowFn())
+	streamHooksMu.Unlock()
+	publishMu.Unlock()
+
+	return func() {
+		publishMu.Lock()
+		streamHooksMu.Lock()
+		streamBuf.reset(streamNowFn())
+		publishStreamWindowFn = origPub
+		preferredSourceIDFn = origPref
+		streamHooksMu.Unlock()
+		publishMu.Unlock()
+	}
 }

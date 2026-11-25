@@ -124,20 +124,13 @@ func setupStopTestDB(t *testing.T, source model.FilmSource) *gorm.DB {
 
 func TestStoppedSourceSkipsPublishMuBeforeSealing(t *testing.T) {
 	resetSearchReseal()
-	resetStreamPublishBufferForTest()
+	stubStreamPublishForTest(t, func([]int64) error { return nil }, func() string { return "" })
 	origCollectPages := collectPagesFn
-	origPub := publishStreamWindowFn
-	origPref := preferredSourceIDFn
 	origSeal := sealSearchIndex
-	publishStreamWindowFn = func([]int64) error { return nil }
-	preferredSourceIDFn = func() string { return "" }
 	sealSearchIndex = func([]int64) bool { return true }
 	t.Cleanup(func() {
 		collectPagesFn = origCollectPages
-		publishStreamWindowFn = origPub
-		preferredSourceIDFn = origPref
 		sealSearchIndex = origSeal
-		resetStreamPublishBufferForTest()
 		resetSearchReseal()
 	})
 

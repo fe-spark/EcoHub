@@ -151,6 +151,9 @@ func (s *InitService) TableInit() error {
 	if err := catalog.EnsureFilmCategoryScoreIndex(); err != nil {
 		return fmt.Errorf("排片评分索引失败: %w", err)
 	}
+	if err := catalog.EnsureFilmCidScoreIndex(); err != nil {
+		return fmt.Errorf("排片分类评分索引失败: %w", err)
+	}
 	if err := catalog.EnsureFilmSourceDeletedIndex(); err != nil {
 		return fmt.Errorf("采集站统计索引失败: %w", err)
 	}

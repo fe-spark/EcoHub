@@ -17,6 +17,9 @@ import (
 // FilmCategoryScoreIndex 排片按分类键、评分取前几部。
 const FilmCategoryScoreIndex = "idx_film_index_cat_score"
 
+// FilmCidScoreIndex 排片兜底按分类、评分取前几部。
+const FilmCidScoreIndex = "idx_film_index_cid_score"
+
 // FilmSourceDeletedIndex 统计各采集站未删除影片数走覆盖索引，避免全表回表超时。
 const FilmSourceDeletedIndex = "idx_film_index_source_del"
 
@@ -30,6 +33,12 @@ const CollectRecordFilmSourceIndex = "idx_crf_source_id"
 // 不写进模型标签，避免启动时用 30 秒读超时去建这个索引。
 func EnsureFilmCategoryScoreIndex() error {
 	return ensureTableIndex(model.TableFilmIndex, FilmCategoryScoreIndex, "category_key, score, hits, mid")
+}
+
+// EnsureFilmCidScoreIndex 让一键排片兜底按分类和评分取前几部。
+// 不写进模型标签，避免启动时用 30 秒读超时去建这个索引。
+func EnsureFilmCidScoreIndex() error {
+	return ensureTableIndex(model.TableFilmIndex, FilmCidScoreIndex, "cid, score, hits, mid")
 }
 
 // EnsureFilmSourceDeletedIndex 让按 first_source_id 统计未删除影片数的 GROUP BY 查询走覆盖索引。

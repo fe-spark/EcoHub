@@ -206,9 +206,7 @@ func TestRunTaskBody_ManualAutoCollectFailureNoNotify(t *testing.T) {
 }
 
 func TestPublishStreamWindowGuarded_PanicReleasesLock(t *testing.T) {
-	orig := publishStreamWindowFn
-	publishStreamWindowFn = func([]int64) error { panic("publish boom") }
-	t.Cleanup(func() { publishStreamWindowFn = orig })
+	stubStreamPublishForTest(t, func([]int64) error { panic("publish boom") }, nil)
 	if err := publishStreamWindowGuarded([]int64{1}, true); err == nil || !strings.Contains(err.Error(), "publish boom") {
 		t.Fatalf("err = %v", err)
 	}

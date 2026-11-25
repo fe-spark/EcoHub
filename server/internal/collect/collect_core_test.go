@@ -432,13 +432,7 @@ func TestOccupyCollectSources_ConcurrentSameSourceOnlyOneWins(t *testing.T) {
 }
 
 func TestCollectBatchContext_Isolation(t *testing.T) {
-	resetStreamPublishBufferForTest()
-	origPub := publishStreamWindowFn
-	publishStreamWindowFn = func(mids []int64) error { return nil }
-	t.Cleanup(func() {
-		resetStreamPublishBufferForTest()
-		publishStreamWindowFn = origPub
-	})
+	stubStreamPublishForTest(t, func(mids []int64) error { return nil }, nil)
 
 	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
 	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}

@@ -47,23 +47,16 @@ func setupAuditSpiderDB(t *testing.T) *gorm.DB {
 // Fix 1：探测返回 0 页时也应完成生命周期收尾并更新定时补窗锚点与耗时统计，且同一站点不重复计算时长。
 func TestZeroPageProbeStillCompletesAndUpdatesCronAnchor(t *testing.T) {
 	resetSearchReseal()
-	resetStreamPublishBufferForTest()
+	stubStreamPublishForTest(t, func([]int64) error { return nil }, func() string { return "" })
 	origProbe := fetchProbePageCount
 	origCollectPages := collectPagesFn
-	origPub := publishStreamWindowFn
-	origPref := preferredSourceIDFn
 	origSeal := sealSearchIndex
 	t.Cleanup(func() {
 		fetchProbePageCount = origProbe
 		collectPagesFn = origCollectPages
-		publishStreamWindowFn = origPub
-		preferredSourceIDFn = origPref
 		sealSearchIndex = origSeal
-		resetStreamPublishBufferForTest()
 		resetSearchReseal()
 	})
-	publishStreamWindowFn = func([]int64) error { return nil }
-	preferredSourceIDFn = func() string { return "" }
 	sealSearchIndex = func([]int64) bool { return true }
 
 	gdb := setupAuditSpiderDB(t)
@@ -168,21 +161,14 @@ func TestCronBatchNoteStartedUsesActualCronTaskID(t *testing.T) {
 // Fix 4：CollectFilms 连续更新多部影片时，第 1 部进入异步检索封口不能导致第 2 部被跳过。
 func TestCollectFilms_MultiMidDoesNotSkipSubsequentWhenSealing(t *testing.T) {
 	resetSearchReseal()
-	resetStreamPublishBufferForTest()
-	origPub := publishStreamWindowFn
-	origPref := preferredSourceIDFn
+	stubStreamPublishForTest(t, func([]int64) error { return nil }, func() string { return "multi-film-src" })
 	origSeal := sealSearchIndex
 	origWait := waitCollectIdle
 	t.Cleanup(func() {
-		publishStreamWindowFn = origPub
-		preferredSourceIDFn = origPref
 		sealSearchIndex = origSeal
 		waitCollectIdle = origWait
-		resetStreamPublishBufferForTest()
 		resetSearchReseal()
 	})
-	publishStreamWindowFn = func([]int64) error { return nil }
-	preferredSourceIDFn = func() string { return "multi-film-src" }
 	waitCollectIdle = func() {}
 	sealSearchIndex = func([]int64) bool { return true }
 

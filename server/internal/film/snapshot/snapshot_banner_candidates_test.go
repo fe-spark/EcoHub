@@ -155,3 +155,71 @@ func TestGetSnapshotBannerCandidates_ExcludesHiddenSubcategory(t *testing.T) {
 		t.Fatalf("unbounded banner leaked hidden subcategory: %v", mids)
 	}
 }
+
+func TestScanBannerFallbackRanks_SmallSourceAndBranchUnion(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	var rows []model.FilmIndex
+	var lines []model.FilmSourcePlaylist
+	for mid := int64(1); mid <= 4; mid++ {
+		f := bannerCandidateFilm(mid, 1, mid*10, float64(4+mid), mid*100, "大片")
+		f.Cid = 10 + (mid % 2)
+		f.FirstSourceId = "other"
+		rows = append(rows, f)
+		lines = append(lines, model.FilmSourcePlaylist{Mid: mid, SourceId: "small_src", LineKind: model.LineKindPlay})
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+	if err := gdb.Create(&lines).Error; err != nil {
+		t.Fatalf("seed small lines: %v", err)
+	}
+
+	// 小站路径（<= smallSourceFallbackCap）
+	smallHot, err := scanBannerFallbackRanks(context.Background(), "hot_random", "small_src", []int64{10, 11}, 2, []int64{4}, false)
+	if err != nil {
+		t.Fatalf("small fallback: %v", err)
+	}
+	smallPicked := takeBannerRanks("hot_random", smallHot, 2)
+	if len(smallPicked) != 2 || smallPicked[0].Mid != 3 || smallPicked[1].Mid != 2 {
+		t.Fatalf("small fallback got %+v", smallPicked)
+	}
+
+	// 大站路径（> smallSourceFallbackCap）：直接走按单 cid 拆支 UNION ALL 分支，验证三类策略与排除均正确
+	bigLines := make([]model.FilmSourcePlaylist, 0, smallSourceFallbackCap+1)
+	for i := 0; i <= smallSourceFallbackCap; i++ {
+		bigLines = append(bigLines, model.FilmSourcePlaylist{
+			Mid:      int64(10000 + i),
+			SourceId: "big_src",
+			LineKind: model.LineKindPlay,
+		})
+	}
+	for mid := int64(1); mid <= 4; mid++ {
+		bigLines = append(bigLines, model.FilmSourcePlaylist{
+			Mid:      mid,
+			SourceId: "big_src",
+			LineKind: model.LineKindPlay,
+		})
+	}
+	if err := gdb.CreateInBatches(&bigLines, 500).Error; err != nil {
+		t.Fatalf("seed big lines: %v", err)
+	}
+
+	bigHot, err := scanBannerBranches(context.Background(), "hot_random", "big_src", "cid", []int64{10, 11}, true, 2, []int64{4}, false)
+	if err != nil {
+		t.Fatalf("big hot: %v", err)
+	}
+	hotPicked := takeBannerRanks("hot_random", bigHot, 2)
+	if len(hotPicked) != 2 || hotPicked[0].Mid != 3 || hotPicked[1].Mid != 2 {
+		t.Fatalf("big hot got %+v", hotPicked)
+	}
+
+	bigScore, err := scanBannerFallbackRanks(context.Background(), "score_random", "big_src", []int64{10, 11}, 3, nil, true)
+	if err != nil {
+		t.Fatalf("big score: %v", err)
+	}
+	scorePicked := takeBannerRanks("score_random", bigScore, 3)
+	// mid=4(8.0), mid=3(7.0), mid=2(6.0); mid=1 score=5.0<6.0
+	if len(scorePicked) != 3 || scorePicked[0].Mid != 4 || scorePicked[1].Mid != 3 || scorePicked[2].Mid != 2 {
+		t.Fatalf("big score got %+v", scorePicked)
+	}
+}

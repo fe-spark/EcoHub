@@ -139,6 +139,12 @@ func TestStartBatchCollectRetry_RollbackOccupyOnRecordStartError(t *testing.T) {
 	prev := db.Mdb
 	db.Mdb = nil // 模拟数据库未连接导致 recordStart 失败
 	t.Cleanup(func() { db.Mdb = prev })
+	// Cleanup 按后进先出执行，必须先等后台重试（含结算与回调）退出再恢复 db.Mdb。
+	t.Cleanup(func() {
+		if !WaitBackgroundCollects(10 * time.Second) {
+			t.Error("background retry collect did not exit before cleanup")
+		}
+	})
 
 	src := model.FilmSource{Id: "retry-rollback-s1", Name: "重试回滚源"}
 	claim, err := claimCollectSources([]model.FilmSource{src}, "q-test-retry")
@@ -161,15 +167,9 @@ func TestStartBatchCollectRetry_RollbackOccupyOnRecordStartError(t *testing.T) {
 	if isOccupiedCollectSource(src.Id) {
 		t.Fatal("source stayed occupied after the retry run failed")
 	}
-	// 等待后台采集队列完全退出，避免污染后续依赖 collectQueues.n == 0 的测试
-	for time.Now().Before(deadline) {
-		collectQueues.mu.Lock()
-		n := collectQueues.n
-		collectQueues.mu.Unlock()
-		if n == 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	// 等待后台采集批次（含队列释放与 emitSummary 落库尝试）完全退出，避免污染后续测试或与 Cleanup 竞态。
+	if !WaitBackgroundCollects(10 * time.Second) {
+		t.Fatal("background retry collect did not exit before deadline")
 	}
 }
 

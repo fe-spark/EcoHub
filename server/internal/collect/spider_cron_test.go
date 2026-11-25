@@ -218,21 +218,14 @@ func TestExecuteTask_MaintenanceOverlapStillSkips(t *testing.T) {
 // 按站点粒度防重：第 1 轮 busy-site 未结束时，新到点直接跳过 busy-site 并让 idle-site 立刻启动。
 func TestAutoCollectOverlap_SkipsBusySiteStartsIdleSite(t *testing.T) {
 	resetSearchReseal()
-	resetStreamPublishBufferForTest()
+	stubStreamPublishForTest(t, func([]int64) error { return nil }, func() string { return "" })
 	origProbe := fetchProbePageCount
-	origPub := publishStreamWindowFn
-	origPref := preferredSourceIDFn
 	origSeal := sealSearchIndex
 	t.Cleanup(func() {
 		fetchProbePageCount = origProbe
-		publishStreamWindowFn = origPub
-		preferredSourceIDFn = origPref
 		sealSearchIndex = origSeal
-		resetStreamPublishBufferForTest()
 		resetSearchReseal()
 	})
-	publishStreamWindowFn = func([]int64) error { return nil }
-	preferredSourceIDFn = func() string { return "" }
 	sealSearchIndex = func([]int64) bool { return true }
 
 	gdb := setupAuditSpiderDB(t)

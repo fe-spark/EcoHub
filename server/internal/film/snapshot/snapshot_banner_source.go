@@ -5,17 +5,25 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"server/internal/film/catalog"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/taxonomy"
+
+	"gorm.io/gorm"
 )
 
 const (
-	bannerIndexCatUpdate = "idx_cat_key_upd_stamp"
-	bannerIndexCatHits   = "idx_cat_key_hits_val"
+	bannerIndexCatUpdate    = "idx_cat_key_upd_stamp"
+	bannerIndexCatHits      = "idx_cat_key_hits_val"
+	bannerIndexCidUpdate    = "idx_cid_update"
+	bannerIndexCidHits      = "idx_cid_hits"
+	smallSourceFallbackCap  = 2000
 )
+
+var bannerReadyIndexes sync.Map
 
 type bannerRank struct {
 	Mid         int64   `gorm:"column:mid"`
@@ -116,15 +124,43 @@ func scanBannerFallbackRanks(ctx context.Context, strategy, sourceID string, cid
 	if limit <= 0 || len(cids) == 0 {
 		return nil, nil
 	}
-	_, order := bannerStrategyPlan(strategy)
-	if strategy != "score_random" {
-		scoreMin = false
+	if sourceMIDs, limited, err := smallSourceFallbackMIDs(ctx, sourceID); err != nil {
+		return nil, err
+	} else if !limited {
+		if len(sourceMIDs) == 0 {
+			return nil, nil
+		}
+		return scanSmallSourceFallbackRanks(ctx, strategy, cids, sourceMIDs, limit, exclude, scoreMin)
 	}
+	// 兜底改按单 cid 拆支走索引取前几部后再合并，避免 cid IN (...) 触发全表扫与 filesort 超时。
+	return scanBannerBranches(ctx, strategy, sourceID, "cid", cids, true, limit, exclude, scoreMin)
+}
+
+func smallSourceFallbackMIDs(ctx context.Context, sourceID string) (mids []int64, exceeded bool, err error) {
+	conn := db.Mdb.WithContext(ctx)
+	from := model.TableFilmSourcePlaylist
+	if dialectName(conn) == "mysql" {
+		from += " USE INDEX (`idx_playlist_source_mid`)"
+	}
+	if err := conn.Table(from).
+		Select("DISTINCT mid").
+		Where("source_id = ? AND line_kind = ?", sourceID, model.LineKindPlay).
+		Limit(smallSourceFallbackCap + 1).
+		Scan(&mids).Error; err != nil {
+		return nil, false, err
+	}
+	if len(mids) > smallSourceFallbackCap {
+		return nil, true, nil
+	}
+	return mids, false, nil
+}
+
+func scanSmallSourceFallbackRanks(ctx context.Context, strategy string, cids, sourceMIDs []int64, limit int, exclude []int64, scoreMin bool) ([]bannerRank, error) {
+	_, order := bannerStrategyPlan(strategy, true)
 	q := db.Mdb.WithContext(ctx).Table(model.TableFilmIndex).
 		Select("mid, hits, score, update_stamp").
-		Where("deleted_at IS NULL AND cid IN ?", cids).
-		Where("EXISTS (SELECT 1 FROM "+model.TableFilmSourcePlaylist+" AS p WHERE p.mid = "+model.TableFilmIndex+".mid AND p.source_id = ? AND p.line_kind = ?)", sourceID, model.LineKindPlay)
-	if scoreMin {
+		Where("deleted_at IS NULL AND mid IN ? AND cid IN ?", sourceMIDs, cids)
+	if strategy == "score_random" && scoreMin {
 		q = q.Where("score >= ?", 6.0)
 	}
 	if len(exclude) > 0 {
@@ -157,20 +193,27 @@ func bannerSourceCategoryKeys(sourceID string, categoryIDs []int64) []string {
 }
 
 func scanBannerRanks(ctx context.Context, strategy, sourceID string, keys []string, limit int, exclude []int64, scoreMin bool) ([]bannerRank, error) {
-	if limit <= 0 || len(keys) == 0 {
+	return scanBannerBranches(ctx, strategy, sourceID, "category_key", keys, false, limit, exclude, scoreMin)
+}
+
+func scanBannerBranches[T string | int64](ctx context.Context, strategy, sourceID, column string, values []T, byCID bool, limit int, exclude []int64, scoreMin bool) ([]bannerRank, error) {
+	if limit <= 0 || len(values) == 0 {
 		return nil, nil
 	}
-	indexName, order := bannerStrategyPlan(strategy)
+	_, order := bannerStrategyPlan(strategy, byCID)
 	if strategy != "score_random" {
 		scoreMin = false
 	}
 	conn := db.Mdb.WithContext(ctx)
 	dialect := dialectName(conn)
-	parts := make([]string, 0, len(keys))
-	args := make([]any, 0, len(keys)*(4+len(exclude)))
-	for _, key := range keys {
-		parts = append(parts, bannerBranchSQL(dialect, indexName, order, scoreMin, exclude))
-		args = append(args, key)
+	indexHint := bannerUseIndexClause(conn, dialect, strategy, byCID)
+	branchSQL := bannerBranchSQL(dialect, indexHint, column, order, scoreMin, exclude)
+
+	parts := make([]string, 0, len(values))
+	args := make([]any, 0, len(values)*(4+len(exclude)))
+	for _, val := range values {
+		parts = append(parts, branchSQL)
+		args = append(args, val)
 		if scoreMin {
 			args = append(args, 6.0)
 		}
@@ -186,21 +229,72 @@ func scanBannerRanks(ctx context.Context, strategy, sourceID string, keys []stri
 	return ranks, nil
 }
 
-func bannerStrategyPlan(strategy string) (indexName, order string) {
+func bannerStrategyPlan(strategy string, byCID bool) (indexName, order string) {
 	switch strategy {
 	case "latest_random":
+		if byCID {
+			return bannerIndexCidUpdate, "update_stamp DESC, mid DESC"
+		}
 		return bannerIndexCatUpdate, "update_stamp DESC, mid DESC"
 	case "score_random":
+		if byCID {
+			return catalog.FilmCidScoreIndex, "score DESC, hits DESC, mid DESC"
+		}
 		return catalog.FilmCategoryScoreIndex, "score DESC, hits DESC, mid DESC"
 	default:
+		if byCID {
+			return bannerIndexCidHits, "hits DESC, mid DESC"
+		}
 		return bannerIndexCatHits, "hits DESC, mid DESC"
 	}
 }
 
-func bannerBranchSQL(dialect, indexName, order string, scoreMin bool, exclude []int64) string {
-	from := model.TableFilmIndex
-	if dialect == "mysql" && indexName != "" {
-		from += " USE INDEX (`" + indexName + "`)"
+func bannerUseIndexClause(conn *gorm.DB, dialect, strategy string, byCID bool) string {
+	if dialect != "mysql" {
+		return ""
+	}
+	indexName, _ := bannerStrategyPlan(strategy, byCID)
+	if indexName == "" {
+		return ""
+	}
+	if (indexName == catalog.FilmCategoryScoreIndex || indexName == catalog.FilmCidScoreIndex) &&
+		!bannerTableIndexReady(conn, model.TableFilmIndex, indexName) {
+		return ""
+	}
+	return " USE INDEX (`" + indexName + "`)"
+}
+
+func bannerTableIndexReady(conn *gorm.DB, tableName, indexName string) bool {
+	if conn == nil || conn.ConnPool == nil {
+		return false
+	}
+	type cacheKey struct {
+		pool  gorm.ConnPool
+		table string
+		index string
+	}
+	key := cacheKey{pool: conn.ConnPool, table: tableName, index: indexName}
+	if ready, ok := bannerReadyIndexes.Load(key); ok {
+		return ready.(bool)
+	}
+	var n int64
+	err := conn.Raw(`
+		SELECT COUNT(*) FROM information_schema.statistics
+		WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+	`, tableName, indexName).Scan(&n).Error
+	if err == nil && n > 0 {
+		bannerReadyIndexes.Store(key, true)
+		return true
+	}
+	return false
+}
+
+func bannerBranchSQL(dialect, filmIndexHint, column, order string, scoreMin bool, exclude []int64) string {
+	from := model.TableFilmIndex + filmIndexHint
+	playlistFrom := model.TableFilmSourcePlaylist + " AS p"
+	if dialect == "mysql" {
+		// 强制 EXISTS 从主键 (mid, source_id, line_kind) 探测，避免优化器反转为先扫 playlist 再 filesort。
+		playlistFrom += " FORCE INDEX (PRIMARY)"
 	}
 	scoreSQL := ""
 	if scoreMin {
@@ -211,8 +305,8 @@ func bannerBranchSQL(dialect, indexName, order string, scoreMin bool, exclude []
 		excludeSQL = " AND mid NOT IN (" + strings.TrimRight(strings.Repeat("?,", len(exclude)), ",") + ")"
 	}
 	inner := fmt.Sprintf(
-		"SELECT mid, hits, score, update_stamp FROM %s WHERE deleted_at IS NULL AND category_key = ?%s%s AND EXISTS (SELECT 1 FROM %s AS p WHERE p.mid = %s.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY %s LIMIT ?",
-		from, scoreSQL, excludeSQL, model.TableFilmSourcePlaylist, model.TableFilmIndex, order,
+		"SELECT mid, hits, score, update_stamp FROM %s WHERE deleted_at IS NULL AND %s = ?%s%s AND EXISTS (SELECT 1 FROM %s WHERE p.mid = %s.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY %s LIMIT ?",
+		from, column, scoreSQL, excludeSQL, playlistFrom, model.TableFilmIndex, order,
 	)
 	// USE INDEX 不能直接跟在 UNION ALL 后面，包进子查询后排序和条数才作用在这一支上。
 	return "SELECT mid, hits, score, update_stamp FROM (" + inner + ") AS banner_branch"

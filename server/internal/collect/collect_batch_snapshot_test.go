@@ -75,17 +75,13 @@ func TestStreamPublishBuffer_BackpressureForcesWindow(t *testing.T) {
 	}
 }
 
+func stubStreamPublishForTest(t *testing.T, pub func([]int64) error, pref func() string) {
+	t.Helper()
+	t.Cleanup(setStreamPublishHooksForTest(pub, pref))
+}
+
 func TestCollectBatchContext_StreamEnqueueKeepsTagMIDsIsolated(t *testing.T) {
-	resetStreamPublishBufferForTest()
-	origPub := publishStreamWindowFn
-	origPref := preferredSourceIDFn
-	publishStreamWindowFn = func(mids []int64) error { return nil }
-	preferredSourceIDFn = func() string { return "source-a" }
-	t.Cleanup(func() {
-		resetStreamPublishBufferForTest()
-		publishStreamWindowFn = origPub
-		preferredSourceIDFn = origPref
-	})
+	stubStreamPublishForTest(t, func(mids []int64) error { return nil }, func() string { return "source-a" })
 
 	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}
 	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Sort: 1}
@@ -106,20 +102,11 @@ func TestCollectBatchContext_StreamEnqueueKeepsTagMIDsIsolated(t *testing.T) {
 }
 
 func TestEnqueueStreamPublish_PreferredCountFlushes(t *testing.T) {
-	resetStreamPublishBufferForTest()
 	var published []int64
-	origPub := publishStreamWindowFn
-	origPref := preferredSourceIDFn
-	publishStreamWindowFn = func(mids []int64) error {
+	stubStreamPublishForTest(t, func(mids []int64) error {
 		published = append(published, mids...)
 		return nil
-	}
-	preferredSourceIDFn = func() string { return "pref" }
-	t.Cleanup(func() {
-		resetStreamPublishBufferForTest()
-		publishStreamWindowFn = origPub
-		preferredSourceIDFn = origPref
-	})
+	}, func() string { return "pref" })
 
 	if err := enqueueStreamPublish("pref", seqMIDs(1, streamPreferredCount)); err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -133,16 +120,7 @@ func TestEnqueueStreamPublish_PreferredCountFlushes(t *testing.T) {
 }
 
 func TestCollectBatchContext_OnlyPrimarySourceTriggersWarmup(t *testing.T) {
-	resetStreamPublishBufferForTest()
-	origPub := publishStreamWindowFn
-	origPref := preferredSourceIDFn
-	publishStreamWindowFn = func(mids []int64) error { return nil }
-	preferredSourceIDFn = func() string { return "primary" }
-	t.Cleanup(func() {
-		resetStreamPublishBufferForTest()
-		publishStreamWindowFn = origPub
-		preferredSourceIDFn = origPref
-	})
+	stubStreamPublishForTest(t, func(mids []int64) error { return nil }, func() string { return "primary" })
 
 	primarySrc := model.FilmSource{Id: "primary", Name: "Primary", Sort: 0}
 	backupSrc := model.FilmSource{Id: "backup", Name: "Backup", Sort: 1}
@@ -178,13 +156,7 @@ func TestCollectBatchContext_OnlyPrimarySourceTriggersWarmup(t *testing.T) {
 }
 
 func TestTakeSourceMIDs_LeavesOtherSource(t *testing.T) {
-	resetStreamPublishBufferForTest()
-	origPub := publishStreamWindowFn
-	publishStreamWindowFn = func(mids []int64) error { return nil }
-	t.Cleanup(func() {
-		resetStreamPublishBufferForTest()
-		publishStreamWindowFn = origPub
-	})
+	stubStreamPublishForTest(t, func(mids []int64) error { return nil }, nil)
 
 	srcA := model.FilmSource{Id: "a", Name: "A"}
 	srcB := model.FilmSource{Id: "b", Name: "B"}
