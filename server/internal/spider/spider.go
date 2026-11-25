@@ -88,6 +88,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	var failedPagesList []int
 	pageCount := 0
 	var collectCtx context.Context
+	var runEpoch uint64
 	statsOwned := false
 	releasedPreparedOccupy := false
 	collectPagesStarted := false
@@ -193,15 +194,22 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		if runOK || effectiveSuccess > 0 || hadWrites {
 			repository.NoteCollectSourceRun(s.Id, effectiveSuccess)
 		}
-		progress.FlushHotpathSideEffects(s.Id)
+		displacedOrStopped := errors.Is(originalErr, progress.ErrStopRequested) || errors.Is(originalErr, progress.ErrDispatchStopped)
+		ownsProgress := batchCtx == nil || (batchCtx.ownsOccupy(s.Id) && (runEpoch == 0 || progress.Epoch(s.Id) == runEpoch))
+		if ownsProgress {
+			progress.FlushHotpathSideEffects(s.Id)
+		}
 		if batchCtx != nil {
-			snap, _ := progress.Snapshot(s.Id)
+			var snap model.CollectProgress
+			if ownsProgress && !displacedOrStopped {
+				snap, _ = progress.Snapshot(s.Id)
+			}
 			status := snap.Status
 			errMsg := ""
-			if originalErr != nil && !errors.Is(originalErr, context.Canceled) {
+			if originalErr != nil && !errors.Is(originalErr, context.Canceled) && !displacedOrStopped {
 				errMsg = originalErr.Error()
 			}
-			if status == progress.StatusStopping || status == progress.StatusStopped {
+			if !ownsProgress || displacedOrStopped || status == progress.StatusStopping || status == progress.StatusStopped {
 				status = progress.StatusStopped
 				errMsg = ""
 			} else if status == "" || status == progress.StatusStarting || status == progress.StatusRunning {
@@ -224,14 +232,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 				}
 			}
 			totalP := pageCount
-			if totalP <= 0 {
+			if totalP <= 0 && ownsProgress && !displacedOrStopped {
 				totalP = snap.Total
 			}
 			if totalP <= 0 && len(failedPagesList) > 0 {
 				totalP = len(failedPagesList)
 			}
 			succP := successPagesCount
-			if succP <= 0 {
+			if succP <= 0 && ownsProgress && !displacedOrStopped {
 				succP = snap.Success
 			}
 			// 失败页只计真正失败的页。没抓到的页留在总数差额里，不能算失败。
@@ -257,9 +265,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 				return
 			}
 			batchCtx.markSourceFinished(*s)
-			// 被用户停止时不再同步抢 publishMu 刷快照窗口，避免已停站点卡在「停止中」；
+			// 被用户停止或已失权时不再同步抢 publishMu 刷快照窗口，避免已停站点卡在「停止中」或干预新重试；
 			// 已入库数据会在批次收尾 flushAndFinalize 与 searchReseal 中统一刷新并检索封口。
-			stoppedByUser := collectCtx != nil && (progress.IsStopping(s.Id) || progress.IsStopped(s.Id))
+			stoppedByUser := !ownsProgress || displacedOrStopped || (collectCtx != nil && (progress.IsStopping(s.Id) || progress.IsStopped(s.Id)))
 			if !stoppedByUser {
 				if err := batchCtx.sealFinishedSource(*s); err != nil {
 					log.Printf("[Spider] 站点 %s 封口入队失败: %v", s.Name, err)
@@ -296,10 +304,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	case err != nil:
 		return err
 	}
-	runEpoch, hasEpoch := batchCtx.progressEpoch(id)
+	batchEpoch, hasEpoch := batchCtx.progressEpoch(id)
 	if !hasEpoch {
-		runEpoch = progress.Epoch(id)
+		batchEpoch = progress.Epoch(id)
 	}
+	runEpoch = batchEpoch
 	collectCtx = progress.WithRunEpoch(ctx, runEpoch)
 	repository.SuppressCollectSourceStats(s.Id)
 	statsOwned = true

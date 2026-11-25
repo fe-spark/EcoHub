@@ -158,3 +158,29 @@ func TestSearchResealRetryAfterIdle_CompletesOnRebuildDone(t *testing.T) {
 	t.Fatalf("retryAfterIdle 重建完成后应释放 StatusSealing 且重建变为空闲，status=%q scheduled=%t building=%t",
 		snap.Status, filmsnapshot.SearchRebuildScheduled(), filmsnapshot.IsSearchIndexBuilding())
 }
+
+func TestSearchResealRetryAfterIdle_RequeuesWhenNotScheduled(t *testing.T) {
+	resetSearchReseal()
+	prevWait := sealRetryWait
+	sealRetryWait = 5 * time.Millisecond
+	t.Cleanup(func() {
+		sealRetryWait = prevWait
+		resetSearchReseal()
+	})
+
+	searchReseal.mu.Lock()
+	searchReseal.sealing["requeue-r1"] = struct{}{}
+	searchReseal.awaitDone = true
+	searchReseal.mu.Unlock()
+
+	searchReseal.reconcileRetrySchedule(false)
+
+	searchReseal.mu.Lock()
+	awaiting := searchReseal.awaitDone
+	retries := searchReseal.rebuildRetries
+	timerSet := searchReseal.retryTimer != nil
+	searchReseal.mu.Unlock()
+	if awaiting || retries != 1 || !timerSet {
+		t.Fatalf("未调度时应复位 awaitDone 并重排重试，awaiting=%t retries=%d timerSet=%t", awaiting, retries, timerSet)
+	}
+}

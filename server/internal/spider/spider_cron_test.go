@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"server/internal/model"
+	"server/internal/repository"
 )
 
 func TestAddLogCleanCron_ValidAndInvalid(t *testing.T) {
@@ -273,5 +274,69 @@ func TestAutoCollectOverlap_SkipsBusySiteStartsIdleSite(t *testing.T) {
 	defer mu.Unlock()
 	if len(probed) != 1 || probed[0] != idleSrc.Id {
 		t.Fatalf("应只采集空闲站 [%s] 并跳过忙碌站 [%s]，实际=%v", idleSrc.Id, busySrc.Id, probed)
+	}
+}
+
+func TestRunTaskOnceWithStatus_AutoCollectOverlapStartsConcurrently(t *testing.T) {
+	setupAuditSpiderDB(t)
+	prevAuto := autoCollectFn
+	const id = "manual_auto_overlap"
+	t.Cleanup(func() {
+		autoCollectFn = prevAuto
+		runningCronMu.Lock()
+		delete(runningCronCounts, id)
+		runningCronMu.Unlock()
+	})
+
+	if err := repository.SaveFilmTask(model.FilmCollectTask{
+		Id:    id,
+		Spec:  "0 0 * * * *",
+		Model: model.TaskModelAutoCollect,
+		Time:  24,
+		State: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	firstEntered := make(chan struct{})
+	firstRelease := make(chan struct{})
+	secondDone := make(chan struct{})
+	var calls atomic.Int32
+	autoCollectFn = func(string, int) error {
+		if calls.Add(1) == 1 {
+			close(firstEntered)
+			<-firstRelease
+			return nil
+		}
+		close(secondDone)
+		return nil
+	}
+
+	msg1, err := RunTaskOnceWithStatus(id)
+	if err != nil || msg1 != RunOnceStarted {
+		t.Fatalf("首次手动触发失败 msg=%q err=%v", msg1, err)
+	}
+	<-firstEntered
+
+	msg2, err := RunTaskOnceWithStatus(id)
+	if err != nil || msg2 != RunOnceStarted {
+		t.Fatalf("自动采集重叠手动触发应立即放行，实际 msg=%q err=%v", msg2, err)
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("第 2 次手动触发未并发进入执行")
+	}
+	if !IsCronTaskRunning(id) {
+		t.Fatal("第 1 次尚未结束时 IsCronTaskRunning 应为 true")
+	}
+
+	close(firstRelease)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && IsCronTaskRunning(id) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if IsCronTaskRunning(id) {
+		t.Fatal("两次均结束后 IsCronTaskRunning 应归 false")
 	}
 }

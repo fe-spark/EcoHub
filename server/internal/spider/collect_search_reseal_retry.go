@@ -64,19 +64,21 @@ func (q *searchResealQueue) retryAfterIdle() {
 	q.mu.Unlock()
 
 	filmsnapshot.RequestActiveFilmSearchIndexRebuild()
-	filmsnapshot.WithSearchRebuildScheduled(func(scheduled bool) {
-		q.mu.Lock()
-		defer q.mu.Unlock()
-		if !q.awaitDone {
-			return
-		}
-		if len(q.sealing) == 0 || q.running {
-			q.awaitDone = false
-			return
-		}
-		if !scheduled && !filmsnapshot.IsSearchIndexBuilding() {
-			q.awaitDone = false
-			q.scheduleIdleRebuildRetryLocked()
-		}
-	})
+	filmsnapshot.WithSearchRebuildScheduled(q.reconcileRetrySchedule)
+}
+
+func (q *searchResealQueue) reconcileRetrySchedule(scheduled bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.awaitDone {
+		return
+	}
+	if len(q.sealing) == 0 || q.running {
+		q.awaitDone = false
+		return
+	}
+	if !scheduled && !filmsnapshot.IsSearchIndexBuilding() {
+		q.awaitDone = false
+		q.scheduleIdleRebuildRetryLocked()
+	}
 }

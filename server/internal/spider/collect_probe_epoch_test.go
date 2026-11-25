@@ -167,3 +167,65 @@ func TestStopAllCancelsInflightProbeImmediately(t *testing.T) {
 		t.Fatal("batch dispatch did not finish after probe cancel")
 	}
 }
+
+// 旧批次失权退出 handleCollectWithStopVersion 时，绝不能抄走新重试的进度或写成失败。
+func TestDisplacedBatchDoesNotCopyRetrySnapshotOnEarlyExit(t *testing.T) {
+	resetSearchReseal()
+	resetStreamPublishBufferForTest()
+	prevHook := beforeRegisterCollectRunHook
+	t.Cleanup(func() {
+		beforeRegisterCollectRunHook = prevHook
+		resetStreamPublishBufferForTest()
+		resetSearchReseal()
+	})
+
+	gdb := setupAuditSpiderDB(t)
+	src := model.FilmSource{Id: "displaced-s1", Name: "被重开站", Uri: "http://127.0.0.1/disp", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.Category{Id: 10, Name: "电影"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 10}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	claim1, err := claimCollectSources([]model.FilmSource{src}, model.CollectTagBatchCollect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBatch := newCollectBatchContext(model.CollectTriggerManual, model.CollectTagBatchCollect, claim1.Sources, time.Now()).withClaim(claim1)
+	defer oldBatch.close()
+
+	beforeRegisterCollectRunHook = func(id string) {
+		if id != src.Id {
+			return
+		}
+		// 模拟旧批次停站并立刻由新重试接手且新重试已写高页数。
+		StopCollectSource(src.Id, "停旧开新")
+		retried, rErr := occupyAndMarkCollectSources([]model.FilmSource{src}, model.CollectTagSingleCollect)
+		if rErr != nil || len(retried) != 1 {
+			t.Fatalf("retry occupy failed: %v", rErr)
+		}
+		progress.SetPageTotal(src.Id, 99)
+		progress.Update(src.Id, func(p *model.CollectProgress) {
+			p.Status = progress.StatusRunning
+			p.Success = 12
+		})
+	}
+
+	ver := stopAllVersion.Load()
+	err = handleCollectWithStopVersion(src.Id, 24, &ver, oldBatch)
+	releaseCollectSourceIDs(src.Id)
+	if err == nil {
+		t.Fatal("失权旧批次应返回中止错误")
+	}
+
+	oldBatch.mu.Lock()
+	snap := oldBatch.sourceSnapshots[src.Id]
+	oldBatch.mu.Unlock()
+	if snap.Status != progress.StatusStopped || snap.PageTotal != 0 || snap.SuccessCnt != 0 || snap.Error != "" {
+		t.Fatalf("失权旧批次应保留纯停站状态且不得混入新重试页数，got=%+v", snap)
+	}
+}
