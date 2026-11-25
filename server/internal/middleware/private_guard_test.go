@@ -10,7 +10,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
+	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -166,7 +166,7 @@ func TestPrivateAccessGuard(t *testing.T) {
 		}
 
 		// 5. 携带 Redis 同步有效的合法 Token -> 200，且 user_id 为 uint 999
-		_ = repository.SaveUserToken(forgedToken, 999)
+		_ = user.SaveUserToken(forgedToken, 999)
 		w4 := httptest.NewRecorder()
 		req4, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
 		req4.Header.Set("Authorization", "Bearer "+forgedToken)
@@ -174,6 +174,6 @@ func TestPrivateAccessGuard(t *testing.T) {
 		if w4.Code != http.StatusOK {
 			t.Errorf("expected 200 for valid token in redis, got %d", w4.Code)
 		}
-		_ = repository.ClearUserToken(999)
+		_ = user.ClearUserToken(999)
 	}
 }

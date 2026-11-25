@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"server/internal/config"
+	"server/internal/httpx"
 	"server/internal/model/dto"
-	"server/internal/service"
+	"server/internal/repobase"
+	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -15,7 +17,7 @@ import (
 
 func clearAuthCookieIfPresent(c *gin.Context) {
 	if cookieToken, err := c.Cookie(config.AuthCookieName); err == nil && cookieToken != "" {
-		ClearAuthCookie(c)
+		httpx.ClearAuthCookie(c)
 	}
 }
 
@@ -23,7 +25,7 @@ func clearAuthCookieIfPresent(c *gin.Context) {
 // 当后台开启「私有化访问」时，前台业务接口必须携带有效登录态或有效的订阅密钥（X-Provide-Key / ?key=）
 func PrivateAccessGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		privateAccess, expectedKey, err := service.ManageSvc.AccessGuardConfig()
+		privateAccess, expectedKey, err := repobase.AccessGuardConfig()
 		if err != nil {
 			dto.Failed("站点配置读取失败", c)
 			c.Abort()
@@ -52,19 +54,19 @@ func PrivateAccessGuard() gin.HandlerFunc {
 		}
 
 		// 3. 检查 Web 端用户 Token
-		authToken := ReadAuthToken(c)
+		authToken := httpx.ReadAuthToken(c)
 
 		if authToken != "" {
 			uc, err := utils.ParseToken(authToken)
 			if err == nil && uc != nil && uc.UserID > 0 {
-				storedToken, tokenErr := service.UserSvc.StoredToken(uc.UserID)
+				storedToken, tokenErr := user.UserSvc.StoredToken(uc.UserID)
 				if tokenErr != nil {
 					dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
 					c.Abort()
 					return
 				}
 				if storedToken != "" && storedToken == authToken {
-					status, role, statusErr := service.UserSvc.AccountGate(uc.UserID)
+					status, role, statusErr := user.UserSvc.AccountGate(uc.UserID)
 					if statusErr != nil {
 						dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
 						c.Abort()
@@ -101,7 +103,7 @@ func PrivateAccessGuard() gin.HandlerFunc {
 // 3. 若配置了 ProvideKey，使用恒定时间校验 ?key= 或 Header X-Provide-Key
 func ProvideKeyGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		privateAccess, expectedKey, err := service.ManageSvc.AccessGuardConfig()
+		privateAccess, expectedKey, err := repobase.AccessGuardConfig()
 		if err != nil {
 			dto.Failed("站点配置读取失败", c)
 			c.Abort()

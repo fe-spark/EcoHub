@@ -116,15 +116,15 @@ type AccessConfig struct {
 // SiteConfigRecord 网站基础配置持久化 (MySQL单行表)
 type SiteConfigRecord struct {
 	gorm.Model
-	SiteName      string `gorm:"size:128"`
-	SiteURL       string `gorm:"size:512;column:site_url"` // 网站访问地址
-	Logo          string `gorm:"size:512"`
-	Keyword       string `gorm:"size:256"`
-	Describe      string `gorm:"size:512"`
-	State         bool
-	Hint          string `gorm:"size:512"`
-	PrivateAccess bool   `gorm:"default:false;column:private_access"`
-	ProvideKey    string `gorm:"size:64;column:provide_key"`
+	SiteName       string `gorm:"size:128"`
+	SiteURL        string `gorm:"size:512;column:site_url"` // 网站访问地址
+	Logo           string `gorm:"size:512"`
+	Keyword        string `gorm:"size:256"`
+	Describe       string `gorm:"size:512"`
+	State          bool
+	Hint           string `gorm:"size:512"`
+	PrivateAccess  bool   `gorm:"default:false;column:private_access"`
+	ProvideKey     string `gorm:"size:64;column:provide_key"`
 	DanmakuJSON    string `gorm:"type:text;column:danmaku_json"`     // DanmakuConfig JSON
 	TipJSON        string `gorm:"type:text;column:tip_json"`         // TipConfig JSON
 	NoticeJSON     string `gorm:"type:text;column:notice_json"`      // NoticeConfig JSON
@@ -152,4 +152,3 @@ type MappingRule struct {
 func (MappingRule) TableName() string {
 	return TableMappingRule
 }
-

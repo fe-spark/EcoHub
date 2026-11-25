@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/testutil"
 
 	"github.com/alicebob/miniredis/v2"

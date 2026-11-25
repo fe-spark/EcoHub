@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/film/writer"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/repository/film/writer"
 )
 
 // TestFuzzySearchScenarios 覆盖前台检索的模糊匹配、排序、空结果与只读模型边界。

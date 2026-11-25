@@ -1,0 +1,392 @@
+package collect
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"server/internal/collect/scheduler"
+	"server/internal/model"
+)
+
+var collectLifecycle = newCollectLifecycle()
+
+type collectLifecycleState struct {
+	mu            sync.Mutex
+	cond          *sync.Cond
+	activeSources map[string]struct{}
+	activeCount   int
+	publishing    int
+	draining      bool
+}
+
+func newCollectLifecycle() *collectLifecycleState {
+	state := &collectLifecycleState{
+		activeSources: make(map[string]struct{}),
+	}
+	state.cond = sync.NewCond(&state.mu)
+	return state
+}
+
+func (s *collectLifecycleState) beginSource(sourceID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return errors.New("采集站点不存在")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.draining {
+		return errCollectDuringMaintenance
+	}
+	if err := collectPauseErr(); err != nil {
+		return err
+	}
+	if _, ok := s.activeSources[sourceID]; ok {
+		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
+	}
+	s.activeSources[sourceID] = struct{}{}
+	s.activeCount++
+	return nil
+}
+
+func (s *collectLifecycleState) endSource(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishSourceLocked(sourceID)
+}
+
+func (s *collectLifecycleState) finishSourceLocked(sourceID string) {
+	if sourceID = strings.TrimSpace(sourceID); sourceID == "" {
+		return
+	}
+	if _, ok := s.activeSources[sourceID]; !ok {
+		return
+	}
+	delete(s.activeSources, sourceID)
+	if s.activeCount > 0 {
+		s.activeCount--
+	}
+	s.cond.Broadcast()
+}
+
+func (s *collectLifecycleState) waitIdleLocked() {
+	for s.activeCount > 0 {
+		s.cond.Wait()
+	}
+}
+
+// waitUntilIdle 等到没有站在抓页。正在封的那一批不在这里打断。
+func (s *collectLifecycleState) waitUntilIdle() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.waitIdleLocked()
+}
+
+// waitUntilIdleFor 最多等 d。到点仍有站在抓页时返回 false。
+func (s *collectLifecycleState) waitUntilIdleFor(d time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.activeCount == 0 {
+		return true
+	}
+	timer := time.AfterFunc(d, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+	deadline := time.Now().Add(d)
+	for s.activeCount > 0 {
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		s.cond.Wait()
+	}
+	return true
+}
+
+func (s *collectLifecycleState) activity() (active int, publishing int, sources []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sources = make([]string, 0, len(s.activeSources))
+	for id := range s.activeSources {
+		sources = append(sources, id)
+	}
+	sort.Strings(sources)
+	return s.activeCount, s.publishing, sources
+}
+
+func (s *collectLifecycleState) collecting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeCount > 0
+}
+
+func (s *collectLifecycleState) isBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeCount > 0 || s.publishing > 0
+}
+func (s *collectLifecycleState) isMaintenanceBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.draining
+}
+
+func (s *collectLifecycleState) beginPublish() {
+	s.mu.Lock()
+	s.publishing++
+	s.mu.Unlock()
+}
+
+func (s *collectLifecycleState) endPublish() {
+	s.mu.Lock()
+	if s.publishing > 0 {
+		s.publishing--
+	}
+	s.cond.Broadcast()
+	s.mu.Unlock()
+}
+
+func (s *collectLifecycleState) runExclusive(action func() error) error {
+	if err := s.beginDrain(30 * time.Second); err != nil {
+		return err
+	}
+	defer s.endDrain()
+
+	s.beginPublish()
+	defer s.endPublish()
+	publishMu.Lock()
+	defer publishMu.Unlock()
+
+	return action()
+}
+
+var (
+	errMaintenanceBusy          = errors.New("已有维护任务在执行")
+	errCollectDuringMaintenance = errors.New("维护中，已跳过")
+	errSearchIndexUpdating      = errors.New("检索索引正在更新，现在不能新开采集。正在进行的采集会继续跑完。")
+	errSearchSealPending        = errors.New("这一轮检索即将入库，现在不能新开采集。正在进行的采集会继续跑完。")
+	errDrainTimeout             = errors.New("等待采集空闲超时")
+)
+
+// maintenanceExitWait 停采集后等待在途写事务和本次运行退出的上限。
+// 沿用删除站点的退出上限。到点仍未退出则维护失败，不开始清理。
+var maintenanceExitWait = deleteStopTimeout
+
+// beginMaintenance 立刻占用闸门并拒绝新采集。闸门已被占用时直接返回，不等待。
+func (s *collectLifecycleState) beginMaintenance() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.draining {
+		return errMaintenanceBusy
+	}
+	s.draining = true
+	return nil
+}
+
+// maintenanceGateWait 维护开工时闸门被其他独占操作（如采集站接口探测）占用的最长等待。
+// 维护之间已由串行队列排好顺序，这里只兜底短暂的独占操作。
+var maintenanceGateWait = 10 * time.Minute
+
+// beginMaintenanceWait 占用闸门；被占用时每 200ms 重试，超时返回 errMaintenanceBusy。
+func (s *collectLifecycleState) beginMaintenanceWait(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := s.beginMaintenance()
+		if err == nil || !errors.Is(err, errMaintenanceBusy) {
+			return err
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("等待维护闸门空闲超过 %s: %w", timeout, errMaintenanceBusy)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// runMaintenance 占用闸门、停止在途采集，等已开始的写事务、运行和这批收尾发布退出后独占执行。
+// 闸门被其他独占操作占用时最多等 maintenanceGateWait，超时返回 errMaintenanceBusy；维护之间的先后由串行队列保证。
+func (s *collectLifecycleState) runMaintenance(reason string, action func() error) error {
+	if err := s.beginMaintenanceWait(maintenanceGateWait); err != nil {
+		return err
+	}
+	defer s.endDrain()
+
+	StopAllCollect(reason)
+	if err := s.waitStoppedCollect(time.Now().Add(maintenanceExitWait)); err != nil {
+		return err
+	}
+
+	s.beginPublish()
+	defer s.endPublish()
+	publishMu.Lock()
+	defer publishMu.Unlock()
+	return action()
+}
+
+// waitStoppedCollect 等待停止后的写事务、站点运行和批次收尾发布退出。
+func (s *collectLifecycleState) waitStoppedCollect(deadline time.Time) error {
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := scheduler.WaitPendingWrites(ctx); err != nil {
+			return fmt.Errorf("等待在途写入结束失败: %w", err)
+		}
+		s.mu.Lock()
+		idle := s.activeCount == 0 && s.publishing == 0
+		s.mu.Unlock()
+		if idle && activeBatchCount() == 0 && SearchWorkBusyReason() == "" {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			s.mu.Lock()
+			activeCount := s.activeCount
+			publishing := s.publishing
+			s.mu.Unlock()
+			return fmt.Errorf("等待在途写入结束失败: active=%d publishing=%d batches=%d search=%q", activeCount, publishing, activeBatchCount(), SearchWorkBusyReason())
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待在途写入结束失败: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *collectLifecycleState) beginDrain(timeout time.Duration) error {
+	s.mu.Lock()
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+
+	for s.draining {
+		if !time.Now().Before(deadline) {
+			s.mu.Unlock()
+			return fmt.Errorf("%w: 维护闸门仍被占用", errDrainTimeout)
+		}
+		s.cond.Wait()
+	}
+	s.draining = true
+
+	for s.activeCount > 0 || s.publishing > 0 {
+		if !time.Now().Before(deadline) {
+			s.draining = false
+			s.cond.Broadcast()
+			s.mu.Unlock()
+			return fmt.Errorf("%w: active=%d publishing=%d", errDrainTimeout, s.activeCount, s.publishing)
+		}
+		s.cond.Wait()
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *collectLifecycleState) endDrain() {
+	s.mu.Lock()
+	s.draining = false
+	s.cond.Broadcast()
+	s.mu.Unlock()
+}
+
+// waitSource 等到该站离开采集生命周期。超时表示这次运行还没退出。
+func (s *collectLifecycleState) waitSource(sourceID string, timeout time.Duration) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.activeSources[sourceID]; !ok {
+		return nil
+	}
+	if timeout <= 0 {
+		return errors.New("停止采集超时，未删除")
+	}
+
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+
+	for {
+		if _, ok := s.activeSources[sourceID]; !ok {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return errors.New("停止采集超时，未删除")
+		}
+		s.cond.Wait()
+	}
+}
+
+func (s *collectLifecycleState) waitIdle(timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond * 200)
+	defer ticker.Stop()
+
+	for {
+		s.mu.Lock()
+		activeCount := s.activeCount
+		s.mu.Unlock()
+		if activeCount == 0 {
+			return nil
+		}
+
+		select {
+		case <-deadline.C:
+			return fmt.Errorf("等待采集任务停止超时: active=%d", activeCount)
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *collectLifecycleState) waitNotBusy(timeout time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.activeCount == 0 && s.publishing == 0 {
+		return nil
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
+	}
+
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+
+	for s.activeCount > 0 || s.publishing > 0 {
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
+		}
+		s.cond.Wait()
+	}
+	return nil
+}
+
+func shouldSkipCollectPublishOnError(source model.FilmSource, h int) bool {
+	return false
+}

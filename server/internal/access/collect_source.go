@@ -9,7 +9,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository"
+	"server/internal/sourcecatalog"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -17,17 +17,17 @@ import (
 // 采集站归属在请求写入前决定。页面埋点的 source 是客户端类型，不能当作采集站。
 var (
 	lookupActiveCollectSourceID = func() string {
-		active := repository.CurrentPrimarySource()
+		active := sourcecatalog.CurrentPrimarySource()
 		if active == nil {
 			return ""
 		}
 		return strings.TrimSpace(active.Id)
 	}
 	lookupCollectSourceExists = func(id string) bool {
-		return repository.FindCollectSourceById(id) != nil
+		return sourcecatalog.FindCollectSourceById(id) != nil
 	}
 	listCollectSources = func() ([]model.FilmSource, error) {
-		return repository.GetCollectSourceList()
+		return sourcecatalog.GetCollectSourceListDB(db.Mdb)
 	}
 )
 

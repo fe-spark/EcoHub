@@ -9,24 +9,28 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/bootstrap"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/router"
-	"server/internal/service"
+	"server/internal/sourcecatalog"
+	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"server/internal/collectctl"
 )
+
 func init() {
 	gin.SetMode(gin.TestMode)
 }
 
 func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 	t.Helper()
+	bootstrap.Wire()
 	gdb := newTestDB(t)
 	_ = useRedis(t)
 
@@ -35,7 +39,7 @@ func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 	if err != nil {
 		t.Fatalf("生成管理员 Token 失败: %v", err)
 	}
-	if err := repository.SaveUserToken(adminToken, adminUserID); err != nil {
+	if err := user.SaveUserToken(adminToken, adminUserID); err != nil {
 		t.Fatalf("保存管理员 Token 失败: %v", err)
 	}
 	gdb.Create(&model.User{Model: gorm.Model{ID: adminUserID}, UserName: "admin", Role: model.UserRoleAdmin, Status: 0})
@@ -47,6 +51,7 @@ func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 		Uri:   "http://default.source.com/api.json",
 		State: true,
 	})
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
 
 	r := router.SetupRouter()
 	return r, adminToken, adminUserID
@@ -276,7 +281,7 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 			"state":   true,
 			"opt":     1,
 		}), "POST collect save add")
-		if !service.WaitAsyncWork(5 * time.Second) {
+		if !collectctl.WaitAsyncWork(5 * time.Second) {
 			t.Fatal("等待采集站初始分类同步超时")
 		}
 
@@ -297,7 +302,7 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/delete", token, map[string]any{
 			"ids": []string{srcID},
 		}), "POST collect delete batch")
-		if !service.WaitAsyncWork(5 * time.Second) {
+		if !collectctl.WaitAsyncWork(5 * time.Second) {
 			t.Fatal("等待采集站异步删除超时")
 		}
 
@@ -351,20 +356,27 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		}), "POST file delete batch")
 	})
 
-	// 8. 影视管理模块（/film/save 统一保存 + /film/delete 批量删除）
+	// 8. 影视管理模块（/film/save 统一保存 + /film/refresh + /film/delete 批量删除）
 	t.Run("FilmEndpoints", func(t *testing.T) {
 		w := doJSONRequest(r, http.MethodPost, "/api/manage/film/save", token, map[string]any{})
 		if w.Code != http.StatusOK || parseResp(t, w).Code == dto.SUCCESS {
 			t.Fatalf("POST /api/manage/film/save 空参数应校验失败: %s", w.Body.String())
 		}
 
-		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/film/delete", token, map[string]any{
-			"ids": []uint{888888},
-		}), "POST film delete batch")
+		if err := db.Mdb.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 9002, FirstSourceId: "src_default_main"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "集成测试可删影片"},
+		}).Error; err != nil {
+			t.Fatalf("初始化测试影片失败: %v", err)
+		}
 
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/film/refresh", token, map[string]any{
-			"ids": []int64{888888},
+			"ids": []int64{9002},
 		}), "POST film refresh batch")
+
+		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/film/delete", token, map[string]any{
+			"ids": []uint{9002},
+		}), "POST film delete batch")
 	})
 
 	// 9. 访问监控与前台基础端点

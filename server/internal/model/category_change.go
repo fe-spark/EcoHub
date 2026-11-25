@@ -20,11 +20,11 @@ type CategoryTreeChange struct {
 
 // CategorySyncResult 分类同步结果
 type CategorySyncResult struct {
-	NeedConfirm bool                 `json:"needConfirm"`
-	Id          string               `json:"id"`
-	Name        string               `json:"name"`
-	Changes     []CategoryTreeChange `json:"changes"`
-	DataCleared bool                 `json:"dataCleared,omitempty"`
-	Message     string               `json:"message,omitempty"`
+	NeedConfirm   bool                 `json:"needConfirm"`
+	Id            string               `json:"id"`
+	Name          string               `json:"name"`
+	Changes       []CategoryTreeChange `json:"changes"`
+	DataCleared   bool                 `json:"dataCleared,omitempty"`
+	Message       string               `json:"message,omitempty"`
 	SitePageTotal int                  `json:"sitePageTotal,omitempty"`
 }

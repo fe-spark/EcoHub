@@ -1,0 +1,525 @@
+package catalog
+
+import (
+	"fmt"
+	"testing"
+
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/repobase"
+	"server/internal/taxonomy"
+	"server/internal/testutil"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+func setupCategoryActiveTreeTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := testutil.MemDSN(t)
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	// 故意不创建 FilmListSnapshot 和 FilmIndex 表，证明请求路径绝对不依赖大表做 DISTINCT 查询
+	if err := gdb.AutoMigrate(
+		&model.Category{},
+		&model.CategoryMapping{},
+	); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	db.Mdb = gdb
+	return gdb
+}
+
+func TestLoadActiveCategoryIDsFromCurrentMappings_Fallback(t *testing.T) {
+	gdb := setupCategoryActiveTreeTestDB(t)
+
+	// 插入 mappings
+	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 10})
+	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 2, CategoryId: 20})
+	gdb.Create(&model.CategoryMapping{SourceId: "src2", SourceTypeId: 3, CategoryId: 0}) // 过滤 0
+
+	// 执行 loadActiveCategoryIDsFromCurrentMappings
+	// 期望直接从 category_mappings 查出 category_id > 0，不报错且不触发 snapshot 表 DISTINCT
+	activeMap := loadActiveCategoryIDsFromCurrentMappings()
+	if !activeMap[10] || !activeMap[20] {
+		t.Fatalf("expected category IDs 10 and 20 to be active, got: %+v", activeMap)
+	}
+	if activeMap[0] {
+		t.Fatalf("expected category ID 0 not to be active")
+	}
+	if len(activeMap) != 2 {
+		t.Fatalf("expected exactly 2 active categories, got %d", len(activeMap))
+	}
+}
+
+func TestIsValidActiveCategoryTree(t *testing.T) {
+	gdb := setupCategoryActiveTreeTestDB(t)
+
+	// 准备分类：根分类 1，子分类 10
+	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true})
+	gdb.Create(&model.Category{Id: 10, Pid: 1, Name: "动作片", Show: true})
+	taxonomy.RefreshCategoryCache()
+
+	// 1. 合法树：子节点 Pid 为 0 且属于根分类
+	validTree := model.CategoryTree{
+		Id: 0, Pid: -1, Name: "分类信息",
+		Children: []*model.CategoryTree{
+			{Id: 1, Pid: 0, Name: "电影"},
+		},
+	}
+	if !isValidActiveCategoryTree(validTree) {
+		t.Fatal("expected validTree to be valid")
+	}
+
+	// 2. 非法树：包含 nil 子节点
+	nilChildTree := model.CategoryTree{
+		Id: 0, Pid: -1, Name: "分类信息",
+		Children: []*model.CategoryTree{nil},
+	}
+	if isValidActiveCategoryTree(nilChildTree) {
+		t.Fatal("expected tree with nil child to be invalid")
+	}
+
+	// 3. 非法树：子节点 Pid != 0
+	nonZeroPidChildTree := model.CategoryTree{
+		Id: 0, Pid: -1, Name: "分类信息",
+		Children: []*model.CategoryTree{
+			{Id: 10, Pid: 1, Name: "动作片"},
+		},
+	}
+	if isValidActiveCategoryTree(nonZeroPidChildTree) {
+		t.Fatal("expected tree with child.Pid != 0 to be invalid")
+	}
+
+	// 4. 非法树：子节点的 Id 在分类体系中不是根分类 (例如 Id: 10)
+	notRootCategoryTree := model.CategoryTree{
+		Id: 0, Pid: -1, Name: "分类信息",
+		Children: []*model.CategoryTree{
+			{Id: 10, Pid: 0, Name: "假冒根分类"},
+		},
+	}
+	if isValidActiveCategoryTree(notRootCategoryTree) {
+		t.Fatal("expected tree with non-root category child to be invalid")
+	}
+}
+
+func TestRepository_RedisNilAndSQLiteDialect(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	defer func() {
+		db.Rdb = origRdb
+	}()
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// 1. GetActiveCategoryTree with db.Rdb == nil
+	tree, err := GetActiveCategoryTree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.Name != "分类信息" {
+		t.Fatalf("expected 分类信息, got %s", tree.Name)
+	}
+
+	// 2. clearProvideListCache with db.Rdb == nil
+	clearProvideListCache()
+
+	// 3. TouchRuleVersion & GetRuleVersion with db.Rdb == nil
+	taxonomy.TouchRuleVersion()
+	rv := taxonomy.GetRuleVersion()
+	if rv == "" {
+		t.Fatalf("expected non-empty rule version when Redis is nil")
+	}
+
+	// 4. SaveSiteBasic with db.Rdb == nil
+	cfg := model.BasicConfig{SiteName: "TestSite"}
+	if err := repobase.SaveSiteBasic(cfg); err != nil {
+		t.Fatalf("SaveSiteBasic failed with nil Redis: %v", err)
+	}
+	gotCfg, err := repobase.GetSiteBasic()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotCfg.SiteName != "TestSite" {
+		t.Fatalf("expected TestSite, got %s", gotCfg.SiteName)
+	}
+}
+
+func TestFilterShownCategoryIDs_DynamicHidden(t *testing.T) {
+	gdb := setupCategoryActiveTreeTestDB(t)
+
+	// 模拟分类管理：电影(1, 显示), 电视剧(2, 显示), 体育(4, 隐藏)
+	if err := gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", StableKey: "movie", Show: true}).Error; err != nil {
+		t.Fatalf("create cat 1: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 2, Pid: 0, Name: "电视剧", StableKey: "tv", Show: true}).Error; err != nil {
+		t.Fatalf("create cat 2: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 4, Pid: 0, Name: "体育", StableKey: "sports"}).Error; err != nil {
+		t.Fatalf("create cat 4: %v", err)
+	}
+	// 模拟在分类管理中将分类 4 设置为不显示
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 4).Update("show", false).Error; err != nil {
+		t.Fatalf("update cat 4 to show=false: %v", err)
+	}
+
+	shownIDs := GetShownRootCategoryIDs()
+	if len(shownIDs) != 2 || shownIDs[0] != 1 || shownIDs[1] != 2 {
+		t.Fatalf("expected shown IDs [1, 2], got %v", shownIDs)
+	}
+
+	// 哪怕之前选中的时候显示 [1, 2, 4]，后面分类 4 设置为不显示，依旧严格过滤出 [1, 2]
+	filtered := FilterShownCategoryIDs([]int64{1, 2, 4})
+	if len(filtered) != 2 || filtered[0] != 1 || filtered[1] != 2 {
+		t.Fatalf("expected filtered IDs [1, 2], got %v", filtered)
+	}
+
+	// 如果只选了被隐藏的分类 4，过滤后应为空
+	onlyHidden := FilterShownCategoryIDs([]int64{4})
+	if len(onlyHidden) != 0 {
+		t.Fatalf("expected empty slice for only hidden categories, got %v", onlyHidden)
+	}
+}
+
+func TestFilterShownCategoryIDs_AllHidden(t *testing.T) {
+	gdb := setupCategoryActiveTreeTestDB(t)
+
+	// 插入分类且全部置为隐藏 (Show=false)
+	gdb.Create(&model.Category{Id: 10, Pid: 0, Name: "分类A", StableKey: "a"})
+	gdb.Create(&model.Category{Id: 20, Pid: 0, Name: "分类B", StableKey: "b"})
+	if err := gdb.Model(&model.Category{}).Where("id IN ?", []int64{10, 20}).Update("show", false).Error; err != nil {
+		t.Fatalf("update to show=false: %v", err)
+	}
+
+	shownIDs := GetShownRootCategoryIDs()
+	if len(shownIDs) != 0 {
+		t.Fatalf("expected 0 shown IDs when all categories are hidden, got %v", shownIDs)
+	}
+
+	// 验证当全部分类都隐藏时，输入任何分类 ID 都必须严格被过滤为 0 个，绝不能短路放行
+	filtered := FilterShownCategoryIDs([]int64{10, 20})
+	if len(filtered) != 0 {
+		t.Fatalf("expected empty slice when all categories hidden, got %v", filtered)
+	}
+}
+
+func TestGetActiveCategoryTree_SourceScoped(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	defer func() {
+		db.Rdb = origRdb
+	}()
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}); err != nil {
+		t.Fatalf("migrate source category: %v", err)
+	}
+	rows := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 10, ParentSourceTypeId: 1, RawName: "动作片", Sort: 1, Depth: 1},
+		{SourceId: "src2", SourceTypeId: 2, ParentSourceTypeId: 0, RawName: "电视剧", Sort: 1, Depth: 0},
+		{SourceId: "src2", SourceTypeId: 20, ParentSourceTypeId: 2, RawName: "国产剧", Sort: 1, Depth: 1},
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+
+	tree1, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree1.Children) != 1 || tree1.Children[0].Id != 1 || tree1.Children[0].Name != "电影" {
+		t.Fatalf("expected src1 root type 1 电影, got: %+v", tree1.Children)
+	}
+	if len(tree1.Children[0].Children) != 1 || tree1.Children[0].Children[0].Id != 10 {
+		t.Fatalf("expected src1 child type 10, got: %+v", tree1.Children[0].Children)
+	}
+
+	tree2, err := GetActiveCategoryTree("src2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree2.Children) != 1 || tree2.Children[0].Id != 2 || tree2.Children[0].Name != "电视剧" {
+		t.Fatalf("expected src2 root type 2 电视剧, got: %+v", tree2.Children)
+	}
+	if len(tree2.Children[0].Children) != 1 || tree2.Children[0].Children[0].Id != 20 {
+		t.Fatalf("expected src2 child type 20, got: %+v", tree2.Children[0].Children)
+	}
+}
+
+func TestSourceTypeTree_UsesMappedShowFlag(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	defer func() {
+		db.Rdb = origRdb
+	}()
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}); err != nil {
+		t.Fatalf("migrate source category: %v", err)
+	}
+	categories := []model.Category{
+		{Id: 1, Pid: 0, Name: "电影", Show: true, StableKey: "source:src1:1"},
+		{Id: 17, Pid: 0, Name: "公告", Show: false, StableKey: "source:src1:17"},
+		{Id: 18, Pid: 0, Name: "头条", Show: false, StableKey: "source:src1:18"},
+	}
+	if err := gdb.Create(&categories).Error; err != nil {
+		t.Fatalf("create categories: %v", err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id IN ?", []int64{17, 18}).Update("show", false).Error; err != nil {
+		t.Fatalf("hide categories: %v", err)
+	}
+	mappings := []model.CategoryMapping{
+		{SourceId: "src1", SourceTypeId: 1, CategoryId: 1},
+		{SourceId: "src1", SourceTypeId: 17, CategoryId: 17},
+		{SourceId: "src1", SourceTypeId: 18, CategoryId: 18},
+	}
+	if err := gdb.Create(&mappings).Error; err != nil {
+		t.Fatalf("create mappings: %v", err)
+	}
+	rows := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 17, ParentSourceTypeId: 0, RawName: "公告", Sort: 2, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 18, ParentSourceTypeId: 0, RawName: "头条", Sort: 3, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 21, ParentSourceTypeId: 0, RawName: "纪录片", Sort: 4, Depth: 0},
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+
+	tree, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := map[int64]bool{}
+	for _, child := range tree.Children {
+		shown[child.Id] = child.Show
+	}
+	if shown[1] != true || shown[21] != true || len(tree.Children) != 2 {
+		t.Fatalf("visible roots = %+v, want 电影 and 纪录片", shown)
+	}
+	for _, id := range []int64{17, 18} {
+		if got := LookupRootSourceType("src1", id); got != nil {
+			t.Fatalf("hidden type %d lookup = %+v, want nil", id, got)
+		}
+		if ids := PublicSourceTypeIDs("src1", "pid", id); len(ids) != 0 {
+			t.Fatalf("hidden type %d pid = %v, want empty", id, ids)
+		}
+		if name := PublicSourceTypeName("src1", id); name != "" {
+			t.Fatalf("hidden type %d name = %q, want empty", id, name)
+		}
+	}
+}
+
+func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	prev := taxonomy.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() {
+		db.Rdb = origRdb
+		taxonomy.StoreMappingSnapshotForTest(prev)
+	})
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	categories := []model.Category{
+		{Id: 1, Pid: 0, Name: "电影", Show: true, StableKey: "source:src1:1"},
+		{Id: 17, Pid: 0, Name: "公告", Show: true, StableKey: "source:src1:17"},
+		{Id: 21, Pid: 0, Name: "纪录片", Show: true, StableKey: "source:src1:21"},
+		{Id: 30, Pid: 0, Name: "动画片", Show: true, StableKey: "source:src1:30"},
+	}
+	if err := gdb.Create(&categories).Error; err != nil {
+		t.Fatalf("create categories: %v", err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 17).Update("show", false).Error; err != nil {
+		t.Fatalf("hide 公告: %v", err)
+	}
+	mappings := []model.CategoryMapping{
+		{SourceId: "src1", SourceTypeId: 1, CategoryId: 1},
+		{SourceId: "src1", SourceTypeId: 17, CategoryId: 17},
+		{SourceId: "src1", SourceTypeId: 21, CategoryId: 21},
+		{SourceId: "src1", SourceTypeId: 30, CategoryId: 30},
+	}
+	if err := gdb.Create(&mappings).Error; err != nil {
+		t.Fatalf("create mappings: %v", err)
+	}
+	rows := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 11, ParentSourceTypeId: 1, RawName: "动作片", Sort: 1, Depth: 1},
+		{SourceId: "src1", SourceTypeId: 12, ParentSourceTypeId: 1, RawName: "喜剧片", Sort: 2, Depth: 1},
+		{SourceId: "src1", SourceTypeId: 13, ParentSourceTypeId: 1, RawName: "剧情", Sort: 3, Depth: 1},
+		{SourceId: "src1", SourceTypeId: 21, ParentSourceTypeId: 0, RawName: "纪录片", Sort: 2, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 30, ParentSourceTypeId: 0, RawName: "动画片", Sort: 3, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 17, ParentSourceTypeId: 0, RawName: "公告", Sort: 4, Depth: 0},
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+	rules := []model.MappingRule{
+		{SourceId: "src1", Group: "CategoryRoot", Raw: "片$", Target: "测试", MatchType: "regex"},
+		{SourceId: "src1", Group: "CategorySub", Raw: "片$", Target: "影片", MatchType: "regex"},
+	}
+	if err := gdb.Create(&rules).Error; err != nil {
+		t.Fatalf("create rules: %v", err)
+	}
+	taxonomy.ReloadMappingRules()
+
+	tree, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(tree.Children))
+	byName := map[string]*model.CategoryTree{}
+	for _, child := range tree.Children {
+		names = append(names, child.Name)
+		byName[child.Name] = child
+	}
+	testRoot := byName["测试"]
+	if len(names) != 2 || byName["电影"] == nil || testRoot == nil || testRoot.Id < syntheticRootTypeOffset || testRoot.Id == 21 {
+		t.Fatalf("public roots = %v, want 电影 and synthetic 测试", names)
+	}
+	movieChildren := make([]string, 0)
+	for _, child := range byName["电影"].Children {
+		movieChildren = append(movieChildren, child.Name)
+	}
+	if len(byName["电影"].Children) != 2 || byName["电影"].Children[0].Name != "影片" || byName["电影"].Children[0].Id != 11 || byName["电影"].Children[1].Name != "剧情" {
+		t.Fatalf("电影 children = %v, want 影片#11 and 剧情", movieChildren)
+	}
+	testChildren := make([]string, 0)
+	for _, child := range testRoot.Children {
+		testChildren = append(testChildren, fmt.Sprintf("%s#%d", child.Name, child.Id))
+	}
+	if len(testRoot.Children) != 1 || testRoot.Children[0].Name != "影片" || testRoot.Children[0].Id != 21 {
+		t.Fatalf("测试 children = %v, want二次合并后的 影片#21", testChildren)
+	}
+
+	merged := LookupRootSourceType("src1", 30)
+	if merged == nil || merged.Id != testRoot.Id || merged.Name != "测试" {
+		t.Fatalf("member 30 lookup = %+v, want 测试#%d", merged, testRoot.Id)
+	}
+	hidden := LookupRootSourceType("src1", 17)
+	if hidden != nil {
+		t.Fatalf("hidden 公告 lookup = %+v, want nil", hidden)
+	}
+	movieIDs := PublicSourceTypeIDs("src1", "pid", 1)
+	if len(movieIDs) != 4 || movieIDs[0] != 1 || movieIDs[1] != 11 || movieIDs[2] != 12 || movieIDs[3] != 13 {
+		t.Fatalf("电影 members = %v, want [1 11 12 13]", movieIDs)
+	}
+	rootIDs := PublicSourceTypeIDs("src1", "pid", testRoot.Id)
+	if len(rootIDs) != 2 || rootIDs[0] != 21 || rootIDs[1] != 30 {
+		t.Fatalf("测试 members = %v, want 21 and 30", rootIDs)
+	}
+	if ids := PublicSourceTypeIDs("src1", "pid", 17); len(ids) != 0 {
+		t.Fatalf("hidden members = %v, want empty", ids)
+	}
+	childIDs := PublicSourceTypeIDs("src1", "cid", 12)
+	if len(childIDs) != 2 || childIDs[0] != 11 || childIDs[1] != 12 {
+		t.Fatalf("影片 members = %v, want 11 and 12", childIDs)
+	}
+	if got := LookupRootSourceType("src1", 12); got != nil {
+		t.Fatalf("child 12 lookup = %+v, want nil", got)
+	}
+	promotedIDs := PublicSourceTypeIDs("src1", "cid", 30)
+	if len(promotedIDs) != 2 || promotedIDs[0] != 21 || promotedIDs[1] != 30 {
+		t.Fatalf("二次合并后 影片 cid(30) = %v, want [21 30]", promotedIDs)
+	}
+}
+
+func TestSourceTypeTree_PromotesRenamedRootsAsChildren(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	prev := taxonomy.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() {
+		db.Rdb = origRdb
+		taxonomy.StoreMappingSnapshotForTest(prev)
+	})
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	rows := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 5, ParentSourceTypeId: 0, RawName: "福利视频", Sort: 5, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 18, ParentSourceTypeId: 0, RawName: "网红主播", Sort: 7, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 37, ParentSourceTypeId: 0, RawName: "海外抖音", Sort: 12, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 51, ParentSourceTypeId: 5, RawName: "自拍", Sort: 1, Depth: 1},
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
+	if err := gdb.Create(&model.MappingRule{SourceId: "src1", Group: "CategoryRoot", Raw: "福利视频|海外抖音|网红主播", Target: "男人帮", MatchType: "regex"}).Error; err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+	taxonomy.ReloadMappingRules()
+
+	tree, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*model.CategoryTree{}
+	for _, child := range tree.Children {
+		byName[child.Name] = child
+	}
+	root := byName["男人帮"]
+	if root == nil || root.Id < syntheticRootTypeOffset || root.Id == 5 || byName["福利视频"] != nil || byName["网红主播"] != nil || byName["海外抖音"] != nil {
+		t.Fatalf("roots = %v, want synthetic 男人帮 as only merged root", rootNames(tree))
+	}
+	got := childNames(root)
+	if len(root.Children) != 4 || got[0] != "自拍#51" || got[1] != "福利视频#5" || got[2] != "网红主播#18" || got[3] != "海外抖音#37" {
+		t.Fatalf("男人帮 children = %v, want 自拍#51 福利视频#5 网红主播#18 海外抖音#37", got)
+	}
+
+	merged := LookupRootSourceType("src1", 18)
+	if merged == nil || merged.Id != root.Id || merged.Name != "男人帮" {
+		t.Fatalf("member 18 lookup = %+v, want 男人帮#%d", merged, root.Id)
+	}
+	nodes := PublicSourceChildNodes("src1", root.Id)
+	if len(nodes) != 4 || nodes[0].Name != "自拍" || nodes[1].Name != "福利视频" || nodes[2].Name != "网红主播" || nodes[3].Name != "海外抖音" {
+		t.Fatalf("filter children = %v", childNames(&model.CategoryTree{Children: nodes}))
+	}
+	pidIDs := PublicSourceTypeIDs("src1", "pid", root.Id)
+	if len(pidIDs) != 4 || pidIDs[0] != 5 || pidIDs[1] != 18 || pidIDs[2] != 37 || pidIDs[3] != 51 {
+		t.Fatalf("男人帮 pid members = %v, want [5 18 37 51]", pidIDs)
+	}
+	cidIDs := PublicSourceTypeIDs("src1", "cid", 18)
+	if len(cidIDs) != 1 || cidIDs[0] != 18 {
+		t.Fatalf("网红主播 cid = %v, want [18]", cidIDs)
+	}
+}
+
+func rootNames(tree model.CategoryTree) []string {
+	names := make([]string, 0, len(tree.Children))
+	for _, child := range tree.Children {
+		if child == nil {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s#%d", child.Name, child.Id))
+	}
+	return names
+}
+
+func childNames(node *model.CategoryTree) []string {
+	if node == nil {
+		return nil
+	}
+	names := make([]string, 0, len(node.Children))
+	for _, child := range node.Children {
+		if child == nil {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%s#%d", child.Name, child.Id))
+	}
+	return names
+}

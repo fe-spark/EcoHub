@@ -10,8 +10,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/testutil"
+	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/alicebob/miniredis/v2"
@@ -148,7 +148,7 @@ func TestAuthToken_SingleSignOn(t *testing.T) {
 
 	// 2. 设备 A 登录
 	tokenA, _ := utils.GenToken(10086, "admin", model.UserRoleAdmin)
-	_ = repository.SaveUserToken(tokenA, 10086)
+	_ = user.SaveUserToken(tokenA, 10086)
 
 	// 设备 A 访问 -> 200
 	w2 := httptest.NewRecorder()
@@ -161,7 +161,7 @@ func TestAuthToken_SingleSignOn(t *testing.T) {
 
 	// 3. 设备 B 登录，顶掉设备 A
 	tokenB, _ := utils.GenToken(10086, "admin", model.UserRoleAdmin)
-	_ = repository.SaveUserToken(tokenB, 10086)
+	_ = user.SaveUserToken(tokenB, 10086)
 
 	// 设备 A 再次访问 -> 401，提示其它设备登录
 	w3 := httptest.NewRecorder()
@@ -187,7 +187,7 @@ func TestAuthToken_SingleSignOn(t *testing.T) {
 	}
 
 	// 4. 清理登录态（注销/改密）
-	_ = repository.ClearUserToken(10086)
+	_ = user.ClearUserToken(10086)
 	w5 := httptest.NewRecorder()
 	req5, _ := http.NewRequest(http.MethodGet, "/api/manage/test", nil)
 	req5.Header.Set("Authorization", "Bearer "+tokenB)
@@ -214,7 +214,7 @@ func TestAuthToken_ReReadsRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.SaveUserToken(token, 10087); err != nil {
+	if err := user.SaveUserToken(token, 10087); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Mdb.Model(&model.User{}).Where("id = ?", 10087).Update("role", model.UserRoleNormal).Error; err != nil {
@@ -231,17 +231,5 @@ func TestAuthToken_ReReadsRole(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("demoted token should be forbidden, got %d body=%s", w.Code, w.Body.String())
-	}
-}
-
-func TestForwardedProto(t *testing.T) {
-	if got := forwardedProto("https, http"); got != "https" {
-		t.Fatalf("got %q", got)
-	}
-	if got := forwardedProto("http"); got != "http" {
-		t.Fatalf("got %q", got)
-	}
-	if got := forwardedProto("HTTPS"); got != "" {
-		t.Fatalf("got %q", got)
 	}
 }
