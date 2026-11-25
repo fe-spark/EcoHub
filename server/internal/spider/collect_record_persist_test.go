@@ -127,8 +127,8 @@ func TestPersistCollectRecord_StopAfterDoneStaysStopped(t *testing.T) {
 	if err != nil || len(list) != 1 {
 		t.Fatalf("query: %v len=%d", err, len(list))
 	}
-	if list[0].Status != model.CollectRecordStatusStopped {
-		t.Fatalf("expected stopped, got %s", list[0].Status)
+	if list[0].Status != model.CollectRecordStatusPartialStopped {
+		t.Fatalf("expected partial_stopped, got %s", list[0].Status)
 	}
 	if list[0].FailedSources != 0 || list[0].SuccessSources != 1 {
 		t.Fatalf("sources success=%d failed=%d", list[0].SuccessSources, list[0].FailedSources)

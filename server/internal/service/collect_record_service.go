@@ -30,7 +30,6 @@ func (s *CollectRecordService) GetHistoryList(q model.CollectRecordQuery) ([]mod
 	if err := attachSingleFilmNames(list); err != nil {
 		return nil, 0, err
 	}
-	attachLiveSourceStatus(list)
 	attachStoredLedgers(list)
 	return list, total, nil
 }
@@ -46,46 +45,6 @@ func attachStoredLedgers(list []model.CollectRecord) {
 			continue
 		}
 		list[i].Ledger = true
-	}
-}
-
-// attachLiveSourceStatus 进行中的记录用采集中心的实时状态盖住开跑时的「采集中」。
-// 只改这次响应，不写回数据库。结束后仍以账单明细为准。
-func attachLiveSourceStatus(list []model.CollectRecord) {
-	for i := range list {
-		if list[i].Status != model.CollectRecordStatusRunning || strings.TrimSpace(list[i].DetailJson) == "" {
-			continue
-		}
-		var details []model.CollectRecordSourceDetail
-		if err := json.Unmarshal([]byte(list[i].DetailJson), &details); err != nil {
-			continue
-		}
-		changed := false
-		for j := range details {
-			live, ok := spider.BatchSourceLiveDetail(list[i].BatchID, details[j].SourceID)
-			if !ok {
-				continue
-			}
-			if live.SourceName == "" {
-				live.SourceName = details[j].SourceName
-			}
-			if live.SourceID == "" {
-				live.SourceID = details[j].SourceID
-			}
-			if live.Hour == 0 {
-				live.Hour = details[j].Hour
-			}
-			details[j] = live
-			changed = true
-		}
-		if !changed {
-			continue
-		}
-		raw, err := json.Marshal(details)
-		if err != nil {
-			continue
-		}
-		list[i].DetailJson = string(raw)
 	}
 }
 
@@ -148,10 +107,6 @@ func attachSingleFilmNames(list []model.CollectRecord) error {
 	return nil
 }
 
-func (s *CollectRecordService) ListOpenIncidents(now time.Time) ([]model.SourceIncident, error) {
-	return repository.ListOpenSourceIncidents(now)
-}
-
 // GetBatchFilms 分页获取某采集批次的影片清单。
 func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) (model.CollectRecordFilmPage, error) {
 	return repository.QueryCollectRecordFilms(q)
@@ -180,7 +135,7 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 	}
 
 	// 单片更新没有时间窗口。按清单里的影片重放，不能走小时采集。
-	if rec.Trigger == model.CollectTriggerSingleUpdate {
+	if rec.Trigger == model.CollectTriggerSingleUpdate || rec.Tag == model.CollectTagSingleUpdate {
 		midsByBatch, err := repository.ListCollectRecordMids([]string{batchID})
 		if err != nil {
 			return model.CollectBatchResult{}, err

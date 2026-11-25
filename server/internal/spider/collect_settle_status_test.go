@@ -76,17 +76,22 @@ func TestBatchCollectStatus(t *testing.T) {
 		t.Fatalf("expected failed for zero success multi-source, got %s", s)
 	}
 
-	// 5. 用户停止：无失败但有停止
-	if s := model.CollectBatchStatus(1, 0, 0, 1, 0, 2, 10, 0); s != model.CollectRecordStatusStopped {
+	// 5. 全部站点被用户停止：无完成站点，无失败站点
+	if s := model.CollectBatchStatus(0, 0, 0, 2, 0, 2, 10, 0); s != model.CollectRecordStatusStopped {
 		t.Fatalf("expected stopped, got %s", s)
 	}
 
-	// 6. 用户停止但停止前已有失败页：仍是 stopped，不能被失败页翻成 partial
-	if s := model.CollectBatchStatus(1, 0, 0, 1, 0, 2, 10, 2); s != model.CollectRecordStatusStopped {
-		t.Fatalf("expected stopped even with failed pages before stop, got %s", s)
+	// 6. 部分停止：部分站点已完成，部分被停止，无失败站点
+	if s := model.CollectBatchStatus(1, 0, 0, 1, 0, 2, 10, 0); s != model.CollectRecordStatusPartialStopped {
+		t.Fatalf("expected partial_stopped, got %s", s)
 	}
 
-	// 7. 停止与失败站点并存：有成功产出，定为 partial
+	// 7. 部分停止但停止前已有失败页：仍是 partial_stopped，不能被失败页翻成 partial
+	if s := model.CollectBatchStatus(1, 0, 0, 1, 0, 2, 10, 2); s != model.CollectRecordStatusPartialStopped {
+		t.Fatalf("expected partial_stopped even with failed pages before stop, got %s", s)
+	}
+
+	// 8. 停止与失败站点并存：有成功产出，定为 partial
 	if s := model.CollectBatchStatus(1, 0, 1, 1, 0, 3, 10, 2); s != model.CollectRecordStatusPartial {
 		t.Fatalf("expected partial when stopped alongside a failed source, got %s", s)
 	}

@@ -1,16 +1,11 @@
 export type CollectRecordSourceStatus =
   | "success"
   | "done"
+  | "partial"
   | "failed"
   | "stopped"
   | "interrupted"
-  | "running"
-  | "partial"
-  | "starting"
-  | "waiting"
-  | "paused"
-  | "stopping"
-  | "sealing";
+  | "running";
 
 export interface CollectRecordSourceDetail {
   sourceId: string;
@@ -30,59 +25,53 @@ export type CollectHistoryStatus =
   | "running"
   | "success"
   | "partial"
+  | "partial_stopped"
   | "failed"
   | "stopped"
   | "interrupted";
 
 export type CollectTriggerType = "manual" | "cron" | "retry" | "single_update" | string;
 
-export interface SourceIncident {
-  sourceId: string;
-  sourceName: string;
-  consecutiveFailures: number;
-  latestFailedAt: string;
-  latestError?: string;
-  latestBatchId: string;
-  tripped: boolean;
+export function resolveBatchStatus(record: { status: string }): CollectHistoryStatus {
+  if (record.status === "done") return "success";
+  switch (record.status) {
+    case "running":
+    case "success":
+    case "partial":
+    case "partial_stopped":
+    case "failed":
+    case "stopped":
+    case "interrupted":
+      return record.status;
+    default:
+      return "success";
+  }
 }
 
-export function resolveBatchStatus(record: {
-  status: string;
-  pageSuccess?: number;
-  pageFailed?: number;
-  failedSources?: number;
-  successSources?: number;
-}): string {
-  if (record.status === "running" || record.status === "stopped" || record.status === "interrupted") {
-    return record.status;
-  }
-  const succ = record.pageSuccess ?? 0;
-  const fail = record.pageFailed ?? 0;
-  const failSrc = record.failedSources ?? 0;
-  const succSrc = record.successSources ?? 0;
-
-  if (fail > 0 || failSrc > 0) {
-    if (succ > 0 || succSrc > 0) return "partial";
-    return "failed";
-  }
-  return record.status || "success";
+export function isSingleFilmRecord(record: { trigger?: string; tag?: string }): boolean {
+  return record.trigger === "single_update" || record.tag === "single_update";
 }
 
-export function canRetryHistoryRecord(record: Pick<CollectHistoryRecord, "status" | "failedSources" | "trigger" | "hour" | "ledger"> & {
-  pageSuccess?: number;
-  pageFailed?: number;
-  successSources?: number;
-}) {
+export function canRetryHistoryRecord(
+  record: Pick<CollectHistoryRecord, "status" | "trigger" | "tag" | "hour" | "ledger">,
+) {
   if (record.status === "running") return false;
-  if (record.trigger === "single_update") return record.ledger === true;
+  if (isSingleFilmRecord(record)) return record.ledger === true;
   const resolved = resolveBatchStatus(record);
   return record.hour !== 0 && (resolved === "failed" || resolved === "partial");
 }
 
-export function canRetryHistorySource(record: Pick<CollectHistoryRecord, "status" | "trigger" | "hour" | "ledger">) {
+export function canRetryHistorySource(
+  record: Pick<CollectHistoryRecord, "status" | "trigger" | "tag" | "hour" | "ledger">,
+) {
   if (record.status === "running") return false;
-  if (record.trigger === "single_update") return record.ledger === true;
+  if (isSingleFilmRecord(record)) return record.ledger === true;
   return record.hour !== 0;
+}
+
+export interface CollectRecordFilm {
+  mid: number;
+  name: string;
 }
 
 export interface CollectHistoryRecord {
@@ -108,9 +97,4 @@ export interface CollectHistoryRecord {
   finishedAt?: string;
   errorMsg?: string;
   detailJson?: string;
-}
-
-export interface CollectRecordFilm {
-  mid: number;
-  name: string;
 }

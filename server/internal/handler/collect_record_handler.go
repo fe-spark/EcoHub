@@ -64,18 +64,6 @@ func (h *CollectRecordHandler) HistoryList(c *gin.Context) {
 	}, "获取采集历史记录成功", c)
 }
 
-func (h *CollectRecordHandler) HistoryIncidents(c *gin.Context) {
-	list, err := service.CollectRecordSvc.ListOpenIncidents(time.Now())
-	if err != nil {
-		dto.Failed("获取异常站点失败: "+err.Error(), c)
-		return
-	}
-	if list == nil {
-		list = []model.SourceIncident{}
-	}
-	dto.Success(gin.H{"list": list}, "获取异常站点成功", c)
-}
-
 // HistoryFilms 分页获取某批次某站点入库/更新的全部影片清单
 func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 	batchID := strings.TrimSpace(c.Query("batchId"))

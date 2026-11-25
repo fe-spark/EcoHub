@@ -5,12 +5,13 @@ import (
 )
 
 const (
-	CollectRecordStatusRunning     = "running"
-	CollectRecordStatusSuccess     = "success"
-	CollectRecordStatusPartial     = "partial"
-	CollectRecordStatusFailed      = "failed"
-	CollectRecordStatusStopped     = "stopped"
-	CollectRecordStatusInterrupted = "interrupted"
+	CollectRecordStatusRunning        = "running"
+	CollectRecordStatusSuccess        = "success"
+	CollectRecordStatusPartial        = "partial"
+	CollectRecordStatusPartialStopped = "partial_stopped"
+	CollectRecordStatusFailed         = "failed"
+	CollectRecordStatusStopped        = "stopped"
+	CollectRecordStatusInterrupted    = "interrupted"
 )
 
 // CollectBatchStatus 由各站终态和页数得到批次状态。有站点异常中断时，整批就是中断。
@@ -22,6 +23,9 @@ func CollectBatchStatus(done, partial, failed, stopped, interrupted, total, succ
 		return CollectRecordStatusSuccess
 	}
 	if failed == 0 && partial == 0 && stopped > 0 {
+		if done > 0 {
+			return CollectRecordStatusPartialStopped
+		}
 		return CollectRecordStatusStopped
 	}
 	if failPages > 0 || failed > 0 || partial > 0 {

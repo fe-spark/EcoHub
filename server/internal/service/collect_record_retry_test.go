@@ -178,6 +178,42 @@ func TestRetryBatchFailedSources_SingleFilmWithoutIDs(t *testing.T) {
 	}
 }
 
+func TestRetryBatchFailedSources_ReplaysSingleFilmByTag(t *testing.T) {
+	setupRetryRecordDB(t)
+	if err := repository.CreateCollectRecord(&model.CollectRecord{
+		BatchID:    "film-tag-only",
+		Trigger:    model.CollectTriggerManual,
+		Tag:        model.CollectTagSingleUpdate,
+		Hour:       0,
+		Ledger:     true,
+		Status:     model.CollectRecordStatusFailed,
+		StartedAt:  time.Now(),
+		DetailJson: `[{"sourceId":"s1","status":"failed"}]`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.BatchSaveCollectRecordFilms("film-tag-only", map[string][]int64{"s1": {99}}); err != nil {
+		t.Fatal(err)
+	}
+
+	called := make(chan []int64, 1)
+	prev := replayCollectFilms
+	replayCollectFilms = func(ids []int64) { called <- append([]int64(nil), ids...) }
+	t.Cleanup(func() { replayCollectFilms = prev })
+
+	if _, err := CollectRecordSvc.RetryBatchFailedSources(model.CollectRecordRetryReq{BatchID: "film-tag-only"}); err != nil {
+		t.Fatalf("expected tag-based single film replay to succeed, got %v", err)
+	}
+	select {
+	case ids := <-called:
+		if len(ids) != 1 || ids[0] != 99 {
+			t.Fatalf("replay ids = %v", ids)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("single-film replay was not started")
+	}
+}
+
 func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 	setupRetryRecordDB(t)
 
