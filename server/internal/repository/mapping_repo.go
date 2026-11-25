@@ -197,6 +197,11 @@ func ListMappingRuleGroups() []string {
 	return groups
 }
 
+// IsDuplicateKeyError 判断是否为数据库唯一键冲突。
+func IsDuplicateKeyError(err error) bool {
+	return isDuplicateKeyErr(err)
+}
+
 func GetMappingRuleByID(id uint) (*model.MappingRule, error) {
 	if id == 0 {
 		return nil, nil
@@ -206,6 +211,18 @@ func GetMappingRuleByID(id uint) (*model.MappingRule, error) {
 		return nil, err
 	}
 	return &rule, nil
+}
+
+// GetMappingRulesByIDs 按 ID 列表读取多条映射规则。
+func GetMappingRulesByIDs(ids []uint) ([]model.MappingRule, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rules []model.MappingRule
+	if err := db.Mdb.Where("id IN ?", ids).Find(&rules).Error; err != nil {
+		return nil, err
+	}
+	return rules, nil
 }
 
 func IsCategoryMappingGroup(group string) bool {
@@ -253,7 +270,15 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 }
 
 func DeleteMappingRule(id uint) error {
-	if err := db.Mdb.Unscoped().Delete(&model.MappingRule{}, id).Error; err != nil {
+	return DeleteMappingRules([]uint{id})
+}
+
+// DeleteMappingRules 批量硬删映射规则并单次更新版本与缓存。
+func DeleteMappingRules(ids []uint) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := db.Mdb.Unscoped().Where("id IN ?", ids).Delete(&model.MappingRule{}).Error; err != nil {
 		return err
 	}
 	TouchRuleVersion()

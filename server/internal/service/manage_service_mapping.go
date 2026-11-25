@@ -73,6 +73,9 @@ func (s *ManageService) CreateMappingRule(rule model.MappingRule) error {
 		return err
 	}
 	if err := repository.CreateMappingRule(&rule); err != nil {
+		if repository.IsDuplicateKeyError(err) {
+			return dtoError("同分组、同匹配方式、同原始值的规则已存在")
+		}
 		return err
 	}
 	return refreshProjectedReadModelAfterMappingRuleChange(rule.Group)
@@ -94,6 +97,9 @@ func (s *ManageService) UpdateMappingRule(rule model.MappingRule) error {
 		return err
 	}
 	if err := repository.UpdateMappingRule(&rule); err != nil {
+		if repository.IsDuplicateKeyError(err) {
+			return dtoError("同分组、同匹配方式、同原始值的规则已存在")
+		}
 		return err
 	}
 	oldGroup := ""
@@ -104,20 +110,38 @@ func (s *ManageService) UpdateMappingRule(rule model.MappingRule) error {
 }
 
 func (s *ManageService) DeleteMappingRule(id uint) error {
-	if id == 0 {
+	return s.DeleteMappingRules([]uint{id})
+}
+
+// DeleteMappingRules 批量删除映射规则，统一在全部删除后刷新一次缓存与分类映射。
+func (s *ManageService) DeleteMappingRules(ids []uint) error {
+	cleanIDs := make([]uint, 0, len(ids))
+	seen := make(map[uint]struct{}, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanIDs = append(cleanIDs, id)
+	}
+	if len(cleanIDs) == 0 {
 		return dtoError("规则 ID 不能为空")
 	}
-	rule, err := repository.GetMappingRuleByID(id)
+	rules, err := repository.GetMappingRulesByIDs(cleanIDs)
 	if err != nil {
 		return err
 	}
-	if err := repository.DeleteMappingRule(id); err != nil {
+	if err := repository.DeleteMappingRules(cleanIDs); err != nil {
 		return err
 	}
-	if rule == nil {
-		return nil
+	groups := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		groups = append(groups, rule.Group)
 	}
-	return refreshProjectedReadModelAfterMappingRuleChange(rule.Group)
+	return refreshProjectedReadModelAfterMappingRuleChange(groups...)
 }
 
 // GetMappingRuleContext 获取指定采集站的原始分类及全部分类映射规则
@@ -170,6 +194,12 @@ func validateMappingRule(rule model.MappingRule) error {
 	}
 	if rule.MatchType != "exact" && rule.MatchType != "regex" {
 		return dtoError("不支持的匹配方式")
+	}
+	if rule.Group != "Filter" && rule.Target == "" {
+		return dtoError("目标值不能为空")
+	}
+	if !repository.IsCategoryMappingGroup(rule.Group) && rule.MatchType == "regex" {
+		return dtoError("当前分组仅支持精确匹配")
 	}
 	if repository.IsCategoryMappingGroup(rule.Group) && rule.SourceId == "" {
 		return dtoError("分类规则必须指定采集站")

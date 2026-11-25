@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useRef } from "react";
 import { Empty, Space, Switch, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -23,6 +23,8 @@ import { CSS } from "@dnd-kit/utilities";
 import type { FilmClassNode } from "./types";
 import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./index.module.less";
+
+const RowDragHandleContext = createContext<React.HTMLAttributes<HTMLElement>>({});
 
 interface CategoryTreeCardProps {
   classTree: FilmClassNode[];
@@ -54,15 +56,36 @@ function SortableTableRow(props: React.HTMLAttributes<HTMLTableRowElement> & { "
     ...(isDragging ? { position: "relative", zIndex: 1 } : {}),
   };
 
+  const handleProps = useMemo(
+    () => ({ ...attributes, ...listeners }),
+    [attributes, listeners],
+  );
+
   return (
-    <tr
-      {...props}
-      ref={setNodeRef}
-      style={style}
-      className={[props.className, isDragging ? styles.draggingRow : ""].filter(Boolean).join(" ")}
-      {...attributes}
-      {...listeners}
-    />
+    <RowDragHandleContext.Provider value={handleProps}>
+      <tr
+        {...props}
+        ref={setNodeRef}
+        style={style}
+        className={[props.className, isDragging ? styles.draggingRow : ""].filter(Boolean).join(" ")}
+      />
+    </RowDragHandleContext.Provider>
+  );
+}
+
+function DragHandleButton({ canDrag }: { canDrag: boolean }) {
+  const handleProps = useContext(RowDragHandleContext);
+  return (
+    <span
+      {...(canDrag ? handleProps : {})}
+      style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "4px 6px" }}
+    >
+      <HolderOutlined
+        className={styles.dragHandle}
+        title={canDrag ? "按住拖拽排序" : "不可拖拽"}
+        style={canDrag ? undefined : { opacity: 0.35, cursor: "not-allowed" }}
+      />
+    </span>
   );
 }
 
@@ -140,13 +163,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       key: "drag",
       width: 60,
       align: "center",
-      render: () => (
-        <HolderOutlined
-          className={styles.dragHandle}
-          title={canWrite ? "按住拖拽排序" : "访客仅可查看"}
-          style={canWrite ? undefined : { opacity: 0.35 }}
-        />
-      ),
+      render: () => <DragHandleButton canDrag={canWrite && !savingTree} />,
     },
     {
       title: "ID",

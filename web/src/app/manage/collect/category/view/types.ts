@@ -244,6 +244,7 @@ export function parseRuleList(resp: Record<string, any>, current: number, pageSi
       : Array.isArray(data.items)
         ? data.items
         : [];
+  const rawPaging = (data.paging || {}) as Record<string, unknown>;
   const totalsRaw = data.totals as Record<string, unknown> | undefined;
   const totals = totalsRaw
     ? {
@@ -255,9 +256,9 @@ export function parseRuleList(resp: Record<string, any>, current: number, pageSi
     rules: list.map((item: Record<string, unknown>) => normalizeRuleRecord(item)),
     totals,
     paging: {
-      current: Number(data.current ?? data.page ?? current),
-      pageSize: Number(data.pageSize ?? data.size ?? pageSize),
-      total: Number(data.total ?? list.length),
+      current: Number(rawPaging.current ?? data.current ?? data.page ?? current),
+      pageSize: Number(rawPaging.pageSize ?? data.pageSize ?? data.size ?? pageSize),
+      total: Number(rawPaging.total ?? data.total ?? list.length),
     } satisfies PagingState,
   };
 }

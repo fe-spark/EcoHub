@@ -436,11 +436,9 @@ func (h *ManageHandler) MappingRuleDelete(c *gin.Context) {
 		dto.Failed("缺少需要删除的规则标识", c)
 		return
 	}
-	for _, id := range cleanIds {
-		if err := service.ManageSvc.DeleteMappingRule(id); err != nil {
-			dto.Failed(fmt.Sprintf("映射规则删除失败: %v", err), c)
-			return
-		}
+	if err := service.ManageSvc.DeleteMappingRules(cleanIds); err != nil {
+		dto.Failed(fmt.Sprintf("映射规则删除失败: %v", err), c)
+		return
 	}
 	dto.SuccessOnlyMsg("映射规则删除成功", c)
 }

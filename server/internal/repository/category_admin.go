@@ -3,12 +3,15 @@ package repository
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 
 	"gorm.io/gorm"
 )
+
+var categoryOrderWriteMu sync.Mutex
 
 type categoryPlacement struct {
 	Id        int64
@@ -58,7 +61,7 @@ func expandSourceOrderPlacements(placements []categoryPlacement, oldMap map[int6
 		}
 		for _, id := range ids {
 			show := placement.Show
-			if id != placement.Id && placement.Show && repWasShown {
+			if id != placement.Id && placement.Show == repWasShown {
 				if prev, ok := oldMap[id]; ok {
 					show = prev.Show
 				}
@@ -150,6 +153,12 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 		return err
 	}
 
+	categoryOrderWriteMu.Lock()
+	defer categoryOrderWriteMu.Unlock()
+
+	expectedTree := GetSourceBoundCategoryTree(sourceID)
+	expectedIDs := collectTreeNodeAndMemberIDs(expectedTree.Children)
+
 	allowed := sourceMappedCategoryIDs(sourceID)
 	if len(allowed) == 0 {
 		return fmt.Errorf("该采集站还没有分类")
@@ -181,7 +190,14 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 		}
 		seen[placement.Id] = struct{}{}
 	}
-	for id := range allowed {
+	requiredIDs := expectedIDs
+	if len(requiredIDs) == 0 {
+		requiredIDs = allowed
+	}
+	for id := range requiredIDs {
+		if _, ok := allowed[id]; !ok {
+			continue
+		}
 		if _, ok := seen[id]; ok {
 			continue
 		}
@@ -194,6 +210,11 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 	}
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if tx.Migrator().HasTable(&model.FilmSource{}) {
+			if err := lockBannerSource(tx, sourceID); err != nil && err != ErrBannerSourceNotFound {
+				return err
+			}
+		}
 		for _, placement := range placements {
 			if err := tx.Model(&model.Category{}).
 				Where("id = ?", placement.Id).
@@ -208,6 +229,31 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 	}
 	MarkCategoryChanged()
 	return nil
+}
+
+func collectTreeNodeAndMemberIDs(nodes []*model.CategoryTree) map[int64]struct{} {
+	out := make(map[int64]struct{})
+	var walk func(list []*model.CategoryTree)
+	walk = func(list []*model.CategoryTree) {
+		for _, node := range list {
+			if node == nil {
+				continue
+			}
+			if node.Id > 0 {
+				out[node.Id] = struct{}{}
+			}
+			for _, id := range node.MemberIds {
+				if id > 0 {
+					out[id] = struct{}{}
+				}
+			}
+			if len(node.Children) > 0 {
+				walk(node.Children)
+			}
+		}
+	}
+	walk(nodes)
+	return out
 }
 
 func sourceMappedCategoryIDs(sourceID string) map[int64]struct{} {

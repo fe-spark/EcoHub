@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -85,8 +87,93 @@ func (s *FilmService) GetSearchOptions() (map[string]any, error) {
 	return options, nil
 }
 
+// GetStoredFilmDetail 后台编辑影片专用详情接口：绕过前台分类隐藏校验，直读片库正文、封面与全部播放线路。
+func (s *FilmService) GetStoredFilmDetail(id int) (model.MovieDetailVo, bool, error) {
+	if id <= 0 {
+		return model.MovieDetailVo{}, false, errors.New("影片信息无效")
+	}
+	row, err := filmrepo.FindFilmIndex(int64(id))
+	if err != nil || row.Mid <= 0 {
+		return model.MovieDetailVo{}, false, errors.New("暂无影片信息")
+	}
+	movieDetail, err := s.loadStoredMovieDetail(row)
+	if err != nil {
+		return model.MovieDetailVo{}, false, err
+	}
+	playList, downloadList, err := loadPlayAndDownloadSourcesByMid(row.Mid)
+	if err != nil {
+		return model.MovieDetailVo{}, false, err
+	}
+	movieDetail.DownloadList = downloadList
+	primaryID := ""
+	if primary := repository.CurrentPrimarySource(); primary != nil {
+		primaryID = primary.Id
+	}
+	isManualFilm := writer.IsManualSourceFilm(db.Mdb, row.Mid, primaryID, row.FirstSourceId)
+	movieDetail.SourceId = row.FirstSourceId
+	// 仅当前主站（或未配置主站）及自建影片可回传原始 SourceTypeId，避免跨站聚合影片把来源站 type_id 误当主站分类。
+	if primaryID == "" || strings.TrimSpace(row.FirstSourceId) == primaryID || isManualFilm {
+		if id := parseCategoryKeyTypeID(row.CategoryKey); id > 0 {
+			movieDetail.RawCid = id
+		}
+		if id := parseCategoryKeyTypeID(row.RootCategoryKey); id > 0 {
+			movieDetail.RawPid = id
+		}
+	}
+	res := model.MovieDetailVo{
+		MovieDetail:     movieDetail,
+		LocalUpdateTime: row.UpdateStamp,
+		UpdateReason:    strings.TrimSpace(row.UpdateReason),
+		List:            playList,
+	}
+	res.PlayList, res.PlayFrom = playGroupsFromPlayLinkVos(playList)
+	return WrapMovieDetailVo(res), isManualFilm, nil
+}
+
+func (s *FilmService) loadStoredMovieDetail(row model.FilmIndex) (model.MovieDetail, error) {
+	detail := model.MovieDetail{
+		Id:                 row.Mid,
+		Cid:                row.Cid,
+		Pid:                row.Pid,
+		Name:               row.Name,
+		Picture:            row.Picture,
+		PictureSlide:       row.PictureSlide,
+		CustomPicture:      row.CustomPicture,
+		CustomPictureSlide: row.CustomPictureSlide,
+		IsCustomPicture:    row.IsCustomPicture,
+		MovieDescriptor: model.MovieDescriptor{
+			SubTitle:    row.SubTitle,
+			CName:       row.CName,
+			ClassTag:    row.ClassTag,
+			Actor:       row.Actor,
+			Director:    row.Director,
+			Writer:      row.Writer,
+			Blurb:       row.Blurb,
+			Remarks:     row.Remarks,
+			ReleaseDate: row.ReleaseDate,
+			Area:        row.Area,
+			Language:    row.Language,
+			Initial:     row.Initial,
+			State:       row.State,
+			DbId:        row.DbId,
+			Hits:        row.Hits,
+			Content:     row.Content,
+		},
+	}
+	if row.Year > 0 {
+		detail.Year = fmt.Sprintf("%d", row.Year)
+	}
+	if row.Score > 0 {
+		detail.DbScore = fmt.Sprintf("%g", row.Score)
+	}
+	return detail, nil
+}
+
 // SaveFilmDetail 自定义上传保存影片信息
 func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
+	if fd.Cid >= repository.SyntheticRootTypeOffset {
+		return errors.New("不能直接选择合成主分类，请选择其下的子分类")
+	}
 	now := time.Now()
 	fd.UpdateTime = now.Format(time.DateTime)
 	fd.AddTime = fd.UpdateTime

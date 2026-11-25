@@ -536,6 +536,27 @@ func TestBannerUpdate_ChangeFilmResetsImages(t *testing.T) {
 	if item.Mid != 3 || !item.IsCustomPic || item.Picture != "http://new.jpg" {
 		t.Fatalf("submitted image should be kept: %+v", item)
 	}
+	// 换片时提交图片但未传 ImageMode，也应自动切为 custom 并保留新图。
+	item, err = BannerSvc.Update(item.Id, "", BannerFields{Mid: i64Ptr(1), Backdrop: strPtr("http://new-slide.jpg")})
+	if err != nil {
+		t.Fatalf("change film with backdrop only: %v", err)
+	}
+	if item.Mid != 1 || !item.IsCustomPic || item.PictureSlide != "http://new-slide.jpg" {
+		t.Fatalf("submitted backdrop without imageMode should switch to custom: %+v", item)
+	}
+	// custom 模式下图片全部为空应自动回退 follow，避免状态自相矛盾。
+	item, err = BannerSvc.Update(item.Id, "", BannerFields{ImageMode: strPtr("custom"), Poster: strPtr(""), Backdrop: strPtr("")})
+	if err != nil {
+		t.Fatalf("custom with empty images: %v", err)
+	}
+	if item.IsCustomPic || item.ImageMode != model.BannerImageFollow {
+		t.Fatalf("empty custom images should fall back to follow: %+v", item)
+	}
+	// PublishDeck 不允许传空切片清空全站轮播。
+	view, _ := BannerSvc.List("")
+	if _, err := BannerSvc.PublishDeck("", view.Revision, []BannerFields{}); !IsBannerUserError(err) {
+		t.Fatalf("empty deck publish should be rejected, got %v", err)
+	}
 }
 
 func TestBannerGenerate_PerCategoryLimit(t *testing.T) {
@@ -609,5 +630,96 @@ func TestBannerSearchFilmsAndCategories_BySource(t *testing.T) {
 	})
 	if err != nil || res.SourceId != "src2" || fmt.Sprint(bannerMidList(res.Items)) != "[2]" {
 		t.Fatalf("src2 generate mismatch: err=%v res=%+v", err, res)
+	}
+}
+
+// 兜底补位按精确展示分类 cid 与跨站同名分类筛选，不能按根 pid 把同根下的隐藏/成人子分类影片带出。
+func TestBannerGenerate_FallbackIgnoresDifferentSubcategoryUnderSameRoot(t *testing.T) {
+	prevSnap := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { support.StoreMappingSnapshotForTest(prevSnap) })
+
+	gdb := setupBannerSvcDB(t)
+	cats := []model.Category{
+		{Id: 100, Pid: 0, Name: "电影", StableKey: "s1-movie", Show: true, Sort: 1},
+		{Id: 101, Pid: 100, Name: "动作片", StableKey: "s1-action", Show: true, Sort: 1},
+		{Id: 102, Pid: 100, Name: "福利片", StableKey: "s1-adult", Show: false, Sort: 2},
+		{Id: 200, Pid: 0, Name: "影视库", StableKey: "s2-root", Show: true, Sort: 1},
+		{Id: 201, Pid: 200, Name: "动作片", StableKey: "s2-action", Show: true, Sort: 1},
+	}
+	if err := gdb.Create(&cats).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 102).Update("show", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	mappings := []model.CategoryMapping{
+		{SourceId: "src1", SourceTypeId: 1, CategoryId: 100},
+		{SourceId: "src1", SourceTypeId: 11, CategoryId: 101},
+		{SourceId: "src1", SourceTypeId: 12, CategoryId: 102},
+		{SourceId: "src2", SourceTypeId: 21, CategoryId: 201},
+	}
+	if err := gdb.Create(&mappings).Error; err != nil {
+		t.Fatal(err)
+	}
+	srcCats := []model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src1", SourceTypeId: 11, ParentSourceTypeId: 1, RawName: "动作片", Sort: 1, Depth: 1},
+		{SourceId: "src1", SourceTypeId: 12, ParentSourceTypeId: 1, RawName: "福利片", Sort: 2, Depth: 1},
+		{SourceId: "src2", SourceTypeId: 21, ParentSourceTypeId: 20, RawName: "动作片", Sort: 1, Depth: 1},
+	}
+	if err := gdb.Create(&srcCats).Error; err != nil {
+		t.Fatal(err)
+	}
+	support.RefreshCategoryCache()
+	repository.MarkCategoryChanged()
+	repository.ReloadMappingRules()
+	_ = repository.RefreshCollectSourceCatalog()
+
+	// mid=10：首采来自 src2 的「动作片」（pid=200, cid=201），但挂载了 src1 播放线路，应通过同名分类兜底命中。
+	aggFilm := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 10, FirstSourceId: "src2"},
+		FilmIndexCategory: model.FilmIndexCategory{
+			Pid: 200, Cid: 201, CName: "动作片",
+			RootCategoryKey: support.BuildSourceCategoryKey("src2", 20),
+			CategoryKey:     support.BuildSourceCategoryKey("src2", 21),
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name: "跨站动作片", Year: 2024, Score: 8.1, Hits: 500,
+			Picture: "http://img/10.jpg", UpdateStamp: 500,
+		},
+	}
+	// mid=20：同属 src1 根分类 pid=100 下的隐藏子类「福利片」(cid=102)，即便热度更高也不得混入「电影」轮播。
+	hiddenSubFilm := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 20, FirstSourceId: "src1"},
+		FilmIndexCategory: model.FilmIndexCategory{
+			Pid: 100, Cid: 102, CName: "福利片",
+			RootCategoryKey: support.BuildSourceCategoryKey("src1", 1),
+			CategoryKey:     support.BuildSourceCategoryKey("src1", 12),
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name: "隐藏子分类影片", Year: 2024, Score: 9.0, Hits: 9999,
+			Picture: "http://img/20.jpg", UpdateStamp: 9999,
+		},
+	}
+	if err := gdb.Create(&[]model.FilmIndex{aggFilm, hiddenSubFilm}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&[]model.FilmSourcePlaylist{
+		{Mid: 10, SourceId: "src1", LineKind: model.LineKindPlay, GroupIndex: 0, GroupName: "线路"},
+		{Mid: 20, SourceId: "src1", LineKind: model.LineKindPlay, GroupIndex: 0, GroupName: "线路"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := BannerSvc.Generate(context.Background(), BannerGenerateReq{
+		SourceId: "src1",
+		Strategy: "hot",
+		Quotas:   []BannerQuota{{CategoryID: 1, Count: 5}},
+	})
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	if fmt.Sprint(bannerMidList(res.Items)) != "[10]" {
+		t.Fatalf("expected only aggregated matching subcategory [10] and exclude hidden subcategory 20, got %v", bannerMidList(res.Items))
 	}
 }

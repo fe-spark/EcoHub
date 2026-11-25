@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Table, Pagination, Alert, Spin, Tag } from "antd";
 import { API_PRIMARY_MISMATCH, ApiGet, ApiPost } from "@/lib/client-api";
@@ -50,6 +50,13 @@ export default function FilmListPageView() {
   const [deleting, setDeleting] = useState(false);
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
   const [params, setParams] = useState<any>({
+    name: "",
+    pid: 0,
+    cid: 0,
+    beginTime: "",
+    endTime: "",
+  });
+  const submittedParamsRef = useRef<any>({
     name: "",
     pid: 0,
     cid: 0,
@@ -168,6 +175,7 @@ export default function FilmListPageView() {
         }
         setOptions(resp.data);
         setParams(nextParams);
+        submittedParamsRef.current = nextParams;
         await getFilmPage({ current: 1, pageSize: page.pageSize || 10, total: 0 }, nextParams);
       } finally {
         if (!cancelled) setCategoryLoading(false);
@@ -210,6 +218,7 @@ export default function FilmListPageView() {
       p.endTime = "";
     }
     setParams(p);
+    submittedParamsRef.current = p;
     const newPage = { ...page, current: 1 };
     setPage(newPage);
     void getFilmPage(newPage, p);
@@ -225,6 +234,7 @@ export default function FilmListPageView() {
       endTime: "",
     };
     setParams(emptyParams);
+    submittedParamsRef.current = emptyParams;
     setClassId(0);
     setDateRange(null);
     const newPage = { ...page, current: 1 };
@@ -385,12 +395,10 @@ export default function FilmListPageView() {
             onBatchUpdate={async () => {
               const ids = selectedRowKeys.map(Number);
               await handleUpdateFilms(ids);
-              setSelectedRowKeys([]);
             }}
             onBatchDelete={async () => {
               const ids = selectedRowKeys.map(Number);
               await handleDelFilms(ids);
-              setSelectedRowKeys([]);
             }}
             onAdd={() => {
               const targetCid = classId || params.cid || params.pid || undefined;
@@ -412,7 +420,7 @@ export default function FilmListPageView() {
               setSelectedRowKeys([]);
               const newPage = { ...page, current, pageSize };
               setPage(newPage);
-              getFilmPage(newPage);
+              void getFilmPage(newPage, submittedParamsRef.current);
             }}
           />
         }

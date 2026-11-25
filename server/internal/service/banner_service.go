@@ -180,8 +180,12 @@ func applyBannerFields(slot *model.BannerSlot, f BannerFields) error {
 		slot.BlurbOverride = ""
 		slot.ScoreOverride = 0
 		slot.YearOverride = 0
-		// 本次没提交图片时，旧影片的自定义海报和横图也不再适用，回到跟随片库。
-		if f.Poster == nil && f.Backdrop == nil {
+		hasSubmittedImage := (f.Poster != nil && strings.TrimSpace(*f.Poster) != "") ||
+			(f.Backdrop != nil && strings.TrimSpace(*f.Backdrop) != "")
+		if f.ImageMode == nil && hasSubmittedImage {
+			slot.ImageMode = model.BannerImageCustom
+		} else if f.Poster == nil && f.Backdrop == nil {
+			// 本次没提交图片时，旧影片的自定义海报和横图也不再适用，回到跟随片库。
 			slot.ImageMode = model.BannerImageFollow
 			slot.PosterOverride = ""
 			slot.BackdropOverride = ""
@@ -208,6 +212,10 @@ func applyBannerFields(slot *model.BannerSlot, f BannerFields) error {
 		}
 		if f.Backdrop != nil {
 			slot.BackdropOverride = strings.TrimSpace(*f.Backdrop)
+		}
+		// 若自定义模式下两张图都为空，回退到跟随片库，避免出现无图的自定义状态。
+		if slot.PosterOverride == "" && slot.BackdropOverride == "" {
+			slot.ImageMode = model.BannerImageFollow
 		}
 	}
 	if f.Blurb != nil {
@@ -315,6 +323,9 @@ func (s *BannerService) Reorder(sourceID, revision string, ids []string) (Banner
 
 // PublishDeck 发布一键排片的预览结果，整组替换指定采集站轮播。
 func (s *BannerService) PublishDeck(sourceID, revision string, items []BannerFields) (BannerListView, error) {
+	if len(items) == 0 {
+		return BannerListView{}, bannerInputErr("排片内容不能为空")
+	}
 	src, _, _, err := resolveBannerSource(sourceID, true)
 	if err != nil {
 		return BannerListView{}, err

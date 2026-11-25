@@ -75,3 +75,37 @@ func TestFilmSearchPage_IncludesIndexingState(t *testing.T) {
 		t.Fatalf("expected status=indexing, got %v", prog["status"])
 	}
 }
+
+func TestFilmHandler_FilmDetail_AllowsHiddenCategory(t *testing.T) {
+	gdb := setupCollectHandlerTestDB(t)
+	if err := gdb.Create(&model.Category{Id: 10, Pid: 0, Name: "隐藏大类", Show: false, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 501, FirstSourceId: "src1"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CName: "隐藏大类"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "隐藏分类影片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	c, w := testContext(http.MethodGet, "/api/manage/film/detail?id=501")
+	FilmHd.FilmDetail(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 body=%s", w.Code, w.Body.String())
+	}
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("code=%d want %d msg=%s", resp.Code, dto.SUCCESS, resp.Msg)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got %T", resp.Data)
+	}
+	detail, ok := data["detail"].(map[string]any)
+	if !ok || detail["name"] != "隐藏分类影片" {
+		t.Fatalf("unexpected detail=%v", data["detail"])
+	}
+	if isManual, ok := data["isManualFilm"].(bool); !ok || isManual {
+		t.Fatalf("expected collected film isManualFilm=false, got %v", data["isManualFilm"])
+	}
+}

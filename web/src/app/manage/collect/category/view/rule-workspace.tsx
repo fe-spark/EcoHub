@@ -63,18 +63,45 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   const [contextLoading, setContextLoading] = useState(false);
   const [ruleContexts, setRuleContexts] = useState<Record<string, CategoryRuleContextData>>({});
   const contextCacheRef = useRef<Record<string, CategoryRuleContextData>>({});
+  const rulesSeqRef = useRef(0);
+  const rulesAbortRef = useRef<AbortController | null>(null);
+  const keywordRef = useRef(keyword);
+  keywordRef.current = keyword;
+  const submittedKeywordRef = useRef("");
+  const sourceIdRef = useRef(sourceId);
+  sourceIdRef.current = sourceId;
+  const previousPrimaryIdRef = useRef(primaryId);
+  const editorVisibleRef = useRef(editorVisible);
+  editorVisibleRef.current = editorVisible;
 
   const fetchRules = useCallback(
     async (page: number, pageSize: number, nextKeyword: string, nextGroup: string, nextSourceId: string) => {
       if (!nextSourceId) {
+        rulesAbortRef.current?.abort();
+        rulesSeqRef.current += 1;
         setRules([]);
         setPaging({ current: 1, pageSize, total: 0 });
         onRuleTotalsChange({ [ROOT_GROUP]: 0, [SUB_GROUP]: 0 });
         return;
       }
+      rulesAbortRef.current?.abort();
+      const controller = new AbortController();
+      rulesAbortRef.current = controller;
+      const seq = ++rulesSeqRef.current;
+      submittedKeywordRef.current = nextKeyword;
       setRulesLoading(true);
       try {
-        const { resp, parsed } = await getCategoryRules(page, pageSize, nextKeyword, nextGroup, nextSourceId);
+        const { resp, parsed } = await getCategoryRules(
+          page,
+          pageSize,
+          nextKeyword,
+          nextGroup,
+          nextSourceId,
+          controller.signal,
+        );
+        if (controller.signal.aborted || seq !== rulesSeqRef.current) {
+          return;
+        }
         if (resp.code !== 0) {
           message.error(resp.msg || "分类规则加载失败");
           return;
@@ -84,8 +111,18 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         if (parsed.totals) {
           onRuleTotalsChange(parsed.totals);
         }
+      } catch (err: any) {
+        if (controller.signal.aborted || err?.name === "CanceledError" || err?.code === "ERR_CANCELED") {
+          return;
+        }
+        message.error("分类规则加载失败");
       } finally {
-        setRulesLoading(false);
+        if (rulesAbortRef.current === controller) {
+          rulesAbortRef.current = null;
+        }
+        if (seq === rulesSeqRef.current) {
+          setRulesLoading(false);
+        }
       }
     },
     [message, onRuleTotalsChange],
@@ -134,14 +171,37 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         message.error("采集站列表加载失败");
       }
     })();
+    return () => {
+      rulesAbortRef.current?.abort();
+    };
   }, [message]);
+
+  useEffect(() => {
+    const prevPrimary = previousPrimaryIdRef.current;
+    if (prevPrimary === primaryId) {
+      return;
+    }
+    previousPrimaryIdRef.current = primaryId;
+    if (!sourceIdRef.current || (prevPrimary && sourceIdRef.current === prevPrimary)) {
+      if (primaryId) {
+        if (editorVisibleRef.current) {
+          setEditorVisible(false);
+          setEditingRule(null);
+          ruleForm.resetFields();
+          message.warning("主站已变更，规则编辑已关闭");
+        }
+        invalidateRuleContext(prevPrimary);
+        setSourceId(primaryId);
+      }
+    }
+  }, [invalidateRuleContext, message, primaryId, ruleForm]);
 
   useEffect(() => {
     if (!sourceId) {
       return;
     }
-    void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId);
-  }, [fetchRules, keyword, paging.pageSize, ruleGroup, sourceId]);
+    void fetchRules(1, paging.pageSize, keywordRef.current, ruleGroup, sourceId);
+  }, [fetchRules, paging.pageSize, ruleGroup, sourceId]);
 
   const activeContext = sourceId ? ruleContexts[sourceId] : undefined;
 
@@ -162,6 +222,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
     return buildFinalCategoryPreview({
       rawCategories: activeContext?.rawCategories || [],
       savedRules: activeContext?.rules || [],
+      syntheticStates: activeContext?.syntheticStates,
       draft: {
         editingId: editingRule?.id,
         group: String(watchedGroup || ROOT_GROUP),
@@ -372,7 +433,13 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
               allowClear
               placeholder="搜索原始值、目标值或说明"
               value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
+              onChange={(event) => {
+                const nextVal = event.target.value;
+                setKeyword(nextVal);
+                if (!nextVal && submittedKeywordRef.current) {
+                  void fetchRules(1, paging.pageSize, "", ruleGroup, sourceId);
+                }
+              }}
               onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup, sourceId)}
               className={styles.searchInput}
             />
@@ -455,6 +522,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         open={editorVisible}
         loading={rulesSubmitting}
         contextLoading={contextLoading}
+        canWrite={canWrite}
         sourceName={currentSourceName}
         editingRule={editingRule}
         form={ruleForm}

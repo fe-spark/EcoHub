@@ -305,3 +305,75 @@ func TestGetSourceBoundCategoryTreeWithCounts_DeduplicatedSum(t *testing.T) {
 		t.Fatalf("child FilmCounts=%#v, want 10->12 11->8 12->3", gotChild)
 	}
 }
+
+func TestSaveSourceCategoryOrder_MissingMappingAndHiddenMembers(t *testing.T) {
+	prev := support.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { support.StoreMappingSnapshotForTest(prev) })
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	origRdb := db.Rdb
+	db.Rdb = nil
+	t.Cleanup(func() { db.Rdb = origRdb })
+
+	// src_a 有根分类(9)、两个成员分类(10 显示, 12 隐藏，规则合并到 10)、以及一个尚无 CategoryMapping 的孤立 SourceCategory(99)。
+	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "电影", StableKey: "a-movie", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 10, Pid: 9, Name: "动作片", StableKey: "a-action", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 12, Pid: 9, Name: "动作二", StableKey: "a-action2", Show: false, Sort: 2})
+	gdb.Model(&model.Category{}).Where("id = ?", 12).Update("show", false)
+	gdb.Create(&model.Category{Id: 11, Pid: 9, Name: "喜剧片", StableKey: "a-comedy", Show: true, Sort: 3})
+	gdb.Create(&[]model.CategoryMapping{
+		{SourceId: "src_a", SourceTypeId: 1, CategoryId: 9},
+		{SourceId: "src_a", SourceTypeId: 6, CategoryId: 10},
+		{SourceId: "src_a", SourceTypeId: 8, CategoryId: 12},
+		{SourceId: "src_a", SourceTypeId: 7, CategoryId: 11},
+	})
+	gdb.Create(&[]model.SourceCategory{
+		{SourceId: "src_a", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src_a", SourceTypeId: 6, ParentSourceTypeId: 1, RawName: "动作片", Sort: 1, Depth: 1},
+		{SourceId: "src_a", SourceTypeId: 8, ParentSourceTypeId: 1, RawName: "动作二", Sort: 2, Depth: 1},
+		{SourceId: "src_a", SourceTypeId: 7, ParentSourceTypeId: 1, RawName: "喜剧片", Sort: 3, Depth: 1},
+		{SourceId: "src_a", SourceTypeId: 99, ParentSourceTypeId: 1, RawName: "未映射分类", Sort: 4, Depth: 1},
+	})
+	// 缺少任意映射的空站点应返回错误
+	if err := SaveSourceCategoryOrder("src_missing", []*model.CategoryTree{}); err == nil {
+		t.Fatal("expected error when saving order for source without mappings")
+	}
+
+	// 保存合并组排序（代表节点 10 的 Show 保持为 true 未变），其中隐藏成员 12 必须保持 show=false。
+	nodes := []*model.CategoryTree{
+		{
+			Id:   9,
+			Name: "电影",
+			Show: true,
+			Children: []*model.CategoryTree{
+				{Id: 11, Name: "喜剧片", Show: true},
+				{Id: 10, Name: "动作片", Show: true, MemberIds: []int64{10, 12}},
+			},
+		},
+	}
+	if err := SaveSourceCategoryOrder("src_a", nodes); err != nil {
+		t.Fatalf("save with unmapped sibling & hidden merged member failed: %v", err)
+	}
+	var action, hiddenMember, comedy model.Category
+	gdb.First(&action, 10)
+	gdb.First(&hiddenMember, 12)
+	gdb.First(&comedy, 11)
+	if comedy.Sort != 1 || action.Sort != 2 || hiddenMember.Sort != 2 {
+		t.Fatalf("unexpected sorts: comedy=%d action=%d hidden=%d", comedy.Sort, action.Sort, hiddenMember.Sort)
+	}
+	if !action.Show || hiddenMember.Show {
+		t.Fatalf("hidden merged member should remain show=false when group show unchanged, action=%v hidden=%v", action.Show, hiddenMember.Show)
+	}
+	// 当主动将整个合并组 Show 切换为 false 时，组内成员才同步更新为 false；恢复 Show=true 时同理。
+	nodes[0].Children[1].Show = false
+	if err := SaveSourceCategoryOrder("src_a", nodes); err != nil {
+		t.Fatalf("toggle group show failed: %v", err)
+	}
+	gdb.First(&action, 10)
+	if action.Show {
+		t.Fatalf("expected action.Show toggled to false")
+	}
+}

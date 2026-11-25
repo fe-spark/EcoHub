@@ -427,6 +427,23 @@ func TestMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
 	if resp.Code != dto.SUCCESS {
 		t.Fatalf("expected MappingRuleDelete success, got code=%d msg=%s", resp.Code, resp.Msg)
 	}
+
+	// 5. 校验：非 Filter 分组不允许空 target；非分类分组不允许 regex；Filter 允许空 target
+	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"sourceId":"s1","raw":"电影","target":"","matchType":"exact","group":"CategoryRoot"}`)
+	h.MappingRuleSave(c)
+	if resp = decodeResponse(t, w); resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on empty target for CategoryRoot, got code=%d", resp.Code)
+	}
+	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"中国.*","target":"中国","matchType":"regex","group":"Area"}`)
+	h.MappingRuleSave(c)
+	if resp = decodeResponse(t, w); resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on regex for Area group, got code=%d", resp.Code)
+	}
+	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"忽略词","target":"","matchType":"exact","group":"Filter"}`)
+	h.MappingRuleSave(c)
+	if resp = decodeResponse(t, w); resp.Code != dto.SUCCESS {
+		t.Fatalf("expected SUCCESS on Filter rule with empty target, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
 }
 
 func TestMappingRule_ListCategoryAllIncludesRootAndSub(t *testing.T) {

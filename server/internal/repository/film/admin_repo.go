@@ -145,8 +145,28 @@ func FilmIDsBelongToSource(ids []int64, sourceID string) (bool, error) {
 		Find(&rows).Error; err != nil {
 		return false, err
 	}
+	needPlaylistCheck := make([]int64, 0)
 	for _, row := range rows {
 		if strings.TrimSpace(row.FirstSourceId) != sourceID {
+			needPlaylistCheck = append(needPlaylistCheck, row.Mid)
+		}
+	}
+	if len(needPlaylistCheck) == 0 {
+		return true, nil
+	}
+	var matchedMids []int64
+	if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+		Distinct("mid").
+		Where("mid IN ? AND source_id = ? AND line_kind = ?", needPlaylistCheck, sourceID, model.LineKindPlay).
+		Pluck("mid", &matchedMids).Error; err != nil {
+		return false, err
+	}
+	matched := make(map[int64]struct{}, len(matchedMids))
+	for _, mid := range matchedMids {
+		matched[mid] = struct{}{}
+	}
+	for _, mid := range needPlaylistCheck {
+		if _, ok := matched[mid]; !ok {
 			return false, nil
 		}
 	}

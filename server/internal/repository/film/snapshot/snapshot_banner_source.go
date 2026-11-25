@@ -25,7 +25,7 @@ type bannerRank struct {
 }
 
 // bannerCandidatesForSource 每个分类键按对应索引只取前 limit 部，再合并。
-// 不再对整站做一次排序。没有播放线路的影片在取前几部时就被跳过。
+// 若本站首采影片数量不足，再补充同一展示分类下挂载了本站线路的聚合影片。
 func bannerCandidatesForSource(ctx context.Context, strategy, sourceID string, categoryIDs []int64, limit int, exclude []int64) ([]model.FilmListSnapshot, error) {
 	keys := bannerSourceCategoryKeys(sourceID, categoryIDs)
 	if len(keys) == 0 {
@@ -44,7 +44,97 @@ func bannerCandidatesForSource(ctx context.Context, strategy, sourceID string, c
 		}
 		picked = append(picked, takeBannerRanks(strategy, more, limit-len(picked))...)
 	}
+	if len(picked) < limit {
+		localCids, err := bannerSourceLocalCategoryIDs(ctx, sourceID, categoryIDs)
+		if err != nil {
+			return nil, err
+		}
+		if len(localCids) > 0 {
+			skip := append(append([]int64{}, exclude...), bannerRankMids(picked)...)
+			more, err := scanBannerFallbackRanks(ctx, strategy, sourceID, localCids, limit-len(picked), skip, strategy == "score_random")
+			if err != nil {
+				return nil, err
+			}
+			picked = append(picked, takeBannerRanks(strategy, more, limit-len(picked))...)
+			if strategy == "score_random" && len(picked) < limit {
+				skip = append(append([]int64{}, exclude...), bannerRankMids(picked)...)
+				more, err = scanBannerFallbackRanks(ctx, strategy, sourceID, localCids, limit-len(picked), skip, false)
+				if err != nil {
+					return nil, err
+				}
+				picked = append(picked, takeBannerRanks(strategy, more, limit-len(picked))...)
+			}
+		}
+	}
 	return listSnapshotsByMIDs(db.Mdb.WithContext(ctx), bannerRankMids(picked))
+}
+
+// bannerSourceLocalCategoryIDs 收集目标展示分类在当前站的精确 cid 以及跨站同名分类 cid，
+// 避免放宽到根分类 pid 后把同根下的隐藏/成人子分类影片混入轮播。
+func bannerSourceLocalCategoryIDs(ctx context.Context, sourceID string, categoryIDs []int64) ([]int64, error) {
+	seenIDs := make(map[int64]struct{})
+	cids := make([]int64, 0, len(categoryIDs))
+	addID := func(id int64) {
+		if id <= 0 {
+			return
+		}
+		if _, ok := seenIDs[id]; ok {
+			return
+		}
+		seenIDs[id] = struct{}{}
+		cids = append(cids, id)
+	}
+	seenNames := make(map[string]struct{})
+	names := make([]string, 0, len(categoryIDs))
+	for _, id := range categoryIDs {
+		for _, typeID := range repository.PublicSourceTypeIDs(sourceID, "pid", id) {
+			addID(support.GetLocalCategoryId(sourceID, typeID))
+		}
+		for _, name := range repository.PublicSourceCategoryNames(sourceID, id) {
+			if _, ok := seenNames[name]; ok {
+				continue
+			}
+			seenNames[name] = struct{}{}
+			names = append(names, name)
+		}
+	}
+	if len(names) > 0 && db.Mdb != nil {
+		var matchedIDs []int64
+		if err := db.Mdb.WithContext(ctx).Model(&model.Category{}).
+			Where("name IN ?", names).
+			Pluck("id", &matchedIDs).Error; err != nil {
+			return nil, err
+		}
+		for _, id := range matchedIDs {
+			addID(id)
+		}
+	}
+	return cids, nil
+}
+
+func scanBannerFallbackRanks(ctx context.Context, strategy, sourceID string, cids []int64, limit int, exclude []int64, scoreMin bool) ([]bannerRank, error) {
+	if limit <= 0 || len(cids) == 0 {
+		return nil, nil
+	}
+	_, order := bannerStrategyPlan(strategy)
+	if strategy != "score_random" {
+		scoreMin = false
+	}
+	q := db.Mdb.WithContext(ctx).Table(model.TableFilmIndex).
+		Select("mid, hits, score, update_stamp").
+		Where("deleted_at IS NULL AND cid IN ?", cids).
+		Where("EXISTS (SELECT 1 FROM "+model.TableFilmSourcePlaylist+" AS p WHERE p.mid = "+model.TableFilmIndex+".mid AND p.source_id = ? AND p.line_kind = ?)", sourceID, model.LineKindPlay)
+	if scoreMin {
+		q = q.Where("score >= ?", 6.0)
+	}
+	if len(exclude) > 0 {
+		q = q.Where("mid NOT IN ?", exclude)
+	}
+	var ranks []bannerRank
+	if err := q.Order(order).Limit(limit).Scan(&ranks).Error; err != nil {
+		return nil, err
+	}
+	return ranks, nil
 }
 
 func bannerSourceCategoryKeys(sourceID string, categoryIDs []int64) []string {

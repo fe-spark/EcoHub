@@ -546,3 +546,121 @@ func TestFilmService_SaveFilmDetail_RejectsNonPrimaryMid(t *testing.T) {
 		t.Fatalf("non-primary film must remain untouched, got %+v", saved)
 	}
 }
+
+func TestFilmService_AggregatedPrimaryFilmAllowedAndManualLineClear(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
+		t.Fatal(err)
+	}
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "主站", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src2", Name: "副站", State: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true, Sort: 1})
+	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 1})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 501, FirstSourceId: "src2"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 1, CName: "电影", CategoryKey: "source:src2:99", RootCategoryKey: "source:src2:88"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "聚合影片"},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 501, SourceId: "src1", LineKind: model.LineKindPlay, GroupIndex: 0, GroupName: "主站线路",
+		Content: `[{"episode":"第1集","link":"https://example.com/1.m3u8"}]`,
+	})
+	_ = repository.RefreshCollectSourceCatalog()
+	support.ReloadMappingRules()
+
+	// 聚合影片（首采在 src2 但挂载了 src1 播放线路）在主站 src1 下应允许操作
+	if _, err := validatePrimaryFilmIDs([]int64{501}, "src1"); err != nil {
+		t.Fatalf("aggregated primary film should pass ownership check: %v", err)
+	}
+
+	srv := new(FilmService)
+	// 后台详情读取：跨站聚合影片不应回传非主站的 RawCid/RawPid，避免在主站分类树误匹配
+	aggDetail, aggManual, err := srv.GetStoredFilmDetail(501)
+	if err != nil {
+		t.Fatalf("get stored aggregated film detail failed: %v", err)
+	}
+	if aggManual || aggDetail.RawCid != 0 || aggDetail.RawPid != 0 {
+		t.Fatalf("expected non-primary aggregated film RawCid=0 RawPid=0 manual=false, got rawCid=%d rawPid=%d manual=%v", aggDetail.RawCid, aggDetail.RawPid, aggManual)
+	}
+
+	// 禁止直接选择合成一级分类 ID
+	if err := srv.SaveFilmDetail(model.FilmDetailVo{Name: "测试片", Cid: repository.SyntheticRootTypeOffset + 1, PlayLink: "https://example.com/a.m3u8"}); err == nil {
+		t.Fatalf("expected error when saving film with synthetic category id")
+	}
+
+	// 非自建采集影片：编辑时即使提交空播放地址 + manualLinesUpdate=true，也禁止覆盖/清空采集站线路
+	if err := gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: 9001, GlobalMid: 501}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.SaveFilmDetail(model.FilmDetailVo{
+		Id:                501,
+		SourceId:          "src1",
+		Name:              "聚合影片已更新",
+		Pid:               1,
+		Cid:               1,
+		CName:             "电影",
+		ManualLinesUpdate: true,
+		PlayLink:          "",
+	}); err != nil {
+		t.Fatalf("save aggregated film failed: %v", err)
+	}
+	var lineCount int64
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("mid = ? AND source_id = ?", 501, "src1").Count(&lineCount)
+	if lineCount != 1 {
+		t.Fatalf("expected collected src1 playlist protected, got %d", lineCount)
+	}
+
+	// 自建影片（含负数 source_mid 映射）：允许更新为有效播放线路，但禁止编辑时清空全部播放地址
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 502, FirstSourceId: "src1"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 1, CName: "电影", CategoryKey: "source:src1:1", RootCategoryKey: "source:src1:1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "自建影片"},
+	})
+	gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: -100502, GlobalMid: 502})
+	gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 502, SourceId: "src1", LineKind: model.LineKindPlay, GroupIndex: 0, GroupName: "自建线路",
+		Content: `[{"episode":"第1集","link":"https://example.com/manual.m3u8"}]`,
+	})
+	manualDetail, isManual, err := srv.GetStoredFilmDetail(502)
+	if err != nil {
+		t.Fatalf("get stored manual film detail failed: %v", err)
+	}
+	if !isManual || manualDetail.RawCid != 1 || manualDetail.RawPid != 1 {
+		t.Fatalf("expected manual film RawCid=1 RawPid=1 manual=true, got rawCid=%d rawPid=%d manual=%v", manualDetail.RawCid, manualDetail.RawPid, isManual)
+	}
+	if err := srv.SaveFilmDetail(model.FilmDetailVo{
+		Id:                502,
+		SourceId:          "src1",
+		Name:              "自建影片已更新",
+		Pid:               1,
+		Cid:               1,
+		CName:             "电影",
+		ManualLinesUpdate: true,
+		PlayLink:          "",
+	}); err == nil {
+		t.Fatalf("expected error when clearing all play links on manual film")
+	}
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("mid = ? AND source_id = ?", 502, "src1").Count(&lineCount)
+	if lineCount != 1 {
+		t.Fatalf("expected existing manual film playlist kept after rejected clear, got %d", lineCount)
+	}
+	if err := srv.SaveFilmDetail(model.FilmDetailVo{
+		Id:                502,
+		SourceId:          "src1",
+		Name:              "自建影片已更新",
+		Pid:               1,
+		Cid:               1,
+		CName:             "电影",
+		ManualLinesUpdate: true,
+		PlayLink:          "第1集$https://example.com/updated.m3u8",
+	}); err != nil {
+		t.Fatalf("save manual film with valid link failed: %v", err)
+	}
+	var updatedLine model.FilmSourcePlaylist
+	if err := gdb.Where("mid = ? AND source_id = ?", 502, "src1").First(&updatedLine).Error; err != nil {
+		t.Fatalf("reload manual playlist failed: %v", err)
+	}
+	if updatedLine.Content == `[{"episode":"第1集","link":"https://example.com/manual.m3u8"}]` || updatedLine.Content == "" {
+		t.Fatalf("expected manual playlist updated to new link, got %s", updatedLine.Content)
+	}
+}

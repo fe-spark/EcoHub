@@ -253,6 +253,47 @@ func PublicSourceTypeName(sourceID string, typeID int64) string {
 	return ""
 }
 
+// PublicSourceCategoryNames 返回当前站目标分类及其可见子类的展示名称列表。
+func PublicSourceCategoryNames(sourceID string, typeID int64) []string {
+	if typeID <= 0 {
+		return nil
+	}
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil || !view.publiclyVisible(typeID) {
+		return nil
+	}
+	group, ok := view.rootByMember(typeID)
+	if !ok {
+		if g, exists := view.groupByMember(typeID); exists {
+			group = g
+			ok = true
+		}
+	}
+	if !ok {
+		return nil
+	}
+	seen := make(map[string]struct{}, 1+len(group.Children))
+	out := make([]string, 0, 1+len(group.Children))
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, exists := seen[name]; exists {
+			return
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	add(group.Name)
+	for i := range group.Children {
+		if group.Children[i].Show {
+			add(group.Children[i].Name)
+		}
+	}
+	return out
+}
+
 // PublicSourceChildNodes 前台一级分类下的子类。已套规则，不含隐藏。
 func PublicSourceChildNodes(sourceID string, parentTypeID int64) []*model.CategoryTree {
 	view, err := loadPublicSourceTypes(sourceID)
@@ -519,7 +560,10 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 	return view, nil
 }
 
-const syntheticRootTypeOffset int64 = 100_000_000
+// SyntheticRootTypeOffset 规则合成一级分类的起始虚拟 ID 偏移量，避免与采集站真实 type_id 冲突。
+const SyntheticRootTypeOffset int64 = 100_000_000
+
+const syntheticRootTypeOffset = SyntheticRootTypeOffset
 
 func syntheticRootPrefix(sourceID string) string {
 	return "rule:root:" + strings.TrimSpace(sourceID) + ":"

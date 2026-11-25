@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Tag, Form, Input, Space, Tabs, Button, message } from "antd";
 import { PlayCircleOutlined, CopyOutlined } from "@ant-design/icons";
 import type { PlayLine } from "./types";
-import { formatEpisodesToPlayLink } from "./utils";
+import { formatEpisodesToPlayLink, isSourcePlayLine } from "./utils";
 import styles from "./index.module.less";
 
 const { TextArea } = Input;
@@ -12,17 +12,23 @@ const { TextArea } = Input;
 interface FilmPlaySectionProps {
   lines?: PlayLine[];
   filmId?: string | number | null;
+  editable?: boolean;
   ownerSourceId?: string;
   lineLinks?: Record<string, string>;
+  lineNames?: Record<string, string>;
   onLineLinkChange?: (lineKey: string, newLink: string) => void;
+  onLineNameChange?: (lineKey: string, newName: string) => void;
 }
 
 export default function FilmPlaySection({
   lines = [],
   filmId,
+  editable = false,
   ownerSourceId = "",
   lineLinks,
+  lineNames,
   onLineLinkChange,
+  onLineNameChange,
 }: FilmPlaySectionProps) {
   const form = Form.useFormInstance();
   const [activeLineKey, setActiveLineKey] = useState<string>("");
@@ -43,11 +49,7 @@ export default function FilmPlaySection({
     if (lines.length > 0) {
       const exists = lines.some((l) => (l.id || l.name) === activeLineKey);
       if (!exists) {
-        const ownerLine = lines.find(
-          (l) =>
-            ownerSourceId &&
-            (l.sourceId === ownerSourceId || l.id?.startsWith(ownerSourceId)),
-        );
+        const ownerLine = lines.find((l) => ownerSourceId && isSourcePlayLine(l, ownerSourceId));
         setActiveLineKey(
           ownerLine
             ? ownerLine.id || ownerLine.name || ""
@@ -68,11 +70,7 @@ export default function FilmPlaySection({
     (line?: PlayLine | null) => {
       if (!line) return false;
       if (!ownerSourceId) return true;
-      return (
-        line.sourceId === ownerSourceId ||
-        line.id === ownerSourceId ||
-        Boolean(line.id?.startsWith(ownerSourceId))
-      );
+      return isSourcePlayLine(line, ownerSourceId);
     },
     [ownerSourceId],
   );
@@ -80,6 +78,7 @@ export default function FilmPlaySection({
   const isOwnerLine = useMemo(() => {
     return isLineOwner(activeLine);
   }, [activeLine, isLineOwner]);
+  const canEditActiveLine = editable && (!filmId || isOwnerLine);
 
   const currentLineText = useMemo(() => {
     if (!activeLine) return "";
@@ -102,9 +101,11 @@ export default function FilmPlaySection({
         : internalLinks[k] !== undefined
         ? internalLinks[k]
         : formatEpisodesToPlayLink(activeLine.linkList || []);
+    const lineName =
+      lineNames?.[k] !== undefined ? lineNames[k] : activeLine.name || activeLine.id || "";
     form.setFieldsValue({
       playLink: lineText,
-      playForm: activeLine.name || activeLine.id || "",
+      playForm: lineName,
     });
   }, [activeLineKey, activeLine, form]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -198,9 +199,9 @@ export default function FilmPlaySection({
       <div className={styles.playLinkHeader}>
         <Space size={6}>
           <span>播放直链</span>
-          {!isOwnerLine && (
+          {!canEditActiveLine && (
             <Tag color="default" style={{ margin: 0, borderRadius: 4 }}>
-              聚合线路
+              {isOwnerLine ? "采集只读" : "聚合线路"}
             </Tag>
           )}
         </Space>
@@ -215,27 +216,45 @@ export default function FilmPlaySection({
         </Button>
       </div>
 
-      {isOwnerLine ? (
-        <Form.Item
-          key={activeLineKey}
-          name="playLink"
-          noStyle
-          rules={[{ required: !filmId, message: "请输入播放地址" }]}
-        >
-          <TextArea
-            rows={5}
-            placeholder="格式: 第01集$https://example.com/play/1.m3u8#第02集$https://example.com/play/2.m3u8"
-            className={styles.editableTextArea}
-            onChange={(e) => {
-              const val = e.target.value;
-              const k = activeLine?.id || activeLine?.name;
-              if (k) {
-                setInternalLinks((prev) => ({ ...prev, [k]: val }));
-                onLineLinkChange?.(k, val);
-              }
-            }}
-          />
-        </Form.Item>
+      {canEditActiveLine ? (
+        <>
+          <Form.Item
+            key={`${activeLineKey}-form`}
+            name="playForm"
+            style={{ marginBottom: 8 }}
+          >
+            <Input
+              size="small"
+              placeholder="线路名称（默认使用采集站名）"
+              onChange={(e) => {
+                const k = activeLine?.id || activeLine?.name;
+                if (k) {
+                  onLineNameChange?.(k, e.target.value);
+                }
+              }}
+            />
+          </Form.Item>
+          <Form.Item
+            key={activeLineKey}
+            name="playLink"
+            noStyle
+            rules={[{ required: !filmId, message: "请输入播放地址" }]}
+          >
+            <TextArea
+              rows={5}
+              placeholder="格式: 第01集$https://example.com/play/1.m3u8#第02集$https://example.com/play/2.m3u8"
+              className={styles.editableTextArea}
+              onChange={(e) => {
+                const val = e.target.value;
+                const k = activeLine?.id || activeLine?.name;
+                if (k) {
+                  setInternalLinks((prev) => ({ ...prev, [k]: val }));
+                  onLineLinkChange?.(k, val);
+                }
+              }}
+            />
+          </Form.Item>
+        </>
       ) : (
         <TextArea
           key={activeLineKey}

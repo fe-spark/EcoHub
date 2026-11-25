@@ -65,7 +65,7 @@ export function useFilmColumns({
         align: "center",
         render: (_, record) => (
           <Tag color="#8b40ff" style={{ borderRadius: 4 }}>
-            #{record.sourceMid || record.mid}
+            #{record.sourceMid && record.sourceMid > 0 ? record.sourceMid : record.mid}
           </Tag>
         ),
       },
@@ -123,10 +123,10 @@ export function useFilmColumns({
         align: "center",
         render: (_, record) => (
           <Tag
-            color={record.remarks.includes("更新") ? "warning" : "success"}
+            color={(record.remarks || "").includes("更新") ? "warning" : "success"}
             style={{ borderRadius: 6, padding: "2px 8px" }}
           >
-            {record.remarks}
+            {record.remarks || "-"}
           </Tag>
         ),
       },
@@ -136,7 +136,7 @@ export function useFilmColumns({
         align: "center",
         render: (v) => (
           <Text type="secondary" style={{ fontSize: 13 }}>
-            {dayjs(v * 1000).format("YYYY-MM-DD HH:mm:ss")}
+            {Number(v) > 0 ? dayjs(Number(v) * 1000).format("YYYY-MM-DD HH:mm:ss") : "-"}
           </Text>
         ),
       },

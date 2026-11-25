@@ -200,6 +200,7 @@ func SetupRouter() *gin.Engine {
 		// filmManage 影视管理
 		filmRoute := manageRoute.Group(`/film`)
 		{
+			filmRoute.GET(`/detail`, handler.FilmHd.FilmDetail)
 			filmRoute.POST(`/save`, handler.FilmHd.FilmSave)
 			filmRoute.POST(`/refresh`, handler.FilmHd.FilmRefresh)
 			filmRoute.GET(`/search/list`, handler.FilmHd.FilmSearchPage)

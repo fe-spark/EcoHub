@@ -102,6 +102,21 @@ func (h *FilmHandler) FilmSearchOptions(c *gin.Context) {
 	dto.Success(options, "影片检索筛选项获取成功", c)
 }
 
+// FilmDetail 后台编辑影片详情接口（不受前台分类隐藏状态拦截）
+func (h *FilmHandler) FilmDetail(c *gin.Context) {
+	id, err := strconv.Atoi(c.DefaultQuery("id", "0"))
+	if err != nil || id <= 0 {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	detail, isManualFilm, err := service.FilmSvc.GetStoredFilmDetail(id)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(gin.H{"detail": detail, "isManualFilm": isManualFilm}, "影片详情获取成功", c)
+}
+
 // FilmSave 保存影片信息（支持手动添加或编辑更新）
 func (h *FilmHandler) FilmSave(c *gin.Context) {
 	var fd = model.FilmDetailVo{}

@@ -228,10 +228,10 @@ func TestSaveDetail_ManualPlaylists_IsolatesSpiderLines(t *testing.T) {
 		t.Fatalf("create spider playlist: %v", err)
 	}
 
-	// 1. 修改采集站入库的影片的播放资源（支持编辑所属采集站的播放直链）
+	// 1. 采集站入库的非自建影片：仅更新基础档案（如片名），禁止覆盖采集站播放线路
 	attemptSpiderEdit := model.MovieDetail{
-		Id:              2001,
-		Name:            "采集入库影片-改名",
+		Id:   2001,
+		Name: "采集入库影片-改名",
 		PlayList: [][]model.MovieUrlInfo{
 			{{Episode: "01", Link: "http://spider.com/updated.m3u8"}},
 		},
@@ -241,13 +241,13 @@ func TestSaveDetail_ManualPlaylists_IsolatesSpiderLines(t *testing.T) {
 		t.Fatalf("SaveDetail failed: %v", err)
 	}
 
-	// 验证：所属采集站的播放线路成功更新为新直链
+	// 验证：采集站播放线路保持原状，未被后台修改覆盖
 	var checkSpider model.FilmSourcePlaylist
 	if err := gdb.Where("mid = ? AND source_id = ?", 2001, "spider_sn").First(&checkSpider).Error; err != nil {
 		t.Fatalf("spider line must exist: %v", err)
 	}
-	if checkSpider.EpisodeCount != 1 || !strings.Contains(checkSpider.Content, "http://spider.com/updated.m3u8") {
-		t.Fatalf("spider line content not updated! content=%s", checkSpider.Content)
+	if checkSpider.EpisodeCount != 1 || !strings.Contains(checkSpider.Content, "http://spider.com/1.m3u8") {
+		t.Fatalf("spider line content must remain protected! content=%s", checkSpider.Content)
 	}
 
 	// 2. 自己新增的影片 (FirstSourceId == "manual")：允许编辑自己新增的播放直链

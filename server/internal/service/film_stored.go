@@ -9,6 +9,21 @@ import (
 	filmrepo "server/internal/repository/film"
 )
 
+func parseCategoryKeyTypeID(key string) int64 {
+	if key == "" {
+		return 0
+	}
+	parts := strings.Split(key, ":")
+	if len(parts) < 3 {
+		return 0
+	}
+	id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
+}
+
 // UseStoredFilm 编辑页使用影片自己保存的正文和封面，不用前台海报源替换结果。
 func UseStoredFilm(detail *model.MovieDetailVo) error {
 	if detail == nil || detail.Id <= 0 {
@@ -21,20 +36,14 @@ func UseStoredFilm(detail *model.MovieDetailVo) error {
 	if detail.SourceId == "" && row.FirstSourceId != "" {
 		detail.SourceId = row.FirstSourceId
 	}
-	if detail.RawCid == 0 && row.CategoryKey != "" {
-		parts := strings.Split(row.CategoryKey, ":")
-		if len(parts) >= 3 {
-			if id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64); err == nil && id > 0 {
-				detail.RawCid = id
-			}
+	if detail.RawCid == 0 {
+		if id := parseCategoryKeyTypeID(row.CategoryKey); id > 0 {
+			detail.RawCid = id
 		}
 	}
-	if detail.RawPid == 0 && row.RootCategoryKey != "" {
-		parts := strings.Split(row.RootCategoryKey, ":")
-		if len(parts) >= 3 {
-			if id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64); err == nil && id > 0 {
-				detail.RawPid = id
-			}
+	if detail.RawPid == 0 {
+		if id := parseCategoryKeyTypeID(row.RootCategoryKey); id > 0 {
+			detail.RawPid = id
 		}
 	}
 	if row.CName != "" {

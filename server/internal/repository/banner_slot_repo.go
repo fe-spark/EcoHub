@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -14,6 +15,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var bannerWriteMu sync.Mutex
 
 // ErrBannerRevisionConflict 提交时带的版本号和该站当前轮播不一致。
 var ErrBannerRevisionConflict = errors.New("轮播已被修改，请刷新后再试")
@@ -150,6 +153,8 @@ func lockBannerSlot(tx *gorm.DB, id string) (model.BannerSlot, error) {
 
 // CreateBannerSlot 新增一行，排在该站末尾。
 func CreateBannerSlot(slot *model.BannerSlot) error {
+	bannerWriteMu.Lock()
+	defer bannerWriteMu.Unlock()
 	gdb, err := bannerDB()
 	if err != nil {
 		return err
@@ -187,6 +192,8 @@ func CreateBannerSlot(slot *model.BannerSlot) error {
 
 // UpdateBannerSlot 在事务里读出一行、交给 apply 合并字段，再整行保存。读-改-写在同一把站点锁里完成。
 func UpdateBannerSlot(id string, apply func(slot *model.BannerSlot) error) (model.BannerSlot, error) {
+	bannerWriteMu.Lock()
+	defer bannerWriteMu.Unlock()
 	gdb, err := bannerDB()
 	if err != nil {
 		return model.BannerSlot{}, err
@@ -228,6 +235,8 @@ func UpdateBannerSlot(id string, apply func(slot *model.BannerSlot) error) (mode
 
 // DeleteBannerSlot 删除一行。
 func DeleteBannerSlot(id string) error {
+	bannerWriteMu.Lock()
+	defer bannerWriteMu.Unlock()
 	gdb, err := bannerDB()
 	if err != nil {
 		return err
@@ -255,6 +264,8 @@ func DeleteBannerSlot(id string) error {
 
 // ReorderBannerSlots 按 ids 的顺序重排该站轮播。ids 必须正好是该站现有的全部行（含后台标成不可用的行）。
 func ReorderBannerSlots(sourceID, revision string, ids []string) error {
+	bannerWriteMu.Lock()
+	defer bannerWriteMu.Unlock()
 	gdb, err := bannerDB()
 	if err != nil {
 		return err
@@ -306,6 +317,8 @@ func ReorderBannerSlots(sourceID, revision string, ids []string) error {
 
 // ReplaceBannerSlots 整组替换该站轮播（一键排片发布）。
 func ReplaceBannerSlots(sourceID, revision string, slots []model.BannerSlot) error {
+	bannerWriteMu.Lock()
+	defer bannerWriteMu.Unlock()
 	gdb, err := bannerDB()
 	if err != nil {
 		return err

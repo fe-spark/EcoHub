@@ -4,6 +4,7 @@ import React from "react";
 import {
   Form,
   Input,
+  InputNumber,
   Image as AntImage,
   Typography,
   Space,
@@ -12,6 +13,8 @@ import {
   Upload,
   Tag,
   Flex,
+  Row,
+  Col,
 } from "antd";
 import {
   UploadOutlined,
@@ -176,11 +179,7 @@ export default function BannerDrawerFrame({
 
             {watchedIsCustomPic ? (
               <Flex gap={8} align="center">
-                <Form.Item
-                  name="picture"
-                  noStyle
-                  rules={[{ required: true, message: "请输入竖版封面地址" }]}
-                >
+                <Form.Item name="picture" noStyle>
                   <Input placeholder="输入或粘贴竖版封面 URL" allowClear style={{ flex: 1 }} />
                 </Form.Item>
                 <Upload
@@ -207,6 +206,46 @@ export default function BannerDrawerFrame({
             )}
           </div>
         </div>
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item
+              name="score"
+              label="评分覆盖"
+              style={{ marginBottom: 12 }}
+              rules={[{ type: "number", min: 0, max: 10, message: "评分需在 0-10 之间" }]}
+            >
+              <InputNumber
+                min={0}
+                max={10}
+                step={0.1}
+                style={{ width: "100%" }}
+                placeholder="留空跟随片库"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              name="year"
+              label="年份覆盖"
+              style={{ marginBottom: 12 }}
+              rules={[{ type: "number", min: 0, max: 9999, message: "年份不合法" }]}
+            >
+              <InputNumber
+                min={0}
+                max={9999}
+                precision={0}
+                style={{ width: "100%" }}
+                placeholder="留空跟随片库"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Form.Item name="blurb" label="简介覆盖" style={{ marginBottom: 0 }}>
+          <Input.TextArea rows={2} placeholder="留空跟随片库" allowClear />
+        </Form.Item>
       </div>
     </div>
   );

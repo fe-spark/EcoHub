@@ -149,7 +149,19 @@ export default function BannersPageView() {
             <Button
               type="primary"
               disabled={!canWrite || !sourceId}
-              onClick={() => setQuickModalOpen(true)}
+              onClick={() => {
+                if (!orderDirty) {
+                  setQuickModalOpen(true);
+                  return;
+                }
+                modal.confirm({
+                  title: "放弃未保存的排序？",
+                  content: "当前排片顺序尚未保存，发布一键排片将覆盖它。",
+                  okText: "继续",
+                  cancelText: "返回",
+                  onOk: () => setQuickModalOpen(true),
+                });
+              }}
             >
               一键排片
             </Button>

@@ -40,29 +40,8 @@ interface WorkingRow {
   hitByDraft: boolean;
 }
 
-// shortcut: 只提升行首 (?ims)；句中标志和 (?i:...) 会报不合法。要完全对齐 RE2 时改回服务端预览。
+// shortcut: 支持行首 (?ims) 及非转义的 (?ims:...) 分组标志；复杂局部大小写切换若与 RE2 差异仍大时改回服务端预览。
 function compilePreviewRegex(raw: string): RegExp {
-  let escaped = false;
-  for (let i = 0; i < raw.length; i += 1) {
-    const ch = raw[i];
-    if (escaped) {
-      if (ch >= "1" && ch <= "9") {
-        throw new Error("re2");
-      }
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (raw.startsWith("(?", i)) {
-      const next = raw[i + 2];
-      if (next === "=" || next === "!" || next === "<") {
-        throw new Error("re2");
-      }
-    }
-  }
   let source = raw;
   let flags = "";
   const lead = source.match(/^\(\?([ims]+)\)/);
@@ -70,7 +49,44 @@ function compilePreviewRegex(raw: string): RegExp {
     flags = lead[1];
     source = source.slice(lead[0].length);
   }
-  return new RegExp(source, flags);
+
+  let out = "";
+  let escaped = false;
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (escaped) {
+      if (ch >= "1" && ch <= "9") {
+        throw new Error("re2");
+      }
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (source.startsWith("(?", i)) {
+      const next = source[i + 2];
+      if (next === "=" || next === "!" || next === "<") {
+        throw new Error("re2");
+      }
+      const inlineMatch = source.slice(i).match(/^\(\?([ims]+):/);
+      if (inlineMatch) {
+        for (const f of inlineMatch[1]) {
+          if (!flags.includes(f)) {
+            flags += f;
+          }
+        }
+        out += "(?:";
+        i += inlineMatch[0].length - 1;
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return new RegExp(out, flags);
 }
 
 function compileRuleGroup(rules: MappingRuleRecord[], draft: DraftRuleInput, targetGroup: string): {
@@ -245,8 +261,9 @@ export function buildFinalCategoryPreview(params: {
   rawCategories: RawSourceCategory[];
   savedRules: MappingRuleRecord[];
   draft: DraftRuleInput;
+  syntheticStates?: Record<string, { show: boolean; sort: number }>;
 }): RuleFullPreview {
-  const { rawCategories, savedRules, draft } = params;
+  const { rawCategories, savedRules, draft, syntheticStates } = params;
   const draftRaw = draft.raw.trim();
   const draftTarget = draft.target.trim();
   const rootRules = compileRuleGroup(savedRules, draft, ROOT_GROUP);
@@ -348,14 +365,15 @@ export function buildFinalCategoryPreview(params: {
 
     const rawNames = synthetic ? uniqueNames(bucket.all) : uniqueNames(bucket.native);
     const anyChildHit = children.some((c) => c.hitByDraft);
+    const synState = synthetic ? syntheticStates?.[name] : undefined;
     return {
       key: `root-${synthetic ? "syn" : rep.id}-${name}`,
       id: synthetic ? 0 : rep.id,
       name,
       rawNames,
       synthetic,
-      show: synthetic ? true : rep.show,
-      sort: rep.sort,
+      show: synthetic ? (synState?.show ?? true) : rep.show,
+      sort: synthetic ? (synState?.sort ?? rep.sort) : rep.sort,
       affected: rootHit || anyChildHit,
       hitByDraft: rootHit,
       children,

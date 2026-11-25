@@ -17,11 +17,18 @@ type MappingRuleSourceCategory struct {
 	Show     bool   `json:"show"`
 }
 
+// SyntheticRootState 已落库的合成一级分类展示状态
+type SyntheticRootState struct {
+	Show bool `json:"show"`
+	Sort int  `json:"sort"`
+}
+
 // MappingRuleContextResult 分类规则配置弹窗所需的采集站原始分类与已保存规则集合
 type MappingRuleContextResult struct {
-	SourceName    string                      `json:"sourceName"`
-	RawCategories []MappingRuleSourceCategory `json:"rawCategories"`
-	Rules         []model.MappingRule         `json:"rules"`
+	SourceName      string                        `json:"sourceName"`
+	RawCategories   []MappingRuleSourceCategory   `json:"rawCategories"`
+	Rules           []model.MappingRule           `json:"rules"`
+	SyntheticStates map[string]SyntheticRootState `json:"syntheticStates,omitempty"`
 }
 
 // GetMappingRuleContext 一次性拉取指定采集站的原始分类及全部分类映射规则，供前端本地计算冲突与全量分类树预览。
@@ -82,9 +89,19 @@ func GetMappingRuleContext(sourceID string) (MappingRuleContextResult, error) {
 		return empty, err
 	}
 
+	syntheticCats := loadSyntheticRootCategories(sourceID)
+	syntheticStates := make(map[string]SyntheticRootState, len(syntheticCats))
+	for _, cat := range syntheticCats {
+		name := strings.TrimSpace(cat.Name)
+		if name != "" {
+			syntheticStates[name] = SyntheticRootState{Show: cat.Show, Sort: cat.Sort}
+		}
+	}
+
 	return MappingRuleContextResult{
-		SourceName:    strings.TrimSpace(source.Name),
-		RawCategories: rawCategories,
-		Rules:         rules,
+		SourceName:      strings.TrimSpace(source.Name),
+		RawCategories:   rawCategories,
+		Rules:           rules,
+		SyntheticStates: syntheticStates,
 	}, nil
 }

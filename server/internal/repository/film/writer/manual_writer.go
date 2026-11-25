@@ -83,6 +83,33 @@ func SaveDetail(sourceID string, detail model.MovieDetail) error {
 	return err
 }
 
+// IsManualSourceFilm 判断影片在指定站点下是否由人工新建（首采为 manual，或仅存在人工负数 source_mid 映射而无采集正数映射）。
+func IsManualSourceFilm(dbConn *gorm.DB, mid int64, sourceID, firstSourceID string) bool {
+	if strings.TrimSpace(firstSourceID) == "manual" {
+		return true
+	}
+	if dbConn == nil || mid <= 0 {
+		return false
+	}
+	sid := strings.TrimSpace(sourceID)
+	if sid == "" {
+		return false
+	}
+	var manualCount int64
+	if err := dbConn.Model(&model.MovieSourceMapping{}).
+		Where("global_mid = ? AND source_id = ? AND source_mid < 0", mid, sid).
+		Count(&manualCount).Error; err != nil || manualCount == 0 {
+		return false
+	}
+	var collectedCount int64
+	if err := dbConn.Model(&model.MovieSourceMapping{}).
+		Where("global_mid = ? AND source_id = ? AND source_mid > 0", mid, sid).
+		Count(&collectedCount).Error; err != nil {
+		return false
+	}
+	return collectedCount == 0
+}
+
 // SaveDetailWithOptions 支持控制快照发布的单片保存入口（TMDB应用等场景）。
 func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveDetailOptions) (int64, error) {
 	source := repository.FindCollectSourceById(sourceID)
@@ -198,15 +225,19 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 				return err
 			}
 
-			// 播放资源保存：保存当前影片所属采集站（或指定站点）的播放线路
-			ownerSourceID := strings.TrimSpace(existingFilm.FirstSourceId)
+			// 播放资源保存：仅自建影片允许更新/清空播放线路，采集入库影片禁止覆盖采集站线路。
+			ownerSourceID := strings.TrimSpace(sourceID)
 			if ownerSourceID == "" {
-				ownerSourceID = strings.TrimSpace(sourceID)
+				ownerSourceID = strings.TrimSpace(existingFilm.FirstSourceId)
 			}
 			if ownerSourceID == "" {
 				ownerSourceID = "manual"
 			}
-			if len(detail.PlayList) > 0 {
+			if (len(detail.PlayList) > 0 || detail.ManualLinesUpdate) &&
+				IsManualSourceFilm(tx, mid, ownerSourceID, existingFilm.FirstSourceId) {
+				if !shared.HasPlayableLinks(detail) {
+					return errors.New("影片必须包含至少一条有效播放链接")
+				}
 				newLines := buildPlaylistsFromDetail(mid, ownerSourceID, detail)
 				if _, _, err := saveStationPlaylistsTx(tx, mid, ownerSourceID, newLines); err != nil {
 					return err
