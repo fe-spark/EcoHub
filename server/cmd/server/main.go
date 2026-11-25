@@ -11,15 +11,18 @@ import (
 	"time"
 
 	"server/internal/access"
+	"server/internal/admin"
+	"server/internal/admin/upgrade"
+	"server/internal/bootstrap"
+	"server/internal/collect"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
-	"server/internal/repository"
-	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/notify"
+	"server/internal/portal"
+	"server/internal/repobase"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/router"
-	"server/internal/service"
-	"server/internal/service/upgrade"
-	"server/internal/spider"
 
 	"github.com/gin-gonic/gin"
 )
@@ -84,7 +87,7 @@ func waitForMySQL(maxRetries int, interval time.Duration) error {
 
 func main() {
 	if config.IsUpgradeHelper() {
-		if err := service.RunUpgradeHelper(os.Args[1:]); err != nil {
+		if err := admin.RunUpgradeHelper(os.Args[1:]); err != nil {
 			log.SetOutput(os.Stderr)
 			log.Fatal(err)
 		}
@@ -99,10 +102,10 @@ func start() {
 	db.StartRedisHealthCheck()
 	db.StartMysqlHealthCheck()
 
-	if err := service.InitSvc.DefaultDataInit(); err != nil {
+	if err := bootstrap.InitSvc.DefaultDataInit(); err != nil {
 		log.Fatalf("[Init] 初始化失败: %v", err)
 	}
-	if err := repository.RefreshCollectSourceCatalog(); err != nil {
+	if err := repobase.RefreshCollectSourceCatalog(); err != nil {
 		log.Fatalf("[Init] 采集站目录加载失败: %v", err)
 	}
 	upgrade.StartReleasePoller()
@@ -122,8 +125,8 @@ func start() {
 				log.Printf("[Init] 启动预热首页缓存发生异常: %v", r)
 			}
 		}()
-		if primary := repository.CurrentPrimarySource(); primary != nil {
-			if _, err := service.IndexSvc.IndexPage(primary.Id); err == nil {
+		if primary := repobase.CurrentPrimarySource(); primary != nil {
+			if _, err := portal.IndexSvc.IndexPage(primary.Id); err == nil {
 				log.Printf("[Init] 首页数据缓存预热完成 primary=%s", primary.Name)
 			}
 		}
@@ -149,8 +152,8 @@ func start() {
 	_ = srv.Close()
 
 	// 2. 快速停止采集任务与通知轮询（非阻塞通知协程退出）
-	spider.StopAllCollect("进程退出，停止采集")
-	service.NotifySvc.StopBotPoller()
+	collect.StopAllCollect("进程退出，停止采集")
+	notify.NotifySvc.StopBotPoller()
 
 	log.Printf("[Shutdown] 退出完成")
 }

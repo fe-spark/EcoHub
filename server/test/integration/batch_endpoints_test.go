@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/router"
-	"server/internal/service"
+	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +35,7 @@ func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 	if err != nil {
 		t.Fatalf("生成管理员 Token 失败: %v", err)
 	}
-	if err := repository.SaveUserToken(adminToken, adminUserID); err != nil {
+	if err := user.SaveUserToken(adminToken, adminUserID); err != nil {
 		t.Fatalf("保存管理员 Token 失败: %v", err)
 	}
 	gdb.Create(&model.User{Model: gorm.Model{ID: adminUserID}, UserName: "admin", Role: model.UserRoleAdmin, Status: 0})
@@ -276,7 +276,7 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 			"state":   true,
 			"opt":     1,
 		}), "POST collect save add")
-		if !service.WaitAsyncWork(5 * time.Second) {
+		if !collect.WaitAsyncWork(5 * time.Second) {
 			t.Fatal("等待采集站初始分类同步超时")
 		}
 
@@ -297,7 +297,7 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/delete", token, map[string]any{
 			"ids": []string{srcID},
 		}), "POST collect delete batch")
-		if !service.WaitAsyncWork(5 * time.Second) {
+		if !collect.WaitAsyncWork(5 * time.Second) {
 			t.Fatal("等待采集站异步删除超时")
 		}
 

@@ -11,8 +11,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmrepo "server/internal/repository/film"
-	filmsnapshot "server/internal/repository/film/snapshot"
+	filmrepo "server/internal/film"
+	filmsnapshot "server/internal/film/snapshot"
 )
 
 // 增量剔除后，内存检索索引应立即不再命中被剔除影片，且不影响其余影片。

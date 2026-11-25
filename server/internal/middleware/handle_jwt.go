@@ -3,9 +3,10 @@ package middleware
 import (
 	"net/http"
 	"server/internal/config"
+	"server/internal/httpx"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/service"
+	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -14,48 +15,48 @@ import (
 // AuthToken 用户登录Token拦截（单点登录校验）
 func AuthToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authToken := ReadAuthToken(c)
+		authToken := httpx.ReadAuthToken(c)
 		if authToken == "" {
-			ClearAuthCookie(c)
+			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "用户未授权,请先登录", c)
 			c.Abort()
 			return
 		}
 		uc, err := utils.ParseToken(authToken)
 		if err != nil || uc == nil {
-			ClearAuthCookie(c)
+			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}
 
-		storedToken, err := service.UserSvc.StoredToken(uc.UserID)
+		storedToken, err := user.UserSvc.StoredToken(uc.UserID)
 		if err != nil {
 			dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
 			c.Abort()
 			return
 		}
 		if storedToken == "" {
-			ClearAuthCookie(c)
+			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}
 		if storedToken != authToken {
-			ClearAuthCookie(c)
+			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}
-		status, role, err := service.UserSvc.AccountGate(uc.UserID)
+		status, role, err := user.UserSvc.AccountGate(uc.UserID)
 		if err != nil {
 			dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
 			c.Abort()
 			return
 		}
 		if status != 0 {
-			_ = service.UserSvc.UserLogout(uc.UserID)
-			ClearAuthCookie(c)
+			_ = user.UserSvc.UserLogout(uc.UserID)
+			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号已被禁用", c)
 			c.Abort()
 			return

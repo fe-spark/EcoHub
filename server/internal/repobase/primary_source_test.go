@@ -1,0 +1,266 @@
+package repobase
+
+import (
+	"sync"
+	"testing"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/testutil"
+)
+
+func setupPrimaryTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.PrimaryState{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	InvalidatePrimarySourceCache()
+	t.Cleanup(func() {
+		db.Mdb = prev
+		InvalidatePrimarySourceCache()
+	})
+	return gdb
+}
+
+// 存储为空时按排序首位懒初始化并持久化；之后排序变化不再改变主站。
+func TestCurrentPrimarySource_LazyPickPersistsAndWinsOverSort(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "a", Name: "A", Uri: "http://a", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "b", Name: "B", Uri: "http://b", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if p := CurrentPrimarySource(); p == nil || p.Id != "b" {
+		t.Fatalf("expected lazy-picked b, got %+v", p)
+	}
+	var rec model.PrimaryState
+	if err := gdb.Where("id = ?", 1).First(&rec).Error; err != nil {
+		t.Fatalf("primary state should be persisted: %v", err)
+	}
+	if rec.PrimarySourceId != "b" {
+		t.Fatalf("expected persisted b, got %q", rec.PrimarySourceId)
+	}
+
+	// 排序把 a 顶到首位，主站不变（S-05 语义）
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "a").Update("sort", -1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if p := CurrentPrimarySource(); p == nil || p.Id != "b" {
+		t.Fatalf("stored primary must win over sort order, got %+v", p)
+	}
+	if id := CurrentPrimaryID(); id != "b" {
+		t.Fatalf("expected id b, got %q", id)
+	}
+}
+
+// SetPrimarySourceID 显式写入后，主站以存储为准。
+func TestSetPrimarySourceID_StoredWins(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "a", Name: "A", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "b", Name: "B", Uri: "http://b", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPrimarySourceID("b"); err != nil {
+		t.Fatal(err)
+	}
+	if p := CurrentPrimarySource(); p == nil || p.Id != "b" {
+		t.Fatalf("expected stored b, got %+v", p)
+	}
+	var srcB, srcA model.FilmSource
+	if err := gdb.Where("id = ?", "b").First(&srcB).Error; err != nil {
+		t.Fatal(err)
+	}
+	if srcB.Sort != 0 {
+		t.Fatalf("expected b moved to sort 0, got %d", srcB.Sort)
+	}
+	if err := gdb.Where("id = ?", "a").First(&srcA).Error; err != nil {
+		t.Fatal(err)
+	}
+	if srcA.Sort != 1 {
+		t.Fatalf("expected a shifted to sort 1, got %d", srcA.Sort)
+	}
+}
+
+// D6：存储指向停用站属异常，返回 nil，不自动换站。
+func TestCurrentPrimarySource_StoredDisabledReturnsNil(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "a", Name: "A", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "b", Name: "B", Uri: "http://b", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPrimarySourceID("a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "a").Update("state", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	if p := CurrentPrimarySource(); p != nil {
+		t.Fatalf("expected nil for disabled stored primary, got %+v", p)
+	}
+	if id := CurrentPrimaryID(); id != "" {
+		t.Fatalf("expected empty id for disabled stored primary, got %q", id)
+	}
+}
+
+// D6：存储指向删除中的站同样不自动换站。
+func TestCurrentPrimarySource_StoredDeletingReturnsNil(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "a", Name: "A", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPrimarySourceID("a"); err != nil {
+		t.Fatal(err)
+	}
+	RegisterSourceDeletingChecker(func(id string) bool { return id == "a" })
+	t.Cleanup(func() { RegisterSourceDeletingChecker(nil) })
+	if p := CurrentPrimarySource(); p != nil {
+		t.Fatalf("expected nil for deleting stored primary, got %+v", p)
+	}
+}
+
+// 存储指向不存在的站：告警并返回 nil，等待人工切换。
+func TestCurrentPrimarySource_StoredMissingReturnsNil(t *testing.T) {
+	setupPrimaryTestDB(t)
+	if err := SetPrimarySourceID("ghost"); err != nil {
+		t.Fatal(err)
+	}
+	if p := CurrentPrimarySource(); p != nil {
+		t.Fatalf("expected nil for missing stored primary, got %+v", p)
+	}
+}
+
+// 无任何启用站时为空主站（D5）。
+func TestCurrentPrimarySource_NoEnabledReturnsNil(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "a", Name: "A", Uri: "http://a", State: false, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if p := CurrentPrimarySource(); p != nil {
+		t.Fatalf("expected nil when no enabled sources, got %+v", p)
+	}
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "a").Update("state", true).Error; err != nil {
+		t.Fatal(err)
+	}
+	// 主站为空时，第一个被启用的站自动成为主站（D5）
+	if p := CurrentPrimarySource(); p == nil || p.Id != "a" {
+		t.Fatalf("expected a after enabling, got %+v", p)
+	}
+}
+
+// 高并发调用 CurrentPrimarySource 与 CurrentPrimaryID 不死锁、无竞态
+func TestCurrentPrimarySource_ConcurrentReadSafe(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "main_src", Name: "Main", Uri: "http://main", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	const workers = 50
+	const iters = 200
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				p := CurrentPrimarySource()
+				if p == nil || p.Id != "main_src" {
+					t.Errorf("unexpected primary: %+v", p)
+					return
+				}
+				if id := CurrentPrimaryID(); id != "main_src" {
+					t.Errorf("unexpected primary id: %s", id)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// 缓存已预热后若主站进入删除态，CurrentPrimarySource 必须立即返回 nil，撤回后恢复
+func TestCurrentPrimarySource_WarmedCacheRespectsDeletingState(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "warm_a", Name: "WarmA", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPrimarySourceID("warm_a"); err != nil {
+		t.Fatal(err)
+	}
+	// 先预热缓存
+	if p := CurrentPrimarySource(); p == nil || p.Id != "warm_a" {
+		t.Fatalf("expected warm_a before deleting, got %+v", p)
+	}
+
+	deleting := true
+	RegisterSourceDeletingChecker(func(id string) bool {
+		return deleting && id == "warm_a"
+	})
+	t.Cleanup(func() { RegisterSourceDeletingChecker(nil) })
+
+	if p := CurrentPrimarySource(); p != nil {
+		t.Fatalf("expected nil while warm_a is deleting even with warm cache, got %+v", p)
+	}
+
+	deleting = false
+	if p := CurrentPrimarySource(); p == nil || p.Id != "warm_a" {
+		t.Fatalf("expected warm_a restored after cancel, got %+v", p)
+	}
+}
+
+// 并发切换主站与单飞回源交叉执行时，缓存不会写入旧主站快照
+func TestCurrentPrimarySource_ConcurrentInvalidateNoStaleCache(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "s1", Name: "S1", Uri: "http://1", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "s2", Name: "S2", Uri: "http://2", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPrimarySourceID("s1"); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			_ = SetPrimarySourceID("s2")
+			_ = SetPrimarySourceID("s1")
+		}
+	}()
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_ = CurrentPrimarySource()
+			}
+		}()
+	}
+	wg.Wait()
+
+	if err := SetPrimarySourceID("s2"); err != nil {
+		t.Fatal(err)
+	}
+	if p := CurrentPrimarySource(); p == nil || p.Id != "s2" {
+		t.Fatalf("expected final primary s2, got %+v", p)
+	}
+}

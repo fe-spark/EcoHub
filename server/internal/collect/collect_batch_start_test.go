@@ -1,0 +1,208 @@
+package collect
+
+import (
+	"testing"
+
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/collect/progress"
+	"server/internal/testutil"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
+	prev := db.Mdb
+	dsn := testutil.MemDSN(t)
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CategoryMapping{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	rows := []model.FilmSource{
+		{Id: "ready", Name: "可采", Uri: "http://example.invalid/ready", State: true},
+		{Id: "off", Name: "停用", Uri: "http://example.invalid/off", State: false},
+		{Id: "bare", Name: "无类", Uri: "http://example.invalid/bare", State: true},
+		{Id: "both", Name: "都缺", Uri: "http://example.invalid/both", State: false},
+		{Id: "busy", Name: "在采", Uri: "http://example.invalid/busy", State: true},
+		{Id: "sync", Name: "拉类", Uri: "http://example.invalid/sync", State: true},
+		{Id: "halt", Name: "收尾", Uri: "http://example.invalid/halt", State: true},
+		{Id: "del", Name: "删中", Uri: "http://example.invalid/del", State: true},
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed sources: %v", err)
+	}
+	for _, id := range []string{"ready", "off", "busy", "sync", "halt", "del"} {
+		if err := gdb.Create(&model.CategoryMapping{SourceId: id, SourceTypeId: 1, CategoryId: 9}).Error; err != nil {
+			t.Fatalf("seed mapping %s: %v", id, err)
+		}
+	}
+
+	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "busy", Name: "在采"}}, "q-test-busy")
+	if _, err := progress.TryRegisterTask("busy", "req-busy", nil); err != nil {
+		t.Fatal(err)
+	}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "halt", Name: "收尾"}}, "q-test-halt")
+	progress.Update("halt", func(p *model.CollectProgress) { p.Status = progress.StatusStopping })
+	progress.BroadcastCategoryStatus("sync", "syncing")
+	progress.SetSourceDeleting("del", true)
+	t.Cleanup(func() {
+		endCollectQueue()
+		progress.SetSourceDeleting("del", false)
+		progress.UnregisterTask("busy", "req-busy")
+		for _, id := range []string{"ready", "busy", "halt", "sync"} {
+			releaseCollectSourceIDs(id)
+			progress.Update(id, func(p *model.CollectProgress) { p.Status = progress.StatusStopped })
+		}
+		progress.BroadcastCategoryStatus("sync", "idle")
+	})
+
+	started, result := PrepareBatchCollectStart([]string{
+		"ready", "off", "bare", "both", "busy", "sync", "halt", "del", "missing", "ready", "  ",
+	})
+	if len(started.Sources) != 1 || started.Sources[0].Id != "ready" {
+		t.Fatalf("started = %+v", started)
+	}
+	if !isOccupiedCollectSource("ready") {
+		t.Fatal("ready source must be occupied")
+	}
+	if isOccupiedCollectSource("busy") || isOccupiedCollectSource("off") || isOccupiedCollectSource("bare") || isOccupiedCollectSource("del") {
+		t.Fatal("skipped sources must not be occupied")
+	}
+
+	got := map[string]string{}
+	for _, item := range result.Skipped {
+		got[item.Id] = item.Reason
+	}
+	want := map[string]string{
+		"off":     "未启用",
+		"bare":    "无分类",
+		"both":    "未启用、无分类",
+		"busy":    "采集中",
+		"sync":    "分类采集中",
+		"halt":    "停止中",
+		"del":     "删除中",
+		"missing": "采集站不存在",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("skipped = %+v", result.Skipped)
+	}
+	for id, reason := range want {
+		if got[id] != reason {
+			t.Fatalf("skip %s = %q, want %q", id, got[id], reason)
+		}
+	}
+}
+
+func TestPrepareBatchCollectStart_SealRejectsBeforeReportingStarted(t *testing.T) {
+	prev := db.Mdb
+	dsn := testutil.MemDSN(t)
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CategoryMapping{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() {
+		db.Mdb = prev
+		beforeCollectQueueAdmit = nil
+		resetSearchReseal()
+		releaseCollectSourceIDs("seal-race")
+	})
+
+	src := model.FilmSource{Id: "seal-race", Name: "封口竞态", Uri: "http://example.invalid/seal", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	beforeCollectQueueAdmit = func() {
+		searchReseal.mu.Lock()
+		searchReseal.running = true
+		searchReseal.mu.Unlock()
+	}
+
+	claim, result := PrepareBatchCollectStart([]string{src.Id})
+	if len(claim.Sources) != 0 || len(result.Started) != 0 {
+		t.Fatalf("started claim=%+v result=%+v", claim.Sources, result.Started)
+	}
+	if len(result.Skipped) != 1 || result.Skipped[0].Reason != errSearchSealPending.Error() {
+		t.Fatalf("skipped = %+v", result.Skipped)
+	}
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("rejected admit must release the occupy")
+	}
+	if collectQueueActive() {
+		t.Fatal("rejected admit must not hold a collect queue")
+	}
+}
+
+func TestIsOccupiedCollectSource_SelfHealsStaleOccupy(t *testing.T) {
+	const sourceID = "stale-occupy-test"
+	collectingSourcesMu.Lock()
+	collectingSources[sourceID] = 999
+	collectingSourcesMu.Unlock()
+	defer releaseCollectSourceIDs(sourceID)
+	progress.Ensure(sourceID, "测试站")
+	progress.Update(sourceID, func(cur *model.CollectProgress) {
+		cur.Status = progress.StatusDone
+	})
+
+	if isOccupiedCollectSource(sourceID) {
+		t.Fatal("expected isOccupiedCollectSource to self-heal stale occupy on terminal status and return false")
+	}
+	collectingSourcesMu.Lock()
+	_, exists := collectingSources[sourceID]
+	collectingSourcesMu.Unlock()
+	if exists {
+		t.Fatal("expected stale occupy to be deleted from collectingSources")
+	}
+}
+
+func TestBatchCollect_ReleasesOccupyAfterFinished(t *testing.T) {
+	prev := db.Mdb
+	dsn := testutil.MemDSN(t)
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CategoryMapping{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "test-finish-src", Name: "测试站", Uri: "http://example.invalid", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	defer releaseCollectSourceIDs(src.Id)
+
+	claimed, res := PrepareBatchCollectStart([]string{src.Id})
+	if len(claimed.Sources) != 1 {
+		t.Fatalf("claimed = %+v, skipped = %+v", claimed, res.Skipped)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should be occupied after PrepareBatchCollectStart")
+	}
+
+	BatchCollectPrepared(model.CollectTriggerManual, 24, claimed)
+
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should NOT be occupied after BatchCollectPrepared finishes")
+	}
+}

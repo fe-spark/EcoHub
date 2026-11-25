@@ -12,7 +12,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/repository/film/snapshot"
+	filmsnapshot "server/internal/film/snapshot"
 )
 
 func TestIsSafePagePath(t *testing.T) {
