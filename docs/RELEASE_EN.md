@@ -1,3 +1,19 @@
+Pre-release **v3.1.7-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.7-beta.0 changes
+
+- **Collect & cron pipeline**: fix concurrency boundaries, progress epoch checks on displaced exits, and search reseal retry convergence; remove scheduled backfill in favor of per-source deduplication and treat all non-collect tasks as maintenance.
+- **Collect records & partial stop status**: streamline the collect history table, detail drawer, and error modal, remove the open incidents endpoint and live running-detail overlay, align single-film retry detection, and add the `partial_stopped` batch status to distinguish partial completion from full stops.
+
+---
+
 Release **v3.1.6**, image `ghcr.io/fe-spark/ecohub:v3.1.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
