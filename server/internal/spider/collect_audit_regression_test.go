@@ -138,44 +138,6 @@ func TestZeroPageProbeStillCompletesAndUpdatesCronAnchor(t *testing.T) {
 	}
 }
 
-// Fix 2：定时采集中途重叠触发补采时，第 1 轮引发的检索封口不应阻塞第 2 轮补采。
-func TestRunAutoCollectTask_RerunNotBlockedBySearchSeal(t *testing.T) {
-	resetSearchReseal()
-	prevAuto := autoCollectFn
-	t.Cleanup(func() {
-		autoCollectFn = prevAuto
-		resetSearchReseal()
-	})
-
-	task := model.FilmCollectTask{Id: "task_cron_rerun", Remark: "测试补采", Time: 24}
-	takeCronCollectRerun(task.Id)
-
-	var rounds int
-	var rerunBlockReason string
-	autoCollectFn = func(trigger string, h int) error {
-		rounds++
-		if rounds == 1 {
-			// 第 1 轮期间触发同任务重叠再执行，并模拟第 1 轮触发了检索封口队列（searchReseal.running = true）。
-			noteCronCollectRerun(task.Id)
-			searchReseal.mu.Lock()
-			searchReseal.running = true
-			searchReseal.mu.Unlock()
-			return nil
-		}
-		// 第 2 轮检查：因为 runAutoCollectTask 外层仍持有队列名额，collectPauseReason 不得因 searchReseal.running 拦掉补采。
-		rerunBlockReason = collectPauseReason()
-		return nil
-	}
-
-	runAutoCollectTask(task, false)
-	if rounds != 2 {
-		t.Fatalf("应执行两轮（首轮+补采），实际=%d", rounds)
-	}
-	if rerunBlockReason != "" {
-		t.Fatalf("补采轮不应被检索封口拦截，actual collectPauseReason=%q", rerunBlockReason)
-	}
-}
-
 // Fix 3：cron 批次应按实际 cronTaskID 记录 PreV 起始时间，而非硬编码 sys_cron_auto_collect。
 func TestCronBatchNoteStartedUsesActualCronTaskID(t *testing.T) {
 	const customID = "task_custom_pre_v_42"

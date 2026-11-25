@@ -27,8 +27,37 @@ var (
 	cronReloadMu sync.Mutex
 )
 
-// runningCronTasks 记录当前正在执行的定时任务 ID,用于前端展示"执行中"以及禁用编辑操作。
-var runningCronTasks sync.Map
+// runningCronCounts 记录当前正在执行的定时任务并发数,用于前端展示"执行中"以及禁用编辑操作。
+var (
+	runningCronMu     sync.Mutex
+	runningCronCounts = make(map[string]int)
+)
+
+func enterCronTaskRun(id string, exclusive bool) bool {
+	if id == "" {
+		return true
+	}
+	runningCronMu.Lock()
+	defer runningCronMu.Unlock()
+	if exclusive && runningCronCounts[id] > 0 {
+		return false
+	}
+	runningCronCounts[id]++
+	return true
+}
+
+func leaveCronTaskRun(id string) {
+	if id == "" {
+		return
+	}
+	runningCronMu.Lock()
+	defer runningCronMu.Unlock()
+	if runningCronCounts[id] > 1 {
+		runningCronCounts[id]--
+	} else {
+		delete(runningCronCounts, id)
+	}
+}
 
 // RegisterTaskCid 将 taskId 与运行时 cron.EntryID 关联
 func RegisterTaskCid(taskId string, cid cron.EntryID) {
@@ -163,39 +192,20 @@ func ReloadCronTask(id string) error {
 }
 
 // executeTask 执行已入队或手动触发的任务。
-// runningCronTasks 保证同一任务同一时刻只跑一条队列。
-// 自动采集重叠到点时不丢掉这次触发：当前队列结束后再补采一轮当时空闲的站。
+// 自动采集支持重叠触发：不整轮阻塞，忙碌站点由批量准入按站跳过，空闲站点立即开跑；
+// 其他（维护类）任务保持同任务互斥，还在执行时跳过本轮。
 // manual 表示手动“立即执行”，此时失败不发定时任务告警。
 func executeTask(ft model.FilmCollectTask, manual bool) {
 	if !ft.State {
 		return
 	}
-	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
-		if ft.Model == model.TaskModelAutoCollect {
-			noteCronCollectRerun(ft.Id)
-			log.Printf("定时采集仍在执行，本轮结束后补采当前空闲站点: Task[%s]\n", ft.Id)
-			return
-		}
+	exclusive := ft.Model != model.TaskModelAutoCollect
+	if !enterCronTaskRun(ft.Id, exclusive) {
 		log.Printf("定时任务跳过: Task[%s] 已在执行中\n", ft.Id)
 		return
 	}
-	defer runningCronTasks.Delete(ft.Id)
+	defer leaveCronTaskRun(ft.Id)
 	runTaskBody(ft, manual)
-}
-
-// cronCollectRerun 记录自动采集执行期间又到的点。一轮结束后只补采一次。
-var cronCollectRerun sync.Map
-
-func noteCronCollectRerun(id string) {
-	if id == "" {
-		return
-	}
-	cronCollectRerun.Store(id, struct{}{})
-}
-
-func takeCronCollectRerun(id string) bool {
-	_, ok := cronCollectRerun.LoadAndDelete(id)
-	return ok
 }
 
 func runTaskBody(ft model.FilmCollectTask, manual bool) {
@@ -236,15 +246,10 @@ func ValidTaskModel(taskModel int) bool {
 	}
 }
 
-// isMaintenanceModel 维护任务：片库清理、日志清理、采集记录清理。
+// isMaintenanceModel 维护任务：除自动采集之外，其余受支持的定时任务均属于维护任务。
 // 维护任务进串行队列依次执行，执行时占用维护闸门（停止采集、独占执行），同时段到点的采集跳过。
 func isMaintenanceModel(taskModel int) bool {
-	switch taskModel {
-	case model.TaskModelOrphanClean, model.TaskModelLogClean, model.TaskModelCollectClean:
-		return true
-	default:
-		return false
-	}
+	return ValidTaskModel(taskModel) && taskModel != model.TaskModelAutoCollect
 }
 
 func maintenanceRunningDetail() string {
@@ -432,19 +437,18 @@ func RunTaskOnceWithStatus(id string) (string, error) {
 		}
 		return RunOnceStarted, nil
 	}
-	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
-		return "", fmt.Errorf("定时任务正在执行中，请等待当前执行完成")
-	}
+	enterCronTaskRun(ft.Id, false)
 	go func() {
-		defer runningCronTasks.Delete(ft.Id)
+		defer leaveCronTaskRun(ft.Id)
 		withCronRecover(ft, func() { runTaskBody(ft, true) })
 	}()
 	return RunOnceStarted, nil
 }
 
 func IsCronTaskRunning(id string) bool {
-	_, ok := runningCronTasks.Load(id)
-	return ok
+	runningCronMu.Lock()
+	defer runningCronMu.Unlock()
+	return runningCronCounts[id] > 0
 }
 
 var taskRanAt sync.Map

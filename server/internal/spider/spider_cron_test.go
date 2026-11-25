@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -139,75 +140,138 @@ func TestEnqueueCronTaskCoalesce(t *testing.T) {
 	}
 }
 
-func TestExecuteTask_AutoCollectOverlapRunsOneFollowUp(t *testing.T) {
-	const id = "test_cron_rerun"
+func TestExecuteTask_AutoCollectOverlapRunsConcurrentlyWithRefCount(t *testing.T) {
+	const id = "test_cron_overlap_concurrent"
 	prev := autoCollectFn
 	t.Cleanup(func() {
 		autoCollectFn = prev
-		runningCronTasks.Delete(id)
-		cronCollectRerun.Delete(id)
+		runningCronMu.Lock()
+		delete(runningCronCounts, id)
+		runningCronMu.Unlock()
 	})
 
 	var calls atomic.Int32
-	started := make(chan struct{})
-	release := make(chan struct{})
+	round1Started := make(chan struct{})
+	round1Release := make(chan struct{})
 	autoCollectFn = func(string, int) error {
-		n := calls.Add(1)
-		if n == 1 {
-			close(started)
-			<-release
-			return nil
+		if calls.Add(1) == 1 {
+			close(round1Started)
+			<-round1Release
 		}
-		noteCronCollectRerun(id)
 		return nil
 	}
 
 	ft := model.FilmCollectTask{Id: id, Model: model.TaskModelAutoCollect, State: true, Time: 24}
-	done := make(chan struct{})
+	done1 := make(chan struct{})
 	go func() {
 		executeTask(ft, false)
-		close(done)
+		close(done1)
 	}()
 	select {
-	case <-started:
+	case <-round1Started:
 	case <-time.After(time.Second):
 		t.Fatal("first collect did not start")
 	}
+
+	// 第 1 轮尚未结束时触发第 2 轮，不应排队或跳过整个任务，应立即进入第 2 轮（由底层按站跳过忙碌站）。
 	executeTask(ft, false)
-	executeTask(ft, false)
-	close(release)
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("collect did not finish")
-	}
 	if got := calls.Load(); got != 2 {
-		t.Fatalf("calls = %d, want 2", got)
+		t.Fatalf("overlap trigger should enter immediately without queuing rerun, calls=%d", got)
 	}
-	if _, ok := cronCollectRerun.Load(id); ok {
-		t.Fatal("ticks during the follow-up must not start another queue")
+	if !IsCronTaskRunning(id) {
+		t.Fatal("round 1 仍在执行时 IsCronTaskRunning 必须保持为 true")
+	}
+
+	close(round1Release)
+	<-done1
+	if IsCronTaskRunning(id) {
+		t.Fatal("两轮都结束后 IsCronTaskRunning 应回到 false")
 	}
 }
 
-func TestExecuteTask_AutoCollectErrorDropsFollowUp(t *testing.T) {
-	const id = "test_cron_rerun_err"
-	prev := autoCollectFn
+func TestExecuteTask_MaintenanceOverlapStillSkips(t *testing.T) {
+	const id = "test_maint_overlap_skip"
+	enterCronTaskRun(id, true)
 	t.Cleanup(func() {
-		autoCollectFn = prev
-		runningCronTasks.Delete(id)
-		cronCollectRerun.Delete(id)
+		runningCronMu.Lock()
+		delete(runningCronCounts, id)
+		runningCronMu.Unlock()
 	})
-	var calls atomic.Int32
-	autoCollectFn = func(string, int) error {
-		calls.Add(1)
-		noteCronCollectRerun(id)
-		return errors.New("读取采集站失败")
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// 非自动采集任务在执行中时仍应跳过。
+		executeTask(model.FilmCollectTask{Id: id, Model: model.TaskModelLogClean, State: true}, false)
+	}()
+	wg.Wait()
+	if !IsCronTaskRunning(id) {
+		t.Fatal("被跳过的清理任务不应清掉原任务的运行态")
 	}
-	executeTask(model.FilmCollectTask{Id: id, Model: model.TaskModelAutoCollect, State: true, Time: 24}, true)
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("calls = %d, want 1", got)
+	if isMaintenanceModel(model.TaskModelAutoCollect) || isMaintenanceModel(99) ||
+		!isMaintenanceModel(model.TaskModelOrphanClean) || !isMaintenanceModel(model.TaskModelLogClean) || !isMaintenanceModel(model.TaskModelCollectClean) {
+		t.Fatal("除自动采集外，所有受支持任务均应属于维护任务")
 	}
-	if _, ok := cronCollectRerun.Load(id); ok {
-		t.Fatal("failed collect must drop the follow-up flag")
+}
+
+// 按站点粒度防重：第 1 轮 busy-site 未结束时，新到点直接跳过 busy-site 并让 idle-site 立刻启动。
+func TestAutoCollectOverlap_SkipsBusySiteStartsIdleSite(t *testing.T) {
+	resetSearchReseal()
+	resetStreamPublishBufferForTest()
+	origProbe := fetchProbePageCount
+	origPub := publishStreamWindowFn
+	origPref := preferredSourceIDFn
+	origSeal := sealSearchIndex
+	t.Cleanup(func() {
+		fetchProbePageCount = origProbe
+		publishStreamWindowFn = origPub
+		preferredSourceIDFn = origPref
+		sealSearchIndex = origSeal
+		resetStreamPublishBufferForTest()
+		resetSearchReseal()
+	})
+	publishStreamWindowFn = func([]int64) error { return nil }
+	preferredSourceIDFn = func() string { return "" }
+	sealSearchIndex = func([]int64) bool { return true }
+
+	gdb := setupAuditSpiderDB(t)
+	busySrc := model.FilmSource{Id: "overlap-busy", Name: "忙碌站", Uri: "http://127.0.0.1/busy", State: true, Format: "json"}
+	idleSrc := model.FilmSource{Id: "overlap-idle", Name: "空闲站", Uri: "http://127.0.0.1/idle", State: true, Format: "json"}
+	if err := gdb.Create([]model.FilmSource{busySrc, idleSrc}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.Category{Id: 10, Name: "电影"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create([]model.CategoryMapping{
+		{SourceId: busySrc.Id, SourceTypeId: 1, CategoryId: 10},
+		{SourceId: idleSrc.Id, SourceTypeId: 1, CategoryId: 10},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟第 1 轮正在采集 overlap-busy。
+	busyClaim, err := claimCollectSources([]model.FilmSource{busySrc}, model.CollectTagCronCollect)
+	if err != nil || len(busyClaim.Sources) != 1 {
+		t.Fatalf("occupy busySrc failed: %v", err)
+	}
+	defer busyClaim.abandon()
+
+	var mu sync.Mutex
+	var probed []string
+	fetchProbePageCount = func(_ context.Context, s *model.FilmSource, _ int) (int, error) {
+		mu.Lock()
+		probed = append(probed, s.Id)
+		mu.Unlock()
+		return 0, nil
+	}
+
+	runAutoCollectTask(model.FilmCollectTask{Id: "task_overlap_1", Remark: "按站跳过", Time: 24, State: true}, false)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(probed) != 1 || probed[0] != idleSrc.Id {
+		t.Fatalf("应只采集空闲站 [%s] 并跳过忙碌站 [%s]，实际=%v", idleSrc.Id, busySrc.Id, probed)
 	}
 }

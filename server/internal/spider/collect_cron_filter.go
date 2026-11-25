@@ -30,42 +30,25 @@ var (
 	defaultAutoCollectFn = reflect.ValueOf(autoCollect).Pointer()
 )
 
-// runAutoCollectTask 跑一轮自动采集。执行期间若又到点，结束后再补采一轮空闲站，不再连环。
+// runAutoCollectTask 跑一轮自动采集（在采站点由 PrepareBatchCollectStart 按站跳过，不做整轮补采）。
 func runAutoCollectTask(ft model.FilmCollectTask, manual bool) {
-	// 占住本轮采集队列名额直到补采判定结束，防止第 1 轮刚释放队列就触发检索封口把补采拦掉。
-	if _, err := tryBeginCollectQueue(); err != nil {
-		log.Printf("[Spider] 定时采集跳过：%s", err.Error())
+	var err error
+	if reflect.ValueOf(autoCollectFn).Pointer() == defaultAutoCollectFn {
+		err = autoCollectForTask(ft.Id, model.CollectTriggerCron, ft.Time)
+	} else {
+		err = autoCollectFn(model.CollectTriggerCron, ft.Time)
+	}
+	if err == nil {
 		return
 	}
-	defer endCollectQueue()
-
-	report := func(err error) {
-		if err == nil {
-			return
-		}
-		remark := strings.TrimSpace(ft.Remark)
-		if remark == "" {
-			remark = "自动采集"
-		}
-		syslog.Errorf("[Cron] %s 失败: %v", remark, err)
-		if !manual {
-			emitCronFailedNotify(ft.Id, remark, err.Error())
-		}
+	remark := strings.TrimSpace(ft.Remark)
+	if remark == "" {
+		remark = "自动采集"
 	}
-	runRound := func() error {
-		if reflect.ValueOf(autoCollectFn).Pointer() == defaultAutoCollectFn {
-			return autoCollectForTask(ft.Id, model.CollectTriggerCron, ft.Time)
-		}
-		return autoCollectFn(model.CollectTriggerCron, ft.Time)
+	syslog.Errorf("[Cron] %s 失败: %v", remark, err)
+	if !manual {
+		emitCronFailedNotify(ft.Id, remark, err.Error())
 	}
-	err := runRound()
-	report(err)
-	if err == nil && takeCronCollectRerun(ft.Id) {
-		log.Printf("定时采集补采一轮空闲站点: Task[%s]\n", ft.Id)
-		report(runRound())
-	}
-	// 补采期间又到的点并进这一轮，留给下一次调度，不再开第三条队列。
-	takeCronCollectRerun(ft.Id)
 }
 
 // autoCollect 返回会让本轮采集整体无法开始的错误（例如读取采集站失败），交给定时任务告警。
