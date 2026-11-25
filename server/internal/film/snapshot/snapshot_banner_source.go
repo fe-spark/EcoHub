@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sort"
 	"strings"
 	"sync"
@@ -166,8 +167,13 @@ func scanSmallSourceFallbackRanks(ctx context.Context, strategy string, cids, so
 	if len(exclude) > 0 {
 		q = q.Where("mid NOT IN ?", exclude)
 	}
+	queryLimit := limit
+	if strategy == "random" {
+		// 随机策略下允许在候选集内全量洗牌（上限为 smallSourceFallbackCap），避免总是命中前 limit 条。
+		queryLimit = smallSourceFallbackCap
+	}
 	var ranks []bannerRank
-	if err := q.Order(order).Limit(limit).Scan(&ranks).Error; err != nil {
+	if err := q.Order(order).Limit(queryLimit).Scan(&ranks).Error; err != nil {
 		return nil, err
 	}
 	return ranks, nil
@@ -200,6 +206,9 @@ func scanBannerBranches[T string | int64](ctx context.Context, strategy, sourceI
 	if limit <= 0 || len(values) == 0 {
 		return nil, nil
 	}
+	if strategy == "random" {
+		return scanRandomBannerBranches(ctx, sourceID, column, values, byCID, limit, exclude)
+	}
 	_, order := bannerStrategyPlan(strategy, byCID)
 	if strategy != "score_random" {
 		scoreMin = false
@@ -207,7 +216,7 @@ func scanBannerBranches[T string | int64](ctx context.Context, strategy, sourceI
 	conn := db.Mdb.WithContext(ctx)
 	dialect := dialectName(conn)
 	indexHint := bannerUseIndexClause(conn, dialect, strategy, byCID)
-	branchSQL := bannerBranchSQL(dialect, indexHint, column, order, scoreMin, exclude)
+	branchSQL := bannerBranchSQL(dialect, indexHint, column, order, scoreMin, "", exclude)
 
 	parts := make([]string, 0, len(values))
 	args := make([]any, 0, len(values)*(4+len(exclude)))
@@ -229,6 +238,83 @@ func scanBannerBranches[T string | int64](ctx context.Context, strategy, sourceI
 	return ranks, nil
 }
 
+type bannerMidBounds struct {
+	Min int64 `gorm:"column:min_mid"`
+	Max int64 `gorm:"column:max_mid"`
+}
+
+func randomBannerPivot(ctx context.Context) (int64, error) {
+	var bounds bannerMidBounds
+	if err := db.Mdb.WithContext(ctx).Table(model.TableFilmIndex).
+		Select("COALESCE(MIN(mid), 0) AS min_mid, COALESCE(MAX(mid), 0) AS max_mid").
+		Scan(&bounds).Error; err != nil {
+		return 0, err
+	}
+	if bounds.Max <= bounds.Min || bounds.Max <= 0 {
+		return bounds.Min, nil
+	}
+	return bounds.Min + rand.Int63n(bounds.Max-bounds.Min+1), nil
+}
+
+func randomBannerWindowSize(limit int) int {
+	n := limit * 6
+	if n < 30 {
+		n = 30
+	}
+	if n > 100 {
+		n = 100
+	}
+	return n
+}
+
+func scanRandomBannerBranches[T string | int64](ctx context.Context, sourceID, column string, values []T, byCID bool, limit int, exclude []int64) ([]bannerRank, error) {
+	pivot, err := randomBannerPivot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conn := db.Mdb.WithContext(ctx)
+	dialect := dialectName(conn)
+	indexHint := bannerUseIndexClause(conn, dialect, "random", byCID)
+	_, order := bannerStrategyPlan("random", byCID)
+	window := randomBannerWindowSize(limit)
+
+	runRange := func(pivotOp string, fetchLimit int) ([]bannerRank, error) {
+		if fetchLimit <= 0 {
+			return nil, nil
+		}
+		branchSQL := bannerBranchSQL(dialect, indexHint, column, order, false, " AND mid "+pivotOp+" ?", exclude)
+		parts := make([]string, 0, len(values))
+		args := make([]any, 0, len(values)*(5+len(exclude)))
+		for _, val := range values {
+			parts = append(parts, branchSQL)
+			args = append(args, val, pivot)
+			for _, mid := range exclude {
+				args = append(args, mid)
+			}
+			args = append(args, sourceID, model.LineKindPlay, fetchLimit)
+		}
+		var out []bannerRank
+		if err := conn.Raw(strings.Join(parts, " UNION ALL "), args...).Scan(&out).Error; err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+
+	// 从随机主键值向后窗口抽取，避免 ORDER BY RAND() 全表扫描；不足时再回卷前半段。
+	ranks, err := runRange(">=", window)
+	if err != nil {
+		return nil, err
+	}
+	if len(ranks) < window {
+		more, err := runRange("<", window-len(ranks))
+		if err != nil {
+			return nil, err
+		}
+		ranks = append(ranks, more...)
+	}
+	return ranks, nil
+}
+
 func bannerStrategyPlan(strategy string, byCID bool) (indexName, order string) {
 	switch strategy {
 	case "latest_random":
@@ -241,6 +327,11 @@ func bannerStrategyPlan(strategy string, byCID bool) (indexName, order string) {
 			return catalog.FilmCidScoreIndex, "score DESC, hits DESC, mid DESC"
 		}
 		return catalog.FilmCategoryScoreIndex, "score DESC, hits DESC, mid DESC"
+	case "random":
+		if byCID {
+			return "", "mid ASC"
+		}
+		return catalog.FilmCategoryDeletedIndex, "mid ASC"
 	default:
 		if byCID {
 			return bannerIndexCidHits, "hits DESC, mid DESC"
@@ -257,7 +348,9 @@ func bannerUseIndexClause(conn *gorm.DB, dialect, strategy string, byCID bool) s
 	if indexName == "" {
 		return ""
 	}
-	if (indexName == catalog.FilmCategoryScoreIndex || indexName == catalog.FilmCidScoreIndex) &&
+	if (indexName == catalog.FilmCategoryScoreIndex ||
+		indexName == catalog.FilmCidScoreIndex ||
+		indexName == catalog.FilmCategoryDeletedIndex) &&
 		!bannerTableIndexReady(conn, model.TableFilmIndex, indexName) {
 		return ""
 	}
@@ -289,7 +382,7 @@ func bannerTableIndexReady(conn *gorm.DB, tableName, indexName string) bool {
 	return false
 }
 
-func bannerBranchSQL(dialect, filmIndexHint, column, order string, scoreMin bool, exclude []int64) string {
+func bannerBranchSQL(dialect, filmIndexHint, column, order string, scoreMin bool, extraWhere string, exclude []int64) string {
 	from := model.TableFilmIndex + filmIndexHint
 	playlistFrom := model.TableFilmSourcePlaylist + " AS p"
 	if dialect == "mysql" {
@@ -305,8 +398,8 @@ func bannerBranchSQL(dialect, filmIndexHint, column, order string, scoreMin bool
 		excludeSQL = " AND mid NOT IN (" + strings.TrimRight(strings.Repeat("?,", len(exclude)), ",") + ")"
 	}
 	inner := fmt.Sprintf(
-		"SELECT mid, hits, score, update_stamp FROM %s WHERE deleted_at IS NULL AND %s = ?%s%s AND EXISTS (SELECT 1 FROM %s WHERE p.mid = %s.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY %s LIMIT ?",
-		from, column, scoreSQL, excludeSQL, playlistFrom, model.TableFilmIndex, order,
+		"SELECT mid, hits, score, update_stamp FROM %s WHERE deleted_at IS NULL AND %s = ?%s%s%s AND EXISTS (SELECT 1 FROM %s WHERE p.mid = %s.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY %s LIMIT ?",
+		from, column, scoreSQL, extraWhere, excludeSQL, playlistFrom, model.TableFilmIndex, order,
 	)
 	// USE INDEX 不能直接跟在 UNION ALL 后面，包进子查询后排序和条数才作用在这一支上。
 	return "SELECT mid, hits, score, update_stamp FROM (" + inner + ") AS banner_branch"
@@ -316,12 +409,20 @@ func takeBannerRanks(strategy string, ranks []bannerRank, limit int) []bannerRan
 	if len(ranks) == 0 || limit <= 0 {
 		return nil
 	}
-	sort.Slice(ranks, func(i, j int) bool {
-		return bannerRankBefore(strategy, ranks[i], ranks[j])
-	})
-	seen := make(map[int64]struct{}, len(ranks))
+	ordered := ranks
+	if strategy == "random" {
+		ordered = append([]bannerRank(nil), ranks...)
+		rand.Shuffle(len(ordered), func(i, j int) {
+			ordered[i], ordered[j] = ordered[j], ordered[i]
+		})
+	} else {
+		sort.Slice(ordered, func(i, j int) bool {
+			return bannerRankBefore(strategy, ordered[i], ordered[j])
+		})
+	}
+	seen := make(map[int64]struct{}, len(ordered))
 	out := make([]bannerRank, 0, limit)
-	for _, rank := range ranks {
+	for _, rank := range ordered {
 		if rank.Mid <= 0 {
 			continue
 		}

@@ -50,6 +50,7 @@ var bannerStrategies = map[string]string{
 	"latest": "latest_random",
 	"hot":    "hot_random",
 	"score":  "score_random",
+	"random": "random",
 }
 
 // Generate 按策略和每个分类的数量为指定采集站生成预览，不落库、不保存配置。
@@ -60,7 +61,7 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 	}
 	strategy, ok := bannerStrategies[strings.TrimSpace(req.Strategy)]
 	if !ok {
-		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 latest、hot 或 score")
+		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 latest、hot、score 或 random")
 	}
 	quotas := make([]BannerQuota, 0, len(req.Quotas))
 	seen := make(map[int64]bool, len(req.Quotas))

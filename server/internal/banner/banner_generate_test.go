@@ -308,6 +308,15 @@ func TestBannerSearchFilmsAndCategories_BySource(t *testing.T) {
 	if err != nil || res.SourceId != "src2" || fmt.Sprint(bannerMidList(res.Items)) != "[2]" {
 		t.Fatalf("src2 generate mismatch: err=%v res=%+v", err, res)
 	}
+
+	randRes, err := BannerSvc.Generate(context.Background(), BannerGenerateReq{
+		SourceId: "src1",
+		Strategy: "random",
+		Quotas:   []BannerQuota{{CategoryID: cat1[0].Id, Count: 1}},
+	})
+	if err != nil || randRes.SourceId != "src1" || fmt.Sprint(bannerMidList(randRes.Items)) != "[1]" {
+		t.Fatalf("src1 random generate mismatch: err=%v res=%+v", err, randRes)
+	}
 }
 
 // 兜底补位按精确展示分类 cid 与跨站同名分类筛选，不能按根 pid 把同根下的隐藏/成人子分类影片带出。

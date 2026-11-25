@@ -2,10 +2,10 @@
 
 import React, { useMemo, useRef } from "react";
 import { Button, InputNumber } from "antd";
-import { FieldTimeOutlined, FireOutlined, StarOutlined } from "@ant-design/icons";
+import { FieldTimeOutlined, FireOutlined, RetweetOutlined, StarOutlined } from "@ant-design/icons";
 import styles from "./banner-quick.module.less";
 
-export type QuickStrategy = "latest" | "hot" | "score";
+export type QuickStrategy = "latest" | "hot" | "score" | "random";
 
 // 一键排片单个分类最多排几部，和后端 bannerQuotaMax 一致。
 export const QUOTA_MAX = 5;
@@ -39,6 +39,7 @@ const STRATEGY_OPTIONS: {
   { value: "latest", title: "最近更新", desc: "刚更新的影片优先", icon: <FieldTimeOutlined /> },
   { value: "hot", title: "最热排片", desc: "播放热度高的优先", icon: <FireOutlined /> },
   { value: "score", title: "评分优先", desc: "评分高的影片优先", icon: <StarOutlined /> },
+  { value: "random", title: "随机排片", desc: "按分类随机抽取影片", icon: <RetweetOutlined /> },
 ];
 
 const FILL_PRESETS = [

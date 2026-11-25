@@ -222,4 +222,36 @@ func TestScanBannerFallbackRanks_SmallSourceAndBranchUnion(t *testing.T) {
 	if len(scorePicked) != 3 || scorePicked[0].Mid != 4 || scorePicked[1].Mid != 3 || scorePicked[2].Mid != 2 {
 		t.Fatalf("big score got %+v", scorePicked)
 	}
+
+	// 随机策略：验证不限制站点、小站兜底、大站拆支均正常返回且不重复、遵守排除名单。
+	unscopedRandom, err := GetSnapshotBannerCandidates(context.Background(), "live", "random", "", []int64{1}, 3, []int64{4})
+	if err != nil {
+		t.Fatalf("unscoped random: %v", err)
+	}
+	if len(unscopedRandom) != 3 {
+		t.Fatalf("unscoped random len = %d", len(unscopedRandom))
+	}
+	seen := make(map[int64]bool, 3)
+	for _, snap := range unscopedRandom {
+		if snap.Mid == 4 || seen[snap.Mid] {
+			t.Fatalf("unexpected/duplicate mid in unscoped random: %v", bannerCandidateMids(unscopedRandom))
+		}
+		seen[snap.Mid] = true
+	}
+
+	smallRandom, err := scanBannerFallbackRanks(context.Background(), "random", "small_src", []int64{10, 11}, 2, []int64{4}, false)
+	if err != nil {
+		t.Fatalf("small random: %v", err)
+	}
+	if got := takeBannerRanks("random", smallRandom, 2); len(got) != 2 {
+		t.Fatalf("small random picked %+v", got)
+	}
+
+	bigRandom, err := scanBannerBranches(context.Background(), "random", "big_src", "cid", []int64{10, 11}, true, 2, []int64{4}, false)
+	if err != nil {
+		t.Fatalf("big random: %v", err)
+	}
+	if got := takeBannerRanks("random", bigRandom, 2); len(got) != 2 {
+		t.Fatalf("big random picked %+v", got)
+	}
 }

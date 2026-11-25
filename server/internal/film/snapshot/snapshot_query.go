@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"strings"
 
 	"gorm.io/gorm"
@@ -187,6 +188,18 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 		return bannerCandidatesForSource(ctx, strategy, strings.TrimSpace(sourceID), categoryPids, limit, exclude)
 	}
 
+	baseQuery := func(skip []int64) *gorm.DB {
+		q := applyBannerCategories(applySourceMembership(liveFilmQuery().WithContext(ctx), sourceID), sourceID, categoryPids)
+		if len(skip) > 0 {
+			q = q.Where("mid NOT IN ?", skip)
+		}
+		return q
+	}
+
+	if strategy == "random" {
+		return scanRandomBannerCandidates(ctx, baseQuery(exclude), limit)
+	}
+
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
 		switch strategy {
 		case "hot_random":
@@ -204,14 +217,6 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 		return q
 	}
 
-	baseQuery := func(skip []int64) *gorm.DB {
-		q := applyBannerCategories(applySourceMembership(liveFilmQuery().WithContext(ctx), sourceID), sourceID, categoryPids)
-		if len(skip) > 0 {
-			q = q.Where("mid NOT IN ?", skip)
-		}
-		return q
-	}
-
 	results, err := scanListSnapshots(applyStrategy(baseQuery(exclude), true).Limit(limit))
 	if err != nil {
 		return nil, err
@@ -224,6 +229,42 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 		}
 		results = append(results, more...)
 	}
+	if len(results) > limit {
+		return results[:limit], nil
+	}
+	return results, nil
+}
+
+func scanRandomBannerCandidates(ctx context.Context, baseQuery *gorm.DB, limit int) ([]model.FilmListSnapshot, error) {
+	pivot, err := randomBannerPivot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	window := randomBannerWindowSize(limit)
+	results, err := scanListSnapshots(
+		baseQuery.Session(&gorm.Session{}).
+			Where("mid >= ?", pivot).
+			Order("mid ASC").
+			Limit(window),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) < window {
+		more, fillErr := scanListSnapshots(
+			baseQuery.Session(&gorm.Session{}).
+				Where("mid < ?", pivot).
+				Order("mid ASC").
+				Limit(window - len(results)),
+		)
+		if fillErr != nil {
+			return nil, fillErr
+		}
+		results = append(results, more...)
+	}
+	rand.Shuffle(len(results), func(i, j int) {
+		results[i], results[j] = results[j], results[i]
+	})
 	if len(results) > limit {
 		return results[:limit], nil
 	}
