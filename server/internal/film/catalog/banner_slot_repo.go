@@ -11,6 +11,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repobase"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -185,7 +186,7 @@ func CreateBannerSlot(slot *model.BannerSlot) error {
 		return nil
 	})
 	if err == nil {
-		ClearIndexPageCache()
+		repobase.ClearIndexPageCache()
 	}
 	return err
 }
@@ -229,7 +230,7 @@ func UpdateBannerSlot(id string, apply func(slot *model.BannerSlot) error) (mode
 	if err != nil {
 		return model.BannerSlot{}, err
 	}
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	return saved, nil
 }
 
@@ -258,7 +259,7 @@ func DeleteBannerSlot(id string) error {
 	if err != nil {
 		return err
 	}
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	return nil
 }
 
@@ -310,7 +311,7 @@ func ReorderBannerSlots(sourceID, revision string, ids []string) error {
 		return nil
 	})
 	if err == nil {
-		ClearIndexPageCache()
+		repobase.ClearIndexPageCache()
 	}
 	return err
 }
@@ -349,7 +350,7 @@ func ReplaceBannerSlots(sourceID, revision string, slots []model.BannerSlot) err
 		return nil
 	})
 	if err == nil {
-		ClearIndexPageCache()
+		repobase.ClearIndexPageCache()
 	}
 	return err
 }
@@ -370,7 +371,7 @@ func ReplaceAllBannerSlots(slots []model.BannerSlot) error {
 		return tx.Create(&slots).Error
 	})
 	if err == nil {
-		ClearIndexPageCache()
+		repobase.ClearIndexPageCache()
 	}
 	return err
 }

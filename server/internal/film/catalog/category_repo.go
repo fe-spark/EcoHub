@@ -12,69 +12,21 @@ import (
 	"gorm.io/gorm"
 )
 
-func BuildCategoryStableKey(pid int64, name string) string {
-	return repobase.BuildCategoryStableKey(pid, name)
-}
-
-func GetCategoryStableKeyByID(id int64) string {
-	return repobase.GetCategoryStableKeyByID(id)
-}
-
-func ResolveCategoryID(id int64) int64 {
-	return repobase.ResolveCategoryID(id)
-}
-
-func touchCategoryVersion() {
-	repobase.TouchCategoryVersion()
-}
-
-func GetCategoryVersion() string {
-	return repobase.GetCategoryVersion()
-}
-
-func GetVersionedIndexPageCacheKey() string {
-	return repobase.GetVersionedIndexPageCacheKey()
-}
-
-func ClearIndexPageCache() {
-	repobase.ClearIndexPageCache()
-}
-
-// RefreshCategoryCache 用于重新加载基础映射映射到内存
-func RefreshCategoryCache() {
-	repobase.RefreshCategoryCache()
-}
-
-// GetRootId 获取分类的顶级根 ID (通过内存递归映射)
-func GetRootId(id int64) int64 {
-	return repobase.GetRootId(id)
-}
-
-// IsRootCategory 判断是否为根分类 (Pid 为 0 的大类)
-func IsRootCategory(id int64) bool {
-	return repobase.IsRootCategory(id)
-}
-
-// GetParentId 获取父类 ID
-func GetParentId(id int64) int64 {
-	return repobase.GetParentId(id)
-}
-
 // ClearCategoryCache 清除分类相关缓存，不触碰已固化的搜索标签。
 func ClearCategoryCache() {
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 	}
 	InvalidatePublicSourceCache()
-	RefreshCategoryCache()
+	repobase.RefreshCategoryCache()
 }
 
 func MarkCategoryChanged() {
 	ClearCategoryCache()
 	InitMappingEngine()
-	touchCategoryVersion()
+	repobase.TouchCategoryVersion()
 	repobase.TouchSearchTagsVersion()
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	filmcache.ClearPatterns(
 		config.FilmRelatePrefix+":*",
 		config.FilmClassifyCacheKey+":*",

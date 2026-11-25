@@ -150,7 +150,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	if req.Modules.FilmSources {
 		list := backup.FilmSources
 		var replaceErr error
-		if err := collect.WithPrimaryMutation(func(_ bool) error {
+		if err := filmsnapshot.WithPrimaryMutation(func(_ bool) error {
 			// 导入前清理旧站限流器
 			oldSources, err := collect.GetCollectSourceList()
 			if err != nil {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"server/internal/config"
+	"server/internal/film"
 	"server/internal/infra/db"
 	"server/internal/model"
 	filmsnapshot "server/internal/film/snapshot"
@@ -113,7 +114,7 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 	var broken map[int64]struct{}
 	if len(uncachedMids) > 0 {
 		var err error
-		batchPlaylists, broken, err = BatchGetPlayPlaylistsByMids(uncachedMids)
+		batchPlaylists, broken, err = film.BatchGetPlayPlaylistsByMids(uncachedMids)
 		if err != nil {
 			return nil, err
 		}

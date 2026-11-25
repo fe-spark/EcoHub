@@ -353,9 +353,6 @@ func filmQuery(batchID, sourceID string) *gorm.DB {
 	return tx
 }
 
-// MarkCollectRecordLedgerIfPresent 终态已记下部数，但清单标记没写上。表里已经有编号就补上。
-var MarkCollectRecordLedgerIfPresent = repobase.MarkCollectRecordLedgerIfPresent
-
 // collectRecordListedFilmTotal 全部站点用记录上的清单行数，单站用明细里的行数。不扫清单表。
 // 记录不存在或该站不在明细里则总数为 0。明细损坏直接返回错误。
 func collectRecordListedFilmTotal(batchID, sourceID string) (int64, error) {

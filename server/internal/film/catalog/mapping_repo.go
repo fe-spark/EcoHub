@@ -244,7 +244,7 @@ func CreateMappingRule(rule *model.MappingRule) error {
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	return nil
 }
 
@@ -265,7 +265,7 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	return nil
 }
 
@@ -283,7 +283,7 @@ func DeleteMappingRules(ids []uint) error {
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	return nil
 }
 
@@ -340,7 +340,7 @@ func ReplaceMappingRules(exports []model.MappingRuleExport) error {
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	return nil
 }
 

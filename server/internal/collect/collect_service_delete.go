@@ -93,7 +93,7 @@ func (s *CollectService) TriggerDelFilmSourceWithAuth(id, newPrimaryID string, c
 		return ErrPrimarySwitchForbidden
 	}
 	// D6：删除当前主站，在准入锁内完成校验与主站交接，消除并发切主与删除竞态
-	return withPrimaryMutation(func(searchBusy bool) error {
+	return filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 		src, err := validateSourceForDelete(id)
 		if err != nil {
 			return err
@@ -154,7 +154,7 @@ func (s *CollectService) TriggerDelFilmSourceBatchWithAuth(ids []string, newPrim
 	if !allowPrimaryHandover && (strings.TrimSpace(newPrimaryID) != "" || confirmClearPrimary) {
 		return ErrPrimarySwitchForbidden
 	}
-	return withPrimaryMutation(func(searchBusy bool) error {
+	return filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 		targets := make([]*model.FilmSource, 0, len(ids))
 		seen := make(map[string]struct{}, len(ids))
 		var failed []string

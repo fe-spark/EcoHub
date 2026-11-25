@@ -189,15 +189,6 @@ func OrganizePlaySources(playSources []model.PlayLinkVo, preferredSource string)
 	return result
 }
 
-func playGroupsFromPlayLinkVos(sources []model.PlayLinkVo) ([][]model.MovieUrlInfo, []string) {
-	return filmrepo.PlayGroupsFromPlayLinkVos(sources)
-}
-
-// BatchGetPlayPlaylistsByMids 批量加载影片播放列表（TVBox 批量组装，无 N+1）。
-func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, map[int64]struct{}, error) {
-	return filmrepo.BatchGetPlayPlaylistsByMids(mids)
-}
-
 // GetFilmDetailOnly 读取影片详情主体，不聚合播放源。
 func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
 	startedAt := time.Now()

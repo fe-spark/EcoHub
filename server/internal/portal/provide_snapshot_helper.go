@@ -65,7 +65,7 @@ func resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot model.FilmListSnap
 		return 0, err
 	}
 	if len(ids) > 0 {
-		rootID := catalog.GetRootId(ids[0])
+		rootID := repobase.GetRootId(ids[0])
 		if rootID > 0 {
 			return rootID, nil
 		}
@@ -76,7 +76,7 @@ func resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot model.FilmListSnap
 		return 0, err
 	}
 	if categoryID > 0 {
-		rootID := catalog.GetRootId(categoryID)
+		rootID := repobase.GetRootId(categoryID)
 		if rootID > 0 {
 			return rootID, nil
 		}

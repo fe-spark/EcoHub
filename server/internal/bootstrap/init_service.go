@@ -5,7 +5,6 @@ import (
 	"server/internal/film/catalog"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"server/internal/access"
@@ -26,10 +25,7 @@ import (
 
 type InitService struct{}
 
-var (
-	InitSvc                = new(InitService)
-	inventoryStatsHookOnce sync.Once
-)
+var InitSvc = new(InitService)
 
 func (s *InitService) DefaultDataInit() error {
 	isNewDatabase := !user.ExistUserTable()
@@ -117,12 +113,6 @@ func (s *InitService) seedRuntimeDefaults(seedSources, runBootSpiderInit bool) e
 	if err := s.loadActiveFilmReadModel(); err != nil {
 		return err
 	}
-	inventoryStatsHookOnce.Do(func() {
-		filmrepo.SetInventoryStatsCollectingChecker(collect.IsCollecting)
-		collect.RegisterCollectDoneHook(func() {
-			filmrepo.RefreshInventoryStatsAsync()
-		})
-	})
 	filmrepo.RefreshInventoryStatsAsync()
 	return nil
 }

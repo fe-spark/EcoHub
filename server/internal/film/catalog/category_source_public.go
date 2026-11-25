@@ -686,6 +686,6 @@ func ensureSyntheticRootGroups(sourceID string, rows []sourceTypeRow, groups []p
 		}
 	}
 	if changed {
-		RefreshCategoryCache()
+		repobase.RefreshCategoryCache()
 	}
 }

@@ -93,6 +93,10 @@ func SetTriggerResetCategorySync(fn func()) { triggerResetCategorySync = fn }
 // 同步清空图库与全部缓存，并重新写入初始化数据与启动默认定时任务。
 // 全程按关键节点上报真实进度，由 SSE 推给页面。
 func (s *SpiderService) ClearFilms() (retErr error) {
+	if OnResetDisableAccess == nil || OnResetClearAccess == nil ||
+		OnResetRecoverAccess == nil || OnResetRecoverCrontab == nil || OnResetReinitSite == nil {
+		return errors.New("站点重置钩子未初始化")
+	}
 	resetSiteLifecycle.Store(true)
 	defer resetSiteLifecycle.Store(false)
 

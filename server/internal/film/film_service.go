@@ -275,9 +275,10 @@ func (s *FilmService) RefreshPrimaryFilms(ids []int64, sourceID string) error {
 		if _, err := validatePrimaryFilmIDs(ids, sourceID); err != nil {
 			return err
 		}
-		if OnRefreshFilms != nil {
-			OnRefreshFilms(ids)
+		if OnRefreshFilms == nil {
+			return errors.New("采集刷新钩子未初始化")
 		}
+		OnRefreshFilms(ids)
 		return nil
 	})
 }

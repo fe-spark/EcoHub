@@ -65,42 +65,12 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	return repobase.RefreshCollectSourceCatalog()
 }
 
-// CurrentPrimarySource 当前主站。没有主站时返回 nil。
-func CurrentPrimarySource() *model.FilmSource {
-	return repobase.CurrentPrimarySource()
-}
-
-// CurrentPrimaryID 当前主站 ID。没有主站或主站不可用时返回空。
-func CurrentPrimaryID() string {
-	return repobase.CurrentPrimaryID()
-}
-
 // SetPrimarySourceID 写入主站状态（切换与交接的持久化入口）。
 func SetPrimarySourceID(id string) error {
 	if err := repobase.SetPrimarySourceID(id); err != nil {
 		return err
 	}
 	return repobase.RefreshCollectSourceCatalog()
-}
-
-// ClearPrimarySourceState 置空主站状态（停用/删除最后一个启用站时的例外路径）。
-func ClearPrimarySourceState() error {
-	return repobase.ClearPrimarySourceState()
-}
-
-// StoredPrimarySourceID 读取持久化的主站 ID（不校验删除态）。
-func StoredPrimarySourceID() string {
-	return repobase.StoredPrimarySourceID()
-}
-
-// FindOtherEnabledCollectSource 返回除 excludeID 外排序最前的可用启用站；不存在时返回 nil。
-func FindOtherEnabledCollectSource(excludeID string) *model.FilmSource {
-	return repobase.FindOtherEnabledCollectSource(excludeID)
-}
-
-// FindOtherEnabledCollectSourcesExcluding 返回除 excludeIDs 外排序靠前的可用启用站列表。
-func FindOtherEnabledCollectSourcesExcluding(excludeIDs map[string]struct{}) []*model.FilmSource {
-	return repobase.FindOtherEnabledCollectSourcesExcluding(excludeIDs)
 }
 
 func GetLastCollectTime(sourceID string) (*time.Time, error) {

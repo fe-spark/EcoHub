@@ -47,7 +47,7 @@ func executeDeferredPrimaryClear(id string) error {
 	deadline := time.Now().Add(deleteIndexWait)
 	for {
 		var needRetry bool
-		err := withPrimaryMutation(func(searchBusy bool) error {
+		err := filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 			storedID := repobase.StoredPrimarySourceID()
 			if storedID != "" && storedID != id {
 				return nil

@@ -98,6 +98,7 @@ func main() {
 
 func start() {
 	log.Printf("[Init] EcoHub server version=%s", config.Version)
+	bootstrap.Wire()
 
 	db.StartRedisHealthCheck()
 	db.StartMysqlHealthCheck()

@@ -26,10 +26,6 @@ func withPrimarySwitchAdmitted(fn func() error) error {
 	})
 }
 
-func withPrimaryMutation(fn func(searchBusy bool) error) error {
-	return filmsnapshot.WithPrimaryMutation(fn)
-}
-
 func enabledSources(sources []model.FilmSource) []model.FilmSource {
 	out := make([]model.FilmSource, 0, len(sources))
 	for _, src := range sources {
@@ -104,7 +100,7 @@ func (s *CollectService) UpdateFilmSourceWithAuth(source model.FilmSource, newPr
 		}()
 
 		var needClean bool
-		err = withPrimaryMutation(func(searchBusy bool) error {
+		err = filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 			latest := repobase.FindCollectSourceById(source.Id)
 			if latest == nil {
 				return errors.New("采集站信息不存在")
@@ -173,7 +169,7 @@ func (s *CollectService) UpdateFilmSourceWithAuth(source model.FilmSource, newPr
 			return err
 		}
 
-		err = withPrimaryMutation(func(searchBusy bool) error {
+		err = filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 			latest := repobase.FindCollectSourceById(source.Id)
 			if latest == nil {
 				return errors.New("采集站信息不存在")
@@ -306,7 +302,7 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 	if len(ids) == 0 {
 		return nil
 	}
-	return withPrimaryMutation(func(searchBusy bool) error {
+	return filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 		oldPrimary := repobase.CurrentPrimarySource()
 		// D6：批量停用不允许包含当前主站，主站交接须走单站停用
 		if !state && oldPrimary != nil {
@@ -356,7 +352,7 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 }
 
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
-	return withPrimaryMutation(func(searchBusy bool) error {
+	return filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 		if source.Id != "" && progress.IsSourceDeleting(source.Id) {
 			return errors.New("该站正在删除")
 		}

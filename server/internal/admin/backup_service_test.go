@@ -37,6 +37,7 @@ func setupBackupTestDB(t *testing.T) *gorm.DB {
 	if err := gdb.AutoMigrate(
 		&model.SiteConfigRecord{},
 		&model.FilmSource{},
+		&model.PrimaryState{},
 		&model.CrontabRecord{},
 		&model.BannerSlot{},
 		&model.FilmIndex{},
@@ -52,8 +53,10 @@ func setupBackupTestDB(t *testing.T) *gorm.DB {
 
 	origMdb := db.Mdb
 	db.Mdb = gdb
+	repobase.InvalidatePrimarySourceCache()
 
 	t.Cleanup(func() {
+		repobase.InvalidatePrimarySourceCache()
 		db.Mdb = origMdb
 	})
 	return gdb
@@ -221,21 +224,8 @@ func TestImportConfig_LegacyBannersGoToSites(t *testing.T) {
 		t.Fatalf("decode legacy backup: %v", err)
 	}
 	req := model.ConfigBackupImportRequest{Modules: model.ConfigBackupModules{Banners: true}, Backup: backup}
-	filmsnapshot.ResetSearchCacheVersionForTest()
-	searchBefore := filmsnapshot.GetSearchCacheVersion()
-	indexBefore := repobase.IndexPageGeneration()
 	if err := BackupSvc.ImportConfig(req); err != nil {
 		t.Fatalf("import config failed: %v", err)
-	}
-	primary := repobase.CurrentPrimarySource()
-	if primary == nil || primary.Id != "src_live" {
-		t.Fatalf("expected primary to stay src_live, got %+v", primary)
-	}
-	if filmsnapshot.GetSearchCacheVersion() == searchBefore {
-		t.Fatal("film source import should bump search cache when primary id stays")
-	}
-	if repobase.IndexPageGeneration() == indexBefore {
-		t.Fatal("film source import should clear index page cache when primary id stays")
 	}
 	slots, err := catalog.ListAllBannerSlots()
 	if err != nil {
@@ -543,6 +533,9 @@ func TestImportConfig_FilmSources_ReplacesAndRejectsDuplicateURI(t *testing.T) {
 	}
 
 	// 2. 正常导入采集站替换生效
+	filmsnapshot.ResetSearchCacheVersionForTest()
+	searchBefore := filmsnapshot.GetSearchCacheVersion()
+	indexBefore := repobase.IndexPageGeneration()
 	req := model.ConfigBackupImportRequest{
 		Modules: model.ConfigBackupModules{FilmSources: true},
 		Backup: model.ConfigBackup{
@@ -555,6 +548,16 @@ func TestImportConfig_FilmSources_ReplacesAndRejectsDuplicateURI(t *testing.T) {
 	}
 	if err := BackupSvc.ImportConfig(req); err != nil {
 		t.Fatalf("import config failed: %v", err)
+	}
+	primary := repobase.CurrentPrimarySource()
+	if primary == nil || primary.Id != "src_live" {
+		t.Fatalf("expected primary to stay src_live, got %+v", primary)
+	}
+	if filmsnapshot.GetSearchCacheVersion() == searchBefore {
+		t.Fatal("film source import should bump search cache when primary id stays")
+	}
+	if repobase.IndexPageGeneration() == indexBefore {
+		t.Fatal("film source import should clear index page cache when primary id stays")
 	}
 
 	gotLive := repobase.FindCollectSourceById("src_live")

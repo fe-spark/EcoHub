@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"server/internal/config"
+	"server/internal/film"
 	"server/internal/model"
 	filmsnapshot "server/internal/film/snapshot"
 
@@ -44,7 +45,7 @@ func TestPlaylistParse_SkipsBadLineAndDropsFilmWhenAllFail(t *testing.T) {
 		t.Fatalf("应只保留解析成功的线路: %+v", mixed.List)
 	}
 
-	lines, broken, err := BatchGetPlayPlaylistsByMids([]int64{401, 402, 403})
+	lines, broken, err := film.BatchGetPlayPlaylistsByMids([]int64{401, 402, 403})
 	if err != nil {
 		t.Fatal(err)
 	}

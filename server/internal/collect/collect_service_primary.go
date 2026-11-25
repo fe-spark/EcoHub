@@ -47,7 +47,7 @@ func (s *CollectService) SwitchPrimary(id string) error {
 	if id == "" {
 		return errors.New("主站 ID 不能为空")
 	}
-	return withPrimaryMutation(func(searchBusy bool) error {
+	return filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 		oldPrimary := repobase.CurrentPrimarySource()
 		if oldPrimary != nil && oldPrimary.Id == id {
 			return nil // 已是当前主站，幂等返回

@@ -119,7 +119,7 @@ func TestGetFilmDetail_ExcludesHiddenNonPrimaryCategoryPeerPlay(t *testing.T) {
 	if len(after.List) != 1 || after.List[0].SourceId != "src_a" {
 		t.Fatalf("expected only src_a play source after hiding child category, got %+v", after.List)
 	}
-	batch, _, err := BatchGetPlayPlaylistsByMids([]int64{101})
+	batch, _, err := film.BatchGetPlayPlaylistsByMids([]int64{101})
 	if err != nil {
 		t.Fatalf("BatchGetPlayPlaylistsByMids: %v", err)
 	}

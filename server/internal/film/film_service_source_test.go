@@ -591,3 +591,31 @@ func TestFilmService_AggregatedPrimaryFilmAllowedAndManualLineClear(t *testing.T
 		t.Fatalf("expected manual playlist updated to new link, got %s", updatedLine.Content)
 	}
 }
+
+func TestFilmService_RefreshPrimaryFilms_HookGuard(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "主站", State: true, Sort: 0})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 601, FirstSourceId: "src1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "测试影片"},
+	})
+	_ = repobase.RefreshCollectSourceCatalog()
+
+	prev := OnRefreshFilms
+	t.Cleanup(func() { OnRefreshFilms = prev })
+
+	OnRefreshFilms = nil
+	srv := new(FilmService)
+	if err := srv.RefreshPrimaryFilms([]int64{601}, "src1"); err == nil {
+		t.Fatal("expected error when OnRefreshFilms hook is nil")
+	}
+
+	var got []int64
+	OnRefreshFilms = func(ids []int64) { got = append(got, ids...) }
+	if err := srv.RefreshPrimaryFilms([]int64{601}, "src1"); err != nil {
+		t.Fatalf("expected RefreshPrimaryFilms to succeed when hook wired, got %v", err)
+	}
+	if len(got) != 1 || got[0] != 601 {
+		t.Fatalf("expected hook called with [601], got %+v", got)
+	}
+}

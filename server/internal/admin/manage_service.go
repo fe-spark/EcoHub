@@ -4,7 +4,6 @@ import (
 	"server/internal/mediaproxy"
 	"server/internal/repobase"
 	"errors"
-	"server/internal/access"
 	"server/internal/model"
 	"server/internal/utils"
 	"strings"
@@ -17,15 +16,6 @@ var ManageSvc = new(ManageService)
 
 // siteBasicMu 串行化 BasicConfig 局部字段的读-改-写，避免并发保存不同子模块相互覆盖。
 var siteBasicMu sync.Mutex
-
-// AccessGuardConfig 返回私有化开关和订阅密钥。
-func (s *ManageService) AccessGuardConfig() (bool, string, error) {
-	cfg, err := repobase.GetSiteBasic()
-	if err != nil {
-		return false, "", err
-	}
-	return cfg.PrivateAccess, strings.TrimSpace(cfg.ProvideKey), nil
-}
 
 // GetSiteBasicConfig 获取网站基本配置信息
 func (s *ManageService) GetSiteBasicConfig() (model.BasicConfig, error) {
@@ -206,16 +196,6 @@ func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error 
 	}
 	curr.Notice = notice
 	return repobase.SaveSiteBasic(curr)
-}
-
-// GetAnalyticsConfig 获取数据分析配置
-func (s *ManageService) GetAnalyticsConfig() (model.AnalyticsConfig, error) {
-	return access.GetAndSyncAnalyticsConfig()
-}
-
-// UpdateAnalyticsConfig 更新数据分析配置并即时热生效
-func (s *ManageService) UpdateAnalyticsConfig(cfg model.AnalyticsConfig) error {
-	return access.UpdateAnalyticsConfig(cfg)
 }
 
 func dtoError(msg string) error {

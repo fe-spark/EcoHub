@@ -66,15 +66,15 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 	if err := deleteOrphanDisplayRootCategories(); err != nil {
 		return err
 	}
-	RefreshCategoryCache()
+	repobase.RefreshCategoryCache()
 	ReloadMappingRules()
-	touchCategoryVersion()
+	repobase.TouchCategoryVersion()
 	repobase.TouchSearchTagsVersion()
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 		db.Rdb.Del(db.Cxt, config.TVBoxConfigCacheKey)
 	}
-	ClearIndexPageCache()
+	repobase.ClearIndexPageCache()
 	clearProvideListCache()
 	return nil
 }

@@ -183,7 +183,7 @@ func buildActiveCategoryAncestorMap(activeCategoryMap map[int64]bool) map[int64]
 
 func isValidActiveCategoryTree(tree model.CategoryTree) bool {
 	for _, child := range tree.Children {
-		if child == nil || child.Pid != 0 || !IsRootCategory(child.Id) {
+		if child == nil || child.Pid != 0 || !repobase.IsRootCategory(child.Id) {
 			return false
 		}
 	}

@@ -9,11 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/bootstrap"
 	"server/internal/collect"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repobase"
 	"server/internal/router"
 	"server/internal/user"
 	"server/internal/utils"
@@ -27,6 +29,7 @@ func init() {
 
 func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 	t.Helper()
+	bootstrap.Wire()
 	gdb := newTestDB(t)
 	_ = useRedis(t)
 
@@ -47,6 +50,7 @@ func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 		Uri:   "http://default.source.com/api.json",
 		State: true,
 	})
+	_ = repobase.RefreshCollectSourceCatalog()
 
 	r := router.SetupRouter()
 	return r, adminToken, adminUserID
@@ -351,20 +355,27 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		}), "POST file delete batch")
 	})
 
-	// 8. 影视管理模块（/film/save 统一保存 + /film/delete 批量删除）
+	// 8. 影视管理模块（/film/save 统一保存 + /film/refresh + /film/delete 批量删除）
 	t.Run("FilmEndpoints", func(t *testing.T) {
 		w := doJSONRequest(r, http.MethodPost, "/api/manage/film/save", token, map[string]any{})
 		if w.Code != http.StatusOK || parseResp(t, w).Code == dto.SUCCESS {
 			t.Fatalf("POST /api/manage/film/save 空参数应校验失败: %s", w.Body.String())
 		}
 
-		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/film/delete", token, map[string]any{
-			"ids": []uint{888888},
-		}), "POST film delete batch")
+		if err := db.Mdb.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 9002, FirstSourceId: "src_default_main"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "集成测试可删影片"},
+		}).Error; err != nil {
+			t.Fatalf("初始化测试影片失败: %v", err)
+		}
 
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/film/refresh", token, map[string]any{
-			"ids": []int64{888888},
+			"ids": []int64{9002},
 		}), "POST film refresh batch")
+
+		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/film/delete", token, map[string]any{
+			"ids": []uint{9002},
+		}), "POST film delete batch")
 	})
 
 	// 9. 访问监控与前台基础端点

@@ -719,3 +719,40 @@ func TestSyncMissingSourceCategories_OnlyEnabledSources(t *testing.T) {
 		t.Fatal("disabled source should NOT be synced")
 	}
 }
+
+func TestSpiderService_ClearFilms_RequiresResetHooks(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "keep_src", Name: "保留站", Uri: "http://keep", State: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	prevDisable := OnResetDisableAccess
+	prevClear := OnResetClearAccess
+	prevRecoverAccess := OnResetRecoverAccess
+	prevRecoverCron := OnResetRecoverCrontab
+	prevReinit := OnResetReinitSite
+	t.Cleanup(func() {
+		OnResetDisableAccess = prevDisable
+		OnResetClearAccess = prevClear
+		OnResetRecoverAccess = prevRecoverAccess
+		OnResetRecoverCrontab = prevRecoverCron
+		OnResetReinitSite = prevReinit
+	})
+
+	OnResetDisableAccess = nil
+	OnResetClearAccess = nil
+	OnResetRecoverAccess = nil
+	OnResetRecoverCrontab = nil
+	OnResetReinitSite = nil
+
+	if err := SpiderSvc.ClearFilms(); err == nil {
+		t.Fatal("expected error when reset hooks are nil")
+	}
+	var count int64
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "keep_src").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("ClearFilms must not wipe database when hooks are nil, count=%d", count)
+	}
+}

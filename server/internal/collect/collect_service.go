@@ -51,10 +51,6 @@ func WaitDeleteSourceJobs() {
 	deleteSourceJobs.Wait()
 }
 
-func WithPrimaryMutation(fn func(searchBusy bool) error) error {
-	return withPrimaryMutation(fn)
-}
-
 func ApplyPrimaryChanged(oldPrimary, newPrimary *model.FilmSource) bool {
 	return applyPrimaryChanged(oldPrimary, newPrimary)
 }
