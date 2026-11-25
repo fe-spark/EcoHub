@@ -5,7 +5,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func TestListProvideSnapshots_TagFilter(t *testing.T) {
@@ -238,8 +238,8 @@ func TestListProvideSnapshots_PrimaryKeywordOnlyRespectsVisibilityAndSourceType(
 	if err := gdb.Model(&model.Category{}).Where("id = ?", 99).Update("show", false).Error; err != nil {
 		t.Fatal(err)
 	}
-	repobase.RefreshCategoryCache()
-	t.Cleanup(repobase.RefreshCategoryCache)
+	taxonomy.RefreshCategoryCache()
+	t.Cleanup(taxonomy.RefreshCategoryCache)
 
 	if err := gdb.Create(&[]model.SourceCategory{
 		{SourceId: "source_master", SourceTypeId: 2, RawName: "连续剧", Sort: 1, Depth: 0},

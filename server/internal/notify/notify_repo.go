@@ -14,6 +14,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 
 	"gorm.io/gorm"
 )
@@ -375,7 +376,7 @@ type BatchSourceCategoryPageQuery struct {
 
 // HasCollectBatchLedger 检查批次是否已写入 collect_record_films 账本
 func HasCollectBatchLedger(batchID string) (bool, error) {
-	return repobase.CollectRecordHasLedger(batchID)
+	return sourcecatalog.CollectRecordHasLedger(batchID)
 }
 
 // LoadBatchSourceCategoryStats 基于 collect_record_films 账本在数据库侧按分类聚合计数

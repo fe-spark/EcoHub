@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
+	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 const (
@@ -88,7 +88,7 @@ func bannerSourceLocalCategoryIDs(ctx context.Context, sourceID string, category
 	names := make([]string, 0, len(categoryIDs))
 	for _, id := range categoryIDs {
 		for _, typeID := range catalog.PublicSourceTypeIDs(sourceID, "pid", id) {
-			addID(repobase.GetLocalCategoryId(sourceID, typeID))
+			addID(taxonomy.GetLocalCategoryId(sourceID, typeID))
 		}
 		for _, name := range catalog.PublicSourceCategoryNames(sourceID, id) {
 			if _, ok := seenNames[name]; ok {
@@ -142,7 +142,7 @@ func bannerSourceCategoryKeys(sourceID string, categoryIDs []int64) []string {
 	seen := make(map[string]struct{}, len(categoryIDs))
 	for _, id := range categoryIDs {
 		for _, typeID := range catalog.PublicSourceTypeIDs(sourceID, "pid", id) {
-			key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+			key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 			if key == "" {
 				continue
 			}

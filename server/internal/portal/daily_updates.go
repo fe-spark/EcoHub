@@ -1,15 +1,15 @@
 package portal
 
 import (
-	"server/internal/repobase"
 	"log"
+	"server/internal/sourcecatalog"
 	"time"
 
-	"server/internal/model"
-	"server/internal/model/dto"
 	"server/internal/film"
 	filmshared "server/internal/film/shared"
 	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
+	"server/internal/model/dto"
 )
 
 const (
@@ -98,7 +98,7 @@ func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]in
 func (i *IndexService) DailyUpdates(req DailyUpdateListReq) (*DailyUpdateResult, error) {
 	req = normalizeDailyUpdateReq(req)
 	if req.SourceId == "" {
-		if active := repobase.CurrentPrimarySource(); active != nil {
+		if active := sourcecatalog.CurrentPrimarySource(); active != nil {
 			req.SourceId = active.Id
 		}
 	}

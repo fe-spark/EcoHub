@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/collect/progress"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"

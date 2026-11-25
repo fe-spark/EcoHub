@@ -14,11 +14,11 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/collect/progress"
+	"server/internal/collect/scheduler"
 	"server/internal/config"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/collect/progress"
-	"server/internal/collect/scheduler"
 )
 
 // Batch 采集批次上下文在抓取阶段需要的能力；调用方可传 nil（全部方法需 nil-safe）。

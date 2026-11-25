@@ -5,9 +5,8 @@ import (
 	"sort"
 	"testing"
 
-	"server/internal/film/catalog"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -138,11 +137,11 @@ func TestLoadFilmSearchMetaIndex_DedupesPlayLines(t *testing.T) {
 }
 
 func TestSearchFilmMetas_DisabledCategoryHidden(t *testing.T) {
-	repobase.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
-	repobase.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
+	taxonomy.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
+	taxonomy.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
 	t.Cleanup(func() {
-		repobase.SetCategoryShowForTest(nil)
-		repobase.SetCategoryTreeForTest(nil, nil)
+		taxonomy.SetCategoryShowForTest(nil)
+		taxonomy.SetCategoryTreeForTest(nil, nil)
 	})
 
 	item1 := utils.FilmSearchItem{Mid: 101, Name: "复仇者联盟"}
@@ -170,9 +169,9 @@ func TestSearchFilmMetas_HiddenSourceCategory(t *testing.T) {
 	if err := gdb.AutoMigrate(&model.MappingRule{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 	if err := gdb.Create([]model.Category{
 		{Id: 1, Pid: 0, Name: "电影", Show: true, StableKey: "src_search_hide:1"},
@@ -195,7 +194,7 @@ func TestSearchFilmMetas_HiddenSourceCategory(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create source categories: %v", err)
 	}
-	catalog.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	item1 := utils.FilmSearchItem{Mid: 101, Name: "复仇者联盟"}
 	utils.FillSearchDerivedFields(&item1)
@@ -212,11 +211,11 @@ func TestSearchFilmMetas_HiddenSourceCategory(t *testing.T) {
 }
 
 func TestTagMetaMatch_DisabledCategoryHidden(t *testing.T) {
-	repobase.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
-	repobase.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
+	taxonomy.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
+	taxonomy.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
 	t.Cleanup(func() {
-		repobase.SetCategoryShowForTest(nil)
-		repobase.SetCategoryTreeForTest(nil, nil)
+		taxonomy.SetCategoryShowForTest(nil)
+		taxonomy.SetCategoryTreeForTest(nil, nil)
 	})
 
 	matcher, err := tagMetaMatch("v_test", model.SearchTagsVO{})

@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 )
 
 func parseProvideSourceCategoryKey(key string) (string, int64, bool) {
-	return repobase.ParseSourceCategoryKey(key)
+	return taxonomy.ParseSourceCategoryKey(key)
 }
 
 func provideTypeFromKey(sourceID, key string) (int64, string, bool) {
@@ -51,7 +52,7 @@ func resolveProvideListedRootType(snapshot model.FilmListSnapshot, sourceID stri
 
 // primaryProvideSourceID 订阅只服务当前主站。
 func primaryProvideSourceID() string {
-	if active := repobase.CurrentPrimarySource(); active != nil {
+	if active := sourcecatalog.CurrentPrimarySource(); active != nil {
 		return strings.TrimSpace(active.Id)
 	}
 	return ""

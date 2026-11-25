@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/collect/scheduler"
 	"server/internal/config"
 	"server/internal/model"
-	"server/internal/collect/scheduler"
 	"server/internal/utils"
 )
 

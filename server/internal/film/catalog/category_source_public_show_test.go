@@ -5,7 +5,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func seedMergedShowTree(t *testing.T, welfareShow, anchorShow bool) {
@@ -56,16 +56,16 @@ func seedMergedShowTree(t *testing.T, welfareShow, anchorShow bool) {
 	}).Error; err != nil {
 		t.Fatalf("create rule: %v", err)
 	}
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 }
 
 func TestSourceTypeTree_HiddenMergedRootStaysOffNav(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 	seedMergedShowTree(t, true, true)
 
@@ -119,10 +119,10 @@ func TestSourceTypeTree_HiddenMergedRootStaysOffNav(t *testing.T) {
 func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 	seedMergedShowTree(t, false, false)
 
@@ -191,10 +191,10 @@ func TestSourceTypeTree_HiddenMergedChildLeavesChips(t *testing.T) {
 func TestSourceTypeTree_PartiallyHiddenCascadingMergedChildStaysVisible(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 
 	gdb := setupCategoryActiveTreeTestDB(t)
@@ -232,7 +232,7 @@ func TestSourceTypeTree_PartiallyHiddenCascadingMergedChildStaysVisible(t *testi
 	if err := gdb.Create(&rules).Error; err != nil {
 		t.Fatalf("create rules: %v", err)
 	}
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	tree, err := GetActiveCategoryTree("src1")
 	if err != nil {

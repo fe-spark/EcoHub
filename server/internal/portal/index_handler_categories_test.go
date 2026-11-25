@@ -18,6 +18,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"server/internal/taxonomy"
 )
 
 func testContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
@@ -108,7 +109,7 @@ func TestCategoryPages_EmptySearchIndexState(t *testing.T) {
 	gdb.Create(&model.Category{Id: 17, Pid: 0, Name: "动漫", Show: true, Sort: 1})
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 17, RawName: "动漫", Sort: 1})
 	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 17, CategoryId: 17})
-	catalog.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 	catalog.MarkCategoryChanged()
 
 	// 1. 有效分类在检索索引未就绪时：overview 返回成功且标记 indexReady=false

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/collect/progress"
 )
 
 func captureNotify(t *testing.T) (*sync.Mutex, *[]string) {

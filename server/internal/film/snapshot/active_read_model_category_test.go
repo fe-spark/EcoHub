@@ -6,8 +6,8 @@ import (
 
 	"server/internal/film/catalog"
 	"server/internal/model"
-	"server/internal/repobase"
 	"server/internal/model/dto"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -441,10 +441,10 @@ func TestCategoryRank_HiddenSubcategoryExcludedFromHomeAndTopPools(t *testing.T)
 		t.Fatalf("create category mappings: %v", err)
 	}
 	catalog.InvalidatePublicSourceCache(srcID)
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 	t.Cleanup(func() {
 		catalog.InvalidatePublicSourceCache(srcID)
-		repobase.RefreshCategoryCache()
+		taxonomy.RefreshCategoryCache()
 	})
 
 	films := []model.FilmIndex{

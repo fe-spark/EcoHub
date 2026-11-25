@@ -1,13 +1,13 @@
 package portal
 
 import (
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 	"strings"
 
-	"server/internal/model"
-	"server/internal/model/dto"
 	filmshared "server/internal/film/shared"
 	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
+	"server/internal/model/dto"
 )
 
 // SearchFilmResult 搜索接口业务结果。
@@ -26,7 +26,7 @@ func (i *IndexService) SearchFilm(keyword, _ string, sortField string, page *dto
 	if page.Current <= 0 {
 		page.Current = 1
 	}
-	sourceID := repobase.CurrentPrimaryID()
+	sourceID := sourcecatalog.CurrentPrimaryID()
 	out := SearchFilmResult{
 		List:    []model.MovieBasicInfo{},
 		Sources: []model.SearchSourceTab{},

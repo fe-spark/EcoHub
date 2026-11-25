@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"server/internal/config"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"

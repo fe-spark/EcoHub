@@ -5,14 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/collect/progress"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"server/internal/collect/ledger"
 )
 
 func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
@@ -66,7 +67,7 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	if missed := batch.saveRecordFilms(map[string][]int64{srcA.Id: {9}, srcB.Id: {2}}); len(missed) > 0 {
 		t.Fatalf("save films missed %+v", missed)
 	}
-	running, err := GetCollectRecordByBatchID(batch.batchID)
+	running, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,7 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	if !strings.Contains(running.DetailJson, `"status":"running"`) || strings.Contains(running.DetailJson, `"filmsTotal":1`) {
 		t.Fatalf("running detail should stay the start roster, detail=%s", running.DetailJson)
 	}
-	if _, total, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if _, total, err := ledger.GetCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: batch.batchID, SourceID: srcA.Id, PageSize: 10,
 	}); err != nil || total != 0 {
 		t.Fatalf("deleted source films total=%d err=%v", total, err)
@@ -87,7 +88,7 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 		{SourceID: srcB.Id, SourceName: srcB.Name, Status: progress.StatusDone, PageTotal: 4, SuccessCnt: 2, FilmsTotal: 1},
 	})
 
-	settled, err := GetCollectRecordByBatchID(batch.batchID)
+	settled, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}

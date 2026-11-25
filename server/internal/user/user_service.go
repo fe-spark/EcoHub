@@ -125,6 +125,7 @@ func (s *UserService) AddUser(u model.User) error {
 	u.Password = utils.PasswordEncrypt(u.Password, u.Salt)
 	return AddUser(&u)
 }
+
 // UpdateProfile 个人资料修改（含修改密码的原密码校验）
 func (s *UserService) UpdateProfile(userID uint, req model.UserUpdatePayload) error {
 	oldUser, err := GetUserById(userID)

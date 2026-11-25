@@ -29,4 +29,3 @@ func HasPlayableLinks(detail model.MovieDetail) bool {
 	}
 	return false
 }
-

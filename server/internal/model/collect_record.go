@@ -177,8 +177,8 @@ type CollectRecordFilmQuery struct {
 // CollectRecordFilmPage 清单的一页。不搜时总数用记录上的部数，翻页用 AfterID。
 // 搜片名时总数是这一批里实际对得上的行数，翻页用片名、影片编号和行号。
 type CollectRecordFilmPage struct {
-	List        []CollectRecordFilm
-	Total       int64
+	List          []CollectRecordFilm
+	Total         int64
 	NextAfterID   uint
 	NextAfterName string
 	NextAfterMid  int64

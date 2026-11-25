@@ -5,16 +5,16 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func TestSourceTypeTree_UsesMappedSort(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 
 	gdb := setupCategoryActiveTreeTestDB(t)
@@ -53,7 +53,7 @@ func TestSourceTypeTree_UsesMappedSort(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create rule: %v", err)
 	}
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	tree, err := GetActiveCategoryTree("src1")
 	if err != nil {

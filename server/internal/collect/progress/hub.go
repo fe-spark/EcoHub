@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 )
 
 func init() {
-	repobase.RegisterSourceDeletingChecker(IsSourceDeleting)
+	sourcecatalog.RegisterSourceDeletingChecker(IsSourceDeleting)
 }
 
 // CategorySyncEvent 采集站分类同步状态事件

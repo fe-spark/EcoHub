@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/collect/progress"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"

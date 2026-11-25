@@ -9,10 +9,10 @@ import (
 
 	"server/internal/config"
 	"server/internal/film"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -102,7 +102,7 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 
 	var uncachedMids []int64
 	for _, s := range snapshots {
-		if !repobase.IsCategoryVisible(s.Cid, s.Pid) {
+		if !taxonomy.IsCategoryVisible(s.Cid, s.Pid) {
 			continue
 		}
 		if _, ok := cachedVos[s.Mid]; !ok {
@@ -126,7 +126,7 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 		toCacheVo = make(map[int64]model.MovieDetailVo, len(uncachedMids))
 	}
 	for _, s := range snapshots {
-		if !repobase.IsCategoryVisible(s.Cid, s.Pid) {
+		if !taxonomy.IsCategoryVisible(s.Cid, s.Pid) {
 			continue
 		}
 		if _, bad := broken[s.Mid]; bad {

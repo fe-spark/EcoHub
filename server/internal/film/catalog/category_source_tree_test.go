@@ -5,7 +5,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -29,15 +29,15 @@ func seedSourceBoundTree(t *testing.T, gdb *gorm.DB) {
 }
 
 func TestGetSourceBoundCategoryTree_OnlyThatSource(t *testing.T) {
-	prev := repobase.CurrentMappingSnapshotForTest()
-	t.Cleanup(func() { repobase.StoreMappingSnapshotForTest(prev) })
+	prev := taxonomy.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { taxonomy.StoreMappingSnapshotForTest(prev) })
 
 	gdb := setupCategoryActiveTreeTestDB(t)
 	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	seedSourceBoundTree(t, gdb)
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	tree := GetSourceBoundCategoryTree("src_a")
 	if len(tree.Children) != 1 || tree.Children[0].Id != 9 || tree.Children[0].Name != "电影" {
@@ -55,10 +55,10 @@ func TestGetSourceBoundCategoryTree_OnlyThatSource(t *testing.T) {
 func TestGetSourceBoundCategoryTree_AppliesCategoryRules(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 
 	gdb := setupCategoryActiveTreeTestDB(t)
@@ -112,7 +112,7 @@ func TestGetSourceBoundCategoryTree_AppliesCategoryRules(t *testing.T) {
 	if err := gdb.Create(&rules).Error; err != nil {
 		t.Fatalf("create rules: %v", err)
 	}
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	tree := GetSourceBoundCategoryTree("src_a")
 	byName := map[string]*model.CategoryTree{}
@@ -228,15 +228,15 @@ func TestSaveSourceCategoryOrder_KeepsOtherSource(t *testing.T) {
 }
 
 func TestSourceCategoryFilmCountsFromDB_IsolationAndDeleted(t *testing.T) {
-	prev := repobase.CurrentMappingSnapshotForTest()
-	t.Cleanup(func() { repobase.StoreMappingSnapshotForTest(prev) })
+	prev := taxonomy.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { taxonomy.StoreMappingSnapshotForTest(prev) })
 
 	gdb := setupCategoryActiveTreeTestDB(t)
 	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}, &model.FilmIndex{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	seedSourceBoundTree(t, gdb)
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 	if err := gdb.Create([]model.FilmIndex{
 		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:6"}},
 		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_a"}, FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:6"}},
@@ -268,8 +268,8 @@ func TestSourceCategoryFilmCountsFromDB_IsolationAndDeleted(t *testing.T) {
 }
 
 func TestGetSourceBoundCategoryTreeWithCounts_DeduplicatedSum(t *testing.T) {
-	prev := repobase.CurrentMappingSnapshotForTest()
-	t.Cleanup(func() { repobase.StoreMappingSnapshotForTest(prev) })
+	prev := taxonomy.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { taxonomy.StoreMappingSnapshotForTest(prev) })
 
 	gdb := setupCategoryActiveTreeTestDB(t)
 	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {
@@ -280,7 +280,7 @@ func TestGetSourceBoundCategoryTreeWithCounts_DeduplicatedSum(t *testing.T) {
 	gdb.Create(&model.Category{Id: 12, Pid: 9, Name: "隐藏片", StableKey: "a-hidden", Show: false, Sort: 3})
 	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 8, CategoryId: 12})
 	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 8, ParentSourceTypeId: 1, RawName: "隐藏片", Sort: 3, Depth: 1})
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	keyCounts := map[string]int64{
 		"source:src_a:1": 5,
@@ -307,8 +307,8 @@ func TestGetSourceBoundCategoryTreeWithCounts_DeduplicatedSum(t *testing.T) {
 }
 
 func TestSaveSourceCategoryOrder_MissingMappingAndHiddenMembers(t *testing.T) {
-	prev := repobase.CurrentMappingSnapshotForTest()
-	t.Cleanup(func() { repobase.StoreMappingSnapshotForTest(prev) })
+	prev := taxonomy.CurrentMappingSnapshotForTest()
+	t.Cleanup(func() { taxonomy.StoreMappingSnapshotForTest(prev) })
 
 	gdb := setupCategoryActiveTreeTestDB(t)
 	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.MappingRule{}); err != nil {

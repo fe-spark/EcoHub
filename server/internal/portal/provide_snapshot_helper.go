@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func currentProvideCategoryIDsBySourceKey(sourceKey string) ([]int64, error) {
@@ -23,7 +23,7 @@ func currentProvideCategoryIDsBySourceKey(sourceKey string) ([]int64, error) {
 	ids := make([]int64, 0)
 	seen := make(map[int64]struct{})
 	for _, mapping := range mappings {
-		if repobase.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId) != sourceKey || mapping.CategoryId <= 0 {
+		if taxonomy.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId) != sourceKey || mapping.CategoryId <= 0 {
 			continue
 		}
 		if _, ok := seen[mapping.CategoryId]; ok {
@@ -51,10 +51,10 @@ func resolveProvideCurrentCategoryIDFromSnapshot(snapshot model.FilmListSnapshot
 		return ids[0], nil
 	}
 	if snapshot.Cid > 0 {
-		return repobase.ResolveCategoryID(snapshot.Cid), nil
+		return taxonomy.ResolveCategoryID(snapshot.Cid), nil
 	}
 	if snapshot.Pid > 0 {
-		return repobase.ResolveCategoryID(snapshot.Pid), nil
+		return taxonomy.ResolveCategoryID(snapshot.Pid), nil
 	}
 	return 0, nil
 }
@@ -65,7 +65,7 @@ func resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot model.FilmListSnap
 		return 0, err
 	}
 	if len(ids) > 0 {
-		rootID := repobase.GetRootId(ids[0])
+		rootID := taxonomy.GetRootId(ids[0])
 		if rootID > 0 {
 			return rootID, nil
 		}
@@ -76,7 +76,7 @@ func resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot model.FilmListSnap
 		return 0, err
 	}
 	if categoryID > 0 {
-		rootID := repobase.GetRootId(categoryID)
+		rootID := taxonomy.GetRootId(categoryID)
 		if rootID > 0 {
 			return rootID, nil
 		}
@@ -91,21 +91,21 @@ func resolveProvideTypeFromSnapshot(snapshot model.FilmListSnapshot) (int64, str
 		return 0, "", err
 	}
 	if categoryID > 0 {
-		if name := repobase.GetCategoryNameById(categoryID); name != "" {
+		if name := taxonomy.GetCategoryNameById(categoryID); name != "" {
 			return categoryID, name, nil
 		}
-		if name := repobase.GetMainCategoryName(categoryID); name != "" {
+		if name := taxonomy.GetMainCategoryName(categoryID); name != "" {
 			return categoryID, name, nil
 		}
 	}
 	if snapshot.Cid > 0 {
-		if name := repobase.GetCategoryNameById(snapshot.Cid); name != "" {
+		if name := taxonomy.GetCategoryNameById(snapshot.Cid); name != "" {
 			return snapshot.Cid, name, nil
 		}
 		return snapshot.Cid, snapshot.CName, nil
 	}
 	if snapshot.Pid > 0 {
-		if name := repobase.GetMainCategoryName(snapshot.Pid); name != "" {
+		if name := taxonomy.GetMainCategoryName(snapshot.Pid); name != "" {
 			return snapshot.Pid, name, nil
 		}
 		return snapshot.Pid, snapshot.CName, nil

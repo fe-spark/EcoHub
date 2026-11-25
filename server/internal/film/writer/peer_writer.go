@@ -11,19 +11,20 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/infra/db"
-	"server/internal/model"
 	"server/internal/film/shared"
 	"server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail) (*model.FilmIndex, error) {
-	categoryVersion := repobase.GetCategoryVersion()
-	ruleVersion := repobase.GetRuleVersion()
+	categoryVersion := taxonomy.GetCategoryVersion()
+	ruleVersion := taxonomy.GetRuleVersion()
 	fi, err := ConvertFilmIndex(sourceID, detail, categoryVersion, ruleVersion)
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func syncOwnedFilmFieldsTx(tx *gorm.DB, existing *model.FilmIndex, sourceID stri
 	if detail.CName == "" && existing.CName != "" {
 		detail.CName = existing.CName
 	}
-	next, err := ConvertFilmIndex(sourceID, detail, repobase.GetCategoryVersion(), repobase.GetRuleVersion())
+	next, err := ConvertFilmIndex(sourceID, detail, taxonomy.GetCategoryVersion(), taxonomy.GetRuleVersion())
 	if err != nil {
 		return false, nil, err
 	}
@@ -202,7 +203,7 @@ func refreshRemarksAndPlaySummaryTx(tx *gorm.DB, mid int64) error {
 	if mid <= 0 {
 		return nil
 	}
-	return refreshRemarksAndPlaySummaryWithStampTx(tx, []int64{mid}, map[int64]struct{}{mid: {}}, repobase.GetCollectSourceListTx(tx))
+	return refreshRemarksAndPlaySummaryWithStampTx(tx, []int64{mid}, map[int64]struct{}{mid: {}}, sourcecatalog.GetCollectSourceListTx(tx))
 }
 
 func pickPlaylistRemarks(playLines []model.FilmSourcePlaylist, sources []model.FilmSource) string {
@@ -391,7 +392,7 @@ func saveSinglePeerDetailTxCtx(ctx context.Context, source *model.FilmSource, de
 			}
 		}
 		if linesChanged || isNew {
-			sources := repobase.GetCollectSourceListTx(tx)
+			sources := sourcecatalog.GetCollectSourceListTx(tx)
 			var stampMids map[int64]struct{}
 			if !isNew && playChanged {
 				stampMids = map[int64]struct{}{mid: {}}
@@ -431,7 +432,7 @@ func SaveCollectedPeerDetails(
 		return model.Mids{}, errNilCollectSource
 	}
 	prepareSourceOtherCategory(source.Id)
-	sources := repobase.GetCollectSourceList()
+	sources := sourcecatalog.GetCollectSourceList()
 	unlock := lockPeerCollectPage(source, details)
 	defer unlock()
 
@@ -473,7 +474,7 @@ func SaveCollectedPeerDetails(
 
 // SaveDetailsForCollect 兼容采集调度层调用。
 func SaveDetailsForCollect(sourceID string, list []model.MovieDetail) (shared.CollectWriteResult, error) {
-	source := repobase.FindCollectSourceById(sourceID)
+	source := sourcecatalog.FindCollectSourceById(sourceID)
 	if source == nil {
 		source = &model.FilmSource{Id: sourceID, Name: sourceID, State: true}
 	}

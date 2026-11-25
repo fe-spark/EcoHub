@@ -5,7 +5,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 // GetSourceBoundCategoryTree 分类管理树。分组、排序、显示与前台同一套规则。
@@ -28,7 +28,7 @@ func GetSourceBoundCategoryTreeWithCounts(sourceID string, keyCounts map[string]
 	if err != nil || len(view.Groups) == 0 {
 		return root
 	}
-	root.Children = adminTreeFromGroups(view.Groups, 0, sourceID, keyCounts, loadSourceTypeCategories(sourceID), loadSyntheticRootCategories(sourceID))
+	root.Children = adminTreeFromGroups(view.Groups, 0, sourceID, keyCounts, loadSourceTypeCategories(sourceID), LoadSyntheticRootCategories(sourceID))
 	return root
 }
 
@@ -80,7 +80,7 @@ func collectSourceTreeCategoryKeys(sourceID string, groups []publicTypeGroup) []
 	keys := make([]string, 0, len(groups)*4)
 	for _, group := range groups {
 		for _, typeID := range collectGroupAllTypeIDs(group) {
-			key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+			key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 			if _, ok := seen[key]; ok {
 				continue
 			}
@@ -91,7 +91,7 @@ func collectSourceTreeCategoryKeys(sourceID string, groups []publicTypeGroup) []
 	return keys
 }
 
-func loadSyntheticRootCategories(sourceID string) map[int64]model.Category {
+func LoadSyntheticRootCategories(sourceID string) map[int64]model.Category {
 	out := make(map[int64]model.Category)
 	if db.Mdb == nil || strings.TrimSpace(sourceID) == "" {
 		return out
@@ -171,7 +171,7 @@ func countGroupFilms(sourceID string, group publicTypeGroup, keyCounts map[strin
 	}
 	var total int64
 	for _, typeID := range collectGroupAllTypeIDs(group) {
-		if key := repobase.BuildSourceCategoryKey(sourceID, typeID); key != "" {
+		if key := taxonomy.BuildSourceCategoryKey(sourceID, typeID); key != "" {
 			total += keyCounts[key]
 		}
 	}

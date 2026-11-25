@@ -4,14 +4,15 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/collect/progress"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"server/internal/collect/ledger"
 )
 
 func TestRunningRecordWaitsUntilFinishToStoreFilms(t *testing.T) {
@@ -36,7 +37,7 @@ func TestRunningRecordWaitsUntilFinishToStoreFilms(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec, err := GetCollectRecordByBatchID(batch.batchID)
+	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestRunningRecordWaitsUntilFinishToStoreFilms(t *testing.T) {
 	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
 		SourceID: src.Id, SourceName: src.Name, Status: progress.StatusDone, FilmsTotal: 2,
 	})
-	rec, err = GetCollectRecordByBatchID(batch.batchID)
+	rec, err = ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestRunningRecordWaitsUntilFinishToStoreFilms(t *testing.T) {
 		SourceID: src.Id, SourceName: src.Name, Status: progress.StatusDone,
 		PageTotal: 1, SuccessCnt: 1, FilmsTotal: 2,
 	}})
-	rec, err = GetCollectRecordByBatchID(batch.batchID)
+	rec, err = ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}

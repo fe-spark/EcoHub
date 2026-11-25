@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/infra/db"
-	"server/internal/model"
 	"server/internal/collect/fetcher"
 	"server/internal/collect/progress"
+	"server/internal/infra/db"
+	"server/internal/model"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"

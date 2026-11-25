@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 
 	"gorm.io/gorm"
 )
@@ -106,7 +106,7 @@ func LoadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 	}
 
 	sourceMap := make(map[string]model.FilmSource)
-	for _, s := range repobase.GetCollectSourceList() {
+	for _, s := range sourcecatalog.GetCollectSourceList() {
 		sourceMap[s.Id] = s
 	}
 

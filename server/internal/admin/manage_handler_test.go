@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"server/internal/collect"
 	"bytes"
 	"encoding/json"
 	"net/http"
@@ -10,7 +9,7 @@ import (
 	"testing"
 
 	"server/internal/config"
-	"server/internal/film"
+	"server/internal/httpx"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -167,7 +166,7 @@ func TestVerifyManagePassword_SafeNoSideEffects(t *testing.T) {
 			if tc.set {
 				c.Set(config.AuthUserClaims, tc.claims)
 			}
-			ok := verifyManagePassword(c, "some-password")
+			ok := httpx.VerifyCurrentPassword(c, "some-password", user.UserSvc.VerifyUserPassword)
 			if ok {
 				t.Fatalf("expected false, got true")
 			}
@@ -232,297 +231,6 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 	}
 }
 
-func TestBannerHandlers(t *testing.T) {
-	setupManageConfigDB(t)
-	h := &film.BannerHandler{}
-	db.Mdb.Create(&model.FilmSource{Id: "src1", Name: "站一", Uri: "http://src1.test", State: true, Sort: 1})
-	db.Mdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "src1"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "测试影片", Area: "美国", Actor: "演员"},
-	})
-	db.Mdb.Create(&model.FilmSourcePlaylist{Mid: 101, SourceId: "src1", LineKind: model.LineKindPlay})
-
-	type listData struct {
-		SourceId string `json:"sourceId"`
-		Revision string `json:"revision"`
-		Items    []struct {
-			Id    string `json:"id"`
-			Mid   int64  `json:"mid"`
-			Area  string `json:"area"`
-			Blurb string `json:"blurb"`
-		} `json:"items"`
-	}
-	list := func() listData {
-		t.Helper()
-		c, w := testContext(http.MethodGet, "/api/manage/banners?sourceId=src1")
-		h.BannerList(c)
-		resp := decodeResponse(t, w)
-		if resp.Code != dto.SUCCESS {
-			t.Fatalf("list code=%d msg=%s", resp.Code, resp.Msg)
-		}
-		raw, _ := json.Marshal(resp.Data)
-		var out listData
-		_ = json.Unmarshal(raw, &out)
-		return out
-	}
-
-	// 按指定采集站读取：src2 应返回 src2 自身轮播列表（空），并带出所有站点选项。
-	db.Mdb.Create(&model.FilmSource{Id: "src2", Name: "站二", Uri: "http://src2.test", State: true, Sort: 2})
-	c, w := testContext(http.MethodGet, "/api/manage/banners?sourceId=src2")
-	h.BannerList(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("src2 list failed: code=%d msg=%s", resp.Code, resp.Msg)
-	}
-	raw, _ := json.Marshal(decodeResponse(t, w).Data)
-	var src2List listData
-	_ = json.Unmarshal(raw, &src2List)
-	if src2List.SourceId != "src2" || len(src2List.Items) != 0 {
-		t.Fatalf("read must target requested sourceId=src2, got source=%s items=%d", src2List.SourceId, len(src2List.Items))
-	}
-
-	// 非主站（src2）选片直查与轮播写入均按 src2 隔离。
-	db.Mdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "src2"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "站二影片", Area: "日本"},
-	})
-	db.Mdb.Create(&model.FilmSourcePlaylist{Mid: 102, SourceId: "src2", LineKind: model.LineKindPlay})
-	c, w = testContext(http.MethodGet, "/api/manage/banners/films?sourceId=src2&name=站二")
-	h.BannerFilms(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("src2 banner films failed: code=%d msg=%s", resp.Code, resp.Msg)
-	}
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":102}`)
-	h.BannerCreate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("non-primary create failed: code=%d msg=%s", resp.Code, resp.Msg)
-	}
-
-	// 跨站影片仍拒绝
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src2","mid":101}`)
-	h.BannerCreate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
-		t.Fatalf("cross-site create want FAILED, got code=%d body=%s", resp.Code, w.Body.String())
-	}
-
-	// 新增
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners", `{"sourceId":"src1","mid":101}`)
-	h.BannerCreate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("create code=%d msg=%s", resp.Code, resp.Msg)
-	}
-	before := list()
-	if len(before.Items) != 1 || before.Items[0].Area != "美国" {
-		t.Fatalf("list after create: %+v", before)
-	}
-	id := before.Items[0].Id
-
-	// 部分更新：只改简介，地区仍来自片库。
-	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/"+id, `{"blurb":"新简介"}`)
-	c.Params = gin.Params{{Key: "id", Value: id}}
-	h.BannerUpdate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("patch code=%d msg=%s", resp.Code, resp.Msg)
-	}
-	after := list()
-	if after.Items[0].Blurb != "新简介" || after.Items[0].Area != "美国" {
-		t.Fatalf("patch result: %+v", after.Items)
-	}
-
-	// 过期的 revision 保存顺序返回 409。
-	body, _ := json.Marshal(map[string]any{"sourceId": "src1", "revision": before.Revision, "ids": []string{id}})
-	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
-	h.BannerOrder(c)
-	if w.Code != http.StatusConflict || decodeResponse(t, w).Code != http.StatusConflict {
-		t.Fatalf("stale order want 409, got status=%d body=%s", w.Code, w.Body.String())
-	}
-	body, _ = json.Marshal(map[string]any{"sourceId": "src1", "revision": after.Revision, "ids": []string{id}})
-	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/order", string(body))
-	h.BannerOrder(c)
-	if w.Code != http.StatusOK || decodeResponse(t, w).Code != dto.SUCCESS {
-		t.Fatalf("order want success, got status=%d body=%s", w.Code, w.Body.String())
-	}
-
-	// 发布时 revision 过期也返回 409。
-	body, _ = json.Marshal(map[string]any{"sourceId": "src1", "revision": before.Revision, "items": []map[string]any{{"mid": 101}}})
-	c, w = testJSONContext(http.MethodPut, "/api/manage/banners/deck", string(body))
-	h.BannerDeck(c)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("stale deck want 409, got status=%d body=%s", w.Code, w.Body.String())
-	}
-
-	// 一键排片参数不合法时返回业务错误。
-	c, w = testJSONContext(http.MethodPost, "/api/manage/banners/generate", `{"sourceId":"src1","strategy":"hot","quotas":[]}`)
-	h.BannerGenerate(c)
-	if resp := decodeResponse(t, w); w.Code != http.StatusOK || resp.Code != dto.FAILED {
-		t.Fatalf("invalid generate want FAILED, got status=%d body=%s", w.Code, w.Body.String())
-	}
-
-	// 删除
-	c, w = testContext(http.MethodDelete, "/api/manage/banners/"+id)
-	c.Params = gin.Params{{Key: "id", Value: id}}
-	h.BannerDelete(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("delete code=%d msg=%s", resp.Code, resp.Msg)
-	}
-	if len(list().Items) != 0 {
-		t.Fatalf("banner should be deleted")
-	}
-
-	// 切换主站后，非主站轮播仍可通过显式 sourceId 管理，但传错 sourceId 时拒绝。
-	if err := collect.SetPrimarySourceID("src2"); err != nil {
-		t.Fatal(err)
-	}
-	legacy := model.BannerSlot{Id: "legacy-src1", SourceId: "src1", Mid: 101, ImageMode: model.BannerImageFollow, Sort: 1}
-	if err := db.Mdb.Create(&legacy).Error; err != nil {
-		t.Fatal(err)
-	}
-	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src2", `{"blurb":"x"}`)
-	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
-	h.BannerUpdate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
-		t.Fatalf("cross-source patch want FAILED, got status=%d body=%s", w.Code, w.Body.String())
-	}
-	c, w = testJSONContext(http.MethodPatch, "/api/manage/banners/legacy-src1?sourceId=src1", `{"blurb":"x"}`)
-	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
-	h.BannerUpdate(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("source-scoped patch want SUCCESS, got status=%d body=%s", w.Code, w.Body.String())
-	}
-	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src2")
-	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
-	h.BannerDelete(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.FAILED {
-		t.Fatalf("cross-source delete want FAILED, got status=%d body=%s", w.Code, w.Body.String())
-	}
-	c, w = testContext(http.MethodDelete, "/api/manage/banners/legacy-src1?sourceId=src1")
-	c.Params = gin.Params{{Key: "id", Value: "legacy-src1"}}
-	h.BannerDelete(c)
-	if resp := decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("source-scoped delete want SUCCESS, got status=%d body=%s", w.Code, w.Body.String())
-	}
-}
-
-func TestMappingRule_SaveAndDelete_BatchContract(t *testing.T) {
-	setupManageConfigDB(t)
-	h := &film.MappingHandler{}
-	var (
-		c    *gin.Context
-		w    *httptest.ResponseRecorder
-		resp dto.Response
-	)
-
-	// 3. MappingRuleSave (新增，ID=0)
-	ruleAddBody := `{"raw":"大陆","target":"中国大陆","matchType":"exact","group":"Area"}`
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", ruleAddBody)
-	h.MappingRuleSave(c)
-	resp = decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("expected MappingRuleSave success, got code=%d msg=%s", resp.Code, resp.Msg)
-	}
-
-	// 4. MappingRuleDelete 批量删除
-	delRuleBody, _ := json.Marshal(map[string][]uint{"ids": {1}})
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/delete", string(delRuleBody))
-	h.MappingRuleDelete(c)
-	resp = decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("expected MappingRuleDelete success, got code=%d msg=%s", resp.Code, resp.Msg)
-	}
-
-	// 5. 校验：非 Filter 分组不允许空 target；非分类分组不允许 regex；Filter 允许空 target
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"sourceId":"s1","raw":"电影","target":"","matchType":"exact","group":"CategoryRoot"}`)
-	h.MappingRuleSave(c)
-	if resp = decodeResponse(t, w); resp.Code != dto.FAILED {
-		t.Fatalf("expected FAILED on empty target for CategoryRoot, got code=%d", resp.Code)
-	}
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"中国.*","target":"中国","matchType":"regex","group":"Area"}`)
-	h.MappingRuleSave(c)
-	if resp = decodeResponse(t, w); resp.Code != dto.FAILED {
-		t.Fatalf("expected FAILED on regex for Area group, got code=%d", resp.Code)
-	}
-	c, w = testJSONContext(http.MethodPost, "/api/manage/mapping/rule/save", `{"raw":"忽略词","target":"","matchType":"exact","group":"Filter"}`)
-	h.MappingRuleSave(c)
-	if resp = decodeResponse(t, w); resp.Code != dto.SUCCESS {
-		t.Fatalf("expected SUCCESS on Filter rule with empty target, got code=%d msg=%s", resp.Code, resp.Msg)
-	}
-}
-
-func TestMappingRule_ListCategoryAllIncludesRootAndSub(t *testing.T) {
-	setupManageConfigDB(t)
-	gdb := db.Mdb
-	rules := []model.MappingRule{
-		{SourceId: "src_cat", Group: "CategoryRoot", Raw: "电影", Target: "电影", MatchType: "exact"},
-		{SourceId: "src_cat", Group: "CategorySub", Raw: "动作片", Target: "动作", MatchType: "exact"},
-		{SourceId: "src_other", Group: "CategorySub", Raw: "他站子类", Target: "动作", MatchType: "exact"},
-		{SourceId: "", Group: "Area", Raw: "中国大陆", Target: "大陆", MatchType: "exact"},
-	}
-	if err := gdb.Create(&rules).Error; err != nil {
-		t.Fatalf("seed rules: %v", err)
-	}
-
-	h := &film.MappingHandler{}
-	c, w := testContext(http.MethodGet, "/api/manage/mapping/rule/list?group=CategoryAll&sourceId=src_cat")
-	h.MappingRuleList(c)
-	resp := decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("MappingRuleList failed: %+v", resp)
-	}
-	raw, _ := json.Marshal(resp.Data)
-	var data struct {
-		List   []model.MappingRule `json:"list"`
-		Totals map[string]int      `json:"totals"`
-	}
-	if err := json.Unmarshal(raw, &data); err != nil {
-		t.Fatalf("unmarshal data: %v", err)
-	}
-	if len(data.List) != 2 || data.List[0].Group != "CategoryRoot" || data.List[1].Group != "CategorySub" {
-		t.Fatalf("CategoryAll list = %+v, want root + sub for src_cat only", data.List)
-	}
-	if data.Totals["CategoryRoot"] != 1 || data.Totals["CategorySub"] != 1 {
-		t.Fatalf("CategoryAll totals = %+v, want 1/1", data.Totals)
-	}
-}
-
-func TestMappingRule_ContextReturnsSourceCategoriesAndRules(t *testing.T) {
-	setupManageConfigDB(t)
-	gdb := db.Mdb
-	if err := gdb.AutoMigrate(&model.SourceCategory{}, &model.Category{}, &model.CategoryMapping{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_ctx", Name: "上下文站", Uri: "http://ctx.test", State: true}).Error; err != nil {
-		t.Fatalf("seed source: %v", err)
-	}
-	if err := gdb.Create(&model.SourceCategory{SourceId: "src_ctx", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0}).Error; err != nil {
-		t.Fatalf("seed source category: %v", err)
-	}
-	if err := gdb.Create(&model.MappingRule{SourceId: "src_ctx", Group: "CategoryRoot", Raw: "电影", Target: "电影", MatchType: "exact"}).Error; err != nil {
-		t.Fatalf("seed rule: %v", err)
-	}
-
-	h := &film.MappingHandler{}
-	c, w := testContext(http.MethodGet, "/api/manage/mapping/rule/context?sourceId=src_ctx")
-	h.MappingRuleContext(c)
-	resp := decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("MappingRuleContext failed: %+v", resp)
-	}
-	raw, _ := json.Marshal(resp.Data)
-	var data struct {
-		SourceName    string `json:"sourceName"`
-		RawCategories []struct {
-			ID   int64  `json:"id"`
-			Name string `json:"name"`
-		} `json:"rawCategories"`
-		Rules []model.MappingRule `json:"rules"`
-	}
-	if err := json.Unmarshal(raw, &data); err != nil {
-		t.Fatalf("unmarshal context: %v", err)
-	}
-	if data.SourceName != "上下文站" || len(data.RawCategories) != 1 || len(data.Rules) != 1 {
-		t.Fatalf("unexpected context data: %+v", data)
-	}
-}
-
 func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
 	// 1. 无凭证调用 UserSave -> Failed
 	c, w := testJSONContext(http.MethodPost, "/api/manage/user/save", `{"userName":"test"}`)
@@ -582,31 +290,5 @@ func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
 	db.Mdb.First(&checkU, 10005)
 	if checkU.NickName != "CapIDNick" {
 		t.Fatalf("expected NickName CapIDNick, got %s", checkU.NickName)
-	}
-}
-
-func TestExportConfigBackup_PasswordValidation(t *testing.T) {
-	// 1. 无凭证 -> 401
-	c, w := testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":"test"}`)
-	ManageHd.ExportConfigBackup(c)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 on unauthenticated export, got %d", w.Code)
-	}
-
-	// 2. 非超管 -> 403
-	c, w = testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":"test"}`)
-	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleNormal})
-	ManageHd.ExportConfigBackup(c)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 on non-admin export, got %d", w.Code)
-	}
-
-	// 3. 超管但密码为空 -> FAILED
-	c, w = testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":""}`)
-	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, Role: model.UserRoleAdmin})
-	ManageHd.ExportConfigBackup(c)
-	resp := decodeResponse(t, w)
-	if resp.Code != dto.FAILED {
-		t.Fatalf("expected FAILED on empty password, got code=%d", resp.Code)
 	}
 }

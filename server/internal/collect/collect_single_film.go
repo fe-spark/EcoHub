@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/infra/db"
-	"server/internal/infra/syslog"
-	"server/internal/model"
 	"server/internal/collect/fetcher"
 	"server/internal/collect/progress"
 	"server/internal/collect/scheduler"
+	"server/internal/infra/db"
+	"server/internal/infra/syslog"
+	"server/internal/model"
 )
 
 func singleFilmSourceDetail(src model.FilmSource, changed int, errMsg string) model.CollectRecordSourceDetail {

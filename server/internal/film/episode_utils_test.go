@@ -3,8 +3,8 @@ package film
 import (
 	"testing"
 
-	"server/internal/model"
 	"server/internal/film/shared"
+	"server/internal/model"
 )
 
 func TestEpisodeCount(t *testing.T) {

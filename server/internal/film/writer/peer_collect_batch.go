@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/model"
 	"server/internal/film/shared"
 	"server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/model"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -358,8 +358,8 @@ func stampNewFilmPlaySummary(fi *model.FilmIndex, source *model.FilmSource, deta
 }
 
 func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem, sources []model.FilmSource) error {
-	categoryVersion := repobase.GetCategoryVersion()
-	ruleVersion := repobase.GetRuleVersion()
+	categoryVersion := taxonomy.GetCategoryVersion()
+	ruleVersion := taxonomy.GetRuleVersion()
 	newFilms := make([]model.FilmIndex, 0)
 	newIdx := make([]int, 0)
 	for i := range items {

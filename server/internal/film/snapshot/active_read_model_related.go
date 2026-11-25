@@ -11,11 +11,11 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
+	"server/internal/film/shared"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -145,7 +145,7 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 			if _, ok := seen[item.Mid]; ok {
 				continue
 			}
-			if !repobase.IsCategoryVisible(item.Cid, item.Pid) {
+			if !taxonomy.IsCategoryVisible(item.Cid, item.Pid) {
 				continue
 			}
 			seen[item.Mid] = struct{}{}

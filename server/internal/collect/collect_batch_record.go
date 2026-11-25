@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/model"
+	"server/internal/collect/ledger"
 	"server/internal/collect/progress"
+	"server/internal/model"
 	"server/internal/utils"
 )
 
@@ -98,7 +99,7 @@ func (b *collectBatchContext) recordStart() error {
 		DetailJson:    string(detailJSON),
 		StartedAt:     b.startedAt,
 	}
-	if err := CreateCollectRecord(rec); err != nil {
+	if err := ledger.CreateCollectRecord(rec); err != nil {
 		return err
 	}
 	b.recordStarted = true
@@ -322,9 +323,9 @@ func (b *collectBatchContext) saveRecordFilmsLocked(films map[string][]int64) ma
 	films = b.withoutDroppedFilms(films)
 	var missed map[string][]int64
 	if len(films) > 0 {
-		if err := BatchSaveCollectRecordFilms(b.batchID, films); err != nil {
+		if err := ledger.BatchSaveCollectRecordFilms(b.batchID, films); err != nil {
 			log.Printf("[Spider] 保存采集批次影片清单失败 batchID=%s: %v", b.batchID, err)
-			missed = UnstoredCollectFilms(err)
+			missed = ledger.UnstoredCollectFilms(err)
 		}
 	}
 	return missed

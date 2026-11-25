@@ -1,20 +1,17 @@
 package admin
 
 import (
-	"server/internal/mediaproxy"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 
-	"server/internal/config"
+	"server/internal/danmaku"
 	"server/internal/httpx"
+	"server/internal/mediaproxy"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/portal"
-	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -230,7 +227,7 @@ func (h *ManageHandler) TestSiteDanmaku(c *gin.Context) {
 			cfg.AppSecret = saved.AppSecret
 		}
 	}
-	res := portal.FetchSniffedDanmaku(cfg, title, req.Episode, false)
+	res := danmaku.FetchSniffedDanmaku(cfg, title, req.Episode, false)
 	dto.Success(gin.H{
 		"status":       res.Status,
 		"count":        len(res.Items),
@@ -286,67 +283,4 @@ func (h *ManageHandler) UpdateSiteNotice(c *gin.Context) {
 		return
 	}
 	dto.SuccessOnlyMsg("公告配置更新成功", c)
-}
-
-// ------------------------------------------------------ 配置备份导入/导出 ------------------------------------------------------
-
-// ExportConfigBackup 导出站点配置备份（需管理密码，不含影视库存与账号，仅超级管理员）
-func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导出配置备份", c)
-		return
-	}
-	var req model.ConfigBackupExportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常", c)
-		return
-	}
-	if strings.TrimSpace(req.Password) == "" || !verifyManagePassword(c, req.Password) {
-		dto.Failed("导出失败, 密钥校验失败!!!", c)
-		return
-	}
-	backup, err := BackupSvc.ExportConfig()
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.Success(backup, "配置备份导出成功", c)
-}
-
-// ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）
-func (h *ManageHandler) ImportConfigBackup(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
-		return
-	}
-	uc, ok := v.(*utils.UserClaims)
-	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
-		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导入配置备份", c)
-		return
-	}
-	var req model.ConfigBackupImportRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常", c)
-		return
-	}
-	if !verifyManagePassword(c, req.Password) {
-		dto.Failed("导入失败, 密钥校验失败!!!", c)
-		return
-	}
-	if err := BackupSvc.ImportConfig(req); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("配置备份导入成功", c)
-}
-
-func verifyManagePassword(c *gin.Context, password string) bool {
-	return httpx.VerifyCurrentPassword(c, password, user.UserSvc.VerifyUserPassword)
 }

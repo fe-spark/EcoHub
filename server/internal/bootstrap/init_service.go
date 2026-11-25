@@ -1,9 +1,9 @@
 package bootstrap
 
 import (
-	"server/internal/mediaproxy"
-	"server/internal/film/catalog"
 	"fmt"
+	"server/internal/film/catalog"
+	"server/internal/mediaproxy"
 	"strings"
 	"time"
 
@@ -11,16 +11,19 @@ import (
 	"server/internal/admin/upgrade"
 	"server/internal/collect"
 	"server/internal/config"
+	filmrepo "server/internal/film"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/repobase"
-	filmrepo "server/internal/film"
-	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/robfig/cron/v3"
+	"server/internal/collect/ledger"
 )
 
 type InitService struct{}
@@ -79,12 +82,12 @@ func (s *InitService) seedRuntimeDefaults(seedSources, runBootSpiderInit bool) e
 			return fmt.Errorf("写入默认采集站失败: %w", err)
 		}
 	}
-	if err := repobase.RefreshCollectSourceCatalog(); err != nil {
+	if err := sourcecatalog.RefreshCollectSourceCatalog(); err != nil {
 		return fmt.Errorf("刷新采集站目录失败: %w", err)
 	}
-	_ = repobase.CurrentPrimarySource()
+	_ = sourcecatalog.CurrentPrimarySource()
 
-	repobase.InitMappingEngine()
+	taxonomy.InitMappingEngine()
 	catalog.InitMainCategories()
 
 	if err := s.SiteWebConfigInit(); err != nil {
@@ -231,10 +234,10 @@ func defaultFilmSources() []model.FilmSource {
 }
 
 func (s *InitService) SpiderInit() error {
-	if err := collect.MarkInterruptedCollectRecords(); err != nil {
+	if err := ledger.MarkInterruptedCollectRecords(); err != nil {
 		syslog.Warnf("[Init] 标记中断采集记录失败: %v", err)
 	}
-	if err := collect.CleanOldCollectRecords(30); err != nil {
+	if err := ledger.CleanOldCollectRecords(30); err != nil {
 		syslog.Warnf("[Init] 清理过期采集记录失败: %v", err)
 	}
 	go collect.SpiderSvc.SyncMissingSourceCategories()

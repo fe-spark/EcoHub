@@ -10,13 +10,13 @@ import (
 
 	"golang.org/x/sync/singleflight"
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
-	"server/internal/model"
-	"server/internal/model/dto"
 	filmquery "server/internal/film/query"
 	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/model/dto"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -44,12 +44,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 
 	// 带了采集站时，pid/cid 是该站的 type_id，不能拿 film_category.id 的可见性去挡。
 	if st.SourceId == "" {
-		if st.Cid > 0 && !repobase.IsCategoryVisible(st.Cid, st.Pid) {
+		if st.Cid > 0 && !taxonomy.IsCategoryVisible(st.Cid, st.Pid) {
 			page.Total = 0
 			page.PageCount = 1
 			return []model.FilmListSnapshot{}, nil
 		}
-		if st.Pid > 0 && !repobase.IsCategoryVisible(0, st.Pid) {
+		if st.Pid > 0 && !taxonomy.IsCategoryVisible(0, st.Pid) {
 			page.Total = 0
 			page.PageCount = 1
 			return []model.FilmListSnapshot{}, nil
@@ -125,7 +125,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 
 		query := applySourceMembership(liveFilmQuery(), st.SourceId)
-		if disabledCatIDs := repobase.GetDisabledCategoryIDs(); len(disabledCatIDs) > 0 {
+		if disabledCatIDs := taxonomy.GetDisabledCategoryIDs(); len(disabledCatIDs) > 0 {
 			query = query.Where("cid NOT IN ? AND pid NOT IN ?", disabledCatIDs, disabledCatIDs)
 		}
 		if st.SourceId != "" {
@@ -170,7 +170,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 		filteredSnapshots := make([]model.FilmListSnapshot, 0, len(snapshots))
 		for _, s := range snapshots {
-			if repobase.IsCategoryVisible(s.Cid, s.Pid) {
+			if taxonomy.IsCategoryVisible(s.Cid, s.Pid) {
 				filteredSnapshots = append(filteredSnapshots, s)
 			}
 		}

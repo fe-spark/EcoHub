@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/model"
 	"server/internal/collect/progress"
+	"server/internal/model"
 )
 
 func TestFilterEnabledSources(t *testing.T) {

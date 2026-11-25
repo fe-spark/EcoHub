@@ -7,7 +7,7 @@ import (
 
 	"server/internal/film/catalog"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -62,7 +62,7 @@ func sourceTypeKeysForProbe(sourceID, field string, categoryID int64) []string {
 	keys := make([]string, 0, len(ids))
 	seen := map[string]struct{}{}
 	for _, id := range ids {
-		key := repobase.BuildSourceCategoryKey(sourceID, id)
+		key := taxonomy.BuildSourceCategoryKey(sourceID, id)
 		if key == "" {
 			continue
 		}

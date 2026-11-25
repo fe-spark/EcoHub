@@ -10,7 +10,7 @@ import (
 	"server/internal/film/shared"
 	"server/internal/film/snapshot"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 	"server/internal/utils"
 )
 
@@ -117,7 +117,7 @@ func LoadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		return nil, nil, nil
 	}
 
-	sources, err := repobase.GetEnabledCollectSourceList()
+	sources, err := sourcecatalog.GetEnabledCollectSourceList()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -222,7 +222,7 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, ma
 		return result, nil, nil
 	}
 
-	sources, err := repobase.GetEnabledCollectSourceList()
+	sources, err := sourcecatalog.GetEnabledCollectSourceList()
 	if err != nil {
 		return nil, nil, err
 	}

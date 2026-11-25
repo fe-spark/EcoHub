@@ -3,12 +3,13 @@ package bootstrap
 import (
 	"sync"
 
-	"server/internal/access"
 	"server/internal/collect"
+	"server/internal/collectctl"
 	"server/internal/film"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/portal"
+	"server/internal/siteops"
 )
 
 var wireOnce sync.Once
@@ -27,25 +28,19 @@ func Wire() {
 				notify.NotifySvc.PublishCronFailed(taskID, remark, reason)
 			},
 		})
-		film.OnResetCollectStats = collect.ResetCollectStatsCoalescer
 		film.OnRefreshFilms = collect.SpiderSvc.CollectFilms
 		film.IsFilmCollectingFn = collect.IsCollecting
 		film.SetInventoryStatsCollectingChecker(collect.IsCollecting)
 		collect.RegisterCollectDoneHook(func() {
 			film.RefreshInventoryStatsAsync()
 		})
-		collect.OnPrimarySwitched = func(targetSourceID string) error {
+		collectctl.OnPrimarySwitched = func(targetSourceID string) error {
 			_, err := portal.IndexSvc.IndexPage(targetSourceID)
 			return err
 		}
-		collect.OnResetDisableAccess = func() { access.SetEnabled(false) }
-		collect.OnResetClearAccess = func() error {
-			_, err := access.ClearAccessData(0)
-			return err
-		}
-		collect.OnResetRecoverAccess = func() { _ = InitSvc.AnalyticsConfigInit() }
-		collect.OnResetRecoverCrontab = func() { _ = InitSvc.CollectCrontabInit() }
-		collect.OnResetReinitSite = InitSvc.ReinitAfterReset
+		siteops.OnResetRecoverAccess = func() { _ = InitSvc.AnalyticsConfigInit() }
+		siteops.OnResetRecoverCrontab = func() { _ = InitSvc.CollectCrontabInit() }
+		siteops.OnResetReinitSite = InitSvc.ReinitAfterReset
 	})
 }
 

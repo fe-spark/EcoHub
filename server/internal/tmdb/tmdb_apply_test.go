@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/film/snapshot"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"

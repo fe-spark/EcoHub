@@ -5,7 +5,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -202,7 +202,7 @@ func openCategoryOtherTestDB(t *testing.T) *gorm.DB {
 	db.Rdb = nil
 	t.Cleanup(func() {
 		db.Mdb = prev
-		repobase.StoreMappingSnapshotForTest(nil)
+		taxonomy.StoreMappingSnapshotForTest(nil)
 	})
 	return gdb
 }

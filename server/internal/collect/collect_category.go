@@ -1,10 +1,10 @@
 package collect
 
 import (
-	"server/internal/repobase"
-	"server/internal/film/catalog"
 	"errors"
 	"fmt"
+	"server/internal/film/catalog"
+	"server/internal/sourcecatalog"
 
 	"server/internal/model"
 )
@@ -31,7 +31,7 @@ func CollectCategory(s *model.FilmSource) (int, error) {
 	}
 	pageCount := 0
 	err := WithSourceExclusive(s.Id, func() error {
-		if s.Id != "" && repobase.FindCollectSourceById(s.Id) == nil {
+		if s.Id != "" && sourcecatalog.FindCollectSourceById(s.Id) == nil {
 			return errors.New("采集站信息不存在")
 		}
 		tree, count, err := FetchCategoryTree(s)
@@ -73,7 +73,7 @@ func ApplySourceCategory(s *model.FilmSource, tree *model.CategoryTree, clearDat
 	}
 	var res catalog.CategoryApplyResult
 	err := WithSourceExclusive(s.Id, func() error {
-		if s.Id != "" && repobase.FindCollectSourceById(s.Id) == nil {
+		if s.Id != "" && sourcecatalog.FindCollectSourceById(s.Id) == nil {
 			return errors.New("采集站信息不存在")
 		}
 		applyRes, applyErr := catalog.ApplyCategoryTree(s.Id, tree, clearData)

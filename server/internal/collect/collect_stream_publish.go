@@ -1,18 +1,18 @@
 package collect
 
 import (
-	"server/internal/repobase"
 	"fmt"
 	"log"
 	"runtime/debug"
+	"server/internal/sourcecatalog"
 	"sort"
 	"sync"
 	"time"
 
-	"server/internal/infra/syslog"
 	filmcache "server/internal/film/cache"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/film/writer"
+	"server/internal/infra/syslog"
 )
 
 const (
@@ -49,7 +49,7 @@ func newStreamPublishBuffer() *streamPublishBuffer {
 }
 
 func lookupPreferredSourceID() string {
-	src := repobase.CurrentPrimarySource()
+	src := sourcecatalog.CurrentPrimarySource()
 	if src == nil {
 		return ""
 	}

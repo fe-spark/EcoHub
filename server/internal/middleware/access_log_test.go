@@ -3,9 +3,9 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"server/internal/access"
 	"strings"
 	"testing"
-	"server/internal/access"
 
 	"github.com/gin-gonic/gin"
 )

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"server/internal/model"
 	"server/internal/collect/scheduler"
+	"server/internal/model"
 	"server/internal/utils"
 )
 

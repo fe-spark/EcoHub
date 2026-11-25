@@ -1,14 +1,16 @@
 package portal
 
 import (
-	"server/internal/repobase"
-	"server/internal/film/catalog"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/url"
+	"server/internal/film/catalog"
+	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,11 +20,11 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
+	filmshared "server/internal/film/shared"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmshared "server/internal/film/shared"
-	filmsnapshot "server/internal/film/snapshot"
 )
 
 type ProvideService struct{}
@@ -36,7 +38,7 @@ var (
 func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[string]any, error) {
 	sourceId := primaryProvideSourceID()
 	// 1. 尝试从 Redis 获取缓存 (TVBox 配置缓存 5 分钟)
-	categoryVersion := repobase.GetCategoryVersion()
+	categoryVersion := taxonomy.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s", config.TVBoxConfigCacheKey, categoryVersion)
 	if sourceId != "" {
 		cacheKey = fmt.Sprintf("%s:src_%s:v%s", config.TVBoxConfigCacheKey, sourceId, categoryVersion)
@@ -229,8 +231,8 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	}
 
 	version := filmsnapshot.GetActiveReadModelVersion()
-	ruleVersion := repobase.GetRuleVersion()
-	categoryVersion := repobase.GetCategoryVersion()
+	ruleVersion := taxonomy.GetRuleVersion()
+	categoryVersion := taxonomy.GetCategoryVersion()
 
 	type tvboxListResult struct {
 		Current   int
@@ -386,7 +388,7 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 
 	apiPath := baseURL + "/api/provide/vod"
 	sites := make([]map[string]any, 0, 1)
-	primary := repobase.CurrentPrimarySource()
+	primary := sourcecatalog.CurrentPrimarySource()
 	if primary != nil {
 		sourceApi := apiPath
 		if key != "" {

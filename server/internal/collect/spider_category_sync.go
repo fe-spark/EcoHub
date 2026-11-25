@@ -1,16 +1,16 @@
 package collect
 
 import (
-	"server/internal/repobase"
-	"server/internal/film/catalog"
 	"errors"
 	"fmt"
 	"log"
+	"server/internal/film/catalog"
+	"server/internal/sourcecatalog"
 	"strings"
 
-	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/collect/progress"
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
 )
 
 // SyncSourceCategories 拉取一个采集站的分类，并写入该站自己的副本。支持变更对比与确认。
@@ -18,7 +18,7 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 	id = strings.TrimSpace(id)
 	confirm = strings.TrimSpace(confirm)
 
-	source := repobase.FindCollectSourceById(id)
+	source := sourcecatalog.FindCollectSourceById(id)
 	if source == nil {
 		if id != "" {
 			progress.BroadcastCategoryStatus(id, "idle")
@@ -32,7 +32,7 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 	categoryTree, pageCount, err := FetchCategoryTree(source)
 	if err != nil {
 		log.Printf("[SpiderService] 采集站分类拉取失败: name=%s id=%s err=%v", source.Name, source.Id, err)
-		if repobase.FindCollectSourceById(source.Id) == nil {
+		if sourcecatalog.FindCollectSourceById(source.Id) == nil {
 			progress.BroadcastCategoryStatus(source.Id, "idle")
 		} else {
 			progress.BroadcastCategoryStatus(source.Id, "failed")
@@ -64,7 +64,7 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 	applyRes, err := ApplySourceCategory(source, categoryTree, clearData)
 	if err != nil {
 		log.Printf("[SpiderService] 采集站分类同步失败: name=%s id=%s err=%v", source.Name, source.Id, err)
-		if repobase.FindCollectSourceById(source.Id) == nil {
+		if sourcecatalog.FindCollectSourceById(source.Id) == nil {
 			progress.BroadcastCategoryStatus(source.Id, "idle")
 		} else {
 			progress.BroadcastCategoryStatus(source.Id, "failed")

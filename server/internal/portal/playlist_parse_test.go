@@ -7,8 +7,8 @@ import (
 
 	"server/internal/config"
 	"server/internal/film"
-	"server/internal/model"
 	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
 
 	"gorm.io/gorm"
 )

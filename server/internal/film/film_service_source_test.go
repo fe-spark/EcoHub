@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
+	"server/internal/film/snapshot"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -277,10 +278,10 @@ func TestValidatePrimaryFilmIDs(t *testing.T) {
 	if _, err := validatePrimaryFilmIDs([]int64{301}, "src1"); err != nil {
 		t.Fatalf("primary-owned film should pass: %v", err)
 	}
-	if _, err := validatePrimaryFilmIDs([]int64{301}, "src2"); !errors.Is(err, repobase.ErrPrimaryMismatch) {
+	if _, err := validatePrimaryFilmIDs([]int64{301}, "src2"); !errors.Is(err, sourcecatalog.ErrPrimaryMismatch) {
 		t.Fatalf("stale source context should mismatch, got %v", err)
 	}
-	if _, err := validatePrimaryFilmIDs([]int64{302}, ""); !errors.Is(err, repobase.ErrPrimaryMismatch) {
+	if _, err := validatePrimaryFilmIDs([]int64{302}, ""); !errors.Is(err, sourcecatalog.ErrPrimaryMismatch) {
 		t.Fatalf("non-primary film id should mismatch, got %v", err)
 	}
 }
@@ -394,7 +395,7 @@ func TestFilmService_DeletePrimaryFilms_AllowsDuringSearchWarmAndChecksOwnership
 	defer snapshot.EndPrimaryWarmup()
 
 	srv := new(FilmService)
-	if err := srv.DeletePrimaryFilms([]int64{302}, "src1"); err != repobase.ErrPrimaryMismatch {
+	if err := srv.DeletePrimaryFilms([]int64{302}, "src1"); err != sourcecatalog.ErrPrimaryMismatch {
 		t.Fatalf("expected ErrPrimaryMismatch for non-primary film, got %v", err)
 	}
 	if err := srv.DeletePrimaryFilms([]int64{301}, "src1"); err != nil {
@@ -411,17 +412,17 @@ func TestFilmService_DeletePrimaryFilms_AllowsDuringSearchWarmAndChecksOwnership
 	if err := gdb.Where("mid = ?", 302).Delete(&model.FilmIndex{}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := srv.DeletePrimaryFilms([]int64{302}, "src1"); err != repobase.ErrPrimaryMismatch {
+	if err := srv.DeletePrimaryFilms([]int64{302}, "src1"); err != sourcecatalog.ErrPrimaryMismatch {
 		t.Fatalf("expected ErrPrimaryMismatch for soft-deleted non-primary film, got %v", err)
 	}
 	gdb.Unscoped().Model(&model.FilmIndex{}).Where("mid = ?", 302).Count(&count)
 	if count != 1 {
 		t.Fatalf("soft-deleted non-primary film 302 must remain protected, count=%d", count)
 	}
-	if err := srv.DeletePrimaryFilms([]int64{999999}, "src1"); err != repobase.ErrPrimaryMismatch {
+	if err := srv.DeletePrimaryFilms([]int64{999999}, "src1"); err != sourcecatalog.ErrPrimaryMismatch {
 		t.Fatalf("expected ErrPrimaryMismatch for nonexistent film, got %v", err)
 	}
-	if err := srv.DeletePrimaryFilms([]int64{0, -1}, "src1"); err != repobase.ErrPrimaryMismatch {
+	if err := srv.DeletePrimaryFilms([]int64{0, -1}, "src1"); err != sourcecatalog.ErrPrimaryMismatch {
 		t.Fatalf("expected ErrPrimaryMismatch for invalid ids, got %v", err)
 	}
 }
@@ -437,7 +438,7 @@ func TestFilmService_SaveFilmDetail_RejectsNonPrimaryMid(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 402, FirstSourceId: "src2"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "非主站原片名"},
 	})
-	_ = repobase.RefreshCollectSourceCatalog()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
 
 	srv := new(FilmService)
 	err := srv.SaveFilmDetail(model.FilmDetailVo{
@@ -446,7 +447,7 @@ func TestFilmService_SaveFilmDetail_RejectsNonPrimaryMid(t *testing.T) {
 		Pid:  1,
 		Cid:  2,
 	})
-	if err != repobase.ErrPrimaryMismatch {
+	if err != sourcecatalog.ErrPrimaryMismatch {
 		t.Fatalf("expected ErrPrimaryMismatch when saving non-primary mid, got %v", err)
 	}
 
@@ -492,8 +493,8 @@ func TestFilmService_AggregatedPrimaryFilmAllowedAndManualLineClear(t *testing.T
 		Mid: 501, SourceId: "src1", LineKind: model.LineKindPlay, GroupIndex: 0, GroupName: "主站线路",
 		Content: `[{"episode":"第1集","link":"https://example.com/1.m3u8"}]`,
 	})
-	_ = repobase.RefreshCollectSourceCatalog()
-	repobase.ReloadMappingRules()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+	taxonomy.ReloadMappingRules()
 
 	// 聚合影片（首采在 src2 但挂载了 src1 播放线路）在主站 src1 下应允许操作
 	if _, err := validatePrimaryFilmIDs([]int64{501}, "src1"); err != nil {
@@ -599,7 +600,7 @@ func TestFilmService_RefreshPrimaryFilms_HookGuard(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 601, FirstSourceId: "src1"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "测试影片"},
 	})
-	_ = repobase.RefreshCollectSourceCatalog()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
 
 	prev := OnRefreshFilms
 	t.Cleanup(func() { OnRefreshFilms = prev })

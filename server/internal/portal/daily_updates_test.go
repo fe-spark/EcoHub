@@ -1,17 +1,16 @@
 package portal
 
 import (
-	"server/internal/film/catalog"
 	"fmt"
 	"testing"
 	"time"
 
 	"server/internal/config"
-	"server/internal/model"
-	"server/internal/model/dto"
 	"server/internal/film"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/model"
+	"server/internal/model/dto"
+	"server/internal/taxonomy"
 )
 
 func TestNormalizeDailyUpdateReqDefaults(t *testing.T) {
@@ -201,9 +200,9 @@ func TestDailyUpdates_PrimarySourceCategoryIsolation(t *testing.T) {
 
 func TestDailyUpdates_HiddenSourceCategorySkipped(t *testing.T) {
 	gdb, _ := setupTestDBAndRedis(t)
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 
 	now := time.Now()
@@ -233,7 +232,7 @@ func TestDailyUpdates_HiddenSourceCategorySkipped(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("create source categories: %v", err)
 	}
-	catalog.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	if err := gdb.Create(&model.FilmIndex{
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3001, FirstSourceId: "src_daily_hide"},

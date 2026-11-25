@@ -1,11 +1,11 @@
 package portal
 
 import (
-	"server/internal/mediaproxy"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"server/internal/mediaproxy"
 	"strings"
 	"sync"
 	"testing"
@@ -19,10 +19,10 @@ import (
 	"gorm.io/gorm/logger"
 
 	"server/internal/config"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 )
 
@@ -558,9 +558,9 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	})
 	// 验证分类停用全链路拦截：当根分类 1 或子分类 10 停用时，详情与列表均应阻断
 	t.Run("ProvideVodCategoryVisibilityInterception", func(t *testing.T) {
-		repobase.SetCategoryShowForTest(map[int64]bool{1: false, 10: true})
-		repobase.TouchCategoryVersion()
-		defer repobase.SetCategoryShowForTest(map[int64]bool{})
+		taxonomy.SetCategoryShowForTest(map[int64]bool{1: false, 10: true})
+		taxonomy.TouchCategoryVersion()
+		defer taxonomy.SetCategoryShowForTest(map[int64]bool{})
 
 		// 验证 ids 详情拉取被拦截（返回空列表）
 		w := httptest.NewRecorder()
@@ -715,8 +715,8 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 	}
 
 	// 检查 Redis 是否缓存了该分页，且 TTL 带有 >= 12h 的随机 Jitter
-	ruleVersion := repobase.GetRuleVersion()
-	categoryVersion := repobase.GetCategoryVersion()
+	ruleVersion := taxonomy.GetRuleVersion()
+	categoryVersion := taxonomy.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:src_%s:T1:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion, "src_default")
 
 	ttl := mr.TTL(cacheKey)
@@ -747,8 +747,8 @@ func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 
-	ruleVersion := repobase.GetRuleVersion()
-	categoryVersion := repobase.GetCategoryVersion()
+	ruleVersion := taxonomy.GetRuleVersion()
+	categoryVersion := taxonomy.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:src_%s:T999:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion, "src_default")
 
 	ttl := mr.TTL(cacheKey)

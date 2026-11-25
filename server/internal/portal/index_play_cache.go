@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 )
 
 func storeFilmPlayInfoCache(cacheKey, payload string, ttl time.Duration, gen int64) {

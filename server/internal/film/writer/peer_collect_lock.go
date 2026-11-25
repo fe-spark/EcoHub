@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
+	"server/internal/film/shared"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -62,7 +62,7 @@ func resolveMatchCategoryPid(source *model.FilmSource, detail model.MovieDetail)
 	}
 	if sourceId == "" || sourceId == "manual" {
 		if detail.Cid > 0 {
-			if root := repobase.GetRootId(detail.Cid); root > 0 {
+			if root := taxonomy.GetRootId(detail.Cid); root > 0 {
 				return root
 			}
 		}
@@ -82,15 +82,15 @@ func resolveMatchCategoryPid(source *model.FilmSource, detail model.MovieDetail)
 	}
 
 	if sourceCid > 0 {
-		if localCid := repobase.GetLocalCategoryId(sourceId, sourceCid); localCid > 0 {
-			if root := repobase.GetRootId(localCid); root > 0 {
+		if localCid := taxonomy.GetLocalCategoryId(sourceId, sourceCid); localCid > 0 {
+			if root := taxonomy.GetRootId(localCid); root > 0 {
 				return root
 			}
 		}
 	}
 	if sourcePid > 0 {
-		if localPid := repobase.GetLocalCategoryId(sourceId, sourcePid); localPid > 0 {
-			if root := repobase.GetRootId(localPid); root > 0 {
+		if localPid := taxonomy.GetLocalCategoryId(sourceId, sourcePid); localPid > 0 {
+			if root := taxonomy.GetRootId(localPid); root > 0 {
 				return root
 			}
 		}

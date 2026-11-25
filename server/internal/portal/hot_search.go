@@ -1,18 +1,18 @@
 package portal
 
 import (
-	"server/internal/repobase"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"server/internal/sourcecatalog"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/infra/db"
 )
 
 const (
@@ -55,7 +55,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) ([
 		sourceID = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceID == "" {
-		sourceID = repobase.CurrentPrimaryID()
+		sourceID = sourcecatalog.CurrentPrimaryID()
 	}
 
 	version := filmsnapshot.GetActiveReadModelVersion()

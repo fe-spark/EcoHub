@@ -7,7 +7,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -91,7 +92,7 @@ func LoadPeerPlaylistsWithFilter(tx *gorm.DB, infos []model.FilmIndex, visible P
 
 func enabledSourceIDs() map[string]struct{} {
 	out := make(map[string]struct{})
-	for _, source := range repobase.GetCollectSourceList() {
+	for _, source := range sourcecatalog.GetCollectSourceList() {
 		id := strings.TrimSpace(source.Id)
 		if source.State && id != "" {
 			out[id] = struct{}{}
@@ -244,7 +245,7 @@ func resolvePeerBigCategory(sourceID string, pid int64, origCat, cName string, c
 		return ""
 	}
 	if sid := strings.TrimSpace(sourceID); sid != "" {
-		if mapped := strings.TrimSpace(repobase.NormalizeRootCategoryName(sid, raw)); mapped != "" {
+		if mapped := strings.TrimSpace(taxonomy.NormalizeRootCategoryName(sid, raw)); mapped != "" {
 			raw = mapped
 		}
 	}

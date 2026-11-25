@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"server/internal/config"
+	filmrepo "server/internal/film"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmrepo "server/internal/film"
-	filmsnapshot "server/internal/film/snapshot"
 )
 
 // 增量剔除后，内存检索索引应立即不再命中被剔除影片，且不影响其余影片。

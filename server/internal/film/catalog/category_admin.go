@@ -9,6 +9,7 @@ import (
 	"server/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var categoryOrderWriteMu sync.Mutex
@@ -211,7 +212,8 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if tx.Migrator().HasTable(&model.FilmSource{}) {
-			if err := lockBannerSource(tx, sourceID); err != nil && err != ErrBannerSourceNotFound {
+			var src model.FilmSource
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", strings.TrimSpace(sourceID)).First(&src).Error; err != nil && !strings.Contains(strings.ToLower(err.Error()), "record not found") {
 				return err
 			}
 		}

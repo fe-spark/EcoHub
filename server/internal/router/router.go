@@ -7,7 +7,6 @@ import (
 
 	"server/internal/access"
 	"server/internal/admin"
-	"server/internal/collect"
 	"server/internal/config"
 	"server/internal/film"
 	"server/internal/infra/syslog"
@@ -19,6 +18,14 @@ import (
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"server/internal/backup"
+	"server/internal/banner"
+	"server/internal/collectctl"
+	"server/internal/danmaku"
+	"server/internal/file"
+	"server/internal/mapping"
+	"server/internal/proxy"
+	"server/internal/siteops"
 )
 
 func serveFilmPicture(c *gin.Context) {
@@ -65,8 +72,8 @@ func SetupRouter() *gin.Engine {
 		frontApi.GET(`/films/filter`, portal.IndexHd.FilmTagSearch)
 		frontApi.GET(`/search/hot-keywords`, portal.IndexHd.HotKeywords)
 		frontApi.POST(`/stats/view`, access.AccessHd.TrackView)
-		frontApi.GET(`/film/danmaku`, portal.DanmakuHd.GetDanmaku)
-		frontApi.POST(`/film/danmaku`, portal.DanmakuHd.PostDanmaku)
+		frontApi.GET(`/film/danmaku`, danmaku.DanmakuHd.GetDanmaku)
+		frontApi.POST(`/film/danmaku`, danmaku.DanmakuHd.PostDanmaku)
 	}
 
 	manageRoute := api.Group(`/manage`)
@@ -99,8 +106,8 @@ func SetupRouter() *gin.Engine {
 			sysConfig.POST(`/notice`, middleware.AdminAccess(), admin.ManageHd.UpdateSiteNotice)
 
 			// 配置备份：导出/导入（需管理密码，不含影视库存与账号，仅超级管理员）
-			sysConfig.POST(`/backup/export`, middleware.AdminAccess(), admin.ManageHd.ExportConfigBackup)
-			sysConfig.POST(`/backup/import`, middleware.AdminAccess(), admin.ManageHd.ImportConfigBackup)
+			sysConfig.POST(`/backup/export`, middleware.AdminAccess(), backup.BackupHd.ExportConfigBackup)
+			sysConfig.POST(`/backup/import`, middleware.AdminAccess(), backup.BackupHd.ImportConfigBackup)
 		}
 		systemLog := manageRoute.Group(`/system/logs`, middleware.AdminAccess())
 		{
@@ -122,28 +129,28 @@ func SetupRouter() *gin.Engine {
 		}
 
 		// 首页轮播管理：按采集站区分
-		banner := manageRoute.Group(`/banners`)
+		bannerRoute := manageRoute.Group(`/banners`)
 		{
-			banner.GET(``, film.BannerHd.BannerList)
-			banner.GET(`/categories`, film.BannerHd.BannerCategories)
-			banner.GET(`/films`, film.BannerHd.BannerFilms)
-			banner.POST(``, film.BannerHd.BannerCreate)
-			banner.PUT(`/order`, film.BannerHd.BannerOrder)
-			banner.POST(`/generate`, film.BannerHd.BannerGenerate)
-			banner.PUT(`/deck`, film.BannerHd.BannerDeck)
-			banner.PATCH(`/:id`, film.BannerHd.BannerUpdate)
-			banner.DELETE(`/:id`, film.BannerHd.BannerDelete)
+			bannerRoute.GET(``, banner.BannerHd.BannerList)
+			bannerRoute.GET(`/categories`, banner.BannerHd.BannerCategories)
+			bannerRoute.GET(`/films`, banner.BannerHd.BannerFilms)
+			bannerRoute.POST(``, banner.BannerHd.BannerCreate)
+			bannerRoute.PUT(`/order`, banner.BannerHd.BannerOrder)
+			bannerRoute.POST(`/generate`, banner.BannerHd.BannerGenerate)
+			bannerRoute.PUT(`/deck`, banner.BannerHd.BannerDeck)
+			bannerRoute.PATCH(`/:id`, banner.BannerHd.BannerUpdate)
+			bannerRoute.DELETE(`/:id`, banner.BannerHd.BannerDelete)
 		}
 
 		// 映射规则管理
-		mapping := manageRoute.Group(`/mapping`)
+		mappingRoute := manageRoute.Group(`/mapping`)
 		{
-			mapping.GET(`/group/list`, film.MappingHd.MappingRuleGroups)
-			mapping.GET(`/rule/list`, film.MappingHd.MappingRuleList)
-			mapping.GET(`/rule/context`, film.MappingHd.MappingRuleContext)
-			mapping.POST(`/rule/save`, film.MappingHd.MappingRuleSave)
-			mapping.POST(`/rule/delete`, film.MappingHd.MappingRuleDelete)
-			mapping.POST(`/rule/reload`, film.MappingHd.MappingRuleReload)
+			mappingRoute.GET(`/group/list`, mapping.MappingHd.MappingRuleGroups)
+			mappingRoute.GET(`/rule/list`, mapping.MappingHd.MappingRuleList)
+			mappingRoute.GET(`/rule/context`, mapping.MappingHd.MappingRuleContext)
+			mappingRoute.POST(`/rule/save`, mapping.MappingHd.MappingRuleSave)
+			mappingRoute.POST(`/rule/delete`, mapping.MappingHd.MappingRuleDelete)
+			mappingRoute.POST(`/rule/reload`, mapping.MappingHd.MappingRuleReload)
 		}
 
 		// 用户相关
@@ -157,51 +164,51 @@ func SetupRouter() *gin.Engine {
 		}
 
 		// 主站状态与切换（切换仅超管，D4；查询保持默认可写权限供只读展示）
-		manageRoute.GET(`/primary`, collect.CollectHd.PrimaryState)
-		manageRoute.PUT(`/primary`, middleware.AdminAccess(), collect.CollectHd.SwitchPrimary)
+		manageRoute.GET(`/primary`, collectctl.CollectHd.PrimaryState)
+		manageRoute.PUT(`/primary`, middleware.AdminAccess(), collectctl.CollectHd.SwitchPrimary)
 
 		// 采集相关
 		collectGroup := manageRoute.Group(`/collect`)
 		{
-			collectGroup.GET(`/list`, collect.CollectHd.FilmSourceList)
-			collectGroup.GET(`/progress-stream`, collect.CollectHd.ProgressStream)
-			collectGroup.GET(`/find`, collect.CollectHd.FindFilmSource)
-			collectGroup.POST(`/test`, collect.CollectHd.FilmSourceTest)
-			collectGroup.POST(`/save`, collect.CollectHd.FilmSourceSave)
-			collectGroup.POST(`/state`, collect.CollectHd.FilmSourceBatchChange)
-			collectGroup.POST(`/delete`, collect.CollectHd.FilmSourceDelBatch)
-			collectGroup.POST(`/delete/cancel`, collect.CollectHd.FilmSourceDelCancel)
-			collectGroup.POST(`/check/all`, collect.CollectHd.FilmSourceCheckAll)
-			collectGroup.GET(`/options`, collect.CollectHd.GetNormalFilmSource)
-			collectGroup.POST(`/sort`, collect.CollectHd.FilmSourceSort)
-			collectGroup.POST(`/category/sync`, collect.CollectHd.FilmSourceSyncCategory)
-			collectGroup.POST(`/page-total`, collect.CollectHd.RefreshSitePageTotal)
+			collectGroup.GET(`/list`, collectctl.CollectHd.FilmSourceList)
+			collectGroup.GET(`/progress-stream`, collectctl.CollectHd.ProgressStream)
+			collectGroup.GET(`/find`, collectctl.CollectHd.FindFilmSource)
+			collectGroup.POST(`/test`, collectctl.CollectHd.FilmSourceTest)
+			collectGroup.POST(`/save`, collectctl.CollectHd.FilmSourceSave)
+			collectGroup.POST(`/state`, collectctl.CollectHd.FilmSourceBatchChange)
+			collectGroup.POST(`/delete`, collectctl.CollectHd.FilmSourceDelBatch)
+			collectGroup.POST(`/delete/cancel`, collectctl.CollectHd.FilmSourceDelCancel)
+			collectGroup.POST(`/check/all`, collectctl.CollectHd.FilmSourceCheckAll)
+			collectGroup.GET(`/options`, collectctl.CollectHd.GetNormalFilmSource)
+			collectGroup.POST(`/sort`, collectctl.CollectHd.FilmSourceSort)
+			collectGroup.POST(`/category/sync`, collectctl.CollectHd.FilmSourceSyncCategory)
+			collectGroup.POST(`/page-total`, collectctl.CollectHd.RefreshSitePageTotal)
 
-			collectGroup.GET(`/history/list`, collect.CollectRecordHd.HistoryList)
-			collectGroup.GET(`/history/films`, collect.CollectRecordHd.HistoryFilms)
-			collectGroup.POST(`/history/delete`, collect.CollectRecordHd.HistoryDelete)
-			collectGroup.POST(`/history/clear`, collect.CollectRecordHd.HistoryClear)
-			collectGroup.POST(`/history/retry`, collect.CollectRecordHd.HistoryRetry)
+			collectGroup.GET(`/history/list`, collectctl.CollectRecordHd.HistoryList)
+			collectGroup.GET(`/history/films`, collectctl.CollectRecordHd.HistoryFilms)
+			collectGroup.POST(`/history/delete`, collectctl.CollectRecordHd.HistoryDelete)
+			collectGroup.POST(`/history/clear`, collectctl.CollectRecordHd.HistoryClear)
+			collectGroup.POST(`/history/retry`, collectctl.CollectRecordHd.HistoryRetry)
 		}
 
 		// 定时任务相关
 		collectCron := manageRoute.Group(`/cron`)
 		{
-			collectCron.GET(`/list`, collect.CronHd.FilmCronTaskList)
-			collectCron.GET(`/find`, collect.CronHd.GetFilmCronTask)
-			collectCron.POST(`/save`, collect.CronHd.FilmCronSave)
-			collectCron.POST(`/state`, collect.CronHd.ChangeTaskState)
-			collectCron.POST(`/run`, collect.CronHd.RunFilmCronTask)
+			collectCron.GET(`/list`, collectctl.CronHd.FilmCronTaskList)
+			collectCron.GET(`/find`, collectctl.CronHd.GetFilmCronTask)
+			collectCron.POST(`/save`, collectctl.CronHd.FilmCronSave)
+			collectCron.POST(`/state`, collectctl.CronHd.ChangeTaskState)
+			collectCron.POST(`/run`, collectctl.CronHd.RunFilmCronTask)
 		}
 
 		// spider 数据采集
 		spiderRoute := manageRoute.Group(`/spider`)
 		{
-			spiderRoute.POST(`/start`, collect.SpiderHd.StarSpider)
-			spiderRoute.POST(`/stop`, collect.SpiderHd.StopTask)
-			spiderRoute.POST(`/clear`, middleware.AdminAccess(), collect.SpiderHd.ClearAllFilm)
-			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), collect.SpiderHd.ResetProgressStream)
-			spiderRoute.GET(`/clear/stats`, collect.SpiderHd.InventoryStats)
+			spiderRoute.POST(`/start`, collectctl.SpiderHd.StarSpider)
+			spiderRoute.POST(`/stop`, collectctl.SpiderHd.StopTask)
+			spiderRoute.POST(`/clear`, middleware.AdminAccess(), siteops.ResetHd.ClearAllFilm)
+			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), siteops.ResetHd.ResetProgressStream)
+			spiderRoute.GET(`/clear/stats`, collectctl.SpiderHd.InventoryStats)
 		}
 
 		// filmManage 影视管理
@@ -232,9 +239,9 @@ func SetupRouter() *gin.Engine {
 		// 采集网络代理相关
 		proxyRoute := manageRoute.Group(`/proxy`)
 		{
-			proxyRoute.GET(`/config`, admin.ProxyHd.GetConfig)
-			proxyRoute.POST(`/config`, middleware.AdminAccess(), admin.ProxyHd.UpdateConfig)
-			proxyRoute.POST(`/config/test`, middleware.AdminAccess(), admin.ProxyHd.TestProxy)
+			proxyRoute.GET(`/config`, proxy.ProxyHd.GetConfig)
+			proxyRoute.POST(`/config`, middleware.AdminAccess(), proxy.ProxyHd.UpdateConfig)
+			proxyRoute.POST(`/config/test`, middleware.AdminAccess(), proxy.ProxyHd.TestProxy)
 		}
 
 		// 消息通知相关
@@ -248,10 +255,10 @@ func SetupRouter() *gin.Engine {
 		// 文件管理
 		fileRoute := manageRoute.Group(`/file`)
 		{
-			fileRoute.POST(`/upload`, admin.FileHd.Upload)
-			fileRoute.POST(`/rename`, admin.FileHd.RenameFile)
-			fileRoute.POST(`/delete`, admin.FileHd.DelFile)
-			fileRoute.GET(`/list`, admin.FileHd.PhotoWall)
+			fileRoute.POST(`/upload`, file.FileHd.Upload)
+			fileRoute.POST(`/rename`, file.FileHd.RenameFile)
+			fileRoute.POST(`/delete`, file.FileHd.DelFile)
+			fileRoute.GET(`/list`, file.FileHd.PhotoWall)
 		}
 	}
 

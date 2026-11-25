@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"server/internal/film/shared"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/film/shared"
 )
 
 func TestSameSourceTitleDoesNotClaimExistingFilm(t *testing.T) {

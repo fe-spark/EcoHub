@@ -5,7 +5,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -195,12 +195,12 @@ func TestLoadPeerPlaylists_AllowsDifferentLocalPidsWithSameSemanticBigCategory(t
 	}
 	prev := db.Mdb
 	db.Mdb = gdb
-	prevSnap := repobase.CurrentMappingSnapshotForTest()
+	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Mdb = prev
-		repobase.StoreMappingSnapshotForTest(prevSnap)
-		repobase.ResetCategoryNameCache()
-		repobase.ClearRootCategoryCNameCache()
+		taxonomy.StoreMappingSnapshotForTest(prevSnap)
+		taxonomy.ResetCategoryNameCache()
+		taxonomy.ClearRootCategoryCNameCache()
 	})
 
 	for _, src := range []model.FilmSource{
@@ -232,7 +232,7 @@ func TestLoadPeerPlaylists_AllowsDifferentLocalPidsWithSameSemanticBigCategory(t
 	if err := gdb.Create(&model.MappingRule{SourceId: "src-custom", Group: "CategoryRoot", Raw: "怀旧剧场", Target: "电视剧", MatchType: "exact"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	repobase.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	filmDuck := model.FilmIndex{
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src-duck", DbId: 4303597},

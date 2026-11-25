@@ -4,10 +4,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"server/internal/httpx"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"github.com/gin-gonic/gin"
 )
 
 type TMDBHandler struct{}

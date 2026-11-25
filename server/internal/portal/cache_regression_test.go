@@ -3,9 +3,10 @@ package portal
 import (
 	"testing"
 
-	"server/internal/model"
 	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func TestGetFilmClassify_WithSourceIDNotBlockedByLocalHiddenCategory(t *testing.T) {
@@ -15,8 +16,8 @@ func TestGetFilmClassify_WithSourceIDNotBlockedByLocalHiddenCategory(t *testing.
 	}
 
 	// 本地分类 id=1 隐藏，但请求指定了 sourceId="source_master" 对应的源站 type_id=1（映射到 id=2 可见，不应被本地 id=1 误拦）
-	repobase.SetCategoryShowForTest(map[int64]bool{1: false, 2: true})
-	t.Cleanup(func() { repobase.SetCategoryShowForTest(nil) })
+	taxonomy.SetCategoryShowForTest(map[int64]bool{1: false, 2: true})
+	t.Cleanup(func() { taxonomy.SetCategoryShowForTest(nil) })
 
 	const ver = "v_classify_src_test"
 	seedLiveSnaps(t, model.FilmListSnapshot{

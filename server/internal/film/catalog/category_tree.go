@@ -6,7 +6,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 )
 
 func sortCategoryTreeNodes(nodes []*model.CategoryTree) {
@@ -126,7 +127,7 @@ func GetActiveCategoryTree(sourceIdOpt ...string) (model.CategoryTree, error) {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceId == "" {
-		if activeSrc := repobase.CurrentPrimarySource(); activeSrc != nil {
+		if activeSrc := sourcecatalog.CurrentPrimarySource(); activeSrc != nil {
 			sourceId = activeSrc.Id
 		}
 	}
@@ -175,7 +176,7 @@ func buildActiveCategoryAncestorMap(activeCategoryMap map[int64]bool) map[int64]
 				break
 			}
 			visible[currentID] = true
-			currentID = repobase.GetParentId(currentID)
+			currentID = taxonomy.GetParentId(currentID)
 		}
 	}
 	return visible
@@ -183,7 +184,7 @@ func buildActiveCategoryAncestorMap(activeCategoryMap map[int64]bool) map[int64]
 
 func isValidActiveCategoryTree(tree model.CategoryTree) bool {
 	for _, child := range tree.Children {
-		if child == nil || child.Pid != 0 || !repobase.IsRootCategory(child.Id) {
+		if child == nil || child.Pid != 0 || !taxonomy.IsRootCategory(child.Id) {
 			return false
 		}
 	}

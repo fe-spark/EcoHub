@@ -2,13 +2,13 @@ package access
 
 import (
 	"net/http"
-	"strconv"
-	"strings"
 	"server/internal/httpx"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/user"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )

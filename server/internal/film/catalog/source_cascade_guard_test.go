@@ -1,11 +1,11 @@
 package catalog
 
 import (
-	"testing"
-	"server/internal/infra/db"
-	"server/internal/testutil"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm/logger"
+	"server/internal/infra/db"
+	"server/internal/testutil"
+	"testing"
 	"time"
 
 	"server/internal/model"

@@ -1,12 +1,12 @@
 package collect
 
 import (
-	"server/internal/repobase"
 	"server/internal/film/catalog"
+	"server/internal/sourcecatalog"
 	"strings"
 
-	"server/internal/model"
 	"server/internal/collect/progress"
+	"server/internal/model"
 )
 
 // PrepareBatchCollectStart 挑出这次能开的站并占用。跳过的站带原因返回，不占队列。
@@ -39,7 +39,7 @@ func PrepareBatchCollectStart(ids []string) (CollectClaim, model.CollectBatchRes
 			continue
 		}
 		seen[id] = struct{}{}
-		fs := repobase.FindCollectSourceById(id)
+		fs := sourcecatalog.FindCollectSourceById(id)
 		if fs == nil {
 			skipped = append(skipped, model.CollectBatchSkip{Id: id, Reason: "采集站不存在"})
 			continue

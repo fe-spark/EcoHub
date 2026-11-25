@@ -5,14 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/collect/progress"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"server/internal/collect/ledger"
 )
 
 func TestPersistCollectRecord(t *testing.T) {
@@ -69,7 +70,7 @@ func TestPersistCollectRecord(t *testing.T) {
 	// 等待异步完成写入
 	time.Sleep(100 * time.Millisecond)
 
-	list, total, err := GetCollectRecordList(model.CollectRecordQuery{
+	list, total, err := ledger.GetCollectRecordList(model.CollectRecordQuery{
 		Page:     1,
 		PageSize: 10,
 	})
@@ -122,7 +123,7 @@ func TestPersistCollectRecord_StopAfterDoneStaysStopped(t *testing.T) {
 		{SourceID: src2.Id, SourceName: src2.Name, Status: progress.StatusStopped, PageTotal: 2, PageCurrent: 1},
 	})
 
-	list, _, err := GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
+	list, _, err := ledger.GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
 	if err != nil || len(list) != 1 {
 		t.Fatalf("query: %v len=%d", err, len(list))
 	}
@@ -232,7 +233,7 @@ func TestSingleFilmBatch_RecordStartCreatesRunning(t *testing.T) {
 		t.Fatalf("recordStart: %v", err)
 	}
 
-	list, total, err := GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
+	list, total, err := ledger.GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 	if films != 0 {
 		t.Fatalf("running batch wrote %d film rows", films)
 	}
-	rec, err := GetCollectRecordByBatchID(batch.batchID)
+	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,10 +328,10 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 		t.Fatalf("running record status=%s films=%d detail=%s", rec.Status, rec.FilmCount, rec.DetailJson)
 	}
 
-	if err := MarkInterruptedCollectRecords(); err != nil {
+	if err := ledger.MarkInterruptedCollectRecords(); err != nil {
 		t.Fatal(err)
 	}
-	rec, err = GetCollectRecordByBatchID(batch.batchID)
+	rec, err = ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +372,7 @@ func TestCheckpointKeepsSourceRunningUntilPersist(t *testing.T) {
 		Error:      "限流",
 	})
 
-	rec, err := GetCollectRecordByBatchID(batch.batchID)
+	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +390,7 @@ func TestCheckpointKeepsSourceRunningUntilPersist(t *testing.T) {
 		FilmsTotal: 3,
 		Error:      "限流",
 	}})
-	rec, err = GetCollectRecordByBatchID(batch.batchID)
+	rec, err = ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +426,7 @@ func TestFullCollectStoresFilmLedger(t *testing.T) {
 		PageTotal: 1, SuccessCnt: 1, FilmsTotal: 3,
 	}})
 
-	rec, err := GetCollectRecordByBatchID(batch.batchID)
+	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +476,7 @@ func TestIncrementalCollectStoresSmallFilmLedger(t *testing.T) {
 	if rows != 2 {
 		t.Fatalf("incremental ledger rows=%d", rows)
 	}
-	rec, err := GetCollectRecordByBatchID(batch.batchID)
+	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}

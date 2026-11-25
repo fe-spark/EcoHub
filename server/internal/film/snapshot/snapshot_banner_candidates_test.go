@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func bannerCandidateFilm(mid, pid, hits int64, score float64, updateStamp int64, name string) model.FilmIndex {
@@ -124,11 +124,11 @@ func TestGetSnapshotBannerCandidates_CanceledContext(t *testing.T) {
 
 func TestGetSnapshotBannerCandidates_ExcludesHiddenSubcategory(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
-	repobase.SetCategoryTreeForTest(map[int64]int64{1: 0, 10: 1, 19: 1}, map[int64]string{1: "电影", 10: "动作片", 19: "伦理片"})
-	repobase.SetCategoryShowForTest(map[int64]bool{1: true, 10: true, 19: false})
+	taxonomy.SetCategoryTreeForTest(map[int64]int64{1: 0, 10: 1, 19: 1}, map[int64]string{1: "电影", 10: "动作片", 19: "伦理片"})
+	taxonomy.SetCategoryShowForTest(map[int64]bool{1: true, 10: true, 19: false})
 	t.Cleanup(func() {
-		repobase.SetCategoryShowForTest(nil)
-		repobase.SetCategoryTreeForTest(nil, nil)
+		taxonomy.SetCategoryShowForTest(nil)
+		taxonomy.SetCategoryTreeForTest(nil, nil)
 	})
 
 	visible := bannerCandidateFilm(1, 1, 50, 8.0, 200, "公开动作")

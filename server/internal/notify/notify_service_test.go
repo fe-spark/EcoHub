@@ -12,10 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -426,14 +428,14 @@ func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
 	}
 	prevRdb := db.Rdb
 	db.Rdb = nil
-	prevSnap := repobase.CurrentMappingSnapshotForTest()
-	repobase.InvalidatePrimarySourceCache()
+	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
+	sourcecatalog.InvalidatePrimarySourceCache()
 	catalog.InvalidatePublicSourceCache()
 	catalog.MarkCategoryChanged()
 	t.Cleanup(func() {
 		db.Rdb = prevRdb
-		repobase.StoreMappingSnapshotForTest(prevSnap)
-		repobase.InvalidatePrimarySourceCache()
+		taxonomy.StoreMappingSnapshotForTest(prevSnap)
+		sourcecatalog.InvalidatePrimarySourceCache()
 		catalog.InvalidatePublicSourceCache()
 		catalog.MarkCategoryChanged()
 	})
@@ -504,10 +506,10 @@ func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = repobase.RefreshCollectSourceCatalog()
-	catalog.ReloadMappingRules()
-	repobase.RefreshCategoryCache()
-	repobase.InvalidatePrimarySourceCache()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+	taxonomy.ReloadMappingRules()
+	taxonomy.RefreshCategoryCache()
+	sourcecatalog.InvalidatePrimarySourceCache()
 	catalog.InvalidatePublicSourceCache()
 	catalog.MarkCategoryChanged()
 
@@ -534,7 +536,7 @@ func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
 	if err := gdb.Model(&model.FilmSource{}).Where("1 = 1").Update("state", false).Error; err != nil {
 		t.Fatal(err)
 	}
-	repobase.InvalidatePrimarySourceCache()
+	sourcecatalog.InvalidatePrimarySourceCache()
 	emptySess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
 		NotifyMIDs: []int64{101, 102, 103},
 	}, 15)
@@ -557,14 +559,14 @@ func TestNotifyPerSiteReplyAndCategoryDrilldown(t *testing.T) {
 	}
 	prevRdb := db.Rdb
 	db.Rdb = nil
-	prevSnap := repobase.CurrentMappingSnapshotForTest()
-	repobase.InvalidatePrimarySourceCache()
+	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
+	sourcecatalog.InvalidatePrimarySourceCache()
 	catalog.InvalidatePublicSourceCache()
 	catalog.MarkCategoryChanged()
 	t.Cleanup(func() {
 		db.Rdb = prevRdb
-		repobase.StoreMappingSnapshotForTest(prevSnap)
-		repobase.InvalidatePrimarySourceCache()
+		taxonomy.StoreMappingSnapshotForTest(prevSnap)
+		sourcecatalog.InvalidatePrimarySourceCache()
 		catalog.InvalidatePublicSourceCache()
 		catalog.MarkCategoryChanged()
 	})
@@ -625,10 +627,10 @@ func TestNotifyPerSiteReplyAndCategoryDrilldown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = repobase.RefreshCollectSourceCatalog()
-	catalog.ReloadMappingRules()
-	repobase.RefreshCategoryCache()
-	repobase.InvalidatePrimarySourceCache()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+	taxonomy.ReloadMappingRules()
+	taxonomy.RefreshCategoryCache()
+	sourcecatalog.InvalidatePrimarySourceCache()
 	catalog.InvalidatePublicSourceCache()
 	catalog.MarkCategoryChanged()
 
@@ -769,14 +771,14 @@ func TestNotifyLedgerAggregationAndSQLPagination(t *testing.T) {
 	}
 	prevRdb := db.Rdb
 	db.Rdb = nil
-	prevSnap := repobase.CurrentMappingSnapshotForTest()
-	repobase.InvalidatePrimarySourceCache()
+	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
+	sourcecatalog.InvalidatePrimarySourceCache()
 	catalog.InvalidatePublicSourceCache()
 	catalog.MarkCategoryChanged()
 	t.Cleanup(func() {
 		db.Rdb = prevRdb
-		repobase.StoreMappingSnapshotForTest(prevSnap)
-		repobase.InvalidatePrimarySourceCache()
+		taxonomy.StoreMappingSnapshotForTest(prevSnap)
+		sourcecatalog.InvalidatePrimarySourceCache()
 		catalog.InvalidatePublicSourceCache()
 		catalog.MarkCategoryChanged()
 	})
@@ -858,10 +860,10 @@ func TestNotifyLedgerAggregationAndSQLPagination(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = repobase.RefreshCollectSourceCatalog()
-	catalog.ReloadMappingRules()
-	repobase.RefreshCategoryCache()
-	repobase.InvalidatePrimarySourceCache()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+	taxonomy.ReloadMappingRules()
+	taxonomy.RefreshCategoryCache()
+	sourcecatalog.InvalidatePrimarySourceCache()
 	catalog.InvalidatePublicSourceCache()
 	catalog.MarkCategoryChanged()
 
@@ -960,7 +962,7 @@ func TestNotifyLedgerAggregationAndSQLPagination(t *testing.T) {
 			},
 		})
 	}
-	fire(fmt.Sprintf("nfp:%s:s:1", sess.BatchID))     // 站点分类页
+	fire(fmt.Sprintf("nfp:%s:s:1", sess.BatchID))       // 站点分类页
 	fire(fmt.Sprintf("nfp:%s:sc:1:0:1", sess.BatchID))  // 电影第1页
 	fire(fmt.Sprintf("nfp:%s:sc:1:0:2", sess.BatchID))  // 电影第2页
 	fire(fmt.Sprintf("nfp:%s:sc:1:1:1", sess.BatchID))  // 其他第1页

@@ -3,15 +3,15 @@ package film
 import (
 	"errors"
 	"fmt"
-	"server/internal/infra/db"
-	"server/internal/film/catalog"
-	"server/internal/mediaproxy"
-	"server/internal/model"
-	"server/internal/repobase"
 	"server/internal/film/cache"
+	"server/internal/film/catalog"
+	"server/internal/film/converter"
 	"server/internal/film/snapshot"
 	"server/internal/film/writer"
-	"server/internal/film/converter"
+	"server/internal/infra/db"
+	"server/internal/mediaproxy"
+	"server/internal/model"
+	"server/internal/sourcecatalog"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -49,7 +49,7 @@ func (s *FilmService) GetFilmPage(vo *model.SearchVo) ([]model.FilmIndex, error)
 	if vo == nil {
 		return nil, errors.New("search params cannot be nil")
 	}
-	if primary := repobase.CurrentPrimarySource(); primary != nil {
+	if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
 		vo.SourceId = primary.Id
 	} else {
 		// 无主站：空列表，不回退其他站点
@@ -73,7 +73,7 @@ func (s *FilmService) SearchIndexState() (bool, any) {
 // GetSearchOptions 获取影片检索的筛选项（固定主站，D3/X-12：不再返回站点列表与默认站点）。
 func (s *FilmService) GetSearchOptions() (map[string]any, error) {
 	options := make(map[string]any)
-	primary := repobase.CurrentPrimarySource()
+	primary := sourcecatalog.CurrentPrimarySource()
 	primaryID := ""
 	if primary != nil {
 		primaryID = primary.Id
@@ -113,7 +113,7 @@ func (s *FilmService) GetStoredFilmDetail(id int) (model.MovieDetailVo, bool, er
 	}
 	movieDetail.DownloadList = downloadList
 	primaryID := ""
-	if primary := repobase.CurrentPrimarySource(); primary != nil {
+	if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
 		primaryID = primary.Id
 	}
 	isManualFilm := writer.IsManualSourceFilm(db.Mdb, row.Mid, primaryID, row.FirstSourceId)
@@ -198,12 +198,12 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	err = snapshot.WithPrimaryMutation(func(_ bool) error {
 		sourceId := strings.TrimSpace(fd.SourceId)
 		// D3：保存影片固定当前主站；携带其他站点时拒绝
-		primary := repobase.CurrentPrimarySource()
+		primary := sourcecatalog.CurrentPrimarySource()
 		if primary == nil {
 			return errors.New("暂无主站，无法保存影片")
 		}
 		if sourceId != "" && sourceId != primary.Id {
-			return repobase.ErrPrimaryMismatch
+			return sourcecatalog.ErrPrimaryMismatch
 		}
 		if isUpdate {
 			owned, err := FilmIDsBelongToSource([]int64{fd.Id}, primary.Id)
@@ -211,7 +211,7 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 				return err
 			}
 			if !owned {
-				return repobase.ErrPrimaryMismatch
+				return sourcecatalog.ErrPrimaryMismatch
 			}
 		}
 		mid, err := writer.SaveDetailWithOptions(primary.Id, detail, writer.SaveDetailOptions{PublishSnapshot: false})
@@ -232,20 +232,20 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 
 // validatePrimaryFilmIDs 校验写操作的影片 ID 均属于当前主站（D3）。
 func validatePrimaryFilmIDs(ids []int64, expectedSourceID string) (string, error) {
-	primary := repobase.CurrentPrimarySource()
+	primary := sourcecatalog.CurrentPrimarySource()
 	if primary == nil {
 		return "", errors.New("暂无主站")
 	}
 	expectedSourceID = strings.TrimSpace(expectedSourceID)
 	if expectedSourceID != "" && expectedSourceID != primary.Id {
-		return "", repobase.ErrPrimaryMismatch
+		return "", sourcecatalog.ErrPrimaryMismatch
 	}
 	owned, err := FilmIDsBelongToSource(ids, primary.Id)
 	if err != nil {
 		return "", err
 	}
 	if !owned {
-		return "", repobase.ErrPrimaryMismatch
+		return "", sourcecatalog.ErrPrimaryMismatch
 	}
 	return primary.Id, nil
 }
@@ -304,12 +304,12 @@ func (s *FilmService) GetPrimaryClassTree() (ClassTreeScope, error) {
 
 // GetClassTreeScope 按采集站获取分类展示树；sourceID 为空时默认使用当前主站。
 func (s *FilmService) GetClassTreeScope(sourceID string) (ClassTreeScope, error) {
-	sources, err := repobase.GetCollectSourceListDB(db.Mdb)
+	sources, err := sourcecatalog.GetCollectSourceListDB(db.Mdb)
 	if err != nil {
 		return ClassTreeScope{}, err
 	}
 	primaryID := ""
-	if primary := repobase.CurrentPrimarySource(); primary != nil {
+	if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
 		primaryID = primary.Id
 	}
 	targetID := strings.TrimSpace(sourceID)
@@ -386,13 +386,13 @@ func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.Catego
 	}
 	targetID := strings.TrimSpace(sourceID)
 	if targetID == "" {
-		primary := repobase.CurrentPrimarySource()
+		primary := sourcecatalog.CurrentPrimarySource()
 		if primary == nil {
 			return errors.New("暂无主站，无法保存分类结构")
 		}
 		targetID = primary.Id
 	} else {
-		sources, err := repobase.GetCollectSourceListDB(db.Mdb)
+		sources, err := sourcecatalog.GetCollectSourceListDB(db.Mdb)
 		if err != nil {
 			return err
 		}

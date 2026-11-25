@@ -1,20 +1,21 @@
 package collect
 
 import (
-	"server/internal/repobase"
-	"server/internal/film/catalog"
 	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/url"
+	"server/internal/film/catalog"
+	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 	"sync/atomic"
 	"time"
 
-	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/collect/fetcher"
 	"server/internal/collect/progress"
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
 	"server/internal/utils"
 )
 
@@ -123,7 +124,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 		return errors.New("该采集站已在批量队列中，已跳过本次采集")
 	}
 
-	s := repobase.FindCollectSourceById(id)
+	s := sourcecatalog.FindCollectSourceById(id)
 	if s == nil {
 		return errors.New("采集站点不存在")
 	} else if !s.State {

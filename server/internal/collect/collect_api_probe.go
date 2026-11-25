@@ -1,29 +1,28 @@
 package collect
 
 import (
-	"server/internal/repobase"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
+	"server/internal/repobase"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"server/internal/model"
-	filmrepo "server/internal/film"
 	"server/internal/collect/scheduler"
+	"server/internal/model"
 	"server/internal/utils"
 )
 
 var (
-	siteResetting        atomic.Bool
-	fullResetRunningMu   sync.RWMutex
-	fullResetRunningFn   func() bool
+	siteResetting      atomic.Bool
+	fullResetRunningMu sync.RWMutex
+	fullResetRunningFn func() bool
 )
 
 // RegisterSiteResetChecker 注册全站重置生命周期状态检查器（覆盖至数据回写初始化完成）。
@@ -46,25 +45,35 @@ func IsSiteResetRunning() bool {
 
 const resetReadyWaitTimeout = 2 * time.Minute
 
-func ClearSpider() error {
+// PrepareAndRunReset 在全站数据重置前统一停采、清空排队并等待在途写入收敛，然后持独占锁执行清库回调。
+func PrepareAndRunReset(report func(int, string), wipeFn func() error) error {
 	siteResetting.Store(true)
 	defer siteResetting.Store(false)
-	filmrepo.ReportResetProgress(5, "正在停止采集任务")
+	if report != nil {
+		report(5, "正在停止采集任务")
+	}
 	StopAllCollect("数据重置，停止采集")
 	clearPendingCronDispatch()
 	if err := clearAndWaitMaintenanceQueue(resetReadyWaitTimeout); err != nil {
 		return err
 	}
-	filmrepo.ReportResetProgress(10, "正在等待在途写入与索引结束")
+	if report != nil {
+		report(10, "正在等待在途写入与索引结束")
+	}
 	if err := waitResetReady(resetReadyWaitTimeout); err != nil {
 		return err
 	}
-	filmrepo.ReportResetProgress(15, "正在清空数据")
+	if report != nil {
+		report(15, "正在清空数据")
+	}
 	return collectLifecycle.runExclusive(func() error {
 		ClearAllCrons()
 		ClearAllLimiters()
 		ResetCollectStatsCoalescer()
-		return filmrepo.FilmZero()
+		if wipeFn != nil {
+			return wipeFn()
+		}
+		return nil
 	})
 }
 

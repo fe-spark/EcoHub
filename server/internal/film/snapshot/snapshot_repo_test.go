@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"server/internal/config"
+	"server/internal/film/cache"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/film/cache"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/glebarez/sqlite"

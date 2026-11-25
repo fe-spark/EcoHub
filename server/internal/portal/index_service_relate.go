@@ -4,11 +4,12 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/model"
-	"server/internal/model/dto"
 	filmshared "server/internal/film/shared"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/model"
+	"server/internal/model/dto"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 )
 
 // RelateMovie 根据当前影片快照匹配相关的影片（默认锁定首选站）。
@@ -32,7 +33,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 		sourceID = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceID == "" {
-		sourceID = repobase.CurrentPrimaryID()
+		sourceID = sourcecatalog.CurrentPrimaryID()
 	}
 
 	snapshotStartedAt := time.Now()
@@ -41,7 +42,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	if snapErr != nil {
 		return nil, snapErr
 	}
-	if snapshot == nil || !repobase.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
+	if snapshot == nil || !taxonomy.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
 		return []model.MovieBasicInfo{}, nil
 	}
 	exists, detailErr := filmsnapshot.HasMovieDetail(snapshot.Mid)
@@ -60,7 +61,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	}
 	visibleList := make([]model.FilmListSnapshot, 0, len(list))
 	for _, item := range list {
-		if repobase.IsCategoryVisible(item.Cid, item.Pid) {
+		if taxonomy.IsCategoryVisible(item.Cid, item.Pid) {
 			visibleList = append(visibleList, item)
 		}
 	}

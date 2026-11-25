@@ -7,7 +7,7 @@ import (
 	"unicode"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -50,17 +50,17 @@ var (
 func IdentityFromFilmIndex(info model.FilmIndex) IdentityProfile {
 	pid := int64(0)
 	if info.Pid > 0 {
-		if root := repobase.GetRootId(info.Pid); root > 0 {
+		if root := taxonomy.GetRootId(info.Pid); root > 0 {
 			pid = root
 		}
 	}
 	if pid <= 0 && info.Cid > 0 {
-		if root := repobase.GetRootId(info.Cid); root > 0 {
+		if root := taxonomy.GetRootId(info.Cid); root > 0 {
 			pid = root
 		}
 	}
 	if pid <= 0 {
-		pid = repobase.ResolveRootCategoryIDByCName(info.CName)
+		pid = taxonomy.ResolveRootCategoryIDByCName(info.CName)
 	}
 	return IdentityProfile{
 		DbID:     info.DbId,

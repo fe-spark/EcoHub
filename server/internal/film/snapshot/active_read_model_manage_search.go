@@ -10,10 +10,10 @@ import (
 	"gorm.io/gorm"
 
 	"server/internal/film/catalog"
+	"server/internal/film/shared"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -209,7 +209,7 @@ func newManageFilterContext(s model.SearchVo, sourceID string) (*manageFilterCon
 			ctx.categoryCheckMode = 3
 			ctx.validCategoryKeys = make(map[string]struct{}, len(typeIDs))
 			for _, id := range typeIDs {
-				key := repobase.BuildSourceCategoryKey(ctx.sourceID, id)
+				key := taxonomy.BuildSourceCategoryKey(ctx.sourceID, id)
 				if key != "" {
 					ctx.validCategoryKeys[key] = struct{}{}
 				}

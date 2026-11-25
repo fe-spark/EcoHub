@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/config"
-	"server/internal/infra/syslog"
-	"server/internal/model"
 	"server/internal/collect/fetcher"
 	"server/internal/collect/progress"
 	"server/internal/collect/scheduler"
+	"server/internal/config"
+	"server/internal/infra/syslog"
+	"server/internal/model"
 	"server/internal/utils"
 )
 

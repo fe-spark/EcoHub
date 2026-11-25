@@ -1,22 +1,24 @@
 package collect
 
 import (
-	"server/internal/utils"
-	"server/internal/repobase"
-	"server/internal/film/catalog"
 	"context"
 	"errors"
 	"fmt"
 	"log"
+	"server/internal/film/catalog"
+	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
+	"server/internal/utils"
 	"strings"
-	"sync/atomic"
+	"sync"
 
-	"server/internal/infra/syslog"
-	"server/internal/model"
+	"server/internal/collect/progress"
 	filmrepo "server/internal/film"
 	filmcache "server/internal/film/cache"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/collect/progress"
+	"server/internal/infra/syslog"
+	"server/internal/model"
 )
 
 type SpiderService struct{}
@@ -31,7 +33,7 @@ func clearCategorySyncRedisCaches() {
 }
 
 func finalizeCategorySync() {
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 	clearCategorySyncRedisCaches()
 	filmrepo.RefreshInventoryStatsAsync()
 }
@@ -62,199 +64,11 @@ func (s *SpiderService) AutoCollect(time int) {
 	utils.GoSafe("自动采集", func() { AutoCollect(time) })
 }
 
-// resetSiteDataRunning 防止并发重复触发站点数据重置。
-var (
-	resetSiteDataRunning atomic.Bool
-	resetSiteLifecycle   atomic.Bool
+var categorySyncs sync.WaitGroup
 
-	// 站点重置跨模块钩子，由装配层注入。
-	OnResetDisableAccess  func()
-	OnResetClearAccess    func() error
-	OnResetRecoverAccess  func()
-	OnResetRecoverCrontab func()
-	OnResetReinitSite     func() error
-)
-
-func init() {
-	RegisterSiteResetChecker(func() bool {
-		return resetSiteDataRunning.Load() || resetSiteLifecycle.Load()
-	})
-}
-
-// triggerResetCategorySync 数据重置后异步回补默认站分类，测试可替换避免访问外网。
-var triggerResetCategorySync = func() {
-	go SpiderSvc.SyncMissingSourceCategories()
-}
-
-func GetTriggerResetCategorySync() func() { return triggerResetCategorySync }
-func SetTriggerResetCategorySync(fn func()) { triggerResetCategorySync = fn }
-
-// ClearFilms 重置站点数据：清空业务与配置数据表（保留账号表 user 与迁移版本表 schema_migrations），
-// 同步清空图库与全部缓存，并重新写入初始化数据与启动默认定时任务。
-// 全程按关键节点上报真实进度，由 SSE 推给页面。
-func (s *SpiderService) ClearFilms() (retErr error) {
-	if OnResetDisableAccess == nil || OnResetClearAccess == nil ||
-		OnResetRecoverAccess == nil || OnResetRecoverCrontab == nil || OnResetReinitSite == nil {
-		return errors.New("站点重置钩子未初始化")
-	}
-	resetSiteLifecycle.Store(true)
-	defer resetSiteLifecycle.Store(false)
-
-	filmrepo.StartResetProgress()
-	clearedDB := false
-	defer func() {
-		if retErr != nil {
-			// 清库前置阶段失败或半途失败时尽力恢复访问统计开关与定时任务，避免系统停摆
-			if OnResetRecoverAccess != nil {
-				OnResetRecoverAccess()
-			}
-			if clearedDB && OnResetRecoverCrontab != nil {
-				OnResetRecoverCrontab()
-			}
-			filmrepo.FinishResetProgress(retErr)
-		}
-	}()
-
-	filmrepo.ReportResetProgress(2, "正在停止后台任务")
-	if OnResetDisableAccess != nil {
-		OnResetDisableAccess()
-	}
-	StopAllCollect("数据重置，停止采集")
-	CollectSvc.CancelDelFilmSources(nil)
-	deleteSourceJobs.Wait()
-	primaryWarmups.Wait()
+// WaitCategorySyncs 等待全部异步分类同步协程结束（供上层测试或站点重置调用）。
+func WaitCategorySyncs() {
 	categorySyncs.Wait()
-
-	if err := ClearSpider(); err != nil {
-		return err
-	}
-	clearedDB = true
-	if OnResetClearAccess != nil {
-		if err := OnResetClearAccess(); err != nil {
-			return err
-		}
-	}
-
-	filmrepo.ReportResetProgress(85, "正在写入初始化数据")
-	if OnResetReinitSite != nil {
-		if err := OnResetReinitSite(); err != nil {
-			return err
-		}
-	}
-
-	filmrepo.ReportResetProgress(95, "正在同步默认分类")
-	if triggerResetCategorySync != nil {
-		triggerResetCategorySync()
-	}
-
-	filmrepo.ReportResetProgress(100, "数据重置完成，已恢复初始状态")
-	filmrepo.FinishResetProgress(nil)
-	return nil
-}
-
-// SiteResetRunning 是否已有数据重置在执行。
-func (s *SpiderService) SiteResetRunning() bool {
-	return resetSiteDataRunning.Load()
-}
-
-// StreamSiteReset 执行数据重置，并把每个进度快照交给 onEvent。
-// 客户端断开后停止推送，重置本身继续跑完。
-func (s *SpiderService) StreamSiteReset(ctx context.Context, onEvent func(any) error) error {
-	if !resetSiteDataRunning.CompareAndSwap(false, true) {
-		return errors.New("站点数据正在重置中，请勿重复操作")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	events := make(chan filmrepo.ResetProgress, 16)
-	unsub := filmrepo.WatchResetProgress(func(p filmrepo.ResetProgress) {
-		select {
-		case events <- p:
-		case <-ctx.Done():
-		}
-	})
-	defer unsub()
-
-	jobDone := make(chan struct{})
-	go func() {
-		defer close(jobDone)
-		defer resetSiteDataRunning.Store(false)
-		if err := s.ClearFilms(); err != nil {
-			syslog.Errorf("[数据重置] 重置失败: %v", err)
-			return
-		}
-		syslog.Infof("[数据重置] 重置完成")
-	}()
-
-	send := func(p filmrepo.ResetProgress) bool {
-		if onEvent != nil {
-			if err := onEvent(p); err != nil {
-				return true
-			}
-		}
-		return !p.Running
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case p := <-events:
-			if send(p) {
-				return nil
-			}
-		case <-jobDone:
-			for {
-				select {
-				case p := <-events:
-					if send(p) {
-						return nil
-					}
-				default:
-					return nil
-				}
-			}
-		}
-	}
-}
-
-// FollowSiteReset 订阅当前重置进度。先推一次快照；没在重置就结束，正在重置则推到结束。
-func (s *SpiderService) FollowSiteReset(ctx context.Context, onEvent func(any) error) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	events := make(chan filmrepo.ResetProgress, 16)
-	unsub := filmrepo.WatchResetProgress(func(p filmrepo.ResetProgress) {
-		select {
-		case events <- p:
-		case <-ctx.Done():
-		}
-	})
-	defer unsub()
-
-	snap := filmrepo.GetResetProgress()
-	if onEvent != nil {
-		if err := onEvent(snap); err != nil {
-			return nil
-		}
-	}
-	if !snap.Running {
-		return nil
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case p := <-events:
-			if onEvent != nil {
-				if err := onEvent(p); err != nil {
-					return nil
-				}
-			}
-			if !p.Running {
-				return nil
-			}
-		}
-	}
 }
 
 // InventoryStats 返回工作台片库规模（顶部为全部已启用站点汇总，明细为各站真实已采集数据）。
@@ -338,7 +152,7 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 		}
 	}()
 
-	sources, err := repobase.GetEnabledCollectSourceList()
+	sources, err := sourcecatalog.GetEnabledCollectSourceList()
 	if err != nil {
 		log.Printf("[SpiderService] 读取已启用采集站失败: %v", err)
 		return
@@ -368,7 +182,7 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 		return
 	}
 
-	primary := repobase.CurrentPrimarySource()
+	primary := sourcecatalog.CurrentPrimarySource()
 	primaryID := ""
 	if primary != nil {
 		primaryID = primary.Id
@@ -389,7 +203,7 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 		pageCount, err := CollectCategory(&source)
 		if err != nil {
 			log.Printf("[SpiderService] 补拉采集站分类失败: name=%s id=%s err=%v", source.Name, source.Id, err)
-			if repobase.FindCollectSourceById(source.Id) == nil {
+			if sourcecatalog.FindCollectSourceById(source.Id) == nil {
 				progress.BroadcastCategoryStatus(source.Id, "idle")
 			} else {
 				progress.BroadcastCategoryStatus(source.Id, "failed")
@@ -406,7 +220,7 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 
 	if synced > 0 {
 		finalizeCategorySync()
-	_ = filmsnapshot.RefreshActiveProjectedReadModel()
+		_ = filmsnapshot.RefreshActiveProjectedReadModel()
 		if primarySynced {
 			_ = filmsnapshot.RefreshActiveProjectedReadModel()
 			repobase.ClearIndexPageCache()
@@ -432,7 +246,7 @@ func (s *SpiderService) StopTasks(ids []string) {
 
 // StopTask 停止指定采集站的任务（仅停止任务，不影响采集站启用状态）。
 func (s *SpiderService) StopTask(id string) error {
-	fs := repobase.FindCollectSourceById(id)
+	fs := sourcecatalog.FindCollectSourceById(id)
 	if fs == nil {
 		return errors.New("采集站信息不存在")
 	}

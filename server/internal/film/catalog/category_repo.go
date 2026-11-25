@@ -4,10 +4,11 @@ import (
 	"strings"
 
 	"server/internal/config"
+	filmcache "server/internal/film/cache"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmcache "server/internal/film/cache"
 	"server/internal/repobase"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -18,14 +19,14 @@ func ClearCategoryCache() {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 	}
 	InvalidatePublicSourceCache()
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 }
 
 func MarkCategoryChanged() {
 	ClearCategoryCache()
-	InitMappingEngine()
-	repobase.TouchCategoryVersion()
-	repobase.TouchSearchTagsVersion()
+	taxonomy.InitMappingEngine()
+	taxonomy.TouchCategoryVersion()
+	taxonomy.TouchSearchTagsVersion()
 	repobase.ClearIndexPageCache()
 	filmcache.ClearPatterns(
 		config.FilmRelatePrefix+":*",
@@ -87,8 +88,10 @@ func ClearSourceCategoryDataTx(tx *gorm.DB, sourceID string) error {
 	if err := tx.Where("source_id = ?", sourceID).Delete(&model.CategoryMapping{}).Error; err != nil {
 		return err
 	}
-	if err := DeleteMappingRulesBySourceTx(tx, sourceID); err != nil {
-		return err
+	if tx.Migrator().HasTable(&model.MappingRule{}) {
+		if err := tx.Unscoped().Where("source_id = ?", sourceID).Delete(&model.MappingRule{}).Error; err != nil {
+			return err
+		}
 	}
 	if err := tx.Where("stable_key LIKE ?", syntheticRootPrefix(sourceID)+"%").Delete(&model.Category{}).Error; err != nil {
 		return err

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"server/internal/model"
 	"server/internal/collect/progress"
+	"server/internal/model"
 )
 
 var (

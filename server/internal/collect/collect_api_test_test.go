@@ -1,9 +1,9 @@
 package collect
 
 import (
-	"server/internal/repobase"
 	"net/http"
 	"net/http/httptest"
+	"server/internal/repobase"
 	"strings"
 	"testing"
 

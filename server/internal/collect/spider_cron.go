@@ -8,12 +8,13 @@ import (
 	"sync"
 	"time"
 
+	filmrepo "server/internal/film"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	filmrepo "server/internal/film"
 
 	"github.com/robfig/cron/v3"
+	"server/internal/collect/ledger"
 )
 
 var CronCollect *cron.Cron = CreateCron()
@@ -391,7 +392,7 @@ func executeLogCleanTask(ft model.FilmCollectTask, manual bool) {
 
 func executeCollectRecordCleanTask(ft model.FilmCollectTask, manual bool) {
 	executeMaintenance(ft, manual, "定期清理超过 30 天的采集运行记录与快照", func(remark string, startedAt time.Time) error {
-		if err := CleanOldCollectRecords(30); err != nil {
+		if err := ledger.CleanOldCollectRecords(30); err != nil {
 			return err
 		}
 		log.Printf("定时任务完成: %s，耗时 %s", remark, time.Since(startedAt))

@@ -1,7 +1,6 @@
 package portal
 
 import (
-	"server/internal/film/catalog"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -15,11 +14,11 @@ import (
 	"gorm.io/gorm/logger"
 
 	"server/internal/config"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
@@ -370,7 +369,7 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	if err := db.Mdb.Create(&model.SourceCategory{SourceId: "source_master", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
-	catalog.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -697,7 +696,7 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 	if err := db.Mdb.Create(&model.SourceCategory{SourceId: "source_master", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
-	catalog.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 	s := model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             701,
@@ -725,9 +724,9 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 	}
 
 	// 验证停用分类拦截
-	repobase.SetCategoryShowForTest(map[int64]bool{1: false})
+	taxonomy.SetCategoryShowForTest(map[int64]bool{1: false})
 	resDisabled, err := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
-	repobase.SetCategoryShowForTest(map[int64]bool{})
+	taxonomy.SetCategoryShowForTest(map[int64]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}

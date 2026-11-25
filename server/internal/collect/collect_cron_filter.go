@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/collect/ledger"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 )
@@ -79,7 +80,7 @@ func autoCollectForTask(taskID, trigger string, h int) error {
 		}
 	}
 	if trigger == model.CollectTriggerCron {
-		skip, err := TrippedSourceIDsToday(time.Now())
+		skip, err := ledger.TrippedSourceIDsToday(time.Now())
 		if err != nil {
 			log.Printf("[Spider] 自动采集：读取熔断站点失败 (fail-open 降级全量): %v", err)
 		} else if len(skip) > 0 {

@@ -105,13 +105,21 @@ type TMDBCreditPerson struct {
 
 type TMDBDetailRaw struct {
 	RawTMDBItem
-	Tagline             string `json:"tagline"`
-	Genres              []struct{ Name string `json:"name"` } `json:"genres"`
-	ProductionCountries []struct{ Name string `json:"name"` } `json:"production_countries"`
-	OriginCountry       []string                              `json:"origin_country"`
-	SpokenLanguages     []struct{ Name string `json:"name"` } `json:"spoken_languages"`
-	Credits             struct {
-		Cast []struct{ Name string `json:"name"` } `json:"cast"`
-		Crew []TMDBCreditPerson                    `json:"crew"`
+	Tagline string `json:"tagline"`
+	Genres  []struct {
+		Name string `json:"name"`
+	} `json:"genres"`
+	ProductionCountries []struct {
+		Name string `json:"name"`
+	} `json:"production_countries"`
+	OriginCountry   []string `json:"origin_country"`
+	SpokenLanguages []struct {
+		Name string `json:"name"`
+	} `json:"spoken_languages"`
+	Credits struct {
+		Cast []struct {
+			Name string `json:"name"`
+		} `json:"cast"`
+		Crew []TMDBCreditPerson `json:"crew"`
 	} `json:"credits"`
 }

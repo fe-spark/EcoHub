@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
+	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -33,7 +33,7 @@ func TestConvertFilmIndex_UnmappedGoesToOther(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConvertFilmIndex: %v", err)
 	}
-	wantKey := repobase.BuildSourceCategoryKey("src_oscar", model.OtherSourceTypeID)
+	wantKey := taxonomy.BuildSourceCategoryKey("src_oscar", model.OtherSourceTypeID)
 	if index.Pid <= 0 || index.Cid <= 0 {
 		t.Fatalf("pid/cid not bound: pid=%d cid=%d", index.Pid, index.Cid)
 	}
@@ -69,7 +69,7 @@ func TestConvertFilmIndex_UnmappedUsesCMS其它(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConvertFilmIndex: %v", err)
 	}
-	wantKey := repobase.BuildSourceCategoryKey("src_alias", 20)
+	wantKey := taxonomy.BuildSourceCategoryKey("src_alias", 20)
 	if index.CName != "其它" {
 		t.Fatalf("c_name=%q", index.CName)
 	}
@@ -87,11 +87,11 @@ func TestConvertFilmIndex_HiddenOtherStillStores(t *testing.T) {
 		t.Fatalf("SaveCategoryTree: %v", err)
 	}
 	if err := gdb.Model(&model.Category{}).
-		Where("stable_key = ?", repobase.BuildSourceCategoryKey("src_hide", model.OtherSourceTypeID)).
+		Where("stable_key = ?", taxonomy.BuildSourceCategoryKey("src_hide", model.OtherSourceTypeID)).
 		Update("show", false).Error; err != nil {
 		t.Fatalf("hide 其他: %v", err)
 	}
-	repobase.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 	index, err := ConvertFilmIndex("src_hide", model.MovieDetail{
 		Id:              10,
 		Cid:             99,
@@ -102,7 +102,7 @@ func TestConvertFilmIndex_HiddenOtherStillStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hidden 其他 should still store, err=%v", err)
 	}
-	wantKey := repobase.BuildSourceCategoryKey("src_hide", model.OtherSourceTypeID)
+	wantKey := taxonomy.BuildSourceCategoryKey("src_hide", model.OtherSourceTypeID)
 	if index.Pid <= 0 || index.Cid <= 0 {
 		t.Fatalf("pid/cid not bound: pid=%d cid=%d", index.Pid, index.Cid)
 	}
@@ -120,11 +120,11 @@ func TestConvertFilmIndex_HiddenMappedStillStores(t *testing.T) {
 		t.Fatalf("SaveCategoryTree: %v", err)
 	}
 	if err := gdb.Model(&model.Category{}).
-		Where("stable_key = ?", repobase.BuildSourceCategoryKey("src_hide_mapped", 1)).
+		Where("stable_key = ?", taxonomy.BuildSourceCategoryKey("src_hide_mapped", 1)).
 		Update("show", false).Error; err != nil {
 		t.Fatalf("hide 电影: %v", err)
 	}
-	repobase.ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 	index, err := ConvertFilmIndex("src_hide_mapped", model.MovieDetail{
 		Id:              1,
 		Cid:             1,
@@ -137,7 +137,7 @@ func TestConvertFilmIndex_HiddenMappedStillStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hidden mapped category should still store, err=%v", err)
 	}
-	wantKey := repobase.BuildSourceCategoryKey("src_hide_mapped", 1)
+	wantKey := taxonomy.BuildSourceCategoryKey("src_hide_mapped", 1)
 	if index.CName != "电影" || index.CategoryKey != wantKey {
 		t.Fatalf("c_name=%s key=%s", index.CName, index.CategoryKey)
 	}
@@ -167,7 +167,7 @@ func TestSaveCollectedPeerDetails_UnmappedGoesToOther(t *testing.T) {
 	if err := gdb.Where("name = ?", "未映射片").First(&film).Error; err != nil {
 		t.Fatalf("film missing: %v", err)
 	}
-	wantKey := repobase.BuildSourceCategoryKey(source.Id, model.OtherSourceTypeID)
+	wantKey := taxonomy.BuildSourceCategoryKey(source.Id, model.OtherSourceTypeID)
 	if film.CName != model.TagOthersName || film.CategoryKey != wantKey {
 		t.Fatalf("c_name=%s key=%s", film.CName, film.CategoryKey)
 	}
@@ -182,7 +182,7 @@ func TestSaveCollectedPeerDetails_HiddenCategoryStores(t *testing.T) {
 	if err := gdb.Model(&model.Category{}).Where("id = ?", 1).Update("show", false).Error; err != nil {
 		t.Fatalf("hide category: %v", err)
 	}
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 
 	source := &model.FilmSource{Id: "src-hidden", Name: "爱旦", State: true}
 	detail := testPeerDetail(42, "停用类片子", "第1集")
@@ -222,7 +222,7 @@ func TestConvertFilmIndex_MappedFilmUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConvertFilmIndex: %v", err)
 	}
-	wantKey := repobase.BuildSourceCategoryKey("src_ok", 1)
+	wantKey := taxonomy.BuildSourceCategoryKey("src_ok", 1)
 	if index.CName != "电影" || index.CategoryKey != wantKey {
 		t.Fatalf("mapped film rewritten: c_name=%s key=%s", index.CName, index.CategoryKey)
 	}
@@ -243,7 +243,7 @@ func openWriterCategoryDB(t *testing.T) *gorm.DB {
 	db.Rdb = nil
 	t.Cleanup(func() {
 		db.Mdb = prev
-		repobase.StoreMappingSnapshotForTest(nil)
+		taxonomy.StoreMappingSnapshotForTest(nil)
 	})
 	return gdb
 }

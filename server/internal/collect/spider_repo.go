@@ -9,18 +9,20 @@ import (
 	"server/internal/film/catalog"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"server/internal/collect/ledger"
 )
 
 // --------- Collect Source -----------
 
 // GetCollectSourceList 获取采集站 API 列表（按排序序号升序）
 func GetCollectSourceList() ([]model.FilmSource, error) {
-	return repobase.GetCollectSourceListDB(db.Mdb)
+	return sourcecatalog.GetCollectSourceListDB(db.Mdb)
 }
 
 // ReplaceCollectSources 用备份列表整体替换采集站（事务清空后写入）
@@ -60,17 +62,17 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 		return err
 	}
 	// 备份导入整体替换站点：存储的主站不在新列表时清空，由懒初始化按新列表重选
-	repobase.ReconcilePrimaryAfterSourceReplace(next)
+	sourcecatalog.ReconcilePrimaryAfterSourceReplace(next)
 	catalog.InvalidatePublicSourceCache()
-	return repobase.RefreshCollectSourceCatalog()
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 // SetPrimarySourceID 写入主站状态（切换与交接的持久化入口）。
 func SetPrimarySourceID(id string) error {
-	if err := repobase.SetPrimarySourceID(id); err != nil {
+	if err := sourcecatalog.SetPrimarySourceID(id); err != nil {
 		return err
 	}
-	return repobase.RefreshCollectSourceCatalog()
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 func GetLastCollectTime(sourceID string) (*time.Time, error) {
@@ -145,7 +147,7 @@ func DelCollectResource(id string) ([]int64, error) {
 		if err := catalog.ClearSourceCategoryDataTx(tx, id); err != nil {
 			return err
 		}
-		if err := purgeSourceCollectHistoryTx(tx, id); err != nil {
+		if err := ledger.PurgeSourceCollectHistoryTx(tx, id); err != nil {
 			return err
 		}
 		if err := catalog.AssertSourceDataCleanedTx(tx, id); err != nil {
@@ -159,11 +161,11 @@ func DelCollectResource(id string) ([]int64, error) {
 	if err != nil {
 		return orphanMids, err
 	}
-	repobase.TouchRuleVersion()
-	catalog.ReloadMappingRules()
+	taxonomy.TouchRuleVersion()
+	taxonomy.ReloadMappingRules()
 	catalog.InvalidatePublicSourceCache(id)
-	if err := repobase.RefreshCollectSourceCatalog(); err != nil {
-		repobase.ForgetCollectSource(id)
+	if err := sourcecatalog.RefreshCollectSourceCatalog(); err != nil {
+		sourcecatalog.ForgetCollectSource(id)
 		return orphanMids, err
 	}
 	return orphanMids, nil
@@ -185,7 +187,7 @@ func UpdateCollectSourceReplacingData(source model.FilmSource, clearCategories b
 	if err != nil {
 		return err
 	}
-	return repobase.RefreshCollectSourceCatalog()
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 // CleanCollectSourceData 清空该站已采集数据（保留采集站配置本身）。
@@ -198,7 +200,7 @@ func AddCollectSource(s model.FilmSource) error {
 	if err := AddCollectSourceTx(db.Mdb, s); err != nil {
 		return err
 	}
-	return repobase.RefreshCollectSourceCatalog()
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
@@ -274,7 +276,7 @@ func SortCollectSources(ids []string) error {
 	if err != nil {
 		return err
 	}
-	return repobase.RefreshCollectSourceCatalog()
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 // BatchUpdateCollectSourceState 批量更新采集源启用状态（原子事务提交）
@@ -291,7 +293,7 @@ func BatchUpdateCollectSourceState(ids []string, state bool) error {
 	if err != nil {
 		return err
 	}
-	return repobase.RefreshCollectSourceCatalog()
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 // BatchAddCollectSource 批量添加采集站信息
@@ -317,7 +319,7 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 	if err != nil {
 		return err
 	}
-	return repobase.RefreshCollectSourceCatalog()
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 // ValidateCollectSourceUpdate 在执行破坏性清库或写库前预检采集站更新的唯一性等约束。

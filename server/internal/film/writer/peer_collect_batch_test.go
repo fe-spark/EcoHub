@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/film/shared"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 	"server/internal/utils"
 
@@ -307,7 +307,7 @@ func openPeerPageDB(t *testing.T) *gorm.DB {
 	}
 	_ = gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true}).Error
 	db.Mdb = gdb
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 	return gdb
 }
 

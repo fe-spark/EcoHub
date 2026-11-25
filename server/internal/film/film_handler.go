@@ -8,7 +8,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 
 	"github.com/gin-gonic/gin"
 )
@@ -72,7 +72,7 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 
 	s.Paging = dto.GetPageParams(c)
 	// D3：读请求忽略 sourceId，固定当前主站并在响应中回显
-	if primary := repobase.CurrentPrimarySource(); primary != nil {
+	if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
 		s.SourceId = primary.Id
 	} else {
 		s.SourceId = ""
@@ -126,7 +126,7 @@ func (h *FilmHandler) FilmSave(c *gin.Context) {
 	}
 
 	if err := FilmSvc.SaveFilmDetail(fd); err != nil {
-		if errors.Is(err, repobase.ErrPrimaryMismatch) {
+		if errors.Is(err, sourcecatalog.ErrPrimaryMismatch) {
 			dto.PrimaryMismatch(c)
 			return
 		}
@@ -152,7 +152,7 @@ func (h *FilmHandler) FilmDelete(c *gin.Context) {
 	}
 
 	if err := FilmSvc.DeletePrimaryFilms(req.Ids, req.SourceId); err != nil {
-		if errors.Is(err, repobase.ErrPrimaryMismatch) {
+		if errors.Is(err, sourcecatalog.ErrPrimaryMismatch) {
 			dto.PrimaryMismatch(c)
 			return
 		}
@@ -214,7 +214,7 @@ func (h *FilmHandler) FilmRefresh(c *gin.Context) {
 		return
 	}
 	if err := FilmSvc.RefreshPrimaryFilms(cleanIds, req.SourceId); err != nil {
-		if errors.Is(err, repobase.ErrPrimaryMismatch) {
+		if errors.Is(err, sourcecatalog.ErrPrimaryMismatch) {
 			dto.PrimaryMismatch(c)
 			return
 		}

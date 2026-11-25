@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/model"
 	"server/internal/collect/scheduler"
+	"server/internal/model"
 )
 
 var collectLifecycle = newCollectLifecycle()

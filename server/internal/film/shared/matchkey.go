@@ -7,7 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -201,10 +201,10 @@ func LoadMovieMatchKeysBySnapshot(snapshot *model.FilmListSnapshot, detail *mode
 	pid := int64(0)
 	if snapshot != nil {
 		if snapshot.Pid > 0 {
-			pid = repobase.GetRootId(snapshot.Pid)
+			pid = taxonomy.GetRootId(snapshot.Pid)
 		}
 		if pid <= 0 && snapshot.Cid > 0 {
-			pid = repobase.GetRootId(snapshot.Cid)
+			pid = taxonomy.GetRootId(snapshot.Cid)
 		}
 	}
 	if pid <= 0 {

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 type relatedCandidateScore struct {
@@ -208,7 +208,7 @@ func resolveCurrentRootCategory(current model.FilmListSnapshot) (string, int64) 
 	rootKey := strings.TrimSpace(current.RootCategoryKey)
 	pid := current.Pid
 	if pid <= 0 && current.CName != "" {
-		pid = repobase.ResolveRootCategoryIDByCName(current.CName)
+		pid = taxonomy.ResolveRootCategoryIDByCName(current.CName)
 	}
 	cName := strings.TrimSpace(current.CName)
 	switch {

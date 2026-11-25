@@ -2,9 +2,10 @@ package film
 
 import (
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/film/cache"
+	"server/internal/infra/db"
 	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func refreshCategoryCaches() {
@@ -12,12 +13,12 @@ func refreshCategoryCaches() {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 	}
 	cache.ClearAllSearchTagsCache()
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 }
 
 func markCategoryChanged() {
 	refreshCategoryCaches()
-	repobase.InitMappingEngine()
-	repobase.TouchCategoryVersion()
+	taxonomy.InitMappingEngine()
+	taxonomy.TouchCategoryVersion()
 	repobase.ClearIndexPageCache()
 }

@@ -5,12 +5,12 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 )
 
 // currentPrimarySourceID 当前主站。没有已启用采集站时为空。
 func currentPrimarySourceID() string {
-	return repobase.CurrentPrimaryID()
+	return sourcecatalog.CurrentPrimaryID()
 }
 
 func indexMatches(cur *filmSearchMetaIndex, version, primary string) bool {

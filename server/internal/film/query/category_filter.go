@@ -8,7 +8,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func categoryKeyColumn(field string) string {
@@ -26,7 +26,7 @@ func categoryIDColumn(field string) string {
 }
 
 func categoryStableKey(id int64) string {
-	return strings.TrimSpace(repobase.GetCategoryStableKeyByID(repobase.ResolveCategoryID(id)))
+	return strings.TrimSpace(taxonomy.GetCategoryStableKeyByID(taxonomy.ResolveCategoryID(id)))
 }
 
 func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
@@ -40,7 +40,7 @@ func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
 	keys := make([]string, 0, len(mappings))
 	seen := make(map[string]struct{}, len(mappings))
 	for _, mapping := range mappings {
-		key := repobase.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId)
+		key := taxonomy.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId)
 		if key == "" {
 			continue
 		}
@@ -82,7 +82,7 @@ func visibleDescendantCategoryIDs(categoryID int64) []int64 {
 }
 
 func visibleCategoryAndDescendantIDs(categoryID int64) []int64 {
-	categoryID = repobase.ResolveCategoryID(categoryID)
+	categoryID = taxonomy.ResolveCategoryID(categoryID)
 	if categoryID <= 0 {
 		return nil
 	}
@@ -102,7 +102,7 @@ func categorySourceKeys(field string, id int64) []string {
 
 	rootID := category.Id
 	if category.Pid > 0 {
-		rootID = repobase.GetRootId(category.Id)
+		rootID = taxonomy.GetRootId(category.Id)
 	}
 	return sourceCategoryKeysByCategoryIDs(visibleCategoryAndDescendantIDs(rootID))
 }
@@ -114,7 +114,7 @@ func rootCategorySourceKeyGroups(id int64) ([]string, []string) {
 	}
 	rootID := category.Id
 	if category.Pid > 0 {
-		rootID = repobase.GetRootId(category.Id)
+		rootID = taxonomy.GetRootId(category.Id)
 	}
 	visibleCategoryIDs := visibleCategoryAndDescendantIDs(rootID)
 	return sourceCategoryKeysByCategoryIDs([]int64{rootID}), sourceCategoryKeysByCategoryIDs(visibleCategoryIDs)
@@ -140,7 +140,7 @@ func categoryByID(id int64) (*model.Category, bool) {
 	if db.Mdb == nil {
 		return nil, false
 	}
-	resolvedID := repobase.ResolveCategoryID(id)
+	resolvedID := taxonomy.ResolveCategoryID(id)
 	if resolvedID <= 0 {
 		return nil, false
 	}
@@ -164,7 +164,7 @@ func applyCategoryVisibilityFilter(query *gorm.DB, field string, id int64) *gorm
 	if field == "pid" {
 		rootID := category.Id
 		if category.Pid > 0 {
-			rootID = repobase.GetRootId(category.Id)
+			rootID = taxonomy.GetRootId(category.Id)
 		}
 		if root, ok := categoryByID(rootID); !ok || !root.Show {
 			return emptyFilmIndexQuery(query)
@@ -181,7 +181,7 @@ func applyCategoryVisibilityFilter(query *gorm.DB, field string, id int64) *gorm
 }
 
 func ApplyCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
-	resolvedID := repobase.ResolveCategoryID(id)
+	resolvedID := taxonomy.ResolveCategoryID(id)
 	if resolvedID <= 0 {
 		return emptyFilmIndexQuery(query)
 	}
@@ -250,7 +250,7 @@ func sourceTypeKeys(sourceID string, typeIDs []int64) []string {
 	keys := make([]string, 0, len(typeIDs))
 	seen := make(map[string]struct{}, len(typeIDs))
 	for _, typeID := range typeIDs {
-		key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+		key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 		if key == "" {
 			continue
 		}
@@ -332,13 +332,13 @@ func liveCategoryKeySets(field string, categoryID int64) (col string, id int64, 
 	if db.Mdb == nil || categoryID <= 0 {
 		return col, categoryID, nil, nil
 	}
-	id = repobase.ResolveCategoryID(categoryID)
+	id = taxonomy.ResolveCategoryID(categoryID)
 	if field == "cid" {
 		return "cid", id, mappingCategoryKeys(visibleCategoryAndDescendantIDs(id)), nil
 	}
 	rootID := id
 	if category, ok := categoryByID(id); ok && category.Pid > 0 {
-		if resolved := repobase.GetRootId(id); resolved > 0 {
+		if resolved := taxonomy.GetRootId(id); resolved > 0 {
 			rootID = resolved
 		}
 	}
@@ -356,7 +356,7 @@ func mappingCategoryKeys(categoryIDs []int64) []string {
 	keys := make([]string, 0, len(mappings))
 	seen := make(map[string]struct{}, len(mappings))
 	for _, mapping := range mappings {
-		key := repobase.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId)
+		key := taxonomy.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId)
 		if key == "" {
 			continue
 		}
@@ -381,7 +381,7 @@ func ApplyManageCategoryFieldFilter(query *gorm.DB, field string, id int64) *gor
 	if query == nil {
 		return nil
 	}
-	resolvedID := repobase.ResolveCategoryID(id)
+	resolvedID := taxonomy.ResolveCategoryID(id)
 	if resolvedID <= 0 {
 		return emptyFilmIndexQuery(query)
 	}

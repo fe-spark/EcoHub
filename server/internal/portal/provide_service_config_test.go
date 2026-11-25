@@ -2,6 +2,7 @@ package portal
 
 import (
 	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 	"strings"
 	"testing"
 
@@ -96,7 +97,7 @@ func TestProvideService_GetVodList_EmptyWhenNoPrimarySource(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 701, FirstSourceId: "src_off"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "停用站泄漏影片"},
 	})
-	_ = repobase.RefreshCollectSourceCatalog()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
 
 	cur, pages, total, list, err := ProvideSvc.GetVodList(0, 0, 1, "停用", 0, "", "", "", "", "", 20)
 	if err != nil {

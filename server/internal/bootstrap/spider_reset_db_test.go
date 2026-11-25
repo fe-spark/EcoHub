@@ -13,20 +13,23 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"server/internal/collectctl"
+	"server/internal/siteops"
 )
 
 func waitResetSearchWorkIdle(t *testing.T) {
 	t.Helper()
-	if !collect.WaitAsyncWork(15 * time.Second) {
+	if !collectctl.WaitAsyncWork(15 * time.Second) {
 		t.Fatal("primary warmup / category sync did not finish")
 	}
 	deadline := time.Now().Add(15 * time.Second)
-	for collect.IsPrimarySiteSwitching() || filmsnapshot.SearchRebuildScheduled() {
+	for collectctl.IsPrimarySiteSwitching() || filmsnapshot.SearchRebuildScheduled() {
 		if time.Now().After(deadline) {
 			t.Fatal("search index rebuild / primary warmup did not finish")
 		}
@@ -51,7 +54,7 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 	prevDB := db.Mdb
 	prevRdb := db.Rdb
 	prevUploadDir := config.FilmPictureUploadDir
-	prevSyncFn := collect.GetTriggerResetCategorySync()
+	prevSyncFn := siteops.GetTriggerResetCategorySync()
 	prevAccess := access.IsEnabled()
 
 	uploadDir := t.TempDir()
@@ -61,7 +64,7 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 	access.SetEnabled(true)
 
 	catSyncCalled := false
-	collect.SetTriggerResetCategorySync(func() {
+	siteops.SetTriggerResetCategorySync(func() {
 		catSyncCalled = true
 	})
 
@@ -72,9 +75,9 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 		db.Mdb = prevDB
 		db.Rdb = prevRdb
 		config.FilmPictureUploadDir = prevUploadDir
-		collect.SetTriggerResetCategorySync(prevSyncFn)
+		siteops.SetTriggerResetCategorySync(prevSyncFn)
 		access.SetEnabled(prevAccess)
-		repobase.InvalidatePrimarySourceCache()
+		sourcecatalog.InvalidatePrimarySourceCache()
 	})
 
 	// 1. 写入必须保留的账号与迁移版本表数据
@@ -129,7 +132,7 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 	collect.RegisterTaskCid("old_task", 999)
 
 	// 3. 执行数据重置
-	if err := collect.SpiderSvc.ClearFilms(); err != nil {
+	if err := siteops.ResetSvc.ClearFilms(); err != nil {
 		t.Fatalf("ClearFilms failed: %v", err)
 	}
 	waitResetSearchWorkIdle(t)
@@ -185,7 +188,7 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 		t.Fatalf("expected custom_src removed, got %d", customSrcCount)
 	}
 
-	primary := repobase.CurrentPrimarySource()
+	primary := sourcecatalog.CurrentPrimarySource()
 	if primary == nil || primary.Id != defaultFilmSources()[0].Id {
 		t.Fatalf("expected default primary source %q, got %+v", defaultFilmSources()[0].Id, primary)
 	}

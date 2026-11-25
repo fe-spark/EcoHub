@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/model"
 	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/model"
+	"server/internal/sourcecatalog"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -113,7 +113,7 @@ func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) err
 		playlistsByMid[pl.Mid] = append(playlistsByMid[pl.Mid], pl)
 	}
 
-	sources := repobase.GetCollectSourceList()
+	sources := sourcecatalog.GetCollectSourceList()
 	summaries := make(map[int64]string, len(mids))
 	for _, mid := range mids {
 		summaries[mid] = BuildPlayFromSummaryFromPlaylists(playlistsByMid[mid], sources)

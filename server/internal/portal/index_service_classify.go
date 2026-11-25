@@ -1,20 +1,21 @@
 package portal
 
 import (
-	"server/internal/film/catalog"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"server/internal/film/catalog"
 	"strings"
 	"sync"
 	"time"
 
+	filmshared "server/internal/film/shared"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmshared "server/internal/film/shared"
-	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 )
 
 // GetCategoryInfo 获取活跃大类信息 (动态结构版)
@@ -50,10 +51,10 @@ func (i *IndexService) GetNavCategory(sourceIdOpt ...string) ([]*model.Category,
 	if sourceId != "" {
 		// 显式传站点时（公开接口 /categories?sourceId=）先校验站点存在且启用，
 		// 不存在的值不进分类树缓存，避免任意参数刷出大量缓存键，也不暴露停用站点的分类。
-		if src := repobase.FindCollectSourceById(sourceId); src == nil || !src.State {
+		if src := sourcecatalog.FindCollectSourceById(sourceId); src == nil || !src.State {
 			return nil, ErrNavCategorySourceUnavailable
 		}
-	} else if active := repobase.CurrentPrimarySource(); active != nil {
+	} else if active := sourcecatalog.CurrentPrimarySource(); active != nil {
 		sourceId = active.Id
 	}
 	tree, err := catalog.GetActiveCategoryTree(sourceId)
@@ -85,7 +86,7 @@ func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.C
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceId == "" {
-		if active := repobase.CurrentPrimarySource(); active != nil {
+		if active := sourcecatalog.CurrentPrimarySource(); active != nil {
 			sourceId = active.Id
 		}
 	}
@@ -99,7 +100,7 @@ func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.C
 func (i *IndexService) SearchTags(st model.SearchTagsVO) (map[string]any, error) {
 	sourceId := strings.TrimSpace(st.SourceId)
 	if sourceId == "" {
-		if active := repobase.CurrentPrimarySource(); active != nil {
+		if active := sourcecatalog.CurrentPrimarySource(); active != nil {
 			sourceId = active.Id
 		}
 	}
@@ -135,7 +136,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 	// 仅在未指定采集站（默认本地分类ID）时用本地可见性校验；指定站点的 pid 是源站 type_id，由源站分类树决定可见性。
-	if sourceId == "" && pid > 0 && !repobase.IsCategoryVisible(0, pid) {
+	if sourceId == "" && pid > 0 && !taxonomy.IsCategoryVisible(0, pid) {
 		return map[string]any{
 			"news":   []model.MovieBasicInfo{},
 			"top":    []model.MovieBasicInfo{},
@@ -143,7 +144,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		}, nil
 	}
 	if sourceId == "" {
-		if active := repobase.CurrentPrimarySource(); active != nil {
+		if active := sourcecatalog.CurrentPrimarySource(); active != nil {
 			sourceId = active.Id
 		}
 	}

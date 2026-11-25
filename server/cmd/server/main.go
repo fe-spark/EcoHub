@@ -16,13 +16,13 @@ import (
 	"server/internal/bootstrap"
 	"server/internal/collect"
 	"server/internal/config"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/notify"
 	"server/internal/portal"
-	"server/internal/repobase"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/router"
+	"server/internal/sourcecatalog"
 
 	"github.com/gin-gonic/gin"
 )
@@ -106,7 +106,7 @@ func start() {
 	if err := bootstrap.InitSvc.DefaultDataInit(); err != nil {
 		log.Fatalf("[Init] 初始化失败: %v", err)
 	}
-	if err := repobase.RefreshCollectSourceCatalog(); err != nil {
+	if err := sourcecatalog.RefreshCollectSourceCatalog(); err != nil {
 		log.Fatalf("[Init] 采集站目录加载失败: %v", err)
 	}
 	upgrade.StartReleasePoller()
@@ -126,7 +126,7 @@ func start() {
 				log.Printf("[Init] 启动预热首页缓存发生异常: %v", r)
 			}
 		}()
-		if primary := repobase.CurrentPrimarySource(); primary != nil {
+		if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
 			if _, err := portal.IndexSvc.IndexPage(primary.Id); err == nil {
 				log.Printf("[Init] 首页数据缓存预热完成 primary=%s", primary.Name)
 			}

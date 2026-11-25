@@ -10,19 +10,20 @@ import (
 	"time"
 
 	"server/internal/bootstrap"
-	"server/internal/collect"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repobase"
 	"server/internal/router"
+	"server/internal/sourcecatalog"
 	"server/internal/user"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	"server/internal/collectctl"
 )
+
 func init() {
 	gin.SetMode(gin.TestMode)
 }
@@ -50,7 +51,7 @@ func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 		Uri:   "http://default.source.com/api.json",
 		State: true,
 	})
-	_ = repobase.RefreshCollectSourceCatalog()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
 
 	r := router.SetupRouter()
 	return r, adminToken, adminUserID
@@ -280,7 +281,7 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 			"state":   true,
 			"opt":     1,
 		}), "POST collect save add")
-		if !collect.WaitAsyncWork(5 * time.Second) {
+		if !collectctl.WaitAsyncWork(5 * time.Second) {
 			t.Fatal("等待采集站初始分类同步超时")
 		}
 
@@ -301,7 +302,7 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		assertSuccess(t, doJSONRequest(r, http.MethodPost, "/api/manage/collect/delete", token, map[string]any{
 			"ids": []string{srcID},
 		}), "POST collect delete batch")
-		if !collect.WaitAsyncWork(5 * time.Second) {
+		if !collectctl.WaitAsyncWork(5 * time.Second) {
 			t.Fatal("等待采集站异步删除超时")
 		}
 

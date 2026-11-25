@@ -6,11 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
-	"server/internal/model"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 )
 
 const (
@@ -34,7 +35,7 @@ func NavTopCategories(sourceIdOpt ...string) ([]model.Category, error) {
 		sourceID = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceID == "" {
-		if active := repobase.CurrentPrimarySource(); active != nil {
+		if active := sourcecatalog.CurrentPrimarySource(); active != nil {
 			sourceID = strings.TrimSpace(active.Id)
 		}
 	}
@@ -108,7 +109,7 @@ func sourceTopCategoryKeyGroups(sourceID string, navIDs []int64) (keyToRoot map[
 			continue
 		}
 		for _, typeID := range catalog.PublicSourceTypeIDs(sourceID, "pid", rootID) {
-			key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+			key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 			if key == "" {
 				continue
 			}

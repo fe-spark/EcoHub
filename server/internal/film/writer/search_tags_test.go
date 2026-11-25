@@ -4,9 +4,9 @@ import (
 	"sync"
 	"testing"
 
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"

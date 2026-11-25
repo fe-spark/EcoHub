@@ -1,22 +1,23 @@
 package portal
 
 import (
-	"server/internal/film"
-	"server/internal/film/catalog"
 	"encoding/json"
 	"fmt"
 	"log"
+	"server/internal/banner"
+	"server/internal/film/catalog"
 	"strings"
 	"sync"
 	"time"
 
 	"server/internal/config"
+	filmshared "server/internal/film/shared"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmshared "server/internal/film/shared"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/repobase"
+	"server/internal/sourcecatalog"
 
 	"golang.org/x/sync/singleflight"
 )
@@ -24,9 +25,9 @@ import (
 type IndexService struct{}
 
 var (
-	IndexSvc      = new(IndexService)
-	indexPageSF   singleflight.Group
-	indexClassSF  singleflight.Group
+	IndexSvc     = new(IndexService)
+	indexPageSF  singleflight.Group
+	indexClassSF singleflight.Group
 )
 
 func normalizeIndexPage(page *dto.Page) *dto.Page {
@@ -106,7 +107,7 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 	if sourceId == "" {
-		if defSource := repobase.CurrentPrimarySource(); defSource != nil {
+		if defSource := sourcecatalog.CurrentPrimarySource(); defSource != nil {
 			sourceId = defSource.Id
 		}
 	}
@@ -220,7 +221,7 @@ func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[s
 	}
 	// 轮播读失败时首页照常返回（轮播为空），但这次结果不进缓存，避免空轮播被缓存 10 分钟。
 	cacheable := true
-	banners, err := film.BannerSvc.HomeBanners(sourceId)
+	banners, err := banner.BannerSvc.HomeBanners(sourceId)
 	if err != nil {
 		log.Printf("[Index] 读取首页轮播失败: %v", err)
 		banners = make(model.Banners, 0)

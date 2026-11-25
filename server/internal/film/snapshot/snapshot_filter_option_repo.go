@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
-	"server/internal/model"
 	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/taxonomy"
 )
 
 // searchTagBackfill 从已入库影片补齐剧情、地区、语言、年份。由 writer 注册，避免 snapshot 反向依赖 writer。
@@ -45,7 +45,7 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) (
 	if sourceId != "" {
 		return sourceTypeFilterOptions(version, sourceId, pid)
 	}
-	pid = repobase.ResolveCategoryID(pid)
+	pid = taxonomy.ResolveCategoryID(pid)
 	if pid <= 0 {
 		return emptyFilterOptionResponse(), nil
 	}
@@ -171,7 +171,7 @@ func sourceTypeFilterKeys(sourceID string, typeID int64) []string {
 	ids := catalog.PublicSourceTypeIDs(sourceID, "pid", typeID)
 	keys := make([]string, 0, len(ids))
 	for _, id := range ids {
-		key := repobase.BuildSourceCategoryKey(sourceID, id)
+		key := taxonomy.BuildSourceCategoryKey(sourceID, id)
 		if key != "" {
 			keys = append(keys, key)
 		}
@@ -184,11 +184,11 @@ func sourceTypeFilterKeys(sourceID string, typeID int64) []string {
 
 // sourceTypeFilterOptions 筛选项跟当前站的 type_id 走。子类是该站自己的下级 type_id，剧情地区从这些片子上统计。
 func sourceTypeFilterOptions(version, sourceId string, typeID int64) (map[string]any, error) {
-	key := repobase.BuildSourceCategoryKey(sourceId, typeID)
+	key := taxonomy.BuildSourceCategoryKey(sourceId, typeID)
 	if key == "" {
 		return emptyFilterOptionResponse(), nil
 	}
-	cacheKey := fmt.Sprintf("%s:ck4:src_%s:v%s:r%s:c%s:%d", config.FilmFilterOptionKey, sourceId, version, repobase.GetRuleVersion(), repobase.GetCategoryVersion(), typeID)
+	cacheKey := fmt.Sprintf("%s:ck4:src_%s:v%s:r%s:c%s:%d", config.FilmFilterOptionKey, sourceId, version, taxonomy.GetRuleVersion(), taxonomy.GetCategoryVersion(), typeID)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any

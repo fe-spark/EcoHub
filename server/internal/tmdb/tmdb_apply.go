@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"server/internal/infra/syslog"
-	"server/internal/model"
 	"server/internal/film"
 	"server/internal/film/snapshot"
 	"server/internal/film/writer"
+	"server/internal/infra/syslog"
+	"server/internal/model"
 	"server/internal/repobase"
 )
 

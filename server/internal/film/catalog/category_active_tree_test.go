@@ -7,6 +7,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -63,7 +64,7 @@ func TestIsValidActiveCategoryTree(t *testing.T) {
 	// 准备分类：根分类 1，子分类 10
 	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true})
 	gdb.Create(&model.Category{Id: 10, Pid: 1, Name: "动作片", Show: true})
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 
 	// 1. 合法树：子节点 Pid 为 0 且属于根分类
 	validTree := model.CategoryTree{
@@ -133,8 +134,8 @@ func TestRepository_RedisNilAndSQLiteDialect(t *testing.T) {
 	clearProvideListCache()
 
 	// 3. TouchRuleVersion & GetRuleVersion with db.Rdb == nil
-	repobase.TouchRuleVersion()
-	rv := repobase.GetRuleVersion()
+	taxonomy.TouchRuleVersion()
+	rv := taxonomy.GetRuleVersion()
 	if rv == "" {
 		t.Fatalf("expected non-empty rule version when Redis is nil")
 	}
@@ -150,24 +151,6 @@ func TestRepository_RedisNilAndSQLiteDialect(t *testing.T) {
 	}
 	if gotCfg.SiteName != "TestSite" {
 		t.Fatalf("expected TestSite, got %s", gotCfg.SiteName)
-	}
-
-	// 5. EnsureMappingRuleIndexes and ResetMappingRules on SQLite
-	if err := EnsureMappingRuleIndexes(); err != nil {
-		t.Fatalf("EnsureMappingRuleIndexes failed on SQLite: %v", err)
-	}
-	gdb.Create(&model.MappingRule{Group: "Area", Raw: "港台", Target: "中国香港"})
-	var ruleCount int64
-	gdb.Model(&model.MappingRule{}).Count(&ruleCount)
-	if ruleCount != 1 {
-		t.Fatalf("expected 1 rule before reset, got %d", ruleCount)
-	}
-	if err := ResetMappingRules(); err != nil {
-		t.Fatalf("ResetMappingRules failed on SQLite: %v", err)
-	}
-	gdb.Model(&model.MappingRule{}).Count(&ruleCount)
-	if ruleCount != 0 {
-		t.Fatalf("expected 0 rules after ResetMappingRules, got %d", ruleCount)
 	}
 }
 
@@ -340,10 +323,10 @@ func TestSourceTypeTree_UsesMappedShowFlag(t *testing.T) {
 func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 
 	gdb := setupCategoryActiveTreeTestDB(t)
@@ -390,7 +373,7 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	if err := gdb.Create(&rules).Error; err != nil {
 		t.Fatalf("create rules: %v", err)
 	}
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	tree, err := GetActiveCategoryTree("src1")
 	if err != nil {
@@ -456,10 +439,10 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 func TestSourceTypeTree_PromotesRenamedRootsAsChildren(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
-	prev := repobase.CurrentMappingSnapshotForTest()
+	prev := taxonomy.CurrentMappingSnapshotForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		repobase.StoreMappingSnapshotForTest(prev)
+		taxonomy.StoreMappingSnapshotForTest(prev)
 	})
 
 	gdb := setupCategoryActiveTreeTestDB(t)
@@ -479,7 +462,7 @@ func TestSourceTypeTree_PromotesRenamedRootsAsChildren(t *testing.T) {
 	if err := gdb.Create(&model.MappingRule{SourceId: "src1", Group: "CategoryRoot", Raw: "福利视频|海外抖音|网红主播", Target: "男人帮", MatchType: "regex"}).Error; err != nil {
 		t.Fatalf("create rule: %v", err)
 	}
-	ReloadMappingRules()
+	taxonomy.ReloadMappingRules()
 
 	tree, err := GetActiveCategoryTree("src1")
 	if err != nil {

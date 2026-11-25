@@ -1,0 +1,445 @@
+package ledger
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"server/internal/infra/db"
+	"server/internal/model"
+
+	"gorm.io/gorm"
+)
+
+// removeRecordsAndFilms 在同一事务里删记录，并只删这些批次里已经不存在记录的影片行。
+func removeRecordsAndFilms(tx *gorm.DB, rows []model.CollectRecord) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(rows))
+	batchIDs := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+		batchID := strings.TrimSpace(row.BatchID)
+		if batchID == "" {
+			continue
+		}
+		if _, ok := seen[batchID]; ok {
+			continue
+		}
+		seen[batchID] = struct{}{}
+		batchIDs = append(batchIDs, batchID)
+	}
+	if err := tx.Where("id IN ?", ids).Delete(&model.CollectRecord{}).Error; err != nil {
+		return err
+	}
+	if len(batchIDs) == 0 {
+		return nil
+	}
+	alive := tx.Model(&model.CollectRecord{}).Where("batch_id IN ? AND batch_id != ''", batchIDs).Select("batch_id")
+	return tx.Where("batch_id IN ? AND batch_id NOT IN (?)", batchIDs, alive).
+		Delete(&model.CollectRecordFilmItem{}).Error
+}
+
+// CreateCollectRecord 创建采集运行记录（初始状态一般为 running）
+func CreateCollectRecord(rec *model.CollectRecord) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	if rec == nil || strings.TrimSpace(rec.BatchID) == "" {
+		return errors.New("采集批次信息异常")
+	}
+	if rec.StartedAt.IsZero() {
+		rec.StartedAt = time.Now()
+	}
+	return db.Mdb.Create(rec).Error
+}
+
+// CompleteCollectRecord 更新采集批次终态与结算指标
+func CompleteCollectRecord(batchID string, c model.CollectRecordCompletion) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return errors.New("批次号不能为空")
+	}
+	return completeCollectRecordDB(db.Mdb, batchID, c)
+}
+
+func completeCollectRecordDB(tx *gorm.DB, batchID string, c model.CollectRecordCompletion) error {
+
+	finishedAt := c.FinishedAt
+	if finishedAt.IsZero() {
+		finishedAt = time.Now()
+	}
+
+	updates := map[string]any{
+		"status":          c.Status,
+		"hour":            c.Hour,
+		"success_sources": c.SuccessSources,
+		"failed_sources":  c.FailedSources,
+		"finished_at":     finishedAt,
+		"duration_ms":     c.DurationMs,
+		"film_count":      c.FilmCount,
+		"page_total":      c.PageTotal,
+		"page_success":    c.PageSuccess,
+		"page_failed":     c.PageFailed,
+		"error_msg":       c.ErrorMsg,
+		"detail_json":     c.DetailJson,
+		"ledger":          c.Ledger,
+	}
+
+	var rec model.CollectRecord
+	if err := tx.Select("id", "status").Where("batch_id = ?", batchID).First(&rec).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("采集记录不存在: %s", batchID)
+		}
+		return err
+	}
+	if rec.Status != model.CollectRecordStatusRunning {
+		return nil
+	}
+	return tx.Model(&model.CollectRecord{}).
+		Where("batch_id = ? AND status = ?", batchID, model.CollectRecordStatusRunning).
+		Updates(updates).Error
+}
+
+// GetCollectRecordByBatchID 通过批次号获取单个采集记录
+func GetCollectRecordByBatchID(batchID string) (*model.CollectRecord, error) {
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
+	}
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return nil, errors.New("批次号不能为空")
+	}
+	var rec model.CollectRecord
+	if err := db.Mdb.Where("batch_id = ?", batchID).First(&rec).Error; err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// GetCollectRecordList 分页筛选采集运行记录
+func GetCollectRecordList(q model.CollectRecordQuery) ([]model.CollectRecord, int64, error) {
+	if db.Mdb == nil {
+		return nil, 0, errors.New("数据库未连接")
+	}
+
+	tx := db.Mdb.Model(&model.CollectRecord{})
+	if batchID := strings.TrimSpace(q.BatchID); batchID != "" {
+		tx = tx.Where("batch_id = ?", batchID)
+	} else {
+		if trig := strings.TrimSpace(q.Trigger); trig != "" {
+			tx = tx.Where("`trigger` = ?", trig)
+		}
+		if st := strings.TrimSpace(q.Status); st != "" {
+			tx = tx.Where("status = ?", st)
+		}
+		if !q.BeginTime.IsZero() {
+			tx = tx.Where("started_at >= ?", q.BeginTime)
+		}
+		if !q.EndTime.IsZero() {
+			tx = tx.Where("started_at <= ?", q.EndTime)
+		}
+		if q.UpdatedOnly {
+			tx = tx.Where("film_count > 0")
+		}
+		if q.FailedOnly {
+			tx = tx.Where("(status IN ? OR failed_sources > 0)", []string{
+				model.CollectRecordStatusFailed,
+				model.CollectRecordStatusPartial,
+				model.CollectRecordStatusInterrupted,
+			})
+		}
+	}
+
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	page := q.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := q.PageSize
+	if pageSize < 1 {
+		pageSize = 10
+	} else if pageSize > 100 {
+		pageSize = 100
+	}
+
+	var list []model.CollectRecord
+	err := tx.Order("started_at DESC, id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&list).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	return list, total, nil
+}
+
+// DeleteCollectRecords 按 ID 列表批量删除采集记录
+func DeleteCollectRecords(ids []uint) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var rows []model.CollectRecord
+		if err := tx.Select("id", "batch_id").
+			Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).
+			Find(&rows).Error; err != nil {
+			return err
+		}
+		return removeRecordsAndFilms(tx, rows)
+	})
+}
+
+// ClearCollectRecords 清空已结束的采集记录，保留进行中的批次和它的影片清单。
+func ClearCollectRecords() error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var rows []model.CollectRecord
+		if err := tx.Select("id", "batch_id").
+			Where("status != ?", model.CollectRecordStatusRunning).
+			Find(&rows).Error; err != nil {
+			return err
+		}
+		return removeRecordsAndFilms(tx, rows)
+	})
+}
+
+// 过期采集记录清理的批大小。包级变量，测试可调小覆盖多批次。
+var (
+	collectCleanRecordChunk = 200  // 每轮处理的过期记录条数
+	collectCleanFilmChunk   = 5000 // 每条 DELETE 删除的影片清单行数上限
+	// collectCleanBeforeDeleteHook 仅供测试：查出过期记录之后、删除之前调用，用于模拟记录状态变化。
+	collectCleanBeforeDeleteHook func(ids []uint)
+)
+
+// CleanOldCollectRecords 清理超过指定天数的历史采集记录（防数据库膨胀）。
+// 不再包一个大事务：按记录 id 游标分批，每批先删记录本身（复核不是 running），
+// 再删已没有记录的批次的影片清单（每次最多 collectCleanFilmChunk 行）；最后按清单 id 游标清掉已无记录的旧清单行。每条语句都有上限，避免撞上 MySQL readTimeout。
+// 进行中的批次（status=running）一律跳过，它的记录和清单都不动。
+func CleanOldCollectRecords(days int) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	if days <= 0 {
+		days = 30
+	}
+	threshold := time.Now().AddDate(0, 0, -days)
+	session := db.Mdb.Session(&gorm.Session{SkipDefaultTransaction: true})
+	recordChunk := collectCleanRecordChunk
+	if recordChunk <= 0 {
+		recordChunk = 200
+	}
+
+	var cursor uint
+	for {
+		var rows []model.CollectRecord
+		if err := session.Select("id", "batch_id").
+			Where("started_at < ? AND status != ? AND id > ?", threshold, model.CollectRecordStatusRunning, cursor).
+			Order("id").
+			Limit(recordChunk).
+			Find(&rows).Error; err != nil {
+			return fmt.Errorf("查询过期采集记录失败: %w", err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		cursor = rows[len(rows)-1].ID
+		ids := make([]uint, 0, len(rows))
+		batchIDs := make([]string, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+			if batchID := strings.TrimSpace(row.BatchID); batchID != "" {
+				batchIDs = append(batchIDs, batchID)
+			}
+		}
+		if collectCleanBeforeDeleteHook != nil {
+			collectCleanBeforeDeleteHook(ids)
+		}
+		// 先删记录（删除时复核不是 running），再只删已没有记录的批次的清单。
+		if err := session.Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).
+			Delete(&model.CollectRecord{}).Error; err != nil {
+			return fmt.Errorf("删除过期采集记录失败: %w", err)
+		}
+		gone, err := batchesWithoutRecord(session, batchIDs)
+		if err != nil {
+			return err
+		}
+		if err := deleteCollectFilmsByBatches(session, gone); err != nil {
+			return err
+		}
+		if len(rows) < recordChunk {
+			break
+		}
+	}
+	return sweepOrphanCollectFilms(session, threshold)
+}
+
+// batchesWithoutRecord 返回 batchIDs 中已没有采集记录的批次。
+func batchesWithoutRecord(session *gorm.DB, batchIDs []string) ([]string, error) {
+	if len(batchIDs) == 0 {
+		return nil, nil
+	}
+	var alive []string
+	if err := session.Model(&model.CollectRecord{}).
+		Where("batch_id IN ?", batchIDs).
+		Pluck("batch_id", &alive).Error; err != nil {
+		return nil, fmt.Errorf("查询采集批次失败: %w", err)
+	}
+	aliveSet := make(map[string]struct{}, len(alive))
+	for _, id := range alive {
+		aliveSet[id] = struct{}{}
+	}
+	gone := make([]string, 0, len(batchIDs))
+	for _, id := range batchIDs {
+		if _, ok := aliveSet[id]; !ok {
+			gone = append(gone, id)
+		}
+	}
+	return gone, nil
+}
+
+// deleteCollectFilmsByBatches 分批删除指定批次的影片清单。先按主键取一批，再按主键删，sqlite 与 MySQL 通用。
+func deleteCollectFilmsByBatches(session *gorm.DB, batchIDs []string) error {
+	if len(batchIDs) == 0 {
+		return nil
+	}
+	chunk := collectCleanFilmChunk
+	if chunk <= 0 {
+		chunk = 5000
+	}
+	for {
+		var ids []uint
+		if err := session.Model(&model.CollectRecordFilmItem{}).
+			Where("batch_id IN ?", batchIDs).
+			Limit(chunk).
+			Pluck("id", &ids).Error; err != nil {
+			return fmt.Errorf("查询过期影片清单失败: %w", err)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		if err := session.Where("id IN ?", ids).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
+			return fmt.Errorf("删除过期影片清单失败: %w", err)
+		}
+		if len(ids) < chunk {
+			return nil
+		}
+	}
+}
+
+// sweepOrphanCollectFilms 按清单 id 游标清理早于 threshold 且所属批次已没有记录的清单行。
+// 仍有记录的批次（包括进行中的）保留；删除语句再原子复核一次批次记录是否存在。
+func sweepOrphanCollectFilms(session *gorm.DB, threshold time.Time) error {
+	chunk := collectCleanFilmChunk
+	if chunk <= 0 {
+		chunk = 5000
+	}
+	var cursor uint
+	for {
+		var rows []model.CollectRecordFilmItem
+		if err := session.Select("id", "batch_id").
+			Where("created_at < ? AND id > ?", threshold, cursor).
+			Order("id").
+			Limit(chunk).
+			Find(&rows).Error; err != nil {
+			return fmt.Errorf("查询孤儿影片清单失败: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		cursor = rows[len(rows)-1].ID
+		batchSet := make(map[string]struct{}, len(rows))
+		batchIDs := make([]string, 0)
+		for _, row := range rows {
+			if _, ok := batchSet[row.BatchID]; ok {
+				continue
+			}
+			batchSet[row.BatchID] = struct{}{}
+			batchIDs = append(batchIDs, row.BatchID)
+		}
+		var alive []string
+		if err := session.Model(&model.CollectRecord{}).
+			Where("batch_id IN ?", batchIDs).
+			Pluck("batch_id", &alive).Error; err != nil {
+			return fmt.Errorf("查询采集批次失败: %w", err)
+		}
+		aliveSet := make(map[string]struct{}, len(alive))
+		for _, id := range alive {
+			aliveSet[id] = struct{}{}
+		}
+		ids := make([]uint, 0, len(rows))
+		for _, row := range rows {
+			if _, ok := aliveSet[row.BatchID]; !ok {
+				ids = append(ids, row.ID)
+			}
+		}
+		if len(ids) > 0 {
+			aliveSub := session.Model(&model.CollectRecord{}).Select("batch_id").Where("batch_id IN ?", batchIDs)
+			if err := session.Where("id IN ? AND batch_id NOT IN (?)", ids, aliveSub).
+				Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
+				return fmt.Errorf("删除孤儿影片清单失败: %w", err)
+			}
+		}
+		if len(rows) < chunk {
+			return nil
+		}
+	}
+}
+
+// MarkInterruptedCollectRecords 服务启动时兜底把残留 running 状态标记为 interrupted
+func MarkInterruptedCollectRecords() error {
+	if db.Mdb == nil {
+		return nil
+	}
+	var rows []model.CollectRecord
+	if err := db.Mdb.Where("status = ?", model.CollectRecordStatusRunning).Find(&rows).Error; err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, rec := range rows {
+		duration := now.Sub(rec.StartedAt).Milliseconds()
+		if duration < 0 {
+			duration = 0
+		}
+		films, bySource, err := filmRowCounts(db.Mdb, rec.BatchID)
+		if err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"status":      model.CollectRecordStatusInterrupted,
+			"finished_at": now,
+			"duration_ms": duration,
+			"error_msg":   "服务重启，任务异常中断",
+			"film_count":  films,
+			"ledger":      films > 0,
+		}
+		detail, err := applyStoredFilmTotals(rec.DetailJson, bySource)
+		if err != nil {
+			return err
+		}
+		if detail != "" {
+			updates["detail_json"] = detail
+		}
+		if err := db.Mdb.Model(&model.CollectRecord{}).
+			Where("id = ? AND status = ?", rec.ID, model.CollectRecordStatusRunning).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}

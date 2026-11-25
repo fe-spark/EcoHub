@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 // groupPublicTypes 按规则合成前台分类树。
@@ -30,7 +30,7 @@ func groupPublicTypes(rows []sourceTypeRow, sourceID string) []publicTypeGroup {
 	buckets := map[string]*bucket{}
 	for _, row := range roots {
 		name := row.Name
-		if mapped := strings.TrimSpace(repobase.NormalizeRootCategoryName(sourceID, row.Name)); mapped != "" {
+		if mapped := strings.TrimSpace(taxonomy.NormalizeRootCategoryName(sourceID, row.Name)); mapped != "" {
 			name = mapped
 		}
 		item, ok := buckets[name]
@@ -70,12 +70,12 @@ func groupPublicTypes(rows []sourceTypeRow, sourceID string) []publicTypeGroup {
 		}
 		childRows := make([]sourceTypeRow, 0, len(item.renamed))
 		for _, row := range item.renamed {
-			row.Name = repobase.NormalizeSubCategoryName(sourceID, row.Name)
+			row.Name = taxonomy.NormalizeSubCategoryName(sourceID, row.Name)
 			childRows = append(childRows, row)
 		}
 		for _, row := range item.all {
 			for _, child := range childrenOf[row.ID] {
-				child.Name = repobase.NormalizeSubCategoryName(sourceID, child.Name)
+				child.Name = taxonomy.NormalizeSubCategoryName(sourceID, child.Name)
 				childRows = append(childRows, child)
 			}
 		}

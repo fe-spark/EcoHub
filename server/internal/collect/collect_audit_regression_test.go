@@ -10,16 +10,17 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/infra/db"
-	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/collect/fetcher"
 	"server/internal/collect/progress"
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/infra/db"
+	"server/internal/model"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"server/internal/collect/ledger"
 )
 
 func setupAuditSpiderDB(t *testing.T) *gorm.DB {
@@ -349,7 +350,7 @@ func TestEarlyStoppedSourceSnapshotSurvivesOverwrite(t *testing.T) {
 	defer releaseCollectSources(claim2.Sources)
 
 	batch.emitSummary()
-	list, _, err := GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
+	list, _, err := ledger.GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
 	if err != nil || len(list) == 0 {
 		t.Fatalf("query CollectRecord failed: %v len=%d", err, len(list))
 	}

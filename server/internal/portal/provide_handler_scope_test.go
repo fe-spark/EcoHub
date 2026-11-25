@@ -8,13 +8,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"server/internal/model"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/model"
+	"server/internal/taxonomy"
 )
 
 func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
-	t.Cleanup(func() { repobase.SetCategoryShowForTest(map[int64]bool{}) })
+	t.Cleanup(func() { taxonomy.SetCategoryShowForTest(map[int64]bool{}) })
 	gdb, _ := setupProvideTestDB(t)
 	const version = "v_tvbox_scope"
 
@@ -67,7 +67,7 @@ func TestHandleProvide_AllEntryAndSourceType(t *testing.T) {
 	if err := gdb.Model(&model.Category{}).Where("id = ?", 1).Update("show", false).Error; err != nil {
 		t.Fatal(err)
 	}
-	repobase.RefreshCategoryCache()
+	taxonomy.RefreshCategoryCache()
 
 	gin.SetMode(gin.TestMode)
 

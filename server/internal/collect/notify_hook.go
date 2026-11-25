@@ -8,8 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/model"
+	"server/internal/collect/ledger"
 	"server/internal/collect/progress"
+	"server/internal/model"
 )
 
 // NotifyDispatcher 采集与定时任务通知回调集合（由 service 层注入，避免循环依赖）
@@ -365,17 +366,17 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	log.Printf("[Spider] 结算采集记录 batchID=%s status=%s sources=%d done=%d partial=%d failed=%d stopped=%d interrupted=%d pageTotal=%d pageSuccess=%d pageFailed=%d filmRows=%d durationMs=%d err=%s",
 		b.batchID, status, len(results), doneCount, partialCount, failedCount, stoppedCount, interruptedCount, totalPage, succPage, failPage, filmCount, duration, errSummary.String())
 	if len(films) > 0 {
-		if err := SaveCollectRecordFilmsChunked(b.batchID, films); err != nil {
+		if err := ledger.SaveCollectRecordFilmsChunked(b.batchID, films); err != nil {
 			log.Printf("[Spider] 采集清单写入未完成，记录保持进行中 batchID=%s err=%v", b.batchID, err)
-			if delErr := DeleteCollectRecordFilms(b.batchID); delErr != nil {
+			if delErr := ledger.DeleteCollectRecordFilms(b.batchID); delErr != nil {
 				log.Printf("[Spider] 清理半截清单失败 batchID=%s err=%v", b.batchID, delErr)
 			}
 			return false
 		}
 	}
-	if err := CompleteCollectRecord(b.batchID, comp); err != nil {
+	if err := ledger.CompleteCollectRecord(b.batchID, comp); err != nil {
 		log.Printf("[Spider] 结算采集记录写入失败 batchID=%s status=%s err=%v", b.batchID, status, err)
-		if delErr := DeleteCollectRecordFilms(b.batchID); delErr != nil {
+		if delErr := ledger.DeleteCollectRecordFilms(b.batchID); delErr != nil {
 			log.Printf("[Spider] 清理未结算清单失败 batchID=%s err=%v", b.batchID, delErr)
 		}
 		return false

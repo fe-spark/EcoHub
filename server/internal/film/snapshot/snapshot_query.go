@@ -10,13 +10,13 @@ import (
 	"gorm.io/gorm"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
-	"server/internal/model"
-	"server/internal/model/dto"
 	filmquery "server/internal/film/query"
 	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/model/dto"
+	"server/internal/taxonomy"
 )
 
 func GetSnapshotByMid(version string, mid int64) (*model.FilmListSnapshot, error) {
@@ -265,7 +265,7 @@ func applyBannerCategories(query *gorm.DB, sourceID string, categoryIDs []int64)
 	}
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
-		if disabledIDs := repobase.GetDisabledCategoryIDs(); len(disabledIDs) > 0 {
+		if disabledIDs := taxonomy.GetDisabledCategoryIDs(); len(disabledIDs) > 0 {
 			query = query.Where("pid NOT IN ? AND cid NOT IN ?", disabledIDs, disabledIDs)
 		}
 		if len(categoryIDs) == 0 {

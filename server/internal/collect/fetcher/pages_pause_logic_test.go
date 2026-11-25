@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
 	"server/internal/config"
 	"server/internal/model"
-	"server/internal/collect/progress"
 )
 
 func failOne(t *testing.T, streak *fetchStreak) (stop bool, pause bool) {

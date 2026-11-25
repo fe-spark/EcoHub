@@ -1,8 +1,8 @@
 package portal
 
 import (
-	"server/internal/mediaproxy"
 	"encoding/json"
+	"server/internal/mediaproxy"
 	"strings"
 	"testing"
 

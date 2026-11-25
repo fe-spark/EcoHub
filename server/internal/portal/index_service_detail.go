@@ -10,11 +10,11 @@ import (
 
 	"golang.org/x/sync/singleflight"
 	"server/internal/config"
-	"server/internal/infra/db"
-	"server/internal/model"
 	filmrepo "server/internal/film"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/taxonomy"
 )
 
 var (
@@ -65,7 +65,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" && data != "{}" {
 			var cached model.MovieDetailVo
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				if !repobase.IsCategoryVisible(cached.Cid, cached.Pid) {
+				if !taxonomy.IsCategoryVisible(cached.Cid, cached.Pid) {
 					return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
 				}
 				return cached, nil
@@ -78,7 +78,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" && data != "{}" {
 				var cached model.MovieDetailVo
 				if json.Unmarshal([]byte(data), &cached) == nil {
-					if !repobase.IsCategoryVisible(cached.Cid, cached.Pid) {
+					if !taxonomy.IsCategoryVisible(cached.Cid, cached.Pid) {
 						return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
 					}
 					return cached, nil
@@ -98,7 +98,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		if snapshot == nil {
 			return model.MovieDetailVo{}, nil
 		}
-		if !repobase.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
+		if !taxonomy.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
 			return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
 		}
 		detailStartedAt := time.Now()

@@ -7,7 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -20,12 +20,12 @@ func EnsureOtherCategory(sourceId string) (typeID int64, categoryID int64, err e
 	if sourceId == "" || sourceId == "manual" {
 		return 0, 0, fmt.Errorf("source id 不能为空")
 	}
-	if typeID, categoryID, ok := repobase.LookupOtherSourceCategory(sourceId); ok {
+	if typeID, categoryID, ok := taxonomy.LookupOtherSourceCategory(sourceId); ok {
 		return typeID, categoryID, nil
 	}
 	otherCategoryMu.Lock()
 	defer otherCategoryMu.Unlock()
-	if typeID, categoryID, ok := repobase.LookupOtherSourceCategory(sourceId); ok {
+	if typeID, categoryID, ok := taxonomy.LookupOtherSourceCategory(sourceId); ok {
 		return typeID, categoryID, nil
 	}
 	typeID, categoryID, err = createOtherCategory(sourceId)
@@ -163,7 +163,7 @@ func existingMappedCategoryID(tx *gorm.DB, sourceId string, typeID int64) int64 
 }
 
 func insertOtherDisplayCategory(tx *gorm.DB, sourceId string, typeID int64, sort int) (int64, error) {
-	stableKey := repobase.BuildSourceCategoryKey(sourceId, typeID)
+	stableKey := taxonomy.BuildSourceCategoryKey(sourceId, typeID)
 	var existing model.Category
 	if err := tx.Where("stable_key = ?", stableKey).First(&existing).Error; err == nil && existing.Id > 0 {
 		return existing.Id, nil

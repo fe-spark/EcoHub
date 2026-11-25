@@ -1,10 +1,10 @@
 package portal
 
 import (
-	"server/internal/mediaproxy"
-	"server/internal/film"
-	"server/internal/repobase"
 	"net/url"
+	"server/internal/film"
+	"server/internal/mediaproxy"
+	"server/internal/sourcecatalog"
 	"strconv"
 	"strings"
 	"time"
@@ -116,7 +116,7 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 	}
 	if len(detail.List) > 0 {
 		primarySourceID := ""
-		if primary := repobase.CurrentPrimarySource(); primary != nil {
+		if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
 			primarySourceID = primary.Id
 		}
 		playFrom = resolvePlayableSourceID(detail.List, playFrom, primarySourceID)

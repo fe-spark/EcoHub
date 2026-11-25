@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/config"
-	"server/internal/model"
 	"server/internal/collect/progress"
 	"server/internal/collect/scheduler"
+	"server/internal/config"
+	"server/internal/model"
 	"server/internal/utils"
 )
 

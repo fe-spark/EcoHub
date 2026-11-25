@@ -8,12 +8,12 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
+	"server/internal/film/shared"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -80,18 +80,18 @@ func SourceCategoryVisibility(sourceID string) func(categoryKey, rootKey string,
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return func(_, _ string, cid, pid int64) bool {
-			return repobase.IsCategoryVisible(cid, pid)
+			return taxonomy.IsCategoryVisible(cid, pid)
 		}
 	}
 	typeVisible := catalog.PublicSourceTypeVisibility(sourceID)
 	return func(categoryKey, rootKey string, cid, pid int64) bool {
-		if sid, typeID, ok := repobase.ParseSourceCategoryKey(categoryKey); ok && sid == sourceID {
+		if sid, typeID, ok := taxonomy.ParseSourceCategoryKey(categoryKey); ok && sid == sourceID {
 			return typeVisible(typeID)
 		}
-		if sid, typeID, ok := repobase.ParseSourceCategoryKey(rootKey); ok && sid == sourceID {
+		if sid, typeID, ok := taxonomy.ParseSourceCategoryKey(rootKey); ok && sid == sourceID {
 			return typeVisible(typeID)
 		}
-		return repobase.IsCategoryVisible(cid, pid)
+		return taxonomy.IsCategoryVisible(cid, pid)
 	}
 }
 

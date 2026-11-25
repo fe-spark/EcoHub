@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -49,22 +49,22 @@ func resolveLocalCategory(pid int64, cid int64, cName string) resolvedSearchCate
 		result.Cid = cid
 	}
 	if result.Cid > 0 {
-		result.Pid = repobase.GetRootId(result.Cid)
+		result.Pid = taxonomy.GetRootId(result.Cid)
 	}
 	if result.Pid == 0 && pid > 0 {
 		result.Pid = pid
 	}
 	if result.Pid == 0 && result.CName != "" {
-		result.Pid = repobase.ResolveRootCategoryIDByCName(result.CName)
+		result.Pid = taxonomy.ResolveRootCategoryIDByCName(result.CName)
 	}
 	if result.Pid > 0 && result.Cid > 0 && result.CName == "" {
-		result.CName = repobase.GetCategoryNameById(result.Cid)
+		result.CName = taxonomy.GetCategoryNameById(result.Cid)
 	}
 	if result.Pid > 0 && result.PKey == "" {
-		result.PKey = repobase.GetCategoryStableKeyByID(result.Pid)
+		result.PKey = taxonomy.GetCategoryStableKeyByID(result.Pid)
 	}
 	if result.Cid > 0 {
-		result.CKey = repobase.GetCategoryStableKeyByID(result.Cid)
+		result.CKey = taxonomy.GetCategoryStableKeyByID(result.Cid)
 	}
 	return result
 }
@@ -76,7 +76,7 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 	}
 
 	if sourceCid > 0 {
-		if row, ok := repobase.GetSourceCategoryInfo(sourceId, sourceCid); ok {
+		if row, ok := taxonomy.GetSourceCategoryInfo(sourceId, sourceCid); ok {
 			if row.ParentSourceTypeId == 0 {
 				name := strings.TrimSpace(row.RawName)
 				if name != "" {
@@ -84,7 +84,7 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 				}
 			}
 			if row.ParentSourceTypeId > 0 {
-				if parent, ok := repobase.GetSourceCategoryInfo(sourceId, row.ParentSourceTypeId); ok {
+				if parent, ok := taxonomy.GetSourceCategoryInfo(sourceId, row.ParentSourceTypeId); ok {
 					name := strings.TrimSpace(parent.RawName)
 					if name != "" {
 						return name
@@ -95,7 +95,7 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 	}
 
 	if sourcePid > 0 {
-		if root, ok := repobase.GetSourceCategoryInfo(sourceId, sourcePid); ok {
+		if root, ok := taxonomy.GetSourceCategoryInfo(sourceId, sourcePid); ok {
 			name := strings.TrimSpace(root.RawName)
 			if name != "" {
 				return name
@@ -113,7 +113,7 @@ func resolveSourceRootTypeID(sourceId string, sourcePid int64, sourceCid int64) 
 	if sourceCid > 0 {
 		current := sourceCid
 		for step := range [5]int{} {
-			row, ok := repobase.GetSourceCategoryInfo(sourceId, current)
+			row, ok := taxonomy.GetSourceCategoryInfo(sourceId, current)
 			if !ok {
 				if step == 0 && sourcePid > 0 {
 					return sourcePid
@@ -165,29 +165,29 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	result := resolvedSearchCategory{CName: strings.TrimSpace(detail.CName)}
 	result.OriginalCategory = resolveOriginalCategoryName(sourceId, sourcePid, sourceCid, detail.CName)
 	rootSourceTypeID := resolveSourceRootTypeID(sourceId, sourcePid, sourceCid)
-	result.PKey = repobase.BuildSourceCategoryKey(sourceId, rootSourceTypeID)
-	result.CKey = repobase.BuildSourceCategoryKey(sourceId, sourceCid)
-	result.Cid = repobase.GetLocalCategoryId(sourceId, sourceCid)
+	result.PKey = taxonomy.BuildSourceCategoryKey(sourceId, rootSourceTypeID)
+	result.CKey = taxonomy.BuildSourceCategoryKey(sourceId, sourceCid)
+	result.Cid = taxonomy.GetLocalCategoryId(sourceId, sourceCid)
 	if result.Cid > 0 {
-		result.Pid = repobase.GetRootId(result.Cid)
+		result.Pid = taxonomy.GetRootId(result.Cid)
 	}
 	if result.Pid == 0 {
-		result.Pid = repobase.GetRootId(repobase.GetLocalCategoryId(sourceId, sourcePid))
+		result.Pid = taxonomy.GetRootId(taxonomy.GetLocalCategoryId(sourceId, sourcePid))
 	}
 	if result.Pid == 0 && detail.Pid > 0 {
-		result.Pid = repobase.GetRootId(detail.Pid)
+		result.Pid = taxonomy.GetRootId(detail.Pid)
 	}
 	if result.Pid == 0 && detail.CName != "" {
-		result.Pid = repobase.ResolveRootCategoryIDByCName(detail.CName)
+		result.Pid = taxonomy.ResolveRootCategoryIDByCName(detail.CName)
 	}
 	if result.Pid > 0 && result.CName == "" {
-		result.CName = repobase.GetCategoryNameById(result.Pid)
+		result.CName = taxonomy.GetCategoryNameById(result.Pid)
 	}
 	if result.PKey == "" && result.Pid > 0 {
-		result.PKey = repobase.GetCategoryStableKeyByID(result.Pid)
+		result.PKey = taxonomy.GetCategoryStableKeyByID(result.Pid)
 	}
 	if result.CKey == "" && result.Cid > 0 {
-		result.CKey = repobase.GetCategoryStableKeyByID(result.Cid)
+		result.CKey = taxonomy.GetCategoryStableKeyByID(result.Cid)
 	}
 	return result
 }
@@ -212,9 +212,9 @@ func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category
 		updateReason = "后台修改"
 	}
 
-	finalArea := repobase.NormalizeArea(detail.Area)
-	finalLang := repobase.NormalizeLanguage(detail.Language)
-	mainCategoryName := repobase.GetMainCategoryName(category.Pid)
+	finalArea := taxonomy.NormalizeArea(detail.Area)
+	finalLang := taxonomy.NormalizeLanguage(detail.Language)
+	mainCategoryName := taxonomy.GetMainCategoryName(category.Pid)
 
 	return normalizedSearchMeta{
 		Score:        score,
@@ -223,7 +223,7 @@ func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category
 		Year:         year,
 		Area:         finalArea,
 		Language:     finalLang,
-		ClassTag:     repobase.CleanPlotTags(detail.ClassTag, finalArea, mainCategoryName, category.CName),
+		ClassTag:     taxonomy.CleanPlotTags(detail.ClassTag, finalArea, mainCategoryName, category.CName),
 	}, nil
 }
 
@@ -279,9 +279,9 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 }
 
 func bindOtherCategory(sourceId string, current resolvedSearchCategory, typeID, categoryID int64) resolvedSearchCategory {
-	key := repobase.BuildSourceCategoryKey(sourceId, typeID)
+	key := taxonomy.BuildSourceCategoryKey(sourceId, typeID)
 	name := model.TagOthersName
-	if info, ok := repobase.GetSourceCategoryInfo(sourceId, typeID); ok {
+	if info, ok := taxonomy.GetSourceCategoryInfo(sourceId, typeID); ok {
 		if raw := strings.TrimSpace(info.RawName); raw != "" {
 			name = raw
 		}
@@ -297,7 +297,7 @@ func bindOtherCategory(sourceId string, current resolvedSearchCategory, typeID, 
 func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) (model.FilmIndex, error) {
 	category := resolveSearchCategory(sourceId, detail)
 	if category.Pid <= 0 && strings.TrimSpace(sourceId) != "manual" {
-		if typeID, categoryID, ok := repobase.LookupOtherSourceCategory(sourceId); ok {
+		if typeID, categoryID, ok := taxonomy.LookupOtherSourceCategory(sourceId); ok {
 			category = bindOtherCategory(sourceId, category, typeID, categoryID)
 		}
 	}

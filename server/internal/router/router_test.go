@@ -16,8 +16,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -210,4 +210,3 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("POST /api/manage/tmdb/apply should forbid visitor, got %d", wVisitorTMDBApply.Code)
 	}
 }
-

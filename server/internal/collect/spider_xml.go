@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"golang.org/x/net/html/charset"
-	"server/internal/model"
 	"server/internal/film/converter"
+	"server/internal/model"
 	"server/internal/utils"
 )
 

@@ -8,6 +8,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 func loadSourceCategoryPlacementsBySourceIDs(sourceIDs []string) (map[string][]sourceCategoryPlacement, error) {
@@ -66,10 +67,10 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 	if err := deleteOrphanDisplayRootCategories(); err != nil {
 		return err
 	}
-	repobase.RefreshCategoryCache()
-	ReloadMappingRules()
-	repobase.TouchCategoryVersion()
-	repobase.TouchSearchTagsVersion()
+	taxonomy.RefreshCategoryCache()
+	taxonomy.ReloadMappingRules()
+	taxonomy.TouchCategoryVersion()
+	taxonomy.TouchSearchTagsVersion()
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 		db.Rdb.Del(db.Cxt, config.TVBoxConfigCacheKey)

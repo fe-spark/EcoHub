@@ -4,9 +4,9 @@ import (
 	"log"
 	"time"
 
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
-	filmsnapshot "server/internal/film/snapshot"
 )
 
 const maxRebuildSealingRetries = 5

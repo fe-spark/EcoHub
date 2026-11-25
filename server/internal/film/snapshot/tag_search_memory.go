@@ -7,20 +7,20 @@ import (
 	"time"
 
 	"server/internal/film/catalog"
+	"server/internal/film/shared"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 // tagPageFromIndex 分类筛选在内存索引上计数并取一页。只按主键回表取当前页。
 func tagPageFromIndex(version string, st model.SearchTagsVO, page *dto.Page, keyword string, recentHours int) (tagSearchCacheItem, error) {
 	// 带了采集站时 pid/cid 是该站 type_id。可见性在 tagMetaMatch 里按分类键判断。
 	if strings.TrimSpace(st.SourceId) == "" {
-		if st.Cid > 0 && !repobase.IsCategoryVisible(st.Cid, st.Pid) {
+		if st.Cid > 0 && !taxonomy.IsCategoryVisible(st.Cid, st.Pid) {
 			return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
-		if st.Pid > 0 && !repobase.IsCategoryVisible(0, st.Pid) {
+		if st.Pid > 0 && !taxonomy.IsCategoryVisible(0, st.Pid) {
 			return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 	}
@@ -95,7 +95,7 @@ func tagMetaMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta) 
 			id = st.Cid
 		}
 		for _, typeID := range catalog.PublicSourceTypeIDs(sourceID, field, id) {
-			key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+			key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 			if key != "" {
 				keys[key] = struct{}{}
 			}
@@ -113,7 +113,7 @@ func tagMetaMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta) 
 		if !categoryVisible(item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
 			return false
 		}
-		if !repobase.IsCategoryVisible(item.Cid, item.Pid) {
+		if !taxonomy.IsCategoryVisible(item.Cid, item.Pid) {
 			return false
 		}
 		if sourceID != "" {
@@ -272,7 +272,7 @@ func categoryPositions(idx *filmSearchMetaIndex, st model.SearchTagsVO) ([]int, 
 	}
 	positions := make([]int, 0)
 	for _, typeID := range catalog.PublicSourceTypeIDs(sourceID, field, id) {
-		key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+		key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 		positions = append(positions, idx.ByCategory[key]...)
 	}
 	return positions, true

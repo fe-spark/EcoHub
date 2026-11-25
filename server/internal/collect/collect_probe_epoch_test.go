@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/model"
 	"server/internal/collect/progress"
+	"server/internal/model"
 )
 
 // stubLateProbe 让探页卡住，直到测试放行；放行后返回给定结果（无视 ctx，模拟请求已在路上、晚一步才回来）。

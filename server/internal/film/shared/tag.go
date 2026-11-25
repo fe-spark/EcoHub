@@ -9,7 +9,7 @@ import (
 	"unicode"
 
 	"server/internal/model"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 const SearchTagDisplayLimit = 12
@@ -254,9 +254,9 @@ func NormalizeSearchTagValue(tagType string, value string) string {
 func NormalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
 	// 带了采集站时，Pid/Cid 是该站自己的 type_id，不能按本地 film_category 改写。
 	if strings.TrimSpace(st.SourceId) == "" {
-		st.Pid = repobase.ResolveCategoryID(st.Pid)
+		st.Pid = taxonomy.ResolveCategoryID(st.Pid)
 		if st.Cid > 0 {
-			st.Cid = repobase.ResolveCategoryID(st.Cid)
+			st.Cid = taxonomy.ResolveCategoryID(st.Cid)
 		}
 	}
 	if IsOthersSearchTagValue(st.Plot) {

@@ -1,16 +1,16 @@
 package portal
 
 import (
+	"errors"
 	"server/internal/film"
 	"server/internal/film/catalog"
-	"errors"
 	"testing"
 
-	"server/internal/infra/db"
-	"server/internal/model"
-	"server/internal/repobase"
 	filmshared "server/internal/film/shared"
 	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -47,7 +47,7 @@ func setupFilmServiceTestDB(t *testing.T) *gorm.DB {
 
 func TestGetFilmDetail_ExcludesHiddenNonPrimaryCategoryPeerPlay(t *testing.T) {
 	gdb, _ := setupTestDBAndRedis(t)
-	t.Cleanup(func() { repobase.SetCategoryShowForTest(map[int64]bool{}) })
+	t.Cleanup(func() { taxonomy.SetCategoryShowForTest(map[int64]bool{}) })
 
 	gdb.Create(&model.FilmSource{Id: "src_a", Name: "主站A", Uri: "http://a", State: true, Sort: 0})
 	gdb.Create(&model.FilmSource{Id: "src_b", Name: "备站B", Uri: "http://b", State: true, Sort: 1})

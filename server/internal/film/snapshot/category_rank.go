@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"server/internal/film/catalog"
-	"server/internal/repobase"
+	"server/internal/taxonomy"
 )
 
 // 分类页年份、热播、最新共用这一条定长榜。封口时各写入一次，请求只合并榜内 mid。
@@ -158,7 +158,7 @@ func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID
 	cands := make([]rankCand, 0, limit)
 	skippedHidden := false
 	for _, typeID := range typeIDs {
-		key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+		key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 		for _, mid := range pools[hotPoolMapKey(sourceID, key)] {
 			if mid <= 0 {
 				continue
@@ -187,7 +187,7 @@ func scanLocalRanks(idx *filmSearchMetaIndex, field string, categoryID int64, so
 	pools := map[string][]rankCand{}
 	for i := range idx.Items {
 		item := idx.Items[i]
-		if !repobase.IsCategoryVisible(item.Cid, item.Pid) {
+		if !taxonomy.IsCategoryVisible(item.Cid, item.Pid) {
 			continue
 		}
 		match := item.Pid == categoryID
@@ -205,7 +205,7 @@ func scanLocalRanks(idx *filmSearchMetaIndex, field string, categoryID int64, so
 func scanSourceRanks(idx *filmSearchMetaIndex, sourceID, field string, categoryID int64, sortType, limit int) []int64 {
 	keys := make(map[string]struct{})
 	for _, typeID := range catalog.PublicSourceTypeIDs(sourceID, field, categoryID) {
-		key := repobase.BuildSourceCategoryKey(sourceID, typeID)
+		key := taxonomy.BuildSourceCategoryKey(sourceID, typeID)
 		if key != "" {
 			keys[key] = struct{}{}
 		}

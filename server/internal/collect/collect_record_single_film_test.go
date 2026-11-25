@@ -5,14 +5,15 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/collect/progress"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"server/internal/collect/ledger"
 )
 
 func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
@@ -55,7 +56,7 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 	emitSingle(43, []int64{43}, "")
 	emitSingle(44, nil, "get movie detail failed")
 
-	list, total, err := GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
+	list, total, err := ledger.GetCollectRecordList(model.CollectRecordQuery{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 	for _, rec := range list {
 		batchIDs = append(batchIDs, rec.BatchID)
 	}
-	midsByBatch, err := ListCollectRecordMids(batchIDs)
+	midsByBatch, err := ledger.ListCollectRecordMids(batchIDs)
 	if err != nil {
 		t.Fatal(err)
 	}

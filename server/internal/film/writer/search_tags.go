@@ -8,12 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/infra/db"
-	"server/internal/model"
 	"server/internal/film/cache"
 	"server/internal/film/shared"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/taxonomy"
 
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
@@ -258,15 +258,15 @@ func collectDynamicSearchTagItems(info model.FilmIndex) []model.SearchTagItem {
 	items := make([]model.SearchTagItem, 0, 8)
 
 	if info.Cid > 0 {
-		catName := repobase.GetCategoryNameById(info.Cid)
+		catName := taxonomy.GetCategoryNameById(info.Cid)
 		if catName == "" {
 			catName = info.CName
 		}
 		items = append(items, collectSearchTagItems(catName, "Category", info.Pid, fmt.Sprint(info.Cid))...)
 	}
 
-	mainCategoryName := repobase.GetMainCategoryName(info.Pid)
-	cleanPlot := repobase.CleanPlotTags(info.ClassTag, info.Area, mainCategoryName, info.CName)
+	mainCategoryName := taxonomy.GetMainCategoryName(info.Pid)
+	cleanPlot := taxonomy.CleanPlotTags(info.ClassTag, info.Area, mainCategoryName, info.CName)
 	items = append(items, collectSearchTagItems(cleanPlot, "Plot", info.Pid)...)
 
 	items = append(items, collectSearchTagItems(info.Area, "Area", info.Pid)...)

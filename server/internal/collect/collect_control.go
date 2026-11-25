@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/collect/progress"
 	"server/internal/collect/scheduler"
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
 )
 
 // deleteStopTimeout 删除前等待本次抓页退出的上限。

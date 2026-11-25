@@ -6,12 +6,13 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/infra/db"
-	"server/internal/model"
 	"server/internal/film/cache"
 	"server/internal/film/shared"
 	"server/internal/film/snapshot"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -111,7 +112,7 @@ func IsManualSourceFilm(dbConn *gorm.DB, mid int64, sourceID, firstSourceID stri
 
 // SaveDetailWithOptions 支持控制快照发布的单片保存入口（TMDB应用等场景）。
 func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveDetailOptions) (int64, error) {
-	source := repobase.FindCollectSourceById(sourceID)
+	source := sourcecatalog.FindCollectSourceById(sourceID)
 	if source == nil {
 		source = &model.FilmSource{Id: sourceID, Name: sourceID, State: true}
 	}
@@ -131,8 +132,8 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 		unlock := lockManualUpdate(source, existingFilm, detail)
 		defer unlock()
 		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-			categoryVersion := repobase.GetCategoryVersion()
-			ruleVersion := repobase.GetRuleVersion()
+			categoryVersion := taxonomy.GetCategoryVersion()
+			ruleVersion := taxonomy.GetRuleVersion()
 			if detail.Pid <= 0 && existingFilm.Pid > 0 {
 				detail.Pid = existingFilm.Pid
 			}

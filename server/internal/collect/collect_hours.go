@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"server/internal/model"
 	"server/internal/collect/progress"
+	"server/internal/model"
 )
 
 // shouldNoteCronCollectSuccess 整次跑完且未被停止，才算成功。

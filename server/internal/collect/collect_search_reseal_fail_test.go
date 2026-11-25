@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/model"
-	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/collect/progress"
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/model"
 )
 
 func TestSearchResealRetryWaitBacksOffAndCaps(t *testing.T) {

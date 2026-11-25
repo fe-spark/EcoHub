@@ -7,7 +7,7 @@ import (
 	"server/internal/model"
 )
 
-func batchOutcomeMessage(result model.CollectBatchResult, startedVerb, emptyLabel string) string {
+func BatchOutcomeMessage(result model.CollectBatchResult, startedVerb, emptyLabel string) string {
 	if len(result.Started) == 0 {
 		if len(result.Skipped) == 0 {
 			return emptyLabel

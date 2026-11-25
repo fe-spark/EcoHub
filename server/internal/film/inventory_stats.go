@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/infra/db"
-	"server/internal/repobase"
 	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/infra/db"
+	"server/internal/sourcecatalog"
 
 	"gorm.io/gorm"
 )
@@ -299,7 +299,7 @@ func getSourceInventoriesWithDB(ctx context.Context, connDB *gorm.DB) ([]SourceI
 	if connDB == nil {
 		return nil, filmsnapshot.ErrSearchIndexMissing
 	}
-	sourceList, err := repobase.GetCollectSourceListDB(connDB)
+	sourceList, err := sourcecatalog.GetCollectSourceListDB(connDB)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +317,7 @@ func getSourceInventoriesWithDB(ctx context.Context, connDB *gorm.DB) ([]SourceI
 	if err != nil {
 		return nil, err
 	}
-	_, failureCounts, err := repobase.CountTodayCollectFailuresDB(connDB, time.Now())
+	_, failureCounts, err := sourcecatalog.CountTodayCollectFailuresDB(connDB, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +340,7 @@ func getSourceInventoriesWithDB(ctx context.Context, connDB *gorm.DB) ([]SourceI
 }
 
 func activePrimaryID() string {
-	if primary := repobase.CurrentPrimarySource(); primary != nil {
+	if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
 		return strings.TrimSpace(primary.Id)
 	}
 	return ""

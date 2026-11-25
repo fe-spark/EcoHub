@@ -9,13 +9,13 @@ import (
 	"time"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/film/catalog"
-	"server/internal/model"
-	"server/internal/model/dto"
 	"server/internal/film/query"
 	"server/internal/film/shared"
-	"server/internal/repobase"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/model/dto"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -408,7 +408,7 @@ func categoryFilmQuery(conn *gorm.DB, sourceID, field string, categoryID int64, 
 		return q.Where("mid IN (SELECT mid FROM ("+memberSQL+") AS cat_members)", args...)
 	}
 	q = applyCategorySnapshotSourceFilter(q, "", sourceID)
-	if disabledIDs := repobase.GetDisabledCategoryIDs(); len(disabledIDs) > 0 {
+	if disabledIDs := taxonomy.GetDisabledCategoryIDs(); len(disabledIDs) > 0 {
 		q = q.Where("pid NOT IN ? AND cid NOT IN ?", disabledIDs, disabledIDs)
 	}
 	q = applyCategoryUpdateIndexHint(q, field)
@@ -423,7 +423,7 @@ func listedCategoryID(sourceID string, id int64) int64 {
 	if strings.TrimSpace(sourceID) != "" {
 		return id
 	}
-	return repobase.ResolveCategoryID(id)
+	return taxonomy.ResolveCategoryID(id)
 }
 
 // CountFilmsByCategoryKeys 若当前内存检索索引非空且与目标采集站（主站）匹配，直接返回按 category_key 汇总的影片数，零 SQL 开销。
