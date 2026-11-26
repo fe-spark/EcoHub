@@ -1,3 +1,20 @@
+测试版 **v3.1.7-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.7-beta.2 更新内容
+
+- **Telegram 通知与回调**：采集通知彻底切换为基于 `collect_record_films` 账本按 `id ASC` 早停分页查询与 Redis 页缓存，移除全量内存 `MID` 传输；回调轮询改为并发 worker 处理并加设查询超时，解决大批量数据点击无响应。
+- **访问安全与站点配置**：加固私有化部署下前后台与 `/provide` 接口访问校验，新增站点访问配置与管理端订阅二维码弹窗，并补充并发与安全回归测试。
+- **采集封口与查询性能**：修复检索封口重建重试状态竞争与无库兜底收敛，优化横幅检索候选与相关片单缓存查询，清理服务端无引用死代码。
+
+---
+
 测试版 **v3.1.7-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

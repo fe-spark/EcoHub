@@ -1,3 +1,20 @@
+Pre-release **v3.1.7-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.2` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.7-beta.2 changes
+
+- **Telegram notifications & callbacks**: migrate batch summary pagination strictly to the `collect_record_films` ledger with `id ASC` early-stop queries and Redis page caching, remove full in-memory `MID` payloads, and process bot callbacks concurrently with DB timeouts to keep large-batch interactions responsive.
+- **Access security & subscription UI**: harden private-mode guards across portal and `/provide` endpoints, add access configuration and admin subscription QR code modal support, and expand regression coverage.
+- **Collect resealing & query performance**: fix search reseal retry state races and empty-library fallback convergence, optimize banner search and related-film read-model caching, and prune unused server dead code.
+
+---
+
 Pre-release **v3.1.7-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
