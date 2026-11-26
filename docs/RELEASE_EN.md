@@ -1,3 +1,19 @@
+Pre-release **v3.1.7-beta.3**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.3`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.3` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.7-beta.3 changes
+
+- **Collect write throughput**: restore 16 concurrent write slots, remove cross-source `matchKey` lock contention and per-page `film_sources` queries during peer collection, and harden source catalog cache invalidation and concurrency.
+- **TG notification resilience**: split batch ledger category aggregation into per-source indexed queries (10s timeout) and gracefully degrade to summary-only delivery with full-list drilldown on stats timeouts.
+
+---
+
 Pre-release **v3.1.7-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

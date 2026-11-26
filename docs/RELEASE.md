@@ -1,3 +1,19 @@
+测试版 **v3.1.7-beta.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.3`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.3`，然后执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.7-beta.3 更新内容
+
+- **采集写入吞吐**：恢复 16 路并发写槽，移除全站平权入库时的跨站 `matchKey` 锁阻塞与每页冗余 `film_sources` 查库，并完善目录内存快照失效、更新刷新与并发同步。
+- **TG 通知容错**：将采集汇总账本分类统计拆分为按站点索引查询（设 10s 超时），统计失败时降级照常推送汇总并保留「全部」片单下钻。
+
+---
+
 测试版 **v3.1.7-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
