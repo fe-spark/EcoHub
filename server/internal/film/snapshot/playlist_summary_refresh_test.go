@@ -9,14 +9,10 @@ func resetPlaySummaryPending(t *testing.T, pending map[int64]struct{}) {
 	t.Helper()
 	playSummaryRefresh.mu.Lock()
 	playSummaryRefresh.pending = pending
-	playSummaryRefresh.flushing = false
-	playSummaryRefresh.waiters = nil
 	playSummaryRefresh.mu.Unlock()
 	t.Cleanup(func() {
 		playSummaryRefresh.mu.Lock()
 		playSummaryRefresh.pending = make(map[int64]struct{})
-		playSummaryRefresh.flushing = false
-		playSummaryRefresh.waiters = nil
 		playSummaryRefresh.mu.Unlock()
 	})
 }

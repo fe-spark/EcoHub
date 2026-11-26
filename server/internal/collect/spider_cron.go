@@ -375,8 +375,7 @@ func cleanGhostFilms() (int64, int64, error) {
 }
 
 const (
-	logRetention           = 7 * 24 * time.Hour
-	failureRecordRetention = 7 * 24 * time.Hour
+	logRetention = 7 * 24 * time.Hour
 )
 
 func executeLogCleanTask(ft model.FilmCollectTask, manual bool) {
@@ -405,12 +404,6 @@ const (
 	RunOnceStarted = "定时任务已触发，执行结果请查看运行日志"
 	RunOnceQueued  = "已有维护任务在执行，本任务已排队，前一条结束后自动执行"
 )
-
-// RunTaskOnce 立即手动执行一次任务
-func RunTaskOnce(id string) error {
-	_, err := RunTaskOnceWithStatus(id)
-	return err
-}
 
 // RunTaskOnceWithStatus 立即手动执行一次任务，并返回给用户的提示。
 // 维护任务进串行队列：前面有维护在跑时排队等待；采集在维护中直接拒绝。

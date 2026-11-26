@@ -24,8 +24,6 @@ var (
 	primarySwitchMu sync.Mutex
 	// primaryWarmups 记录切换主站后异步预热的协程，测试用来等它们结束。
 	primaryWarmups sync.WaitGroup
-	// categorySyncs 记录异步同步分类的协程，测试用来等它们结束。
-	categorySyncs sync.WaitGroup
 	// deleteSourceJobs 记录已入队待处理的异步删站任务，保证 WaitAsyncWork 不与 Add 竞态。
 	deleteSourceJobs sync.WaitGroup
 	// OnPrimarySwitched 切换主站重建索引完成后的预热回调，由装配层注入。
@@ -146,27 +144,6 @@ func (s *CollectService) GetCategoryStatusMap() (map[string]string, error) {
 		} else {
 			result[source.Id] = "failed"
 		}
-	}
-	return result, nil
-}
-
-// GetCategoryReadyMap 返回所有采集站的分类就绪状态映射
-func (s *CollectService) GetCategoryReadyMap() (map[string]bool, error) {
-	sources, err := collect.GetCollectSourceList()
-	if err != nil {
-		return nil, err
-	}
-	sourceIDs := make([]string, 0, len(sources))
-	for _, source := range sources {
-		if source.Id != "" {
-			sourceIDs = append(sourceIDs, source.Id)
-		}
-	}
-	readySet := catalog.SourceIDsWithCategory(sourceIDs)
-	result := make(map[string]bool, len(sources))
-	for _, source := range sources {
-		_, ok := readySet[source.Id]
-		result[source.Id] = ok
 	}
 	return result, nil
 }

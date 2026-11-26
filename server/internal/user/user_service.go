@@ -49,11 +49,6 @@ func (s *UserService) StoredToken(userID uint) (string, error) {
 	return GetUserToken(userID)
 }
 
-// AccountStatus 读取账号状态。0 为正常。
-func (s *UserService) AccountStatus(userID uint) (int, error) {
-	return UserAccountStatus(userID)
-}
-
 // AccountGate 读取账号状态和角色。鉴权以库里的值为准，不信 JWT 里的旧角色。
 func (s *UserService) AccountGate(userID uint) (status int, role int, err error) {
 	return UserAccountGate(userID)

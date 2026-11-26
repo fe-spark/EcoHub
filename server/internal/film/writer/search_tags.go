@@ -60,20 +60,6 @@ func UpsertDynamicSearchTags(infos ...model.FilmIndex) error {
 	return nil
 }
 
-func BatchHandleSearchTag(infos ...model.FilmIndex) {
-	if len(infos) == 0 {
-		return
-	}
-
-	pids := collectSearchTagPidList(infos)
-	if err := RefreshSearchTagsByPids(pids...); err != nil {
-		log.Printf("RefreshSearchTagsByPids Error: %v", err)
-		return
-	}
-
-	cache.ClearAllSearchTagsCache()
-}
-
 func normalizeOrderedPids(pids []int64) []int64 {
 	pidSet := make(map[int64]struct{}, len(pids))
 	orderedPids := make([]int64, 0, len(pids))

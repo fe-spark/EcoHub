@@ -44,7 +44,6 @@ var (
 		regexp.MustCompile(`(?i)(中文字幕|中英双字|双语字幕|抢先版|枪版|高清版|超清版|蓝光版|完整版|未删减版|无删减版|未删减|无删减|修复版|加长版|导演剪辑版|公映版)`),
 		regexp.MustCompile(`(?i)(第[0-9一二三四五六七八九十]+[集期话]|更新至[0-9]+[集期话]|全[0-9]+[集期话]|完结|连载中|(Episode|EP)[0-9]+)`),
 	}
-	yearRegex          = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
 	bracketYearRegex   = regexp.MustCompile(`[（(]\s*(19\d{2}|20\d{2})\s*[）)]`)
 	emptyBracketsRegex = regexp.MustCompile(`[（(]\s*[）)]|[【\[]\s*[】\]]`)
 )

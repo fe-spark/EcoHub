@@ -65,14 +65,6 @@ func (s *VersionService) GetAppVersion(checkUpdate bool) AppVersionInfo {
 	return info
 }
 
-func (s *VersionService) LoadLatestRelease(includePre bool) (githubReleaseCache, error) {
-	rel, ok := currentRelease(includePre)
-	if !ok {
-		return githubReleaseCache{}, fmt.Errorf("尚未取得最新版本")
-	}
-	return rel, nil
-}
-
 func fetchGithubLatestRelease(includePre bool) (githubReleaseCache, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=20", githubRepoPath())
 	req, err := http.NewRequest(http.MethodGet, url, nil)

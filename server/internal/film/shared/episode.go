@@ -1,7 +1,6 @@
 package shared
 
 import (
-	"encoding/json"
 	"strings"
 
 	"server/internal/infra/db"
@@ -41,31 +40,6 @@ func IsEpisodeCountHigher(newCounts []int, existingCounts []int) bool {
 	}
 	existMax := MaxEpisodeCount(existingCounts)
 	return newMax > existMax
-}
-
-// ExtractEpisodeCountsFromDetail 主站详情各线路分集数。
-func ExtractEpisodeCountsFromDetail(d model.MovieDetail) []int {
-	counts := make([]int, 0, len(d.PlayList))
-	for _, group := range d.PlayList {
-		if n := EpisodeCount(group); n > 0 {
-			counts = append(counts, n)
-		}
-	}
-	return counts
-}
-
-// ExtractEpisodeCountsFromContents 附属源 playlist 各线路分集数。
-func ExtractEpisodeCountsFromContents(contents []string) []int {
-	counts := make([]int, 0, len(contents))
-	for _, content := range contents {
-		var links []model.MovieUrlInfo
-		if err := json.Unmarshal([]byte(content), &links); err == nil {
-			if n := EpisodeCount(links); n > 0 {
-				counts = append(counts, n)
-			}
-		}
-	}
-	return counts
 }
 
 // LoadExistingEpisodeCountsByMIDs 查库获取 mids 在写库前各源播放线路分集数。

@@ -11,8 +11,6 @@ import (
 	"server/internal/infra/db"
 )
 
-const defaultSearchRebuildDebounce = 500 * time.Millisecond
-
 // SearchIndexProgress 检索索引构建的数字进度
 type SearchIndexProgress struct {
 	Total   int64  `json:"total"`

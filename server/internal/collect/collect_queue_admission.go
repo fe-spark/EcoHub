@@ -96,28 +96,6 @@ func waitCollectQueues() {
 	collectQueues.mu.Unlock()
 }
 
-func waitCollectQueuesFor(d time.Duration) bool {
-	collectQueues.mu.Lock()
-	defer collectQueues.mu.Unlock()
-	if collectQueues.n == 0 {
-		return true
-	}
-	timer := time.AfterFunc(d, func() {
-		collectQueues.mu.Lock()
-		collectQueues.cond.Broadcast()
-		collectQueues.mu.Unlock()
-	})
-	defer timer.Stop()
-	deadline := time.Now().Add(d)
-	for collectQueues.n > 0 {
-		if !time.Now().Before(deadline) {
-			return false
-		}
-		collectQueues.cond.Wait()
-	}
-	return true
-}
-
 func queueCount() (n int, frozen bool) {
 	collectQueues.mu.Lock()
 	defer collectQueues.mu.Unlock()

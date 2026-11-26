@@ -19,11 +19,6 @@ const (
 	mappingRuleSourceUniqueIndex = "uidx_source_group_raw_match_type"
 )
 
-// InitMappingEngine 从数据库加载映射规则并初始化内存缓存
-func InitMappingEngine() {
-	taxonomy.InitMappingEngine()
-}
-
 // ReloadMappingRules 强制重新从数据库加载所有映射规则
 func ReloadMappingRules() {
 	taxonomy.ReloadMappingRules()
@@ -40,10 +35,6 @@ func ResetMappingRules() error {
 
 func TouchRuleVersion() {
 	taxonomy.TouchRuleVersion()
-}
-
-func GetRuleVersion() string {
-	return taxonomy.GetRuleVersion()
 }
 
 func EnsureMappingRuleIndexes() error {
@@ -128,22 +119,6 @@ func buildMappingRuleQuery(query MappingRuleQuery) *gorm.DB {
 		dbQuery = dbQuery.Where("(raw LIKE ? OR target LIKE ? OR remarks LIKE ?)", like, like, like)
 	}
 	return dbQuery
-}
-
-func ListMappingRules(query MappingRuleQuery) ([]model.MappingRule, dto.Page, error) {
-	page := dto.Page{Current: 1, PageSize: 20}
-	if query.Paging != nil {
-		page = *query.Paging
-	}
-
-	dbQuery := buildMappingRuleQuery(query)
-
-	if err := dto.GetPage(dbQuery, &page); err != nil {
-		return nil, page, err
-	}
-	list := make([]model.MappingRule, 0)
-	err := dbQuery.Order("`group` ASC, raw ASC, id ASC").Offset((page.Current - 1) * page.PageSize).Limit(page.PageSize).Find(&list).Error
-	return list, page, err
 }
 
 func ListAllMappingRules(query MappingRuleQuery) ([]model.MappingRule, error) {
@@ -270,10 +245,6 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 	return nil
 }
 
-func DeleteMappingRule(id uint) error {
-	return DeleteMappingRules([]uint{id})
-}
-
 // DeleteMappingRules 批量硬删映射规则并单次更新版本与缓存。
 func DeleteMappingRules(ids []uint) error {
 	if len(ids) == 0 {
@@ -335,32 +306,4 @@ func ReplaceMappingRules(exports []model.MappingRuleExport) error {
 	ReloadMappingRules()
 	repobase.ClearIndexPageCache()
 	return nil
-}
-
-func GetAreaMapping() map[string]string {
-	return taxonomy.GetAreaMapping()
-}
-
-func GetLangMapping() map[string]string {
-	return taxonomy.GetLangMapping()
-}
-
-func GetFilterMap() map[string]bool {
-	return taxonomy.GetFilterMap()
-}
-
-func GetAttributeMapping() map[string]string {
-	return taxonomy.GetAttributeMapping()
-}
-
-func GetPlotMapping() map[string]string {
-	return taxonomy.GetPlotMapping()
-}
-
-func GetCategoryNameFromCache(id int64) (string, bool) {
-	return taxonomy.GetCategoryNameFromCache(id)
-}
-
-func SetCategoryNameCache(id int64, name string) {
-	taxonomy.SetCategoryNameCache(id, name)
 }

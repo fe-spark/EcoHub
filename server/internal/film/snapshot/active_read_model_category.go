@@ -14,7 +14,6 @@ import (
 	"server/internal/film/shared"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/model/dto"
 	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
@@ -23,15 +22,8 @@ import (
 
 const (
 	snapshotListCacheTTL = 10 * time.Minute
-	snapshotPageCacheTTL = 5 * time.Minute
 	basicSelectFields    = "mid, first_source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language, actor, director, blurb"
 )
-
-type categoryPageCacheItem struct {
-	Total     int                    `json:"total"`
-	PageCount int                    `json:"page_count"`
-	Movies    []model.MovieBasicInfo `json:"movies"`
-}
 
 func applyCategorySnapshotSourceFilter(query *gorm.DB, version string, sourceID string) *gorm.DB {
 	return applySourceMembership(query, sourceID)
@@ -92,69 +84,6 @@ func finishCategoryList(cacheKey string, listGen string, snapshots []model.FilmL
 
 func GetSnapshotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, offset)
-}
-
-func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourceID string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
-	startedAt := time.Now()
-	page = shared.EnsurePage(page)
-	version = strings.TrimSpace(version)
-	sourceID = strings.TrimSpace(sourceID)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
-	}
-	id = listedCategoryID(sourceID, id)
-	if version == "" || id <= 0 {
-		return []model.MovieBasicInfo{}
-	}
-
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck5", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var item categoryPageCacheItem
-			if json.Unmarshal([]byte(data), &item) == nil {
-				page.Total = item.Total
-				page.PageCount = item.PageCount
-				return item.Movies
-			}
-		}
-	}
-
-	listGen := GetSearchCacheVersion()
-	query := categoryFilmQuery(db.Mdb, sourceID, field, id, "")
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return []model.MovieBasicInfo{}
-	}
-	page.Total = int(total)
-	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
-	if page.PageCount <= 0 {
-		page.PageCount = 1
-	}
-
-	offset := shared.PageOffset(page)
-	snapshots, err := scanListSnapshots(query.Select(basicSelectFields).Order(liveTieOrder("update_stamp DESC, mid DESC")).Offset(offset).Limit(page.PageSize))
-	if err != nil {
-		return []model.MovieBasicInfo{}
-	}
-	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
-
-	item := categoryPageCacheItem{
-		Total:     page.Total,
-		PageCount: page.PageCount,
-		Movies:    result,
-	}
-	if raw, err := json.Marshal(item); err == nil {
-		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotPageCacheTTL), listGen)
-	}
-
-	log.Printf("[FilmCategoryList] 获取分类分页列表 source=%s field=%s id=%d total=%d page=%d size=%d cost=%s",
-		sourceID, field, id, page.Total, page.Current, len(result), time.Since(startedAt))
-	return result
-}
-
-func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
-	return GetSnapshotMovieListByCategoryPageWithSourceReadModel(version, "", field, id, page)
 }
 
 // mysqlUseIndexHint 把 USE INDEX 挂到 FROM 子句之后，避免 Table("t USE INDEX ...")
@@ -300,70 +229,6 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		end = len(mids)
 	}
 	return movieInfosByMids(version, mids[offset:end])
-}
-
-func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
-	return GetSnapshotHotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, offset)
-}
-
-func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, poolSize int) ([]model.MovieBasicInfo, error) {
-	if poolSize <= 0 {
-		poolSize = searchHotPoolCap
-	}
-	if poolSize > searchHotPoolCap {
-		poolSize = searchHotPoolCap
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	id = listedCategoryID(sourceID, id)
-	if id <= 0 {
-		return []model.MovieBasicInfo{}, nil
-	}
-	version = resolveHotListVersion(version)
-	mids, err := categoryRankMids(version, sourceID, field, id, 1, poolSize)
-	if err != nil {
-		return nil, err
-	}
-	return movieInfosByMids(version, mids)
-}
-
-func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) ([]model.MovieBasicInfo, error) {
-	return GetSnapshotHotPoolByCategoryWithSourceReadModel(version, "", field, id, poolSize)
-}
-
-func GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
-	if limit <= 0 {
-		return []model.MovieBasicInfo{}, nil
-	}
-	if poolSize <= 0 {
-		poolSize = 50
-	}
-	pool, err := GetSnapshotHotPoolByCategoryWithSourceReadModel(version, sourceID, field, id, poolSize)
-	if err != nil {
-		return nil, err
-	}
-	if len(pool) <= limit {
-		res := make([]model.MovieBasicInfo, len(pool))
-		copy(res, pool)
-		return res, nil
-	}
-
-	indices := make([]int, len(pool))
-	for i := range indices {
-		indices[i] = i
-	}
-	rand.Shuffle(len(indices), func(i, j int) {
-		indices[i], indices[j] = indices[j], indices[i]
-	})
-
-	result := make([]model.MovieBasicInfo, limit)
-	for i := 0; i < limit; i++ {
-		result[i] = pool[indices[i]]
-	}
-	return result, nil
-}
-
-func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
-	return GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, poolSize)
 }
 
 // GetSnapshotTopMoviesBySortFastWithSource 分类页三路排序。年份、热播、最新读同一套内存榜。

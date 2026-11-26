@@ -7,7 +7,6 @@ import (
 	"unicode"
 
 	"server/internal/model"
-	"server/internal/taxonomy"
 	"server/internal/utils"
 )
 
@@ -46,65 +45,6 @@ var (
 	packedRangeRe    = regexp.MustCompile(`(\d+)\s*[-~至到]\s*(\d+)`)
 	serialProgressRe = regexp.MustCompile(`(?:更新至|更新到|更至|第)\s*(\d+)\s*[集期话回]?`)
 )
-
-func IdentityFromFilmIndex(info model.FilmIndex) IdentityProfile {
-	pid := int64(0)
-	if info.Pid > 0 {
-		if root := taxonomy.GetRootId(info.Pid); root > 0 {
-			pid = root
-		}
-	}
-	if pid <= 0 && info.Cid > 0 {
-		if root := taxonomy.GetRootId(info.Cid); root > 0 {
-			pid = root
-		}
-	}
-	if pid <= 0 {
-		pid = taxonomy.ResolveRootCategoryIDByCName(info.CName)
-	}
-	return IdentityProfile{
-		DbID:     info.DbId,
-		Name:     info.Name,
-		RootPid:  pid,
-		CName:    info.CName,
-		ClassTag: info.ClassTag,
-		Year:     info.Year,
-		Director: info.Director,
-		Remarks:  info.Remarks,
-	}
-}
-
-func IdentityFromSnapshot(snap model.FilmListSnapshot) IdentityProfile {
-	return IdentityFromFilmIndex(model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: snap.Mid, DbId: snap.DbId},
-		FilmIndexCategory: model.FilmIndexCategory{Cid: snap.Cid, Pid: snap.Pid, CName: snap.CName},
-		FilmIndexContent: model.FilmIndexContent{
-			Name:     snap.Name,
-			ClassTag: snap.ClassTag,
-			Year:     snap.Year,
-			Director: snap.Director,
-			Remarks:  snap.Remarks,
-		},
-	})
-}
-
-func IdentityFromMovieDetail(detail model.MovieDetail) IdentityProfile {
-	episodes := make([]model.MovieUrlInfo, 0)
-	for _, group := range detail.PlayList {
-		episodes = append(episodes, group...)
-	}
-	return IdentityProfile{
-		DbID:     detail.DbId,
-		Name:     detail.Name,
-		RootPid:  ResolveMovieDetailRootPid(detail),
-		CName:    detail.CName,
-		ClassTag: detail.ClassTag,
-		Year:     ParseIdentityYear(detail.Year),
-		Director: detail.Director,
-		Remarks:  detail.Remarks,
-		Episodes: episodes,
-	}
-}
 
 func ParseIdentityYear(raw string) int64 {
 	token := yearTokenRe.FindString(strings.TrimSpace(raw))
@@ -380,16 +320,6 @@ func lastIdentityLabel(profile IdentityProfile) string {
 		return last
 	}
 	return strings.TrimSpace(profile.Remarks)
-}
-
-// SameWorkPlaylist 已有线路和本次采集是否像同一部（末集标签相同，或都是全集/合全集）。
-func SameWorkPlaylist(existing []model.MovieUrlInfo, incoming IdentityProfile) bool {
-	got := IdentityProfile{Episodes: existing}
-	a, b := lastIdentityLabel(got), lastIdentityLabel(incoming)
-	if a != "" && a == b {
-		return true
-	}
-	return classifyRemarkKind(got) == remarkComplete && classifyRemarkKind(incoming) == remarkComplete
 }
 
 func classifyRemarkKind(profile IdentityProfile) remarkKind {

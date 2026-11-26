@@ -92,20 +92,6 @@ func activeReadModelVersion(readModel *FilmReadModel, snapshotVersion string) st
 	return snapshotVersion
 }
 
-func ActivateRebuiltFilmListSnapshot(version string) error {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = EnsureLiveReadVersion()
-	} else if err := SetActiveSnapshotVersion(version); err != nil {
-		return err
-	}
-	if err := LoadActiveFilmReadModel(version); err != nil {
-		return err
-	}
-	RefreshAccessDataCaches()
-	return nil
-}
-
 func EnsureActiveFilmListSnapshot() error {
 	var dbCount int64
 	if err := db.Mdb.Model(&model.FilmIndex{}).Count(&dbCount).Error; err != nil {
@@ -121,30 +107,6 @@ func EnsureActiveFilmListSnapshot() error {
 	}
 	log.Printf("[Snapshot] film_index count=%d version=%s", dbCount, version)
 	return nil
-}
-
-func RefreshMissingPlayFromSummaries() {
-	_, _ = FlushPendingPlaySummaryRefresh()
-
-	var missingMIDs []int64
-	if err := db.Mdb.Model(&model.FilmIndex{}).
-		Where("film_index.play_from_summary = ? OR film_index.play_from_summary IS NULL", "").
-		Pluck("film_index.mid", &missingMIDs).Error; err != nil {
-		log.Printf("[Snapshot] 查询缺失播放源影片失败: %v", err)
-		return
-	}
-	if len(missingMIDs) == 0 {
-		return
-	}
-	midSet := make(map[int64]struct{}, len(missingMIDs))
-	for _, mid := range missingMIDs {
-		if mid > 0 {
-			midSet[mid] = struct{}{}
-		}
-	}
-	if err := flushPlaySummaryRefreshMids(midSet); err != nil {
-		log.Printf("[Snapshot] 刷新缺失播放源摘要失败: %v", err)
-	}
 }
 
 func HasPublishedFilmListSnapshot() (bool, error) {

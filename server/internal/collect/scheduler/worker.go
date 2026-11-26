@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"log"
-	"sort"
 	"time"
 )
 
@@ -142,15 +141,6 @@ func shouldLogWrite(page int) bool {
 		return true
 	}
 	return page%50 == 0
-}
-
-func (l *writeLane) pendingSourceIDs() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	ids := make([]string, 0, len(l.order))
-	ids = append(ids, l.order...)
-	sort.Strings(ids)
-	return ids
 }
 
 func (l *writeLane) nextJob() (Job, jobMeta, func()) {

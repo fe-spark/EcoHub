@@ -28,11 +28,6 @@ var NotifySvc = &NotifyService{
 
 const alertCooldown = 60 * time.Second
 
-// GetConfig 获取完整通知配置（内部使用，含明文 BotToken）
-func (s *NotifyService) GetConfig() (model.NotifyConfig, error) {
-	return GetNotifyConfig()
-}
-
 // PublicConfig 获取脱敏后的通知配置（供管理后台展示）
 func (s *NotifyService) PublicConfig() (model.NotifyConfig, error) {
 	cfg, err := GetNotifyConfig()

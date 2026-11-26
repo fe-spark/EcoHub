@@ -192,8 +192,6 @@ const (
 
 	// DefaultUpdateSpec 每小时整点执行一次
 	DefaultUpdateSpec = "0 0 * * * *"
-	// EveryDaySpec 每天凌晨0点执行一次
-	EveryDaySpec = "0 0 0 * * *"
 	// OrphanCleanSpec 每天 02:00，错开整点增量采集。
 	OrphanCleanSpec = "0 0 2 * * *"
 	// DefaultUpdateTime 每次采集最近 24 小时内更新的影片

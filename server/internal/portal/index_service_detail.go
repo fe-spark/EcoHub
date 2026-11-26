@@ -188,27 +188,3 @@ func OrganizePlaySources(playSources []model.PlayLinkVo, preferredSource string)
 	result = append(result, otherLines...)
 	return result
 }
-
-// GetFilmDetailOnly 读取影片详情主体，不聚合播放源。
-func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
-	startedAt := time.Now()
-	version := filmsnapshot.GetActiveReadModelVersion()
-	snapshotStartedAt := time.Now()
-	snapshot, err := filmsnapshot.GetSnapshotByMid(version, int64(id))
-	logSlowIndexServiceStep("GetFilmDetailOnly.snapshot", snapshotStartedAt, "id", id)
-	if err != nil {
-		return model.MovieDetail{}, err
-	}
-	if snapshot == nil {
-		return model.MovieDetail{}, nil
-	}
-	detailStartedAt := time.Now()
-	movieDetail, _ := filmsnapshot.GetMovieDetailBySnapshot(*snapshot)
-	logSlowIndexServiceStep("GetFilmDetailOnly.detail", detailStartedAt, "id", id)
-	if movieDetail == nil {
-		filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
-		return model.MovieDetail{}, nil
-	}
-	logSlowIndexServiceStep("GetFilmDetailOnly.total", startedAt, "id", id)
-	return *movieDetail, nil
-}

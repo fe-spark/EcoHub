@@ -471,19 +471,3 @@ func SaveCollectedPeerDetails(
 		source.Id, page, len(details), err)
 	return model.Mids{}, err
 }
-
-// SaveDetailsForCollect 兼容采集调度层调用。
-func SaveDetailsForCollect(sourceID string, list []model.MovieDetail) (shared.CollectWriteResult, error) {
-	source := sourcecatalog.FindCollectSourceById(sourceID)
-	if source == nil {
-		source = &model.FilmSource{Id: sourceID, Name: sourceID, State: true}
-	}
-	mids, err := SaveCollectedPeerDetails(context.Background(), source, 1, list)
-	if err != nil {
-		return shared.CollectWriteResult{}, err
-	}
-	return shared.CollectWriteResult{
-		AffectedMIDs: mids.Affected,
-		NotifyMIDs:   mids.Notify,
-	}, nil
-}

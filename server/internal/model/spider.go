@@ -194,13 +194,6 @@ type FilmSourceListItem struct {
 	Deleting         bool             `json:"deleting"`        // 该站是否正在执行后台异步级联删除
 }
 
-type Option struct {
-	Name  string `json:"name"`
-	Value any    `json:"value"`
-}
-
-type OptionGroup map[string][]Option
-
 // CollectParams 数据采集所需要的参数（统一批量结构，单站即单个元素）
 type CollectParams struct {
 	Ids  []string `json:"ids"`  // 资源站id列表

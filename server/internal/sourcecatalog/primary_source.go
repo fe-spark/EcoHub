@@ -225,21 +225,6 @@ func ClearPrimarySourceState() error {
 	return err
 }
 
-// FindOtherEnabledCollectSource 返回除 excludeID 外排序最前且未在删除中的启用站。
-// 用于停用/删除当前主站前判断是否允许置空（D6）。
-func FindOtherEnabledCollectSource(excludeID string) *model.FilmSource {
-	excludeID = strings.TrimSpace(excludeID)
-	excluded := make(map[string]struct{}, 1)
-	if excludeID != "" {
-		excluded[excludeID] = struct{}{}
-	}
-	list := FindOtherEnabledCollectSourcesExcluding(excluded)
-	if len(list) > 0 {
-		return list[0]
-	}
-	return nil
-}
-
 // FindOtherEnabledCollectSourcesExcluding 返回除 excludeIDs 外排序靠前且未在删除中的启用站列表。
 func FindOtherEnabledCollectSourcesExcluding(excludeIDs map[string]struct{}) []*model.FilmSource {
 	if db.Mdb == nil {

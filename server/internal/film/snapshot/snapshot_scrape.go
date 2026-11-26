@@ -52,12 +52,3 @@ func ApplyTMDBScrapeToSnapshot(snap *model.FilmListSnapshot, sc *model.FilmTMDBS
 	snap.IsScraped = true
 	snap.TmdbID = sc.TmdbID
 }
-
-// ApplyTMDBScrapeToFilmIndex 只标记词条。正文已经写在 film_index。
-func ApplyTMDBScrapeToFilmIndex(idx *model.FilmIndex, sc *model.FilmTMDBScrape) {
-	if idx == nil || sc == nil || sc.TmdbID <= 0 {
-		return
-	}
-	idx.IsScraped = true
-	idx.TmdbID = sc.TmdbID
-}

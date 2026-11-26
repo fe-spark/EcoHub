@@ -47,23 +47,6 @@ func ApplyCategoryTree(sourceId string, tree *model.CategoryTree, clearCollected
 	return applyCategoryPlans(sourceId, plans, true, false, clearCollected)
 }
 
-func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusinessFields bool, skipRebuild bool, clearCollected bool) error {
-	sourceId = strings.TrimSpace(sourceId)
-	if sourceId == "" {
-		return fmt.Errorf("source id 不能为空")
-	}
-	if tree == nil {
-		return nil
-	}
-
-	plans := make([]sourceCategoryPlacement, 0)
-	if err := flattenSourceCategoryPlacements(tree.Children, 0, 0, &plans); err != nil {
-		return err
-	}
-	_, err := applyCategoryPlans(sourceId, plans, preserveBusinessFields, skipRebuild, clearCollected)
-	return err
-}
-
 func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserveBusinessFields bool, skipRebuild bool) error {
 	_, err := applyCategoryPlans(sourceId, plans, preserveBusinessFields, skipRebuild, false)
 	return err

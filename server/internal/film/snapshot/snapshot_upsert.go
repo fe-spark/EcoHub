@@ -93,11 +93,6 @@ func InvalidateCachesAfterSourceDelete(deletedSourceID string) {
 	ClearDynamicPlayCaches()
 }
 
-func UpsertActiveSnapshotByMid(mid int64) error {
-	_, _, err := UpsertActiveSnapshotsByMids(mid)
-	return err
-}
-
 func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 	return upsertActiveSnapshots(mids, true)
 }

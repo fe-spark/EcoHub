@@ -127,10 +127,3 @@ func ClearSourceCategoryDataTx(tx *gorm.DB, sourceID string) error {
 	}
 	return tx.Where("id IN ?", removable).Delete(&model.Category{}).Error
 }
-
-// ExistsCategoryTree 查询分类信息是否存在
-func ExistsCategoryTree() bool {
-	var count int64
-	db.Mdb.Table(model.TableCategory).Count(&count)
-	return count > 0
-}

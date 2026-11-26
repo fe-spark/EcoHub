@@ -145,11 +145,6 @@ func SearchWorkBusyReason() string {
 	return strings.Join(parts, "，")
 }
 
-// StopAllTasks 用户一键终止全部采集。
-func StopAllTasks() {
-	StopAllCollect("用户一键终止")
-}
-
 // StopAllTasksAndWait 按给定原因停止全部采集，并等待正在写的事务结束。
 func StopAllTasksAndWait(timeout time.Duration, reason string) error {
 	if timeout <= 0 {
@@ -157,21 +152,6 @@ func StopAllTasksAndWait(timeout time.Duration, reason string) error {
 	}
 	StopAllCollect(reason)
 	return collectLifecycle.waitNotBusy(timeout)
-}
-
-// PrepareSingleCollectStart 单站采集启动前占用采集源并预置起始进度。
-func PrepareSingleCollectStart(source model.FilmSource) error {
-	if reason := batchCollectBlockReason(source); reason != "" {
-		return fmt.Errorf("站点 %s 暂不可采集: %s", source.Name, reason)
-	}
-	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")
-	if err != nil {
-		return err
-	}
-	if len(claimed) == 0 {
-		return fmt.Errorf("站点 %s 已在采集队列或正在运行，已跳过本次采集", source.Name)
-	}
-	return nil
 }
 
 // GetActiveTaskProgress 查询全部采集进度快照（含超时判定与终态清理）。
@@ -182,11 +162,6 @@ func GetActiveTaskProgress() []model.CollectProgress {
 // IsTaskRunning 指定站点是否有活跃任务。
 func IsTaskRunning(id string) bool {
 	return progress.IsTaskRunning(id)
-}
-
-// IsAnyTaskRunning 是否存在任何活跃任务。
-func IsAnyTaskRunning() bool {
-	return progress.IsAnyTaskRunning()
 }
 
 // IsCollecting 是否仍有采集任务、运行队列或待检索封口尚未收尾。

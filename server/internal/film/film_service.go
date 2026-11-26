@@ -283,11 +283,6 @@ func (s *FilmService) RefreshPrimaryFilms(ids []int64, sourceID string) error {
 	})
 }
 
-// GetFilmClassTree 获取影片分类信息
-func (s *FilmService) GetFilmClassTree() model.CategoryTree {
-	return catalog.GetCategoryTree()
-}
-
 // ClassTreeScope 分类管理的树和站点选项。
 type ClassTreeScope struct {
 	Tree            model.CategoryTree
@@ -295,11 +290,6 @@ type ClassTreeScope struct {
 	DefaultSourceId string
 	CurrentSourceId string
 	PrimarySourceId string
-}
-
-// GetPrimaryClassTree 获取当前主站的分类展示树及采集站选项。
-func (s *FilmService) GetPrimaryClassTree() (ClassTreeScope, error) {
-	return s.GetClassTreeScope("")
 }
 
 // GetClassTreeScope 按采集站获取分类展示树；sourceID 为空时默认使用当前主站。
@@ -355,30 +345,6 @@ func collectSourceExists(sources []model.FilmSource, sourceID string) bool {
 	return false
 }
 
-// GetFilmClassById 通过ID获取影片分类信息
-func (s *FilmService) GetFilmClassById(id int64) *model.CategoryTree {
-	return catalog.GetCategoryTreeByID(id)
-}
-
-func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTree {
-	if len(nodes) == 0 {
-		return []*model.CategoryTree{}
-	}
-	res := make([]*model.CategoryTree, 0, len(nodes))
-	for _, node := range nodes {
-		if node == nil || node.Id <= 0 {
-			continue
-		}
-		res = append(res, &model.CategoryTree{
-			Id:       node.Id,
-			Name:     strings.TrimSpace(node.Name),
-			Show:     node.Show,
-			Children: sanitizeCategoryTreeNodes(node.Children),
-		})
-	}
-	return res
-}
-
 // SaveSourceClassTree 保存指定采集站的分类展示树结构；sourceID 为空时默认当前主站。
 func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.CategoryTree) error {
 	if len(nodes) == 0 {
@@ -409,22 +375,5 @@ func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.Catego
 	snapshot.ClearDynamicPlayCaches()
 	cache.ClearTVBoxConfigCache()
 	cache.ClearTVBoxListCache()
-	return nil
-}
-
-func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {
-	cleanNodes := sanitizeCategoryTreeNodes(nodes)
-	if len(cleanNodes) == 0 {
-		return errors.New("分类结构不能为空")
-	}
-	if err := catalog.SaveCategoryTreeStructure(cleanNodes); err != nil {
-		return err
-	}
-	if err := snapshot.RefreshActiveProjectedReadModel(); err != nil {
-		return err
-	}
-	cache.ClearTVBoxConfigCache()
-	cache.ClearTVBoxListCache()
-	RefreshInventoryStatsAsync()
 	return nil
 }

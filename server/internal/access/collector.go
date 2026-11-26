@@ -10,7 +10,6 @@ const channelSize = 1024
 
 var (
 	eventCh         chan *AccessEvent
-	droppedTotal    int64
 	droppedUnsynced int64
 	started         atomic.Bool
 )
@@ -32,13 +31,8 @@ func Collect(evt *AccessEvent) {
 	select {
 	case eventCh <- evt:
 	default:
-		atomic.AddInt64(&droppedTotal, 1)
 		atomic.AddInt64(&droppedUnsynced, 1)
 	}
-}
-
-func Dropped() int64 {
-	return atomic.LoadInt64(&droppedTotal)
 }
 
 func takeUnsyncedDropped() int64 {

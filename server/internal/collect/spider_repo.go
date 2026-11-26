@@ -417,26 +417,6 @@ func normalizeCollectCd(source *model.FilmSource) {
 	}
 }
 
-// ExistCollectSourceList 查询是否已经存在站点 list 相关数据。
-func ExistCollectSourceList() (bool, error) {
-	if db.Mdb == nil {
-		return false, errors.New("数据库未连接")
-	}
-	var count int64
-	if err := db.Mdb.Model(&model.FilmSource{}).Count(&count).Error; err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-// ClearSourceCategoryData 清空一个采集站的分类副本。
-func ClearSourceCategoryData(sourceID string) error {
-	if db.Mdb == nil {
-		return errors.New("数据库未连接")
-	}
-	return catalog.ClearSourceCategoryDataTx(db.Mdb, sourceID)
-}
-
 // EnsureDefaultPosterSource 保证存在海报源站。
 func EnsureDefaultPosterSource() error {
 	if db.Mdb == nil {

@@ -2,7 +2,6 @@ package film
 
 import (
 	"gorm.io/gorm"
-	"log"
 	"server/internal/config"
 	"server/internal/film/cache"
 	"server/internal/film/catalog"
@@ -11,10 +10,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repobase"
-	"server/internal/sourcecatalog"
 	"server/internal/taxonomy"
 	"strings"
-	"time"
 )
 
 func DelFilmSearchBatch(ids []int64) error {
@@ -156,69 +153,6 @@ func FilmIDsBelongToSource(ids []int64, sourceID string) (bool, error) {
 		}
 	}
 	return true, nil
-}
-
-func ClearMasterDataBySourceIDsFast(sourceIDs ...string) error {
-	ids := normalizeSourceIDs(sourceIDs...)
-	if len(ids) == 0 {
-		return nil
-	}
-
-	startedAt := time.Now()
-	if err := clearMasterDataBySourceIDs(db.Mdb, ids); err != nil {
-		return err
-	}
-	clearCost := time.Since(startedAt)
-
-	cacheStartedAt := time.Now()
-	InvalidateMasterSwitchCaches()
-	log.Printf("[Collect] 主站切换数据重置完成 sources=%d clear=%s cache=%s total=%s", len(ids), clearCost, time.Since(cacheStartedAt), time.Since(startedAt))
-	return nil
-}
-
-func normalizeSourceIDs(sourceIDs ...string) []string {
-	ids := make([]string, 0, len(sourceIDs))
-	seen := make(map[string]struct{}, len(sourceIDs))
-	for _, sourceID := range sourceIDs {
-		sourceID = strings.TrimSpace(sourceID)
-		if sourceID == "" {
-			continue
-		}
-		if _, ok := seen[sourceID]; ok {
-			continue
-		}
-		seen[sourceID] = struct{}{}
-		ids = append(ids, sourceID)
-	}
-	return ids
-}
-
-func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
-	for _, table := range masterDataResetTables() {
-		startedAt := time.Now()
-		if err := repobase.TruncateTable(conn, table); err != nil {
-			return err
-		}
-		if cost := time.Since(startedAt); cost > time.Second {
-			log.Printf("[Collect] 源重置清表较慢 table=%s cost=%s", table, cost)
-		}
-	}
-	return sourcecatalog.DeleteCollectSourceStatsTx(conn, sourceIDs...)
-}
-
-func masterDataResetTables() []string {
-	return []string{
-		model.TableFilmIndex,
-		model.TableFilmSourcePlaylist,
-		model.TableMovieMatchKey,
-		model.TableMovieSourceMapping,
-		model.TableSearchTag,
-		model.TableCategory,
-		model.TableCategoryMapping,
-		model.TableSourceCategory,
-		model.TableBannerSlot,
-		model.TableFilmTMDBScrape,
-	}
 }
 
 func RefreshMasterDataCaches() {

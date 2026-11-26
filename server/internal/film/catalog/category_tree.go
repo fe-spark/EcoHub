@@ -10,20 +10,6 @@ import (
 	"server/internal/taxonomy"
 )
 
-func sortCategoryTreeNodes(nodes []*model.CategoryTree) {
-	sort.SliceStable(nodes, func(i, j int) bool {
-		if nodes[i].Sort == nodes[j].Sort {
-			return nodes[i].Id < nodes[j].Id
-		}
-		return nodes[i].Sort < nodes[j].Sort
-	})
-	for _, node := range nodes {
-		if len(node.Children) > 0 {
-			sortCategoryTreeNodes(node.Children)
-		}
-	}
-}
-
 // buildTreeHelper 内部辅助函数：直接从列表构建树形结构内存模型
 func buildTreeHelper() model.CategoryTree {
 	root := model.CategoryTree{
@@ -68,56 +54,6 @@ func buildTreeHelper() model.CategoryTree {
 // GetCategoryTree 获取完整分类树副本 (实时查库，不走长期缓存)
 func GetCategoryTree() model.CategoryTree {
 	return buildTreeHelper()
-}
-
-func GetCategoryTreeByID(id int64) *model.CategoryTree {
-	if id <= 0 {
-		return nil
-	}
-
-	var current model.Category
-	if err := db.Mdb.Where("id = ?", id).First(&current).Error; err != nil {
-		return nil
-	}
-
-	node := &model.CategoryTree{
-		Id:        current.Id,
-		Pid:       current.Pid,
-		Name:      current.Name,
-		StableKey: current.StableKey,
-		Alias:     current.Alias,
-		Show:      current.Show,
-		Sort:      current.Sort,
-		CreatedAt: current.CreatedAt,
-		UpdatedAt: current.UpdatedAt,
-		Children:  make([]*model.CategoryTree, 0),
-	}
-
-	if current.Pid != 0 {
-		return node
-	}
-
-	var children []model.Category
-	if err := db.Mdb.Where("pid = ?", current.Id).Order("sort ASC, id ASC").Find(&children).Error; err != nil {
-		return nil
-	}
-	for _, child := range children {
-		item := child
-		node.Children = append(node.Children, &model.CategoryTree{
-			Id:        item.Id,
-			Pid:       item.Pid,
-			Name:      item.Name,
-			StableKey: item.StableKey,
-			Alias:     item.Alias,
-			Show:      item.Show,
-			Sort:      item.Sort,
-			CreatedAt: item.CreatedAt,
-			UpdatedAt: item.UpdatedAt,
-			Children:  make([]*model.CategoryTree, 0),
-		})
-	}
-
-	return node
 }
 
 // GetActiveCategoryTree 获取前台导航分类树。支持可选 sourceId 按采集站独立隔离。优先 Redis；未命中时用分类映射构建。
@@ -165,21 +101,6 @@ func loadActiveCategoryIDs(sourceId string) map[int64]bool {
 
 func loadActiveCategoryIDsFromCurrentMappings() map[int64]bool {
 	return loadActiveCategoryIDs("")
-}
-
-func buildActiveCategoryAncestorMap(activeCategoryMap map[int64]bool) map[int64]bool {
-	visible := make(map[int64]bool, len(activeCategoryMap))
-	for categoryID := range activeCategoryMap {
-		currentID := categoryID
-		for currentID > 0 {
-			if visible[currentID] {
-				break
-			}
-			visible[currentID] = true
-			currentID = taxonomy.GetParentId(currentID)
-		}
-	}
-	return visible
 }
 
 func isValidActiveCategoryTree(tree model.CategoryTree) bool {

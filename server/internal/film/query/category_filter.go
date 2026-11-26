@@ -1,7 +1,6 @@
 package query
 
 import (
-	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
@@ -10,48 +9,6 @@ import (
 	"server/internal/model"
 	"server/internal/taxonomy"
 )
-
-func categoryKeyColumn(field string) string {
-	if field == "cid" {
-		return "category_key"
-	}
-	return "root_category_key"
-}
-
-func categoryIDColumn(field string) string {
-	if field == "cid" {
-		return "cid"
-	}
-	return "pid"
-}
-
-func categoryStableKey(id int64) string {
-	return strings.TrimSpace(taxonomy.GetCategoryStableKeyByID(taxonomy.ResolveCategoryID(id)))
-}
-
-func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
-	if db.Mdb == nil || len(categoryIDs) == 0 {
-		return nil
-	}
-	var mappings []model.CategoryMapping
-	if err := db.Mdb.Where("category_id IN ?", categoryIDs).Find(&mappings).Error; err != nil {
-		return nil
-	}
-	keys := make([]string, 0, len(mappings))
-	seen := make(map[string]struct{}, len(mappings))
-	for _, mapping := range mappings {
-		key := taxonomy.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId)
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		keys = append(keys, key)
-	}
-	return keys
-}
 
 func visibleDescendantCategoryIDs(categoryID int64) []int64 {
 	if db.Mdb == nil || categoryID <= 0 {
@@ -89,119 +46,6 @@ func visibleCategoryAndDescendantIDs(categoryID int64) []int64 {
 	ids := []int64{categoryID}
 	ids = append(ids, visibleDescendantCategoryIDs(categoryID)...)
 	return ids
-}
-
-func categorySourceKeys(field string, id int64) []string {
-	category, ok := categoryByID(id)
-	if !ok {
-		return nil
-	}
-	if field == "cid" {
-		return sourceCategoryKeysByCategoryIDs(visibleCategoryAndDescendantIDs(category.Id))
-	}
-
-	rootID := category.Id
-	if category.Pid > 0 {
-		rootID = taxonomy.GetRootId(category.Id)
-	}
-	return sourceCategoryKeysByCategoryIDs(visibleCategoryAndDescendantIDs(rootID))
-}
-
-func rootCategorySourceKeyGroups(id int64) ([]string, []string) {
-	category, ok := categoryByID(id)
-	if !ok {
-		return nil, nil
-	}
-	rootID := category.Id
-	if category.Pid > 0 {
-		rootID = taxonomy.GetRootId(category.Id)
-	}
-	visibleCategoryIDs := visibleCategoryAndDescendantIDs(rootID)
-	return sourceCategoryKeysByCategoryIDs([]int64{rootID}), sourceCategoryKeysByCategoryIDs(visibleCategoryIDs)
-}
-
-func applyRootCategorySourceFilter(query *gorm.DB, rootID int64) *gorm.DB {
-	if query == nil {
-		return nil
-	}
-	rootKeys, visibleKeys := rootCategorySourceKeyGroups(rootID)
-	if len(visibleKeys) == 0 {
-		return query
-	}
-	subQuery := query.Session(&gorm.Session{NewDB: true})
-	visibleCategoryQuery := subQuery.Where("category_key IN ?", visibleKeys)
-	if len(rootKeys) > 0 {
-		visibleCategoryQuery = visibleCategoryQuery.Or("root_category_key IN ? AND (category_key = '' OR category_key IS NULL)", rootKeys)
-	}
-	return query.Where(visibleCategoryQuery)
-}
-
-func categoryByID(id int64) (*model.Category, bool) {
-	if db.Mdb == nil {
-		return nil, false
-	}
-	resolvedID := taxonomy.ResolveCategoryID(id)
-	if resolvedID <= 0 {
-		return nil, false
-	}
-	var category model.Category
-	if err := db.Mdb.Where("id = ?", resolvedID).First(&category).Error; err != nil {
-		return nil, false
-	}
-	return &category, true
-}
-
-func emptyFilmIndexQuery(query *gorm.DB) *gorm.DB {
-	return query.Where("1 = 0")
-}
-
-func applyCategoryVisibilityFilter(query *gorm.DB, field string, id int64) *gorm.DB {
-	category, ok := categoryByID(id)
-	if !ok || !category.Show {
-		return emptyFilmIndexQuery(query)
-	}
-
-	if field == "pid" {
-		rootID := category.Id
-		if category.Pid > 0 {
-			rootID = taxonomy.GetRootId(category.Id)
-		}
-		if root, ok := categoryByID(rootID); !ok || !root.Show {
-			return emptyFilmIndexQuery(query)
-		}
-		return query
-	}
-
-	if category.Pid > 0 {
-		if parent, ok := categoryByID(category.Pid); !ok || !parent.Show {
-			return emptyFilmIndexQuery(query)
-		}
-	}
-	return query
-}
-
-func ApplyCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
-	resolvedID := taxonomy.ResolveCategoryID(id)
-	if resolvedID <= 0 {
-		return emptyFilmIndexQuery(query)
-	}
-	query = applyCategoryVisibilityFilter(query, field, resolvedID)
-	if keys := categorySourceKeys(field, resolvedID); len(keys) > 0 {
-		if field == "pid" {
-			return applyRootCategorySourceFilter(query, resolvedID)
-		}
-		return query.Where("category_key IN ?", keys)
-	}
-	if stableKey := categoryStableKey(resolvedID); stableKey != "" {
-		return query.Where(fmt.Sprintf("%s = ?", categoryKeyColumn(field)), stableKey)
-	}
-	return query.Where(fmt.Sprintf("%s = ?", categoryIDColumn(field)), resolvedID)
-}
-
-// HasLiveCategoryKeys 当前展示分类是否已有来源映射。没有映射时列表仍按 pid/cid 过滤。
-func HasLiveCategoryKeys(field string, categoryID int64) bool {
-	_, _, visible, roots := liveCategoryKeySets(field, categoryID)
-	return len(visible) > 0 || len(roots) > 0
 }
 
 // LiveCategoryMatchSQL 展示分类的匹配条件。
@@ -283,11 +127,6 @@ func sourceTypeMatchCond(columnPrefix, _ string, keys []string) (string, []any) 
 	return col("category_key") + " IN (" + placeholders + ")", args
 }
 
-// ApplySourceTypeMatch 只匹配当前采集站自己的分类键。不把其他站的同名分类并进来。
-func ApplySourceTypeMatch(query *gorm.DB, sourceID, field string, typeID int64) *gorm.DB {
-	return ApplySourceTypeMatchIDs(query, sourceID, field, []int64{typeID})
-}
-
 // ApplySourceTypeMatchIDs 匹配该站这一组 type_id。规则合并后的前台分类把成员一起带上。
 func ApplySourceTypeMatchIDs(query *gorm.DB, sourceID, field string, typeIDs []int64) *gorm.DB {
 	if query == nil {
@@ -295,11 +134,6 @@ func ApplySourceTypeMatchIDs(query *gorm.DB, sourceID, field string, typeIDs []i
 	}
 	cond, args := sourceTypeMatchCond("", field, sourceTypeKeys(sourceID, typeIDs))
 	return query.Where(cond, args...)
-}
-
-// LiveCategoryMemberSQL 从指定采集站的播放线路取出属于该站这个 type_id 的 mid。
-func LiveCategoryMemberSQL(dialectName, sourceID, field string, typeID int64) (string, []any) {
-	return LiveCategoryMemberSQLIDs(dialectName, sourceID, field, []int64{typeID})
 }
 
 // LiveCategoryMemberSQLIDs 从该站播放线路取出这一组 type_id 的 mid。
@@ -318,10 +152,19 @@ func LiveCategoryMemberSQLIDs(dialectName, sourceID, field string, typeIDs []int
 	return memberSQL, args
 }
 
-// LiveCategoryProbeKeys 返回展示分类的 id 列、id、子分类键和大类根键。
-// 片库里多数影片 pid 为 0，列表要同时认这些来源分类键。
-func LiveCategoryProbeKeys(field string, categoryID int64) (idColumn string, id int64, categoryKeys, rootKeys []string) {
-	return liveCategoryKeySets(field, categoryID)
+func categoryByID(id int64) (*model.Category, bool) {
+	if db.Mdb == nil {
+		return nil, false
+	}
+	resolvedID := taxonomy.ResolveCategoryID(id)
+	if resolvedID <= 0 {
+		return nil, false
+	}
+	var category model.Category
+	if err := db.Mdb.Where("id = ?", resolvedID).First(&category).Error; err != nil {
+		return nil, false
+	}
+	return &category, true
 }
 
 func liveCategoryKeySets(field string, categoryID int64) (col string, id int64, visible []string, roots []string) {
@@ -374,31 +217,4 @@ func sqlPlaceholders(n int) string {
 		return ""
 	}
 	return strings.TrimRight(strings.Repeat("?,", n), ",")
-}
-
-// ApplyManageCategoryFieldFilter 专供管理后台多维检索分类过滤（不校验前台 show 状态，兼容聚合映射与物理 pid/cid）
-func ApplyManageCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
-	if query == nil {
-		return nil
-	}
-	resolvedID := taxonomy.ResolveCategoryID(id)
-	if resolvedID <= 0 {
-		return emptyFilmIndexQuery(query)
-	}
-	if keys := categorySourceKeys(field, resolvedID); len(keys) > 0 {
-		if field == "pid" {
-			rootKeys, visibleKeys := rootCategorySourceKeyGroups(resolvedID)
-			subQuery := query.Session(&gorm.Session{NewDB: true})
-			cond := subQuery.Where("category_key IN ? OR pid = ?", visibleKeys, resolvedID)
-			if len(rootKeys) > 0 {
-				cond = cond.Or("root_category_key IN ? AND (category_key = '' OR category_key IS NULL)", rootKeys)
-			}
-			return query.Where(cond)
-		}
-		return query.Where("(category_key IN ? OR cid = ?)", keys, resolvedID)
-	}
-	if stableKey := categoryStableKey(resolvedID); stableKey != "" {
-		return query.Where(fmt.Sprintf("(%s = ? OR %s = ?)", categoryKeyColumn(field), categoryIDColumn(field)), stableKey, resolvedID)
-	}
-	return query.Where(fmt.Sprintf("%s = ?", categoryIDColumn(field)), resolvedID)
 }

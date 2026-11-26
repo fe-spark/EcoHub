@@ -198,9 +198,3 @@ func UserAccountGate(id uint) (status int, role int, err error) {
 	}
 	return row.Status, row.Role, nil
 }
-
-// UserAccountStatus 读取账号状态。0 为正常。
-func UserAccountStatus(id uint) (int, error) {
-	status, _, err := UserAccountGate(id)
-	return status, err
-}

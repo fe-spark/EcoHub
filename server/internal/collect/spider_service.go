@@ -59,11 +59,6 @@ func (s *SpiderService) BatchCollect(time int, ids []string) model.CollectBatchR
 	return result
 }
 
-// AutoCollect 自动采集
-func (s *SpiderService) AutoCollect(time int) {
-	utils.GoSafe("自动采集", func() { AutoCollect(time) })
-}
-
 var categorySyncs sync.WaitGroup
 
 // WaitCategorySyncs 等待全部异步分类同步协程结束（供上层测试或站点重置调用）。
@@ -79,11 +74,6 @@ func (s *SpiderService) InventoryStats(ctx context.Context, refresh bool) (filmr
 // CollectFilms 触发主站影片采集同步（兼容单个与批量）
 func (s *SpiderService) CollectFilms(ids []int64) {
 	utils.GoSafe("单片更新", func() { CollectFilms(ids) })
-}
-
-// FilmClassCollect 重新拉取每个采集站的分类副本。已调整的显示和排序保留。
-func (s *SpiderService) FilmClassCollect() error {
-	return s.SyncAllSourceCategories()
 }
 
 // SyncSourceCategoriesAsync 异步拉取一个采集站的分类，立即广播 syncing 状态，后台完成写入。
@@ -229,11 +219,6 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 	}
 }
 
-// StopAllTasks 强制停止所有採集任務
-func (s *SpiderService) StopAllTasks() {
-	StopAllTasks()
-}
-
 // StopTasks 批量停止指定采集站的任务。
 func (s *SpiderService) StopTasks(ids []string) {
 	for _, id := range ids {
@@ -242,14 +227,4 @@ func (s *SpiderService) StopTasks(ids []string) {
 			StopTask(id)
 		}
 	}
-}
-
-// StopTask 停止指定采集站的任务（仅停止任务，不影响采集站启用状态）。
-func (s *SpiderService) StopTask(id string) error {
-	fs := sourcecatalog.FindCollectSourceById(id)
-	if fs == nil {
-		return errors.New("采集站信息不存在")
-	}
-	StopTask(id)
-	return nil
 }

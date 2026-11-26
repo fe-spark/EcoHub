@@ -10,14 +10,6 @@ import (
 // ErrDatabaseUnavailable 数据库连接未就绪。
 var ErrDatabaseUnavailable = errors.New("数据库未连接")
 
-func GetFilmIndexById(id int64) *model.FilmIndex {
-	row, err := FindFilmIndex(id)
-	if err != nil {
-		return nil
-	}
-	return &row
-}
-
 // FindFilmIndex 按 mid 读取影片档案。
 func FindFilmIndex(mid int64) (model.FilmIndex, error) {
 	if db.Mdb == nil {

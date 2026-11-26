@@ -116,10 +116,6 @@ func (s *MappingService) UpdateMappingRule(rule model.MappingRule) error {
 	return refreshProjectedReadModelAfterMappingRuleChange(oldGroup, rule.Group)
 }
 
-func (s *MappingService) DeleteMappingRule(id uint) error {
-	return s.DeleteMappingRules([]uint{id})
-}
-
 // DeleteMappingRules 批量删除映射规则，统一在全部删除后刷新一次缓存与分类映射。
 func (s *MappingService) DeleteMappingRules(ids []uint) error {
 	cleanIDs := make([]uint, 0, len(ids))

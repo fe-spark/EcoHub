@@ -5,9 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/taxonomy"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -29,34 +27,6 @@ func BuildMovieMatchKeysWithCategory(dbID int64, name string, pid int64) []strin
 		keys = append(keys, utils.GenerateHashKey(normalizedTitle))
 	}
 	return UniqueKeys(keys)
-}
-func BuildMovieMatchKeys(dbID int64, name string) []string {
-	return BuildMovieMatchKeysWithCategory(dbID, name, 0)
-}
-
-// DropSharedMatchKeys 丢掉被多部影片共用的匹配键（同名跨类的纯片名回退键）。
-// 详情查找只用一部片子独占的键，避免两条「仙逆」互相看见对方线路。
-func DropSharedMatchKeys(keys []string) []string {
-	keys = UniqueKeys(keys)
-	if len(keys) == 0 || db.Mdb == nil {
-		return keys
-	}
-	owners := LoadMidCandidatesByMatchKeys(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		seen := make(map[int64]struct{})
-		for _, mid := range owners[key] {
-			if mid <= 0 {
-				continue
-			}
-			seen[mid] = struct{}{}
-		}
-		if len(seen) > 1 {
-			continue
-		}
-		out = append(out, key)
-	}
-	return out
 }
 
 func UniqueKeys(keys []string) []string {
@@ -101,10 +71,6 @@ func buildMovieMatchKeyRecords(mid int64, keys []string) []model.MovieMatchKey {
 		records = append(records, model.MovieMatchKey{Mid: mid, MatchKey: key})
 	}
 	return records
-}
-
-func SaveMovieMatchKeysByMid(midToKeys map[int64][]string) error {
-	return SaveMovieMatchKeysByMidTx(db.Mdb, midToKeys)
 }
 
 func SaveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error {
@@ -165,50 +131,4 @@ func SaveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error 
 		}
 	}
 	return nil
-}
-
-func LoadMovieMatchKeysByMids(mids []int64) map[int64][]string {
-	return LoadMovieMatchKeysByMidsTx(db.Mdb, mids)
-}
-
-func LoadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
-	keys = UniqueKeys(keys)
-	if len(keys) == 0 || db.Mdb == nil {
-		return nil
-	}
-
-	var records []model.MovieMatchKey
-	if err := db.Mdb.Where("match_key IN ?", keys).Order("mid ASC, match_key ASC").Find(&records).Error; err != nil {
-		return nil
-	}
-
-	result := make(map[string][]int64, len(keys))
-	for _, record := range records {
-		result[record.MatchKey] = append(result[record.MatchKey], record.Mid)
-	}
-	return result
-}
-
-func LoadMovieMatchKeysBySnapshot(snapshot *model.FilmListSnapshot, detail *model.MovieDetail) []string {
-	if snapshot != nil && snapshot.Mid > 0 {
-		if keys := LoadMovieMatchKeysByMids([]int64{snapshot.Mid})[snapshot.Mid]; len(keys) > 0 {
-			return DropSharedMatchKeys(keys)
-		}
-	}
-	if detail == nil {
-		return nil
-	}
-	pid := int64(0)
-	if snapshot != nil {
-		if snapshot.Pid > 0 {
-			pid = taxonomy.GetRootId(snapshot.Pid)
-		}
-		if pid <= 0 && snapshot.Cid > 0 {
-			pid = taxonomy.GetRootId(snapshot.Cid)
-		}
-	}
-	if pid <= 0 {
-		pid = ResolveMovieDetailRootPid(*detail)
-	}
-	return BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 }

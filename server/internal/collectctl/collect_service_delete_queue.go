@@ -248,7 +248,3 @@ func enqueueDelFilmSources(queue chan deleteSourceJob, sources []*model.FilmSour
 	res.commit(nil, "")
 	return nil
 }
-
-func enqueueDelFilmSource(src *model.FilmSource) error {
-	return enqueueDelFilmSources(deleteSourceQueue, []*model.FilmSource{src})
-}

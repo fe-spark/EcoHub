@@ -24,10 +24,6 @@ func isDispatchStopped(runVersion uint64) bool {
 	return stopAllVersion.Load() != runVersion
 }
 
-func countLiveCollectTasks() int {
-	return progress.TaskCount()
-}
-
 // prioritizeCollectSources 采集站排序（按后台设置的 Sort 升序优先派发）。
 func prioritizeCollectSources(sources []model.FilmSource) []model.FilmSource {
 	if len(sources) <= 1 {
@@ -82,18 +78,6 @@ func claimCollectSources(sources []model.FilmSource, tag string) (CollectClaim, 
 	}
 	epochs := progress.MarkSourcesCollectStarting(occupied, queueID)
 	return CollectClaim{Sources: occupied, tokens: tokens, epochs: epochs}, nil
-}
-
-func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string) {
-	if len(sources) == 0 {
-		return
-	}
-	claim, err := claimCollectSources(sources, tag)
-	if err != nil {
-		syslog.Errorf("[%s] 分配采集队列失败: %v", tag, err)
-		return
-	}
-	runSourcesWithLimitCore(claim, h, tag, trigger)
 }
 
 func runSourcesWithLimitCore(claim CollectClaim, h int, tag, trigger string) {

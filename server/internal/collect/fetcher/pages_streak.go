@@ -34,12 +34,6 @@ func newFetchStreak(ctx context.Context, name string) (*fetchStreak, func() bool
 	return s, stop
 }
 
-func (s *fetchStreak) succeeded() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ok > 0
-}
-
 // tryBegin 可以领新页时占一个在途名额。正在等在途结果，或已经决定中断时返回 false。
 func (s *fetchStreak) tryBegin() bool {
 	s.mu.Lock()

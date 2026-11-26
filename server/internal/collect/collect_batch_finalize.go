@@ -217,9 +217,6 @@ func (b *collectBatchContext) warmPrimaryHome(sourceID string) {
 	b.primaryWarmedUp = true
 	b.mu.Unlock()
 	filmsnapshot.FlushSnapshotCacheInvalidation()
-	if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
-		filmsnapshot.NotifySnapshotPublished(version)
-	}
 }
 
 func (b *collectBatchContext) flushAndFinalize() error {

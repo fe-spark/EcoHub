@@ -191,15 +191,6 @@ func GetFilterMap() map[string]bool {
 	return res
 }
 
-func GetAttributeMapping() map[string]string {
-	snap := getMappingSnapshot()
-	res := make(map[string]string, len(snap.Attribute))
-	for k, v := range snap.Attribute {
-		res[k] = v
-	}
-	return res
-}
-
 func GetPlotMapping() map[string]string {
 	snap := getMappingSnapshot()
 	res := make(map[string]string, len(snap.Plot))

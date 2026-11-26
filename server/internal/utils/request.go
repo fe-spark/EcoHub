@@ -291,28 +291,6 @@ func getOrCreateInsecureTransport(base *http.Transport, proxyURL string) *http.T
 	return t
 }
 
-// CloseIdleHTTPConnections 丢掉空闲长连接。源站成批 EOF 时，重试不要再走刚被掐掉的连接。
-func CloseIdleHTTPConnections() {
-	sharedTransport.CloseIdleConnections()
-	sharedInsecureTransport.CloseIdleConnections()
-	idle := make([]*http.Transport, 0)
-	proxyTransportsMu.RLock()
-	for _, transport := range proxyTransports {
-		idle = append(idle, transport)
-	}
-	proxyTransportsMu.RUnlock()
-	proxyInsecureTransportsMu.RLock()
-	for _, transport := range proxyInsecureTransports {
-		idle = append(idle, transport)
-	}
-	proxyInsecureTransportsMu.RUnlock()
-	for _, transport := range idle {
-		if transport != nil {
-			transport.CloseIdleConnections()
-		}
-	}
-}
-
 // ResetProxyTransports 清理并关闭全部代理传输池（代理配置变更或重置时调用）。
 func ResetProxyTransports() {
 	sharedTransport.CloseIdleConnections()

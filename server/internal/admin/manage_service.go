@@ -197,15 +197,3 @@ func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error 
 	curr.Notice = notice
 	return repobase.SaveSiteBasic(curr)
 }
-
-func dtoError(msg string) error {
-	return &manageError{message: msg}
-}
-
-type manageError struct {
-	message string
-}
-
-func (e *manageError) Error() string {
-	return e.message
-}

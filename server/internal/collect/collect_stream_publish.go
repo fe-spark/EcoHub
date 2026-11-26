@@ -339,9 +339,6 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {
 		filmsnapshot.FlushSnapshotCacheInvalidation()
-		if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
-			filmsnapshot.NotifySnapshotPublished(version)
-		}
 	}
 	return nil
 }

@@ -14,9 +14,6 @@ import (
 // cleaningURISources 记录正在执行换源清库的站点，防止清库窗口被切为主站。
 var cleaningURISources sync.Map
 
-// ErrPrimaryMismatch 写操作携带或归属的站点与当前主站不一致（D3）。
-var ErrPrimaryMismatch = sourcecatalog.ErrPrimaryMismatch
-
 // ErrPrimarySwitchForbidden 非超级管理员尝试执行或触发主站切换/交接（D4）。
 var ErrPrimarySwitchForbidden = errors.New("权限不足，仅超级管理员可执行主站切换")
 

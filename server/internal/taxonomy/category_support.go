@@ -12,18 +12,6 @@ import (
 	"server/internal/model"
 )
 
-func BuildCategoryStableKey(pid int64, name string) string {
-	name = strings.TrimSpace(name)
-	if pid == 0 {
-		return fmt.Sprintf("root:%s", name)
-	}
-	parentKey := GetCategoryStableKeyByID(pid)
-	if parentKey == "" {
-		return fmt.Sprintf("sub:%d:%s", pid, name)
-	}
-	return fmt.Sprintf("%s/%s", parentKey, name)
-}
-
 func BuildSourceCategoryKey(sourceId string, sourceTypeId int64) string {
 	sourceId = strings.TrimSpace(sourceId)
 	if sourceId == "" || sourceTypeId <= 0 {
@@ -116,10 +104,6 @@ func GetCategoryVersion() string {
 	return version
 }
 
-func GetVersionedIndexPageCacheKey() string {
-	return fmt.Sprintf("%s:v%s", config.IndexPageCacheKey, GetCategoryVersion())
-}
-
 func RefreshCategoryCache() {
 	if db.Mdb == nil {
 		return
@@ -190,22 +174,6 @@ func IsRootCategory(id int64) bool {
 
 	p, ok := idToPid[id]
 	return ok && p == 0
-}
-
-func GetParentId(id int64) int64 {
-	if id == 0 {
-		return 0
-	}
-
-	catMu.RLock()
-	if !catInitialized {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
-	return idToPid[id]
 }
 
 // isCategoryVisibleLocked 判断分类是否可用，调用方必须持有 catMu 锁

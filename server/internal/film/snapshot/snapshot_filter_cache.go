@@ -5,10 +5,6 @@ import (
 	"server/internal/model/dto"
 )
 
-func SearchSnapshotsByKeywordAndSortFast(version string, keyword string, sortField string, page *dto.Page) ([]model.FilmListSnapshot, error) {
-	return SearchSnapshotsByKeywordAndSortReadModel(version, keyword, sortField, page)
-}
-
 func SearchSnapshotsByKeywordSourceAndSortFast(version string, sourceID string, keyword string, sortField string, page *dto.Page) ([]model.FilmListSnapshot, error) {
 	return SearchSnapshotsByKeywordSourceAndSortReadModel(version, sourceID, keyword, sortField, page)
 }

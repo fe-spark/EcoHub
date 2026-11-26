@@ -22,11 +22,6 @@ type peerPick struct {
 // PeerCategoryVisibleFunc 判断指定采集站的影片所属分类是否对外可见。
 type PeerCategoryVisibleFunc func(sourceID, categoryKey, rootCategoryKey string, cid, pid int64) bool
 
-// LoadActivePeerPlaylists 使用当前数据库连接加载其他站的播放线路。
-func LoadActivePeerPlaylists(infos []model.FilmIndex) (map[int64][]model.FilmSourcePlaylist, error) {
-	return LoadActivePeerPlaylistsWithFilter(infos, nil)
-}
-
 // LoadActivePeerPlaylistsWithFilter 使用当前数据库连接加载其他站的播放线路，并按分类可见性过滤。
 func LoadActivePeerPlaylistsWithFilter(infos []model.FilmIndex, visible PeerCategoryVisibleFunc) (map[int64][]model.FilmSourcePlaylist, error) {
 	if db.Mdb == nil {

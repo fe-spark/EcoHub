@@ -173,42 +173,11 @@ func UnregisterTask(id, reqID string) bool {
 	return true
 }
 
-// TaskCount 当前活跃任务数。
-func TaskCount() int {
-	n := 0
-	tasks.Range(func(_, _ any) bool {
-		n++
-		return true
-	})
-	return n
-}
-
 // RangeTasks 遍历活跃任务，fn 返回 false 时终止。
 func RangeTasks(fn func(id, reqID string) bool) {
 	tasks.Range(func(key, value any) bool {
 		return fn(key.(string), value.(task).reqID)
 	})
-}
-
-// CancelTask 取消指定任务的上下文，返回是否存在该任务。
-func CancelTask(id string) bool {
-	val, ok := tasks.Load(id)
-	if !ok {
-		return false
-	}
-	val.(task).cancel()
-	return true
-}
-
-// CancelAllTasks 取消全部活跃任务并返回取消数量。
-func CancelAllTasks() int {
-	count := 0
-	tasks.Range(func(_, value any) bool {
-		value.(task).cancel()
-		count++
-		return true
-	})
-	return count
 }
 
 // MarkAllRunningStopped 把所有 starting/running 的进度置为 stopped，并立即取消在途探页。

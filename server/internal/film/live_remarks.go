@@ -10,20 +10,6 @@ import (
 	"server/internal/model"
 )
 
-type liveProgress struct {
-	count         int
-	last          string
-	masterCount   int
-	masterRemarks string
-}
-
-func (p *liveProgress) note(count int, last string) {
-	if count > p.count {
-		p.count = count
-		p.last = last
-	}
-}
-
 // pickLiveRemark 轮播更新状态与最近更新同源：全库最大集数所在进度。
 // 主站集数未落后时用主站 Remarks；附属站先追到更多集时按该线路最后一集生成文案。
 func pickLiveRemark(masterCount int, masterRemarks, leadingLast string, globalMax int) string {
@@ -70,8 +56,6 @@ type LiveBannerSnapshot struct {
 	CustomPicture      string
 	CustomPictureSlide string
 	IsCustomPicture    bool
-	IsScraped          bool
-	TmdbID             int64
 }
 
 func (s LiveBannerSnapshot) DisplayPicture() string {
@@ -181,19 +165,4 @@ func LiveBannerSnapshotsByMIDs(ctx context.Context, sourceID string, mids []int6
 		out[snap.Mid] = current
 	}
 	return out, nil
-}
-
-// LiveUpdateRemarksByMIDs 从活跃快照读取展示用更新状态（毫秒级索引直查）。
-func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
-	snaps, err := LiveBannerSnapshotsByMIDs(context.Background(), "", mids)
-	if err != nil {
-		return map[int64]string{}
-	}
-	out := make(map[int64]string, len(snaps))
-	for mid, s := range snaps {
-		if s.Remarks != "" {
-			out[mid] = s.Remarks
-		}
-	}
-	return out
 }

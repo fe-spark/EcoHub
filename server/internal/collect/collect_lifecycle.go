@@ -91,29 +91,6 @@ func (s *collectLifecycleState) waitUntilIdle() {
 	s.waitIdleLocked()
 }
 
-// waitUntilIdleFor 最多等 d。到点仍有站在抓页时返回 false。
-func (s *collectLifecycleState) waitUntilIdleFor(d time.Duration) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.activeCount == 0 {
-		return true
-	}
-	timer := time.AfterFunc(d, func() {
-		s.mu.Lock()
-		s.cond.Broadcast()
-		s.mu.Unlock()
-	})
-	defer timer.Stop()
-	deadline := time.Now().Add(d)
-	for s.activeCount > 0 {
-		if !time.Now().Before(deadline) {
-			return false
-		}
-		s.cond.Wait()
-	}
-	return true
-}
-
 func (s *collectLifecycleState) activity() (active int, publishing int, sources []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -334,28 +311,6 @@ func (s *collectLifecycleState) waitSource(sourceID string, timeout time.Duratio
 			return errors.New("停止采集超时，未删除")
 		}
 		s.cond.Wait()
-	}
-}
-
-func (s *collectLifecycleState) waitIdle(timeout time.Duration) error {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	ticker := time.NewTicker(time.Millisecond * 200)
-	defer ticker.Stop()
-
-	for {
-		s.mu.Lock()
-		activeCount := s.activeCount
-		s.mu.Unlock()
-		if activeCount == 0 {
-			return nil
-		}
-
-		select {
-		case <-deadline.C:
-			return fmt.Errorf("等待采集任务停止超时: active=%d", activeCount)
-		case <-ticker.C:
-		}
 	}
 }
 

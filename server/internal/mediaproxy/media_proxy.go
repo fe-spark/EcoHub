@@ -73,11 +73,6 @@ func getActiveRuntime() mediaProxyRuntime {
 	return val.(mediaProxyRuntime)
 }
 
-// GetActiveMediaProxyConfig 获取当前有效的媒体反代配置（微秒级内存无锁读取）
-func GetActiveMediaProxyConfig() model.MediaProxyConfig {
-	return getActiveRuntime().config
-}
-
 // ValidateMediaProxyConfig 严格校验媒体反代配置合法性
 func ValidateMediaProxyConfig(cfg model.MediaProxyConfig) error {
 	tpl := strings.TrimSpace(cfg.Template)
@@ -202,19 +197,6 @@ func WrapMovieBasicInfos(list []model.MovieBasicInfo) []model.MovieBasicInfo {
 		WrapMovieBasicInfo(&out[i])
 	}
 	return out
-}
-
-// WrapMovieDetail 包装影片详情中的封面字段
-func WrapMovieDetail(detail *model.MovieDetail) *model.MovieDetail {
-	if detail == nil {
-		return nil
-	}
-	clone := *detail
-	clone.Picture = WrapMediaURL(clone.Picture)
-	clone.PictureSlide = WrapMediaURL(clone.PictureSlide)
-	clone.CustomPicture = WrapMediaURL(clone.CustomPicture)
-	clone.CustomPictureSlide = WrapMediaURL(clone.CustomPictureSlide)
-	return &clone
 }
 
 // WrapMovieDetailVo 包装影片详情 VO 中的封面字段（纯值拷贝，绝不污染原始结构）

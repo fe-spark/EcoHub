@@ -155,9 +155,6 @@ func Infof(format string, v ...any)  { emit(LevelInfo, format, v...) }
 func Warnf(format string, v ...any)  { emit(LevelWarn, format, v...) }
 func Errorf(format string, v ...any) { emit(LevelError, format, v...) }
 
-func Info(v ...any)  { emit(LevelInfo, "%s", fmt.Sprint(v...)) }
-func Error(v ...any) { emit(LevelError, "%s", fmt.Sprint(v...)) }
-
 func emit(level, format string, v ...any) {
 	msg := strings.TrimRight(fmt.Sprintf(format, v...), "\n")
 	ts := time.Now().Format("2006/01/02 15:04:05")

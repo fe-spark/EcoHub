@@ -8,11 +8,6 @@ import (
 	"server/internal/infra/db"
 )
 
-// ClearSearchTagsCache 清除搜索标签与筛选项缓存。
-func ClearSearchTagsCache(_ int64) {
-	ClearAllSearchTagsCache()
-}
-
 // ClearAllSearchTagsCache 清除所有分类的搜索标签及筛选项缓存（单次流式扫描 + 批量 UNLINK）。
 func ClearAllSearchTagsCache() {
 	if db.Rdb == nil {

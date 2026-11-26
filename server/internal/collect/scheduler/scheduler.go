@@ -109,10 +109,6 @@ func (s *writeScheduler) cancelSource(sourceID string) {
 	s.lane.cancelSource(sourceID)
 }
 
-func (s *writeScheduler) snapshot() writeSnapshot {
-	return s.lane.snapshot()
-}
-
 func (s *writeScheduler) waitPending(ctx context.Context) error {
 	return s.lane.waitPending(ctx)
 }

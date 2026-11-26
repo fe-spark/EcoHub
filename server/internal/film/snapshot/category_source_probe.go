@@ -14,11 +14,9 @@ import (
 
 const (
 	categoryProbeMaxRows = 200
-	categoryProbeMaxKeys = 400
 
 	probeIndexRootUpdate = "idx_root_key_upd_stamp"
 	probeIndexCatUpdate  = "idx_cat_key_upd_stamp"
-	probeIndexPidUpdate  = "idx_film_index_pid_update_mid"
 )
 
 type probeRank struct {
@@ -83,32 +81,6 @@ func sourceTypeProbeBranches(sourceKeys []string) []probeBranch {
 			continue
 		}
 		branches = append(branches, probeBranch{column: "category_key", value: sourceKey, index: probeIndexCatUpdate})
-	}
-	return branches
-}
-
-func buildProbeBranches(idColumn string, id int64, categoryKeys, rootKeys []string) []probeBranch {
-	branches := make([]probeBranch, 0, 1+len(categoryKeys)+len(rootKeys))
-	if id > 0 && (idColumn == "pid" || idColumn == "cid") {
-		index := ""
-		if idColumn == "pid" {
-			index = probeIndexPidUpdate
-		}
-		branches = append(branches, probeBranch{column: idColumn, value: id, index: index})
-	}
-	rootIndex := probeIndexRootUpdate
-	catIndex := probeIndexCatUpdate
-	for _, key := range rootKeys {
-		if key == "" {
-			continue
-		}
-		branches = append(branches, probeBranch{column: "root_category_key", value: key, index: rootIndex})
-	}
-	for _, key := range categoryKeys {
-		if key == "" {
-			continue
-		}
-		branches = append(branches, probeBranch{column: "category_key", value: key, index: catIndex})
 	}
 	return branches
 }

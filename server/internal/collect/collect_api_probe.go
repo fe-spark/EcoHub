@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"server/internal/repobase"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -103,27 +102,20 @@ func CollectApiTest(s model.FilmSource) error {
 
 // CollectApiTestCtx 在给定超时内探测采集站。
 func CollectApiTestCtx(ctx context.Context, s model.FilmSource) error {
-	return collectApiTest(ctx, s, 0, false, false)
+	return collectApiTest(ctx, s, false, false)
 }
 
 func CollectApiTestChoosingProxy(s model.FilmSource, useProxy bool) error {
-	return collectApiTest(context.Background(), s, 0, useProxy, true)
+	return collectApiTest(context.Background(), s, useProxy, true)
 }
 
-func CollectApiTestWithTimeout(s model.FilmSource, timeoutSeconds int) error {
-	return collectApiTest(context.Background(), s, timeoutSeconds, false, false)
-}
-
-func collectApiTest(ctx context.Context, s model.FilmSource, timeoutSeconds int, useProxy bool, proxyChosen bool) error {
+func collectApiTest(ctx context.Context, s model.FilmSource, useProxy bool, proxyChosen bool) error {
 	if ctx == nil {
 		return errors.New("检测上下文为空")
 	}
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, Ctx: ctx, SkipTLSVerify: s.SkipTLSVerify}
 	r.Params.Set("ac", "list")
 	r.Params.Set("pg", "1")
-	if timeoutSeconds > 0 {
-		r.Header = map[string][]string{"timeout": {strconv.Itoa(timeoutSeconds)}}
-	}
 	if (proxyChosen && useProxy) || (!proxyChosen && s.ProxyCollect) {
 		ok, proxy, err := repobase.ResolveSpiderProxy()
 		if err != nil {

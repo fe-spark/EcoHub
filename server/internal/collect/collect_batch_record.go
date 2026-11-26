@@ -225,18 +225,6 @@ func (b *collectBatchContext) trackFilmsLocked(sourceID string, mids []int64) {
 	}
 }
 
-// runningFilmRowsLocked 已入库的影片行数。同一影片在多站各算一行。调用方须持有 b.mu。
-func (b *collectBatchContext) runningFilmRowsLocked() int {
-	rows := 0
-	for sourceID, set := range b.sourceFilmMIDs {
-		if b.sourceDroppedLocked(sourceID) {
-			continue
-		}
-		rows += len(set)
-	}
-	return rows
-}
-
 // ledgerFilmsLocked 这一批要写入清单的编号。调用方须持有 b.mu。
 // 普通批次是实际入库的编号。单片批次只存要重放的编号：有入库的站只挂自己的，一个站都没入库时只挂请求过的站。
 func (b *collectBatchContext) ledgerFilmsLocked() map[string][]int64 {

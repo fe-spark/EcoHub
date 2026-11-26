@@ -19,8 +19,7 @@ import (
 )
 
 const (
-	tagSearchCacheTTL    = 2 * time.Hour
-	snapshotSelectFields = "mid, first_source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language"
+	tagSearchCacheTTL = 2 * time.Hour
 )
 
 type tagSearchCacheItem struct {

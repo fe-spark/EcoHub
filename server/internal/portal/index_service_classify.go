@@ -18,27 +18,6 @@ import (
 	"server/internal/taxonomy"
 )
 
-// GetCategoryInfo 获取活跃大类信息 (动态结构版)
-func (i *IndexService) GetCategoryInfo() map[string]any {
-	nav := make(map[string]any)
-	tree := catalog.GetCategoryTree()
-
-	for _, t := range tree.Children {
-		if !t.Show {
-			continue
-		}
-		key := strings.ToLower(strings.TrimSpace(t.Alias))
-		if key == "" {
-			key = strings.ToLower(strings.TrimSpace(t.Name))
-		}
-		if key == "" {
-			continue
-		}
-		nav[key] = t
-	}
-	return nav
-}
-
 // ErrNavCategorySourceUnavailable 指定的采集站不存在或已停用。
 var ErrNavCategorySourceUnavailable = errors.New("采集站不存在或已停用")
 

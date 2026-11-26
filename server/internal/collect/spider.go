@@ -23,8 +23,6 @@ import (
 	采集逻辑 v3
 */
 
-var spiderCore = &JsonCollect{}
-
 // collectPagesFn 分页拉取实现；默认注入 fetcher.CollectPages，测试可替换以验证停止收尾路径。
 var collectPagesFn = fetcher.CollectPages
 

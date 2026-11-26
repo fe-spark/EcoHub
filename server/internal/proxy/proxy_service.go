@@ -157,10 +157,6 @@ func (s *ProxyService) TestProxy(proxyURL string, preserveAuth bool) (int64, err
 	return duration, nil
 }
 
-func (s *ProxyService) ResolveSpiderProxy() (bool, string, error) {
-	return repobase.ResolveSpiderProxy()
-}
-
 func RedactProxyURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
