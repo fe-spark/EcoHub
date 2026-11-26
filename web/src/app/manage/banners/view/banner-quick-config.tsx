@@ -2,10 +2,10 @@
 
 import React, { useMemo, useRef } from "react";
 import { Button, InputNumber } from "antd";
-import { FieldTimeOutlined, FireOutlined, StarOutlined } from "@ant-design/icons";
+import { FieldTimeOutlined, FireOutlined, StarOutlined, TrophyOutlined } from "@ant-design/icons";
 import styles from "./banner-quick.module.less";
 
-export type QuickStrategy = "latest" | "hot" | "score";
+export type QuickStrategy = "latest" | "hot" | "score" | "douban";
 
 // 一键排片单个分类最多排几部，和后端 bannerQuotaMax 一致。
 export const QUOTA_MAX = 5;
@@ -18,6 +18,7 @@ export interface QuickConfigMemo {
 
 export interface CategoryQuotaItem {
   id: number;
+  key?: string;
   name: string;
   count: number;
 }
@@ -28,6 +29,9 @@ interface BannerQuickConfigProps {
   categories: CategoryQuotaItem[];
   onCategoriesChange: (next: CategoryQuotaItem[]) => void;
   disabled?: boolean;
+  quotaTitle?: string;
+  quotaMax?: number;
+  fillPresets?: { label: string; count: number }[];
 }
 
 const STRATEGY_OPTIONS: {
@@ -39,6 +43,7 @@ const STRATEGY_OPTIONS: {
   { value: "latest", title: "最近更新", desc: "刚更新的影片优先", icon: <FieldTimeOutlined /> },
   { value: "hot", title: "最热排片", desc: "播放热度高的优先", icon: <FireOutlined /> },
   { value: "score", title: "评分优先", desc: "评分高的影片优先", icon: <StarOutlined /> },
+  { value: "douban", title: "豆瓣推荐", desc: "按豆瓣热映/热播榜单排片", icon: <TrophyOutlined /> },
 ];
 
 const FILL_PRESETS = [
@@ -54,6 +59,9 @@ export default function BannerQuickConfig({
   categories,
   onCategoriesChange,
   disabled = false,
+  quotaTitle = "分类数量配额",
+  quotaMax = QUOTA_MAX,
+  fillPresets = FILL_PRESETS,
 }: BannerQuickConfigProps) {
   const totalPlannedCount = useMemo(
     () => categories.reduce((sum, item) => sum + (item.count || 0), 0),
@@ -127,11 +135,11 @@ export default function BannerQuickConfig({
       <div className={styles.configGroup}>
         <div className={styles.configGroupHeader}>
           <span className={styles.configGroupTitle}>
-            分类数量配额（共 {totalPlannedCount} 部）
+            {quotaTitle}（共 {totalPlannedCount} 部）
           </span>
           {categories.length > 0 && (
             <div className={styles.quickActions}>
-              {FILL_PRESETS.map((preset) => (
+              {fillPresets.map((preset) => (
                 <Button
                   key={preset.count}
                   size="small"
@@ -159,7 +167,7 @@ export default function BannerQuickConfig({
                 </span>
                 <InputNumber
                   min={0}
-                  max={QUOTA_MAX}
+                  max={quotaMax}
                   size="small"
                   value={cat.count}
                   disabled={disabled}

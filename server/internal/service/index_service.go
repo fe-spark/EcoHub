@@ -117,6 +117,8 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 			},
 			"content":       []map[string]any{},
 			"banners":       make(model.Banners, 0),
+			"recommends":    []model.HomeRecommendSection{},
+			"homeLayout":    []HomeLayoutSlot{},
 			"currentSource": "",
 		}, nil
 	}
@@ -229,6 +231,8 @@ func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[s
 		"category":      tree,
 		"content":       filteredList,
 		"banners":       banners,
+		"recommends":    HomeRecommendSvc.HomeSections(sourceId),
+		"homeLayout":    HomeRecommendSvc.HomeLayout(sourceId),
 		"currentSource": sourceId,
 	}
 	if db.Rdb != nil && cacheable && support.IndexPageGeneration() == pageGen {

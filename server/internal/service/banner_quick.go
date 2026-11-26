@@ -8,6 +8,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 // 一键排片单个分类最多排几部，和后台输入框上限一致。
@@ -50,6 +51,7 @@ var bannerStrategies = map[string]string{
 	"latest": "latest_random",
 	"hot":    "hot_random",
 	"score":  "score_random",
+	"douban": "douban",
 }
 
 // Generate 按策略和每个分类的数量为指定采集站生成预览，不落库、不保存配置。
@@ -60,7 +62,7 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 	}
 	strategy, ok := bannerStrategies[strings.TrimSpace(req.Strategy)]
 	if !ok {
-		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 latest、hot 或 score")
+		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 latest、hot、score 或 douban")
 	}
 	quotas := make([]BannerQuota, 0, len(req.Quotas))
 	seen := make(map[int64]bool, len(req.Quotas))
@@ -111,12 +113,29 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 			skipped = append(skipped, BannerSkipped{CategoryID: q.CategoryID, Reason: "not_site_category", Requested: q.Count})
 			continue
 		}
-		cands, err := filmsnapshot.GetSnapshotBannerCandidates(ctx, version, strategy, src.Id, cats, q.Count, used)
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return BannerGenerateResult{}, ctxErr
+		var cands []model.FilmListSnapshot
+		if strategy == "douban" {
+			catName := support.GetCategoryNameById(q.CategoryID)
+			rawCands, err := HotChartsSvc.GetRawCandidatesByCategoryName(catName)
+			if err != nil {
+				return BannerGenerateResult{}, bannerInputErr("获取豆瓣推荐榜单失败: %v", err)
 			}
-			return BannerGenerateResult{}, err
+			mids, _, err := filmsnapshot.MatchHotChartCandidates(version, src.Id, rawCands, q.Count, used...)
+			if err != nil {
+				return BannerGenerateResult{}, err
+			}
+			cands, err = filmsnapshot.ListSnapshotsByMIDsForHotCharts(ctx, mids)
+			if err != nil {
+				return BannerGenerateResult{}, err
+			}
+		} else {
+			cands, err = filmsnapshot.GetSnapshotBannerCandidates(ctx, version, strategy, src.Id, cats, q.Count, used)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return BannerGenerateResult{}, ctxErr
+				}
+				return BannerGenerateResult{}, err
+			}
 		}
 		picks[i] = cands
 		for _, c := range cands {
