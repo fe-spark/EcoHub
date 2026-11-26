@@ -231,9 +231,21 @@ func TestBannerMySQL_FallbackAndRandomExplainPlans(t *testing.T) {
 			args:    []any{10, 50, "src2", model.LineKindPlay, 30},
 		},
 		{
+			name:    "cid_random_wrap",
+			wantKey: "idx_film_index_cid",
+			sql:     "EXPLAIN SELECT mid, hits, score, update_stamp FROM film_index USE INDEX (`idx_film_index_cid`) WHERE deleted_at IS NULL AND cid = ? AND mid < ? AND EXISTS (SELECT 1 FROM film_source_playlist AS p FORCE INDEX (PRIMARY) WHERE p.mid = film_index.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY mid DESC LIMIT ?",
+			args:    []any{10, 50, "src2", model.LineKindPlay, 30},
+		},
+		{
 			name:    "pid_random_unscoped",
 			wantKey: "idx_film_index_pid",
 			sql:     "EXPLAIN SELECT mid FROM `film_index` USE INDEX (`idx_film_index_pid`) WHERE `film_index`.`deleted_at` IS NULL AND pid IN (?) AND mid >= ? ORDER BY mid ASC LIMIT ?",
+			args:    []any{1, 50, 30},
+		},
+		{
+			name:    "pid_random_unscoped_wrap",
+			wantKey: "idx_film_index_pid",
+			sql:     "EXPLAIN SELECT mid FROM `film_index` USE INDEX (`idx_film_index_pid`) WHERE `film_index`.`deleted_at` IS NULL AND pid IN (?) AND mid < ? ORDER BY mid DESC LIMIT ?",
 			args:    []any{1, 50, 30},
 		},
 	}

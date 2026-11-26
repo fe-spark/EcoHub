@@ -191,8 +191,14 @@ func applyCategoryIndexHint(query *gorm.DB, field, pidIndex, cidIndex string) *g
 	}
 	switch field {
 	case "pid":
+		if !bannerTableIndexReady(query, model.TableFilmIndex, pidIndex) {
+			return query
+		}
 		return query.Clauses(mysqlUseIndexHint{index: pidIndex})
 	case "cid":
+		if !bannerTableIndexReady(query, model.TableFilmIndex, cidIndex) {
+			return query
+		}
 		return query.Clauses(mysqlUseIndexHint{index: cidIndex})
 	default:
 		return query

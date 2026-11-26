@@ -142,7 +142,7 @@ func scanBannerFallbackRanks(ctx context.Context, strategy, sourceID string, cid
 func smallSourceFallbackMIDs(ctx context.Context, sourceID string) (mids []int64, exceeded bool, err error) {
 	conn := db.Mdb.WithContext(ctx)
 	from := model.TableFilmSourcePlaylist
-	if dialectName(conn) == "mysql" {
+	if dialectName(conn) == "mysql" && bannerTableIndexReady(conn, model.TableFilmSourcePlaylist, "idx_playlist_source_mid") {
 		from += " USE INDEX (`idx_playlist_source_mid`)"
 	}
 	if err := conn.Table(from).
@@ -280,11 +280,11 @@ func scanRandomBannerBranches[T string | int64](ctx context.Context, sourceID, c
 	_, order := bannerStrategyPlan("random", byCID)
 	window := randomBannerWindowSize(limit)
 
-	runRange := func(pivotOp string, fetchLimit int) ([]bannerRank, error) {
+	runRange := func(pivotOp, rangeOrder string, fetchLimit int) ([]bannerRank, error) {
 		if fetchLimit <= 0 {
 			return nil, nil
 		}
-		branchSQL := bannerBranchSQL(dialect, indexHint, column, order, false, " AND mid "+pivotOp+" ?", exclude)
+		branchSQL := bannerBranchSQL(dialect, indexHint, column, rangeOrder, false, " AND mid "+pivotOp+" ?", exclude)
 		parts := make([]string, 0, len(values))
 		args := make([]any, 0, len(values)*(5+len(exclude)))
 		for _, val := range values {
@@ -302,13 +302,13 @@ func scanRandomBannerBranches[T string | int64](ctx context.Context, sourceID, c
 		return out, nil
 	}
 
-	// 从随机主键值向后窗口抽取，避免 ORDER BY RAND() 全表扫描；不足时再回卷前半段。
-	ranks, err := runRange(">=", window)
+	// 从随机主键值向后窗口抽取，避免 ORDER BY RAND() 全表扫描；不足时沿索引反向从枢轴向左补齐，避免固定命中头部影片。
+	ranks, err := runRange(">=", order, window)
 	if err != nil {
 		return nil, err
 	}
 	if len(ranks) < window {
-		more, err := runRange("<", window-len(ranks))
+		more, err := runRange("<", "mid DESC", window-len(ranks))
 		if err != nil {
 			return nil, err
 		}
@@ -347,20 +347,20 @@ func bannerUseIndexClause(conn *gorm.DB, dialect, strategy string, byCID bool) s
 		return ""
 	}
 	indexName, _ := bannerStrategyPlan(strategy, byCID)
-	if indexName == "" {
-		return ""
-	}
-	if (indexName == catalog.FilmCategoryScoreIndex ||
-		indexName == catalog.FilmCidScoreIndex ||
-		indexName == catalog.FilmCategoryDeletedIndex) &&
-		!bannerTableIndexReady(conn, model.TableFilmIndex, indexName) {
+	if indexName == "" || !bannerTableIndexReady(conn, model.TableFilmIndex, indexName) {
 		return ""
 	}
 	return " USE INDEX (`" + indexName + "`)"
 }
 
 func bannerTableIndexReady(conn *gorm.DB, tableName, indexName string) bool {
-	if conn == nil || conn.ConnPool == nil {
+	if conn == nil {
+		return false
+	}
+	if conn.DryRun {
+		return true
+	}
+	if conn.ConnPool == nil {
 		return false
 	}
 	type cacheKey struct {
