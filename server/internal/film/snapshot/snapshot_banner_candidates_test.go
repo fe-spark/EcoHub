@@ -366,4 +366,46 @@ func TestBannerMySQLSQLPlans_CidFallbackAndRandomIndexHints(t *testing.T) {
 	if strings.Contains(unboundedSQL, "idx_film_index_pid") {
 		t.Fatalf("unbounded random banner query should not force pid index, got: %s", unboundedSQL)
 	}
+
+	wrapSQL := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		var rows []model.FilmIndex
+		base := applyBannerCategories(tx.Model(&model.FilmIndex{}), "", []int64{1})
+		return buildRandomBannerRangeQuery(base, true, "<", 500, 30).Find(&rows)
+	})
+	if !strings.Contains(wrapSQL, "ORDER BY mid DESC") {
+		t.Fatalf("wrap-around random banner query should scan backward with mid DESC, got: %s", wrapSQL)
+	}
+
+	// 非 DryRun 且无可用连接池（模拟索引未就绪探测失败）时不应强制输出 USE INDEX。
+	nonDryNoPool := *gdb
+	nonDryNoPool.Config = &gorm.Config{DryRun: false, Dialector: gdb.Dialector}
+	nonDryNoPool.Statement = &gorm.Statement{DB: &nonDryNoPool}
+	if hint := bannerUseIndexClause(&nonDryNoPool, "mysql", "random", true); hint != "" {
+		t.Fatalf("expected empty index hint when index readiness cannot be verified, got %q", hint)
+	}
+}
+
+func TestRandomBannerWrapAroundIncludesTailFilms(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	// 在全表尾部放一条其他分类大 mid，确保 pivot 经常落在目标分类全部 mid 之后，从而触发 < pivot 回卷。
+	rows := []model.FilmIndex{
+		bannerCandidateFilm(1, 1, 10, 8.0, 100, "头1"),
+		bannerCandidateFilm(2, 1, 10, 8.0, 100, "头2"),
+		bannerCandidateFilm(100, 1, 10, 8.0, 100, "近枢轴1"),
+		bannerCandidateFilm(101, 1, 10, 8.0, 100, "近枢轴2"),
+		bannerCandidateFilm(100000, 2, 10, 8.0, 100, "遥远他类"),
+	}
+	if err := gdb.Create(&rows).Error; err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	base := applyBannerCategories(liveFilmQuery(), "", []int64{1})
+	// 强制以 500 为 pivot（大于分类 1 最大 mid=101），< pivot 应按 mid DESC 从 101, 100 取回而不是固定从 1, 2 取。
+	wrapped, err := scanListSnapshots(buildRandomBannerRangeQuery(base, false, "<", 500, 2))
+	if err != nil {
+		t.Fatalf("wrapped query: %v", err)
+	}
+	got := bannerCandidateMids(wrapped)
+	if len(got) != 2 || got[0] != 101 || got[1] != 100 {
+		t.Fatalf("wrap-around query = %v, want [101 100]", got)
+	}
 }

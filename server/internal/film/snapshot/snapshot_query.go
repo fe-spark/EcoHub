@@ -237,12 +237,16 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 
 func buildRandomBannerRangeQuery(baseQuery *gorm.DB, usePidIndex bool, pivotOp string, pivot int64, fetchLimit int) *gorm.DB {
 	q := baseQuery.Session(&gorm.Session{})
-	if usePidIndex && dialectName(q) == "mysql" {
+	if usePidIndex && dialectName(q) == "mysql" && bannerTableIndexReady(q, model.TableFilmIndex, bannerIndexPid) {
 		// 限定在目标一级分类二级索引 (pid, mid) 区间内按主键游标顺序扫描，避免优化器误选聚簇主键引发全表扫描。
 		q = q.Clauses(mysqlUseIndexHint{index: bannerIndexPid})
 	}
+	order := "mid ASC"
+	if pivotOp == "<" {
+		order = "mid DESC"
+	}
 	return q.Where("mid "+pivotOp+" ?", pivot).
-		Order("mid ASC").
+		Order(order).
 		Limit(fetchLimit)
 }
 
