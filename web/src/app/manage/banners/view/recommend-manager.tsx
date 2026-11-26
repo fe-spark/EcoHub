@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useId, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import { Button, Dropdown, Empty, Form, Space, Spin, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -113,6 +113,16 @@ export default function RecommendManager({
   const [quickStrategy, setQuickStrategy] = useState<QuickStrategy>("douban");
   const [quickPreview, setQuickPreview] = useState<RecommendPreviewGroup[]>([]);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+
+  // 切换采集源时关闭弹窗并清理预览态，防止把旧站分组/预览发布到新站。
+  useEffect(() => {
+    setGroupModalOpen(false);
+    setEditingGroup(null);
+    setFilmPickerOpen(false);
+    setQuickModalOpen(false);
+    setQuickDrawerOpen(false);
+    setQuickPreview([]);
+  }, [sourceId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),

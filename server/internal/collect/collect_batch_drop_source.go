@@ -7,8 +7,8 @@ import (
 	"server/internal/model"
 )
 
-// PauseActiveBatchRecords 停住包含该站的进行中批次的结算，执行删站清库，成功后再标记摘除。
-// 先拿 recordMu 再拿批次锁，和结算写清单同一顺序。
+// PauseActiveBatchRecords 停住包含该站的进行中批次的流式落账与结算，执行删站清库，成功后再标记摘除。
+// 先拿 recordMu 再拿批次锁，与流式刷账和结算同一顺序。
 func PauseActiveBatchRecords(sourceID string, fn func() error) error {
 	if fn == nil {
 		return nil
@@ -77,7 +77,7 @@ func (b *collectBatchContext) sourceDroppedLocked(sourceID string) bool {
 	return ok
 }
 
-// dropSourceLocked 只记墓碑。读取和写入都跳过这个站，不再改各张明细表。
+// dropSourceLocked 记墓碑并同步剔除缓冲中未刷库的该站数据。调用方须持有 b.mu。
 func (b *collectBatchContext) dropSourceLocked(sourceID string) {
 	if b == nil || sourceID == "" || b.sourceDroppedLocked(sourceID) {
 		return
@@ -86,40 +86,16 @@ func (b *collectBatchContext) dropSourceLocked(sourceID string) {
 		b.droppedSources = map[string]struct{}{}
 	}
 	b.droppedSources[sourceID] = struct{}{}
-}
-
-func (b *collectBatchContext) midListedLocked(mid int64) bool {
-	for id, set := range b.sourceFilmMIDs {
-		if b.sourceDroppedLocked(id) {
-			continue
+	delete(b.pendingSealMIDs, sourceID)
+	if len(b.ledgerPending) > 0 {
+		kept := b.ledgerPending[:0]
+		for _, item := range b.ledgerPending {
+			if item.sourceID != sourceID {
+				kept = append(kept, item)
+			}
 		}
-		if _, ok := set[mid]; ok {
-			return true
-		}
+		b.ledgerPending = kept
 	}
-	return false
-}
-
-func (b *collectBatchContext) withoutDroppedFilms(films map[string][]int64) map[string][]int64 {
-	if b == nil || len(films) == 0 {
-		return nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if len(b.droppedSources) == 0 {
-		return films
-	}
-	out := make(map[string][]int64, len(films))
-	for id, mids := range films {
-		if b.sourceDroppedLocked(id) || len(mids) == 0 {
-			continue
-		}
-		out[id] = mids
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func (b *collectBatchContext) withoutDroppedResults(results []model.SourceNotifyResult) ([]model.SourceNotifyResult, bool) {

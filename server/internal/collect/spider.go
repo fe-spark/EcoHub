@@ -259,7 +259,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 				SuccessCnt:  succP,
 				FailedCnt:   failP,
 				FailedPages: failedPagesList,
-				FilmsTotal:  batchCtx.sourceFilmCount(s.Id),
 				Error:       errMsg,
 			})
 			if originalErr != nil && !hadWrites {

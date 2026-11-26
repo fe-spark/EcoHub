@@ -45,10 +45,10 @@ func TestPurgeKeepsRunningAndInterruptedStatus(t *testing.T) {
 	if err := CreateCollectRecord(interrupted); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("batch-running", map[string][]int64{"src-a": {1}, "src-b": {2}}); err != nil {
+	if err := SaveCollectRecordFilms(running.ID, map[string][]int64{"src-a": {1}, "src-b": {2}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("batch-interrupted", map[string][]int64{"src-a": {3}, "src-b": {4}}); err != nil {
+	if err := SaveCollectRecordFilms(interrupted.ID, map[string][]int64{"src-a": {3}, "src-b": {4}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,5 +78,44 @@ func TestPurgeKeepsRunningAndInterruptedStatus(t *testing.T) {
 	}
 	if strings.Contains(interruptedLeft.DetailJson, "src-a") || interruptedLeft.PageSuccess != 4 {
 		t.Fatalf("interrupted detail=%s pageSuccess=%d", interruptedLeft.DetailJson, interruptedLeft.PageSuccess)
+	}
+}
+
+func TestPurgePreservesCountsWhenLedgerRetired(t *testing.T) {
+	gdb := setupTestDB(t)
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CollectSourceStats{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, src := range []model.FilmSource{
+		{Id: "src-a", Name: "A", Uri: "http://a.example"},
+		{Id: "src-b", Name: "B", Uri: "http://b.example"},
+	} {
+		if err := gdb.Create(&src).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	retired := &model.CollectRecord{
+		BatchID:    "batch-retired-ledger",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		FilmCount:  30,
+		Ledger:     false,
+		StartedAt:  time.Now().Add(-10 * 24 * time.Hour),
+		DetailJson: `[{"sourceId":"src-a","status":"done","filmsTotal":10},{"sourceId":"src-b","status":"done","filmsTotal":20}]`,
+	}
+	if err := CreateCollectRecord(retired); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Transaction(func(tx *gorm.DB) error {
+		return PurgeSourceCollectHistoryTx(tx, "src-a")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := GetCollectRecordByBatchID("batch-retired-ledger")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FilmCount != 20 || !strings.Contains(got.DetailJson, `"filmsTotal":20`) {
+		t.Fatalf("expected surviving source filmCount=20 preserved, got filmCount=%d detail=%s", got.FilmCount, got.DetailJson)
 	}
 }

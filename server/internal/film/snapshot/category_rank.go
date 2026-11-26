@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"server/internal/film/catalog"
+	"server/internal/infra/db"
+	"server/internal/model"
 	"server/internal/taxonomy"
 )
 
@@ -127,16 +129,19 @@ func categoryRankMids(version, sourceID, field string, categoryID int64, sortTyp
 	if version == "" {
 		version = LiveReadVersion
 	}
+	sourceID = strings.TrimSpace(sourceID)
+	categoryID = listedCategoryID(sourceID, categoryID)
+	if categoryID <= 0 {
+		return nil, nil
+	}
+	if sourceID != "" && sourceID != currentPrimarySourceID() {
+		return queryNonPrimaryCategoryRankMids(sourceID, field, categoryID, sortType, limit)
+	}
 	idx, err := loadFilmSearchMetaIndex(version)
 	if err != nil {
 		return nil, err
 	}
 	if len(idx.Items) == 0 {
-		return nil, nil
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	categoryID = listedCategoryID(sourceID, categoryID)
-	if categoryID <= 0 {
 		return nil, nil
 	}
 	if sourceID == "" {
@@ -149,6 +154,36 @@ func categoryRankMids(version, sourceID, field string, categoryID int64, sortTyp
 		return res, nil
 	}
 	return scanSourceRanks(idx, sourceID, field, categoryID, sortType, limit), nil
+}
+
+// queryNonPrimaryCategoryRankMids 为非主站分类楼层直接走 DB 查询该站可见分类影片，避免受限于仅含主站的内存索引。
+func queryNonPrimaryCategoryRankMids(sourceID, field string, categoryID int64, sortType, limit int) ([]int64, error) {
+	if db.Mdb == nil {
+		return nil, nil
+	}
+	typeIDs := catalog.PublicSourceTypeIDs(sourceID, field, categoryID)
+	if len(typeIDs) == 0 {
+		return nil, nil
+	}
+	keys := make([]string, 0, len(typeIDs))
+	for _, tid := range typeIDs {
+		keys = append(keys, taxonomy.BuildSourceCategoryKey(sourceID, tid))
+	}
+	order := "update_stamp DESC, mid DESC"
+	switch sortType {
+	case 0:
+		order = "year DESC, update_stamp DESC, mid DESC"
+	case 1:
+		order = "hits DESC, mid DESC"
+	}
+	var mids []int64
+	err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("mid").
+		Where("category_key IN ? AND "+model.FilmHasPlaySourceSQL(), keys, sourceID, model.LineKindPlay).
+		Order(order).
+		Limit(limit).
+		Pluck("mid", &mids).Error
+	return mids, err
 }
 
 func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID, field string, categoryID int64, sortType, limit int) ([]int64, bool) {

@@ -101,12 +101,12 @@ func TestCandidateYearFilter(t *testing.T) {
 
 func TestValidateTMDBImageDomain(t *testing.T) {
 	for _, valid := range []string{"", "https://image.tmdb.org/t/p", "http://img.example.com/t/p"} {
-		if err := validateTMDBImageDomain(valid); err != nil {
+		if err := ValidateTMDBImageDomain(valid); err != nil {
 			t.Fatalf("expected %q to be valid, got %v", valid, err)
 		}
 	}
 	for _, invalid := range []string{"image.tmdb.org/t/p", "ftp://image.tmdb.org/t/p", "https://"} {
-		if err := validateTMDBImageDomain(invalid); err == nil {
+		if err := ValidateTMDBImageDomain(invalid); err == nil {
 			t.Fatalf("expected %q to be rejected", invalid)
 		}
 	}

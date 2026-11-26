@@ -33,23 +33,36 @@ func PurgeSourceCollectHistoryTx(tx *gorm.DB, sourceID string) error {
 			alive[id] = struct{}{}
 		}
 	}
-	var rows []model.CollectRecord
-	if err := tx.Select("id", "batch_id", "status", "error_msg", "detail_json").
-		Where("detail_json LIKE ?", "%"+sourceID+"%").
-		Find(&rows).Error; err != nil {
-		return err
-	}
 	drop := make([]model.CollectRecord, 0)
-	for _, row := range rows {
-		if !strings.Contains(row.DetailJson, sourceID) {
-			continue
-		}
-		if collectRecordOnlySource(row.DetailJson, sourceID, alive) {
-			drop = append(drop, row)
-			continue
-		}
-		if _, err := stripSourceFromCollectRecord(tx, row, sourceID); err != nil {
+	const scanChunk = 200
+	var cursor uint
+	for {
+		var rows []model.CollectRecord
+		if err := tx.Select("id", "batch_id", "status", "ledger", "error_msg", "detail_json").
+			Where("id > ? AND detail_json LIKE ?", cursor, "%"+sourceID+"%").
+			Order("id ASC").
+			Limit(scanChunk).
+			Find(&rows).Error; err != nil {
 			return err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		cursor = rows[len(rows)-1].ID
+		for _, row := range rows {
+			if !strings.Contains(row.DetailJson, sourceID) {
+				continue
+			}
+			if collectRecordOnlySource(row.DetailJson, sourceID, alive) {
+				drop = append(drop, row)
+				continue
+			}
+			if _, err := stripSourceFromCollectRecord(tx, row, sourceID); err != nil {
+				return err
+			}
+		}
+		if len(rows) < scanChunk {
+			break
 		}
 	}
 	return removeRecordsAndFilms(tx, drop)
@@ -70,12 +83,22 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 	if len(kept) == len(details) {
 		return row.DetailJson, nil
 	}
-	filmCount, bySource, err := filmRowCounts(tx, row.BatchID)
-	if err != nil {
-		return "", err
-	}
-	for i := range kept {
-		kept[i].FilmsTotal = bySource[kept[i].SourceID]
+	filmCount := 0
+	if row.Ledger || row.Status == model.CollectRecordStatusRunning {
+		var bySource map[string]int
+		var err error
+		filmCount, bySource, err = FilmRowCounts(tx, row.ID)
+		if err != nil {
+			return "", err
+		}
+		for i := range kept {
+			kept[i].FilmsTotal = bySource[kept[i].SourceID]
+		}
+	} else {
+		// 账本已淘汰的已结束批次沿用存活站点既有统计数，避免重算覆盖清零。
+		for _, d := range kept {
+			filmCount += d.FilmsTotal
+		}
 	}
 	raw, err := json.Marshal(kept)
 	if err != nil {
@@ -127,6 +150,7 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 		"success_sources": done,
 		"failed_sources":  failed + partial,
 		"film_count":      filmCount,
+		"ledger":          row.Ledger && filmCount > 0,
 		"page_total":      pageTotal,
 		"page_success":    pageSuccess,
 		"page_failed":     pageFailed,

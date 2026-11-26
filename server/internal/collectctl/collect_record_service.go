@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"server/internal/sourcecatalog"
 	"server/internal/utils"
 	"sort"
 	"strings"
@@ -32,33 +31,20 @@ func (s *CollectRecordService) GetHistoryList(q model.CollectRecordQuery) ([]mod
 	if err := attachSingleFilmNames(list); err != nil {
 		return nil, 0, err
 	}
-	attachStoredLedgers(list)
 	return list, total, nil
 }
 
-// attachStoredLedgers 编号已经在表里、标记却还是关的，打开列表时补上，不再显示「清单写入中」。
-func attachStoredLedgers(list []model.CollectRecord) {
-	for i := range list {
-		if list[i].Ledger || list[i].FilmCount <= 0 || list[i].Status == model.CollectRecordStatusRunning {
-			continue
-		}
-		ready, err := sourcecatalog.MarkCollectRecordLedgerIfPresent(list[i].BatchID)
-		if err != nil || !ready {
-			continue
-		}
-		list[i].Ledger = true
-	}
-}
-
 func attachSingleFilmNames(list []model.CollectRecord) error {
-	batchIDs := make([]string, 0)
+	recordIDs := make([]uint, 0)
 	for i := range list {
 		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate {
 			continue
 		}
-		batchIDs = append(batchIDs, list[i].BatchID)
+		if list[i].ID > 0 {
+			recordIDs = append(recordIDs, list[i].ID)
+		}
 	}
-	midsByBatch, err := ledger.ListCollectRecordMids(batchIDs)
+	midsByRecord, err := ledger.ListCollectRecordMids(recordIDs)
 	if err != nil {
 		return err
 	}
@@ -66,7 +52,7 @@ func attachSingleFilmNames(list []model.CollectRecord) error {
 	seen := make(map[int64]struct{})
 	parsed := make([][]int64, len(list))
 	for i := range list {
-		rowIDs := midsByBatch[list[i].BatchID]
+		rowIDs := midsByRecord[list[i].ID]
 		if len(rowIDs) == 0 {
 			continue
 		}
@@ -138,11 +124,11 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 
 	// 单片更新没有时间窗口。按清单里的影片重放，不能走小时采集。
 	if rec.Trigger == model.CollectTriggerSingleUpdate || rec.Tag == model.CollectTagSingleUpdate {
-		midsByBatch, err := ledger.ListCollectRecordMids([]string{batchID})
+		midsByRecord, err := ledger.ListCollectRecordMids([]uint{rec.ID})
 		if err != nil {
 			return model.CollectBatchResult{}, err
 		}
-		ids := midsByBatch[batchID]
+		ids := midsByRecord[rec.ID]
 		if len(ids) == 0 {
 			return model.CollectBatchResult{}, errors.New("单片更新缺少影片编号，无法重试")
 		}

@@ -219,8 +219,9 @@ func danmakuHTTPClient(timeout time.Duration) (*http.Client, error) {
 		proxyURL = ""
 	}
 	return &http.Client{
-		Transport: utils.GetOrCreateProxyTransport(proxyURL),
-		Timeout:   timeout,
+		Transport:     utils.GetOrCreateProxyTransport(proxyURL),
+		Timeout:       timeout,
+		CheckRedirect: utils.CheckSafeOutboundRedirect,
 	}, nil
 }
 

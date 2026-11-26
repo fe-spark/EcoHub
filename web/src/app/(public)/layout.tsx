@@ -42,12 +42,13 @@ async function getNavList(): Promise<{ items: NavItem[]; unauthorized: boolean; 
     if (response.code === 0 && Array.isArray(response.data)) {
       return { items: response.data, unauthorized: false, failed: false };
     }
-    return { items: [], unauthorized: false, failed: true };
+    // 收到 HTTP 200 说明后端已通过私有化鉴权（例如空库暂无分类），不再误判为未鉴权触发登录死循环
+    return { items: [], unauthorized: false, failed: false };
   } catch (error) {
     if (isServerUnauthorizedError(error)) {
       return { items: [], unauthorized: true, failed: true };
     }
-    // 非 401 错误先标记 failed，结合私有化状态决定是否拦截
+    // 非 401 异常（如 5xx/网络中断）先标记 failed，结合私有化状态决定是否拦截
     return { items: [], unauthorized: false, failed: true };
   }
 }

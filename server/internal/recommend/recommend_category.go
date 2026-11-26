@@ -81,10 +81,12 @@ func categoryOptionsFromTree(roots []*model.CategoryTree) []RecommendCategoryOpt
 }
 
 // collectCategorySlots 批量收集多个分类分组的影片 ID，并一次 SQL 加载全部基础信息避免 N+1 查询。
-func collectCategorySlots(version, sourceID string, groups []model.HomeRecommendGroup, visibleCats map[int64]*model.CategoryTree, withHot bool) (map[int64]categoryMidsSlot, map[int64]model.MovieBasicInfo) {
+// 返回的 ok 为 false 表示加载过程中发生异常，首页不得缓存该降级结果。
+func collectCategorySlots(version, sourceID string, groups []model.HomeRecommendGroup, visibleCats map[int64]*model.CategoryTree, withHot bool) (map[int64]categoryMidsSlot, map[int64]model.MovieBasicInfo, bool) {
 	slots := make(map[int64]categoryMidsSlot)
 	seenMids := make(map[int64]struct{})
 	allMids := make([]int64, 0)
+	okAll := true
 
 	addMids := func(list []int64) {
 		for _, mid := range list {
@@ -117,6 +119,7 @@ func collectCategorySlots(version, sourceID string, groups []model.HomeRecommend
 		field, catID := categoryHomeField(cat)
 		movies, hot, err := filmsnapshot.HomeCategoryMids(version, sourceID, field, catID, limit, 50)
 		if err != nil {
+			okAll = false
 			continue
 		}
 		addMids(movies)
@@ -129,13 +132,13 @@ func collectCategorySlots(version, sourceID string, groups []model.HomeRecommend
 	}
 
 	if len(allMids) == 0 {
-		return slots, map[int64]model.MovieBasicInfo{}
+		return slots, map[int64]model.MovieBasicInfo{}, okAll
 	}
 	byID, err := filmsnapshot.MovieBasicInfosByMIDs(version, allMids)
 	if err != nil {
-		return slots, map[int64]model.MovieBasicInfo{}
+		return slots, map[int64]model.MovieBasicInfo{}, false
 	}
-	return slots, byID
+	return slots, byID, okAll
 }
 
 func buildCategoryPreviewAdminItems(sourceID string, cat *model.CategoryTree, slot categoryMidsSlot, byID map[int64]model.MovieBasicInfo, limit int) []model.HomeRecommendAdminItem {

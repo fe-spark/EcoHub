@@ -1,20 +1,32 @@
 package migration
 
 import (
-	"database/sql"
 	"fmt"
 	"log"
 	"slices"
 	"strings"
-	"time"
 
-	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 )
+
+// unusedFilmIndexes 已不再用于 SQL 过滤或造成明显写放大的单列及超宽复合索引。
+var unusedFilmIndexes = []string{
+	"idx_film_index_db_id",
+	"idx_film_index_original_category",
+	"idx_film_index_area",
+	"idx_film_index_language",
+	"idx_film_index_year",
+	"idx_film_index_collect_stamp",
+	"idx_film_index_category_version",
+	"idx_film_index_rule_version",
+	"idx_filter_score",
+	"idx_filter_update",
+	"idx_filter_hits",
+}
 
 type filmIndexSpec struct {
 	name string
@@ -26,9 +38,13 @@ var cidCompositeSpecs = []filmIndexSpec{
 	{name: "idx_cid_hits", cols: []string{"cid", "hits", "mid"}},
 }
 
-func migrateFilmIndexCidComposite(gdb *gorm.DB) error {
+// migrateFilmIndexOptimize 先删除废弃索引以降低写放大与空间占用，再在线校正复合索引列序。
+func migrateFilmIndexOptimize(gdb *gorm.DB) error {
 	if gdb == nil || !gdb.Migrator().HasTable(&model.FilmIndex{}) {
 		return nil
+	}
+	if err := dropFilmIndexes(gdb, unusedFilmIndexes); err != nil {
+		return err
 	}
 	isSQLite := gdb.Dialector != nil && gdb.Dialector.Name() == "sqlite"
 	for _, spec := range cidCompositeSpecs {
@@ -115,10 +131,10 @@ func rebuildFilmIndex(gdb *gorm.DB, isSQLite bool, spec filmIndexSpec, exists bo
 		)
 	}
 
-	// 线上主库可能数据量大，优先走长读超时直连避免 30s 读超时中断在线 DDL。
+	// 线上主库数据量较大，复用长读超时直连避免 30s 读超时中断在线 DDL。
 	if db.Mdb != nil && gdb == db.Mdb && strings.TrimSpace(config.MysqlDsn) != "" {
 		log.Printf("[Migration] 正在在线重建索引 %s.%s (%s)", model.TableFilmIndex, spec.name, colList)
-		conn, err := openMigrationLongReadConn(config.MysqlDsn)
+		conn, err := db.OpenLongReadConn(config.MysqlDsn)
 		if err != nil {
 			return err
 		}
@@ -132,28 +148,4 @@ func rebuildFilmIndex(gdb *gorm.DB, isSQLite bool, spec filmIndexSpec, exists bo
 		return nil
 	}
 	return gdb.Exec(alterSQL).Error
-}
-
-func openMigrationLongReadConn(dsn string) (*sql.DB, error) {
-	if parsed, err := mysql.ParseDSN(dsn); err == nil {
-		parsed.ReadTimeout = 30 * time.Minute
-		parsed.WriteTimeout = 30 * time.Minute
-		dsn = parsed.FormatDSN()
-	} else if strings.Contains(dsn, "readTimeout=") {
-		dsn = strings.Replace(dsn, "readTimeout=30s", "readTimeout=30m", 1)
-	} else if strings.Contains(dsn, "?") {
-		dsn += "&readTimeout=30m"
-	} else {
-		dsn += "?readTimeout=30m"
-	}
-	conn, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
-	}
-	conn.SetMaxOpenConns(1)
-	if err = conn.Ping(); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return conn, nil
 }

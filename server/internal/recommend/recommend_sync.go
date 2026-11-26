@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/banner"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/hotchart"
 	"server/internal/model"
@@ -89,12 +90,23 @@ func (s *HomeRecommendService) syncGroupList(ctx context.Context, groups []model
 	summary := RecommendBatchSyncResult{
 		Results: make([]RecommendSyncResult, 0, len(groups)),
 	}
+	if len(groups) > 0 {
+		_ = filmsnapshot.WarmSearchMetaIndex()
+	}
 	for _, g := range groups {
 		if !isValidChartKey(strings.TrimSpace(g.SyncChartKey)) {
 			continue
 		}
 		summary.SyncedGroups++
-		res, err := s.syncSingleGroup(ctx, g)
+		groupCtx := ctx
+		var cancel context.CancelFunc
+		if groupCtx == nil {
+			groupCtx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
+		}
+		res, err := s.syncSingleGroup(groupCtx, g)
+		if cancel != nil {
+			cancel()
+		}
 		if err != nil {
 			summary.FailedGroups++
 			res.Error = err.Error()
@@ -109,21 +121,25 @@ func (s *HomeRecommendService) syncGroupList(ctx context.Context, groups []model
 
 // SyncSourceChartGroups 同步指定采集站下所有绑定了豆瓣/Bangumi榜单的分组。
 func (s *HomeRecommendService) SyncSourceChartGroups(ctx context.Context, sourceID string) (RecommendBatchSyncResult, error) {
-	groups, err := ListHomeRecommendGroups(ctx, sourceID)
+	src, _, _, err := banner.ResolveBannerSource(sourceID, true)
+	if err != nil {
+		return RecommendBatchSyncResult{}, err
+	}
+	groups, err := ListHomeRecommendGroups(ctx, src.Id)
 	if err != nil {
 		return RecommendBatchSyncResult{}, err
 	}
 	return s.syncGroupList(ctx, groups), nil
 }
 
-// SyncAllAutoGroups 定时同步所有开启 AutoSync 的推荐分组。
+// SyncAllAutoGroups 定时同步所有开启 AutoSync 的推荐分组（每组独立 15s 超时，避免多站共享超时被截断）。
 func (s *HomeRecommendService) SyncAllAutoGroups() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	groups, err := ListAutoSyncRecommendGroups(ctx)
+	listCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	groups, err := ListAutoSyncRecommendGroups(listCtx)
+	cancel()
 	if err != nil {
 		log.Printf("[HomeRecommend] 查询自动同步分组失败: %v", err)
 		return
 	}
-	_ = s.syncGroupList(ctx, groups)
+	_ = s.syncGroupList(nil, groups)
 }

@@ -23,6 +23,7 @@ const (
 	hotChartsFetchCandidateN = 36
 	hotChartsHTTPTimeout     = 8 * time.Second
 	hotChartsRefreshCooldown = 2 * time.Minute
+	hotChartsFailCooldown    = 60 * time.Second
 	hotChartsPollInterval    = 6 * time.Hour
 	hotChartsInitialDelay    = 15 * time.Second
 )
@@ -55,6 +56,7 @@ type HotChartsService struct {
 	pollerOnce  sync.Once
 	refreshMu   sync.Mutex
 	lastRefresh time.Time
+	lastFailAt  time.Time
 }
 
 var HotChartsSvc = new(HotChartsService)
@@ -184,10 +186,7 @@ func (s *HotChartsService) warmRawBundle(forceRefresh bool) error {
 			forceRefresh = false
 		}
 	}
-	sfKey := fmt.Sprintf("%s:%t", hotChartsRawCacheKey, forceRefresh)
-	_, err, _ := s.sf.Do(sfKey, func() (any, error) {
-		return s.loadOrFetchRawBundle(forceRefresh)
-	})
+	_, err := s.loadOrFetchRawBundle(forceRefresh)
 	return err
 }
 
@@ -201,29 +200,64 @@ func (s *HotChartsService) loadOrFetchRawBundle(forceRefresh bool) (*rawHotChart
 		}
 	}
 
-	bundle, err := fetchAllHotChartBuckets()
-	if err == nil && bundle != nil && len(bundle.Buckets) > 0 {
-		if db.Rdb != nil {
-			if data, mErr := json.Marshal(bundle); mErr == nil {
-				_ = db.Rdb.Set(db.Cxt, hotChartsRawCacheKey, string(data), hotChartsRawTTL).Err()
-				_ = db.Rdb.Set(db.Cxt, hotChartsLastGoodKey, string(data), hotChartsLastGoodTTL).Err()
+	sfKey := fmt.Sprintf("%s:%t", hotChartsRawCacheKey, forceRefresh)
+	val, err, _ := s.sf.Do(sfKey, func() (any, error) {
+		if !forceRefresh {
+			s.refreshMu.Lock()
+			inFailCooldown := !s.lastFailAt.IsZero() && time.Since(s.lastFailAt) < hotChartsFailCooldown
+			s.refreshMu.Unlock()
+			if inFailCooldown {
+				if fb := loadLastGoodHotChartsBundle(); fb != nil {
+					return fb, nil
+				}
+				return nil, errors.New("外部榜单请求冷却中，请稍后重试")
 			}
 		}
-		return bundle, nil
-	}
 
-	// 兜底：若本次拉取失败，回退上一次成功缓存
-	if db.Rdb != nil {
-		if raw, lErr := db.Rdb.Get(db.Cxt, hotChartsLastGoodKey).Result(); lErr == nil && raw != "" {
-			var fallback rawHotChartsBundle
-			if json.Unmarshal([]byte(raw), &fallback) == nil && len(fallback.Buckets) > 0 {
-				log.Printf("[HotCharts] 外部榜单拉取失败，已使用历史兜底缓存: %v", err)
-				return &fallback, nil
+		bundle, err := fetchAllHotChartBuckets()
+		if err == nil && bundle != nil && len(bundle.Buckets) > 0 {
+			s.refreshMu.Lock()
+			s.lastFailAt = time.Time{}
+			s.refreshMu.Unlock()
+			if db.Rdb != nil {
+				if data, mErr := json.Marshal(bundle); mErr == nil {
+					_ = db.Rdb.Set(db.Cxt, hotChartsRawCacheKey, string(data), hotChartsRawTTL).Err()
+					_ = db.Rdb.Set(db.Cxt, hotChartsLastGoodKey, string(data), hotChartsLastGoodTTL).Err()
+				}
 			}
+			return bundle, nil
 		}
-	}
+
+		s.refreshMu.Lock()
+		s.lastFailAt = time.Now()
+		s.refreshMu.Unlock()
+
+		if fallback := loadLastGoodHotChartsBundle(); fallback != nil {
+			log.Printf("[HotCharts] 外部榜单拉取失败，已使用历史兜底缓存: %v", err)
+			return fallback, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("暂无可用热门榜单")
+	})
 	if err != nil {
 		return nil, err
 	}
-	return nil, errors.New("暂无可用热门榜单")
+	return val.(*rawHotChartsBundle), nil
+}
+
+func loadLastGoodHotChartsBundle() *rawHotChartsBundle {
+	if db.Rdb == nil {
+		return nil
+	}
+	raw, err := db.Rdb.Get(db.Cxt, hotChartsLastGoodKey).Result()
+	if err != nil || raw == "" {
+		return nil
+	}
+	var fallback rawHotChartsBundle
+	if json.Unmarshal([]byte(raw), &fallback) == nil && len(fallback.Buckets) > 0 {
+		return &fallback
+	}
+	return nil
 }

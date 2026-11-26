@@ -14,6 +14,7 @@ import (
 const (
 	sourceIncidentTripAfter   = 3
 	collectRecordLookbackDays = 30
+	maxIncidentScanPages      = 50
 )
 
 type incidentAcc struct {
@@ -34,7 +35,10 @@ func sameDay(a, b time.Time) bool {
 
 // TrippedSourceIDsToday 返回当日已熔断的站点集合
 func TrippedSourceIDsToday(now time.Time) (map[string]struct{}, error) {
-	incidents, err := ListOpenSourceIncidents(now)
+	if now.IsZero() {
+		now = time.Now()
+	}
+	incidents, err := listOpenSourceIncidents(now, true)
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +54,12 @@ func TrippedSourceIDsToday(now time.Time) (map[string]struct{}, error) {
 // ListOpenSourceIncidents 追溯各采集站未自愈的异常状态。
 // 最近一次已结算为失败、部分失败或异常中断都算未恢复；成功、完成和用户停止才闭合。
 // 采集中的进度不算恢复。熔断只看连续整站失败，部分失败不计入熔断。
-// 采用分批检索 + 状态闭合早停：站点一旦自愈或连续失败已经截断，就不再往下扫。
+// 采用键集游标分批检索 + 状态闭合早停：站点一旦自愈或连续失败已经截断，就不再往下扫。
 func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
+	return listOpenSourceIncidents(now, false)
+}
+
+func listOpenSourceIncidents(now time.Time, todayTripOnly bool) ([]model.SourceIncident, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("数据库未连接")
 	}
@@ -59,6 +67,7 @@ func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 		now = time.Now()
 	}
 	since := now.AddDate(0, 0, -collectRecordLookbackDays)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	activeSourceSet := make(map[string]struct{})
 	if sources, err := sourcecatalog.GetCollectSourceListDB(db.Mdb); err == nil {
@@ -72,17 +81,22 @@ func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 	states := make(map[string]*incidentAcc)
 	order := make([]string, 0)
 	const batchPageSize = 100
-	offset := 0
+	var (
+		hasCursor    bool
+		cursorAt     time.Time
+		cursorID     uint
+		scannedPages int
+	)
 
-	for {
+	for scannedPages < maxIncidentScanPages {
+		scannedPages++
 		var pageRows []model.CollectRecord
-		err := db.Mdb.Select("batch_id", "started_at", "detail_json").
-			Where("started_at >= ? AND `trigger` != ?", since, model.CollectTriggerSingleUpdate).
-			Order("started_at DESC, id DESC").
-			Offset(offset).
-			Limit(batchPageSize).
-			Find(&pageRows).Error
-		if err != nil {
+		q := db.Mdb.Select("id", "batch_id", "started_at", "detail_json").
+			Where("started_at >= ? AND `trigger` != ?", since, model.CollectTriggerSingleUpdate)
+		if hasCursor {
+			q = q.Where("started_at < ? OR (started_at = ? AND id < ?)", cursorAt, cursorAt, cursorID)
+		}
+		if err := q.Order("started_at DESC, id DESC").Limit(batchPageSize).Find(&pageRows).Error; err != nil {
 			return nil, err
 		}
 		if len(pageRows) == 0 {
@@ -90,6 +104,25 @@ func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 		}
 
 		processIncidentRecords(pageRows, states, &order)
+
+		last := pageRows[len(pageRows)-1]
+		hasCursor = true
+		cursorAt = last.StartedAt
+		cursorID = last.ID
+
+		// 当日熔断判定越过今天 0 点后，仅需追完今天已失败且连续次数尚未闭合的站点即可停止。
+		if todayTripOnly && last.StartedAt.Before(dayStart) {
+			needMore := false
+			for _, st := range states {
+				if st.status == model.CollectRecordStatusFailed && sameDay(st.at, now) && !st.closed && !st.streakDone && st.consecutive < sourceIncidentTripAfter {
+					needMore = true
+					break
+				}
+			}
+			if !needMore {
+				break
+			}
+		}
 
 		// 活跃站点都已自愈，或连续整站失败已经遇到非失败记录，就可以停。
 		if len(activeSourceSet) > 0 {
@@ -108,7 +141,6 @@ func ListOpenSourceIncidents(now time.Time) ([]model.SourceIncident, error) {
 		if len(pageRows) < batchPageSize {
 			break
 		}
-		offset += batchPageSize
 	}
 
 	out := make([]model.SourceIncident, 0)

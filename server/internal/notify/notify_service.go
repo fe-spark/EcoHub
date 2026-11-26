@@ -225,7 +225,9 @@ func (s *NotifyService) PublishSourceFailed(sourceID, sourceName, reason string)
 		html.EscapeString(truncateRunes(reason, 200)),
 		time.Now().Format("2006-01-02 15:04:05"),
 	)
-	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	utils.GoSafe("Telegram告警-采集源失败", func() {
+		broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	})
 }
 
 // PublishCronFailed 发送定时任务执行失败告警
@@ -258,7 +260,9 @@ func (s *NotifyService) PublishCronFailed(taskID, remark, reason string) {
 		formatReasonCodeLines(reason, cronReasonLineMax, cronReasonTotalMax),
 		time.Now().Format("2006-01-02 15:04:05"),
 	)
-	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	utils.GoSafe("Telegram告警-采集源失败", func() {
+		broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	})
 }
 
 // PublishPrimaryChange 发送主站切换通知。
@@ -279,7 +283,9 @@ func (s *NotifyService) PublishPrimaryChange(oldPrimary, newPrimary *model.FilmS
 	}
 	siteName := basic.SiteName
 	text := formatPrimaryChangeHTML(siteName, oldPrimary, newPrimary, enabledSources)
-	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	utils.GoSafe("Telegram告警-采集源失败", func() {
+		broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	})
 }
 
 // PublishSourceOrderChange 发送采集站排序调整通知（复用 SourceOrderChange 事件开关）。
@@ -298,7 +304,9 @@ func (s *NotifyService) PublishSourceOrderChange(enabledSources []model.FilmSour
 		return
 	}
 	text := formatSourceOrderChangeHTML(basic.SiteName, enabledSources)
-	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	utils.GoSafe("Telegram告警-采集源失败", func() {
+		broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
+	})
 }
 
 func formatEnabledOrderLine(enabledSources []model.FilmSource) string {

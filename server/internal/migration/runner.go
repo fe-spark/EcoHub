@@ -18,7 +18,6 @@ type Migration struct {
 }
 
 // migrations 按版本号递增执行。已发布版本不要改 Run，后续升级在末尾追加。
-// 当前大版本没有历史补丁，只留一条空基线。
 var migrations = []Migration{
 	{
 		Version: "20261009_baseline",
@@ -56,16 +55,6 @@ var migrations = []Migration{
 		Run:     migrateFilmIndexDedup,
 	},
 	{
-		Version: "20261126_film_index_cid_composite",
-		Name:    "重建 film_index 分类排片复合索引列序为 (cid, update_stamp/hits, mid)",
-		Run:     migrateFilmIndexCidComposite,
-	},
-	{
-		Version: "20261126_film_index_prune_unused",
-		Name:    "清理 film_index 冗余单列与超宽过滤复合索引以降低写入放大",
-		Run:     migrateFilmIndexPruneUnused,
-	},
-	{
 		Version: "20261126_home_recommend",
 		Name:    "新增首页推荐分组与条目表",
 		Run: func(gdb *gorm.DB) error {
@@ -73,11 +62,21 @@ var migrations = []Migration{
 		},
 	},
 	{
-		Version: "20261126_home_recommend_category",
-		Name:    "首页推荐分组增加站点分类绑定字段",
+		Version: "20261126_home_recommend_builtin",
+		Name:    "首页推荐分组增加内置板块标识字段",
 		Run: func(gdb *gorm.DB) error {
 			return gdb.AutoMigrate(&model.HomeRecommendGroup{})
 		},
+	},
+	{
+		Version: "20261126_film_index_optimize",
+		Name:    "清理 film_index 废弃索引并重建分类排片复合索引列序",
+		Run:     migrateFilmIndexOptimize,
+	},
+	{
+		Version: "20261126_schema_cleanup",
+		Name:    "重建 collect_record_films 聚簇主键表并清理 home_recommend_group 废弃列",
+		Run:     migrateSchemaCleanup,
 	},
 }
 

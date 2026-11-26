@@ -139,11 +139,11 @@ func (s *InitService) loadActiveFilmReadModel() error {
 }
 
 func (s *InitService) TableInit() error {
-	if err := repobase.AutoMigrateAll(); err != nil {
-		return fmt.Errorf("建表失败: %w", err)
-	}
 	if err := repobase.RunSchemaMigrations(); err != nil {
 		return fmt.Errorf("数据库版本迁移失败: %w", err)
+	}
+	if err := repobase.AutoMigrateAll(); err != nil {
+		return fmt.Errorf("建表失败: %w", err)
 	}
 	if err := repobase.AlignUserAutoIncrement(); err != nil {
 		return fmt.Errorf("用户表自增对齐失败: %w", err)
@@ -159,9 +159,6 @@ func (s *InitService) TableInit() error {
 	}
 	if err := catalog.EnsureFilmCategoryDeletedIndex(); err != nil {
 		return fmt.Errorf("分类统计索引失败: %w", err)
-	}
-	if err := catalog.EnsureCollectRecordFilmSourceIndex(); err != nil {
-		return fmt.Errorf("采集清单站点索引失败: %w", err)
 	}
 	return nil
 }
@@ -240,9 +237,11 @@ func (s *InitService) SpiderInit() error {
 	if err := ledger.MarkInterruptedCollectRecords(); err != nil {
 		syslog.Warnf("[Init] 标记中断采集记录失败: %v", err)
 	}
-	if err := ledger.CleanOldCollectRecords(30); err != nil {
-		syslog.Warnf("[Init] 清理过期采集记录失败: %v", err)
-	}
+	utils.GoSafe("启动清理过期采集记录", func() {
+		if err := ledger.CleanOldCollectRecords(30); err != nil {
+			syslog.Warnf("[Init] 清理过期采集记录失败: %v", err)
+		}
+	})
 	go collect.SpiderSvc.SyncMissingSourceCategories()
 	return s.CollectCrontabInit()
 }

@@ -111,10 +111,14 @@ func (s *HomeRecommendService) GenerateQuickPreview(ctx context.Context, req Rec
 func generateDoubanGroupPreview(ctx context.Context, readVersion, sourceID string, g model.HomeRecommendGroup, count int) ([]model.HomeRecommendAdminItem, error) {
 	var cands []filmsnapshot.HotChartCandidate
 	var rates map[int]string
+	var err error
 	if isValidChartKey(g.SyncChartKey) {
-		cands, rates, _ = hotchart.HotChartsSvc.GetRawCandidatesByKey(g.SyncChartKey, false)
+		cands, rates, err = hotchart.HotChartsSvc.GetRawCandidatesByKey(g.SyncChartKey, false)
 	} else {
-		cands, _ = hotchart.HotChartsSvc.GetRawCandidatesByCategoryName(g.Title)
+		cands, err = hotchart.HotChartsSvc.GetRawCandidatesByCategoryName(g.Title)
+	}
+	if err != nil {
+		return nil, err
 	}
 	mids, midToIdx, err := filmsnapshot.MatchHotChartCandidates(readVersion, sourceID, cands, count)
 	if err != nil {

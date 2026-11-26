@@ -126,7 +126,15 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		return err
 	}
 
-	// 2. 导入采集站前停掉采集与排队删站，且禁止与数据重置并发执行。
+	// 2. 与站点重置及并发导入严格互斥，导入采集站前停掉采集与排队删站。
+	if siteops.ResetSvc.SiteResetRunning() {
+		return errors.New("站点数据正在重置中，请稍后再导入配置")
+	}
+	unlockMaint, ok := siteops.TryLockSiteMaintenance()
+	if !ok {
+		return errors.New("正在执行站点维护操作（重置或配置导入），请稍后再试")
+	}
+	defer unlockMaint()
 	if siteops.ResetSvc.SiteResetRunning() {
 		return errors.New("站点数据正在重置中，请稍后再导入配置")
 	}
@@ -273,6 +281,12 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 			return err
 		}
 		b.Site.ProvideKey = cleanKey
+		if err := mediaproxy.ValidateMediaProxyConfig(b.Site.MediaProxy); err != nil {
+			return fmt.Errorf("媒体反代配置无效: %w", err)
+		}
+		if apiURL := strings.TrimSpace(b.Site.Danmaku.ApiURL); apiURL != "" && !utils.IsSafeOutboundURL(apiURL) {
+			return errors.New("弹幕接口地址无效或不允许访问内网地址")
+		}
 	}
 	if req.Modules.FilmSources {
 		if b.FilmSources == nil {
@@ -282,8 +296,8 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 		seenURI := make(map[string]struct{}, len(b.FilmSources))
 		for _, src := range b.FilmSources {
 			uri := strings.TrimSpace(src.Uri)
-			if !utils.ValidURL(uri) {
-				return fmt.Errorf("采集站 %q 接口地址无效", src.Name)
+			if !utils.IsSafeOutboundURL(uri) {
+				return fmt.Errorf("采集站 %q 接口地址无效或不允许访问内网地址", src.Name)
 			}
 			// shortcut: 协议大小写和连续多个结尾斜杠仍视为不同地址, 导入里出现再收紧
 			key := uri
@@ -320,8 +334,13 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 			return fmt.Errorf("网络代理配置无效: %w", err)
 		}
 	}
-	if req.Modules.TMDB && b.TMDB == nil {
-		return errors.New("备份中缺少 TMDB 刮削配置数据")
+	if req.Modules.TMDB {
+		if b.TMDB == nil {
+			return errors.New("备份中缺少 TMDB 刮削配置数据")
+		}
+		if err := tmdb.ValidateTMDBImageDomain(b.TMDB.ImageDomain); err != nil {
+			return err
+		}
 	}
 	if req.Modules.Notify && b.Notify == nil {
 		return errors.New("备份中缺少通知配置数据")

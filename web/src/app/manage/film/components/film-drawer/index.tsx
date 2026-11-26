@@ -138,7 +138,12 @@ export default function FilmDrawer({
       const slidePic = filmData.customPictureSlide || filmData.pictureSlide || "";
       const cat = resolveCategoryFields(filmData, categoryList || allCategoryListRef.current);
       const allLines = Array.isArray(filmData.list) ? (filmData.list as PlayLine[]) : [];
-      const lines = allLines.filter((line) => isSourcePlayLine(line, primaryId));
+      const fallbackSourceId = String(filmData.firstSourceId || filmData.sourceId || "").trim();
+      const primaryLines = allLines.filter((line) => isSourcePlayLine(line, primaryId));
+      const lines =
+        primaryLines.length > 0 || !filmData.isManualFilm || !fallbackSourceId
+          ? primaryLines
+          : allLines.filter((line) => isSourcePlayLine(line, fallbackSourceId));
       setPlayLines(lines);
       const initialLinks: Record<string, string> = {};
       const initialNames: Record<string, string> = {};
@@ -355,8 +360,13 @@ export default function FilmDrawer({
       };
 
       if (!filmId || isManualFilm) {
-        const targetSourceId = String(payload.sourceId || loadedDetailRef.current?.firstSourceId || "");
-        const ownerLines = playLines.filter((l) => !targetSourceId || isSourcePlayLine(l, targetSourceId));
+        const primarySourceId = String(payload.sourceId || "").trim();
+        const fallbackSourceId = String(loadedDetailRef.current?.firstSourceId || loadedDetailRef.current?.sourceId || "").trim();
+        const primaryOwnerLines = playLines.filter((l) => !primarySourceId || isSourcePlayLine(l, primarySourceId));
+        const ownerLines =
+          primaryOwnerLines.length > 0 || !isManualFilm || !fallbackSourceId
+            ? primaryOwnerLines
+            : playLines.filter((l) => isSourcePlayLine(l, fallbackSourceId));
         const mergedPlay = mergePlayLinesForSave(ownerLines, lineLinksMap, values.playLink, playForm, lineNamesMap);
         if (!String(mergedPlay.playLink || "").trim()) {
           message.error("请至少输入一条有效播放地址");

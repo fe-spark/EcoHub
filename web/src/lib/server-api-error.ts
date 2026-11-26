@@ -27,7 +27,9 @@ export class ServerApiError extends Error {
 }
 
 export function isServerUnauthorizedError(error: unknown): boolean {
-  return error instanceof ServerApiError && error.status === 401;
+  if (!(error instanceof ServerApiError)) return false;
+  if (error.status === 401) return true;
+  return error.status === 403 && Boolean(error.payload?.private_access);
 }
 
 export function buildHttpServerApiError(

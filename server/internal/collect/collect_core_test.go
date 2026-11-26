@@ -457,13 +457,8 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	batchB.addAffectedMIDs(&sourceB, 24, []int64{300, 400})
 
 	// 验证两批次各自独立持有自身标签刷新 MIDs，互不泄露
-	batchA.mu.Lock()
-	midsA := sortedMIDSlice(batchA.affectedMIDs)
-	batchA.mu.Unlock()
-
-	batchB.mu.Lock()
-	midsB := sortedMIDSlice(batchB.affectedMIDs)
-	batchB.mu.Unlock()
+	midsA := sortedMIDSlice(batchA.takeAffectedMIDs())
+	midsB := sortedMIDSlice(batchB.takeAffectedMIDs())
 
 	expectedA := []int64{100, 200}
 	expectedB := []int64{300, 400}

@@ -160,25 +160,20 @@ func (b *collectBatchContext) takeSourceMIDs(sourceID string) []int64 {
 	if b.sourceDroppedLocked(sourceID) {
 		return nil
 	}
-	set := b.sourceFilmMIDs[sourceID]
-	if len(set) == 0 || len(b.affectedMIDs) == 0 {
+	raw := b.pendingSealMIDs[sourceID]
+	delete(b.pendingSealMIDs, sourceID)
+	if len(raw) == 0 {
 		return nil
 	}
-	taken := make([]int64, 0, len(set))
-	seen := make(map[int64]struct{}, len(set))
-	kept := make([]int64, 0, len(b.affectedMIDs))
-	for _, mid := range b.affectedMIDs {
-		if _, ok := set[mid]; !ok {
-			kept = append(kept, mid)
-			continue
-		}
+	taken := make([]int64, 0, len(raw))
+	seen := make(map[int64]struct{}, len(raw))
+	for _, mid := range raw {
 		if _, dup := seen[mid]; dup {
 			continue
 		}
 		seen[mid] = struct{}{}
 		taken = append(taken, mid)
 	}
-	b.affectedMIDs = kept
 	return taken
 }
 
@@ -224,7 +219,7 @@ func (b *collectBatchContext) flushAndFinalize() error {
 		return nil
 	}
 	b.mu.Lock()
-	hasWork := len(b.finishedSources) > 0 || len(b.affectedMIDs) > 0 || streamBuf.pendingCount() > 0
+	hasWork := len(b.finishedSources) > 0 || len(b.pendingSealMIDs) > 0 || streamBuf.pendingCount() > 0
 	warmupHome := false
 	if !b.primaryWarmedUp {
 		for id := range b.finishedSources {

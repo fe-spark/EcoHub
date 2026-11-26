@@ -3,6 +3,8 @@ package siteops
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"server/internal/access"
@@ -19,12 +21,22 @@ var (
 	// resetSiteDataRunning 防止并发重复触发站点数据重置。
 	resetSiteDataRunning atomic.Bool
 	resetSiteLifecycle   atomic.Bool
+	// siteMaintMu 串行化站点数据重置与配置备份导入，消除并发交错与 TOCTOU。
+	siteMaintMu sync.Mutex
 
 	// 站点重置跨模块钩子，由装配层注入。
 	OnResetRecoverAccess  func()
 	OnResetRecoverCrontab func()
 	OnResetReinitSite     func() error
 )
+
+// TryLockSiteMaintenance 非阻塞申请全局站点维护独占锁（供重置与配置导入互斥）。
+func TryLockSiteMaintenance() (func(), bool) {
+	if !siteMaintMu.TryLock() {
+		return nil, false
+	}
+	return siteMaintMu.Unlock, true
+}
 
 func init() {
 	collect.RegisterSiteResetChecker(func() bool {
@@ -47,18 +59,24 @@ func (s *ResetService) ClearFilms() (retErr error) {
 	if OnResetRecoverAccess == nil || OnResetRecoverCrontab == nil || OnResetReinitSite == nil {
 		return errors.New("站点重置钩子未初始化")
 	}
+	unlockMaint, ok := TryLockSiteMaintenance()
+	if !ok {
+		return errors.New("正在执行站点维护操作（重置或配置导入），请稍后再试")
+	}
+	defer unlockMaint()
+
 	resetSiteLifecycle.Store(true)
 	defer resetSiteLifecycle.Store(false)
 
 	StartResetProgress()
-	clearedDB := false
+	enteredReset := false
 	defer func() {
 		if retErr != nil {
-			// 清库前置阶段失败或半途失败时尽力恢复访问统计开关与定时任务，避免系统停摆
+			// 清库前置或半途失败时恢复访问统计开关与定时任务，避免调度停摆。
 			if OnResetRecoverAccess != nil {
 				OnResetRecoverAccess()
 			}
-			if clearedDB && OnResetRecoverCrontab != nil {
+			if enteredReset && OnResetRecoverCrontab != nil {
 				OnResetRecoverCrontab()
 			}
 			FinishResetProgress(retErr)
@@ -71,10 +89,10 @@ func (s *ResetService) ClearFilms() (retErr error) {
 	collectctl.CollectSvc.CancelDelFilmSources(nil)
 	collectctl.WaitAllAsyncWork()
 
+	enteredReset = true
 	if err := collect.PrepareAndRunReset(ReportResetProgress, FilmZero); err != nil {
 		return err
 	}
-	clearedDB = true
 	if _, err := access.ClearAccessData(0); err != nil {
 		return err
 	}
@@ -111,18 +129,35 @@ func (s *ResetService) StreamSiteReset(ctx context.Context, onEvent func(any) er
 		ctx = context.Background()
 	}
 	events := make(chan ResetProgress, 16)
-	unsub := WatchResetProgress(func(p ResetProgress) {
+	pushProgress := func(p ResetProgress) {
+		// 非阻塞投递，慢速 SSE 客户端满队列时丢弃旧快照保留最新进度，不反向阻塞重置主流程。
 		select {
 		case events <- p:
-		case <-ctx.Done():
+		default:
+			select {
+			case <-events:
+			default:
+			}
+			select {
+			case events <- p:
+			default:
+			}
 		}
-	})
+	}
+	unsub := WatchResetProgress(pushProgress)
 	defer unsub()
 
 	jobDone := make(chan struct{})
 	go func() {
 		defer close(jobDone)
 		defer resetSiteDataRunning.Store(false)
+		defer func() {
+			if r := recover(); r != nil {
+				err := fmt.Errorf("站点重置异常中止: %v", r)
+				syslog.Errorf("[数据重置] %v", err)
+				FinishResetProgress(err)
+			}
+		}()
 		if err := s.ClearFilms(); err != nil {
 			syslog.Errorf("[数据重置] 重置失败: %v", err)
 			return
@@ -170,7 +205,15 @@ func (s *ResetService) FollowSiteReset(ctx context.Context, onEvent func(any) er
 	unsub := WatchResetProgress(func(p ResetProgress) {
 		select {
 		case events <- p:
-		case <-ctx.Done():
+		default:
+			select {
+			case <-events:
+			default:
+			}
+			select {
+			case events <- p:
+			default:
+			}
 		}
 	})
 	defer unsub()

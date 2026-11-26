@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"server/internal/collect/progress"
@@ -100,6 +101,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	streak, stopStreakWait := newFetchStreak(ctx, s.Name)
 	defer stopStreakWait()
 	var stopErr error
+	var stoppedByStreak atomic.Bool
 	var stopOnce sync.Once
 	var statsMu sync.Mutex
 	stats := pageStats{}
@@ -140,6 +142,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	giveUp := func(reason string) {
 		stopOnce.Do(func() {
 			stopErr = errors.New(reason)
+			stoppedByStreak.Store(true)
 			log.Printf("[Spider] 站点 %s(%s) %s", s.Name, s.Id, reason)
 			syslog.Errorf("[Spider] 站点 %s(%s) %s", s.Name, s.Id, reason)
 			if batch != nil {
@@ -196,11 +199,15 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		return true
 	}
 	markStopped := func() {
-		// 连续失败中断不写成用户「已停止」，否则采集记录会丢掉中断原因。
-		if stopErr != nil {
+		// 连续失败中断不写成用户「已停止」，且通过代次校验避免覆盖同站新任务的进度。
+		if stoppedByStreak.Load() {
 			return
 		}
-		progress.MarkStopped(s.Id)
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+			if cur.Status == progress.StatusStarting || cur.Status == progress.StatusRunning || cur.Status == progress.StatusPaused {
+				cur.Status = progress.StatusStopped
+			}
+		})
 	}
 	recordPageFailure := func(page int, stage string, err error) {
 		snapshot := recordPageFinished(page, false, err)

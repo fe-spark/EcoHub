@@ -77,7 +77,6 @@ type CollectRecord struct {
 
 // CollectRecordFilm 采集批次清单里的一行影片。全部站点按清单行返回，并带上 SourceID。
 type CollectRecordFilm struct {
-	ID       uint   `json:"id"`
 	Mid      int64  `json:"mid"`
 	Name     string `json:"name"`
 	SourceID string `json:"sourceId,omitempty"`
@@ -106,6 +105,7 @@ type CollectRecordSourceDetail struct {
 type CollectRecordCompletion struct {
 	Status         string    `json:"status"`
 	Hour           int       `json:"hour"`
+	SourceCount    int       `json:"sourceCount,omitempty"`
 	SuccessSources int       `json:"successSources"`
 	FailedSources  int       `json:"failedSources"`
 	FinishedAt     time.Time `json:"finishedAt"`
@@ -149,38 +149,38 @@ type CollectRecordQuery struct {
 	BatchID     string    `json:"batchId"`
 }
 
-// CollectRecordFilmItem 采集批次入库/更新影片关联记录。
-// 同一批次、同一站点、同一影片只保留一行，重复结算时覆盖而不是累加。
+// CollectRecordFilmItem 采集批次入库/更新影片账本。
+// 聚簇主键 (record_id, source_id, mid) 兼具唯一去重与全站/单站顺序游标能力，仅保留 idx_crf_source_record 用于删站清理。
 type CollectRecordFilmItem struct {
-	ID        uint      `gorm:"primaryKey;autoIncrement;index:idx_crf_batch_id,priority:2;index:idx_crf_batch_source_id,priority:3" json:"id"`
-	BatchID   string    `gorm:"uniqueIndex:uk_crf_batch_source_mid,priority:1;index:idx_crf_batch_id,priority:1;index:idx_crf_batch_source_id,priority:1;index:idx_crf_mid_batch,priority:2;size:64;not null" json:"batchId"`
-	SourceID  string    `gorm:"uniqueIndex:uk_crf_batch_source_mid,priority:2;index:idx_crf_batch_source_id,priority:2;size:32;not null" json:"sourceId"`
-	Mid       int64     `gorm:"uniqueIndex:uk_crf_batch_source_mid,priority:3;index:idx_crf_mid_batch,priority:1;not null" json:"mid"`
-	CreatedAt time.Time `gorm:"not null" json:"createdAt"`
+	RecordID uint   `gorm:"primaryKey;autoIncrement:false;index:idx_crf_source_record,priority:2;not null" json:"recordId"`
+	SourceID string `gorm:"primaryKey;index:idx_crf_source_record,priority:1;size:32;not null" json:"sourceId"`
+	Mid      int64  `gorm:"primaryKey;autoIncrement:false;not null" json:"mid"`
 }
 
 func (CollectRecordFilmItem) TableName() string {
 	return TableCollectRecordFilm
 }
 
-// CollectRecordFilmQuery 批次影片清单分页查询入参
+// CollectRecordFilmQuery 批次影片清单分页查询入参。
+// 浏览态按 (afterSource, afterMid) 游标翻页；搜索态按 (afterName, afterMid, afterSource) 游标翻页。
 type CollectRecordFilmQuery struct {
-	BatchID   string `json:"batchId"`
-	SourceID  string `json:"sourceId"`
-	AfterID   uint   `json:"afterId"`
-	AfterName string `json:"afterName"`
-	AfterMid  int64  `json:"afterMid"`
-	PageSize  int    `json:"pageSize"`
-	Keyword   string `json:"keyword"`
+	BatchID     string `json:"batchId"`
+	SourceID    string `json:"sourceId"`
+	AfterSource string `json:"afterSource"`
+	AfterName   string `json:"afterName"`
+	AfterMid    int64  `json:"afterMid"`
+	PageSize    int    `json:"pageSize"`
+	Keyword     string `json:"keyword"`
 }
 
-// CollectRecordFilmPage 清单的一页。不搜时总数用记录上的部数，翻页用 AfterID。
-// 搜片名时总数是这一批里实际对得上的行数，翻页用片名、影片编号和行号。
+// CollectRecordFilmPage 清单的一页。
+// 浏览态 Total 为记录部数；搜索态不执行全表 COUNT（Total 为 -1），触发扫描预算上限时 Truncated 为 true。
 type CollectRecordFilmPage struct {
-	List          []CollectRecordFilm
-	Total         int64
-	NextAfterID   uint
-	NextAfterName string
-	NextAfterMid  int64
-	HasMore       bool
+	List            []CollectRecordFilm
+	Total           int64
+	NextAfterSource string
+	NextAfterName   string
+	NextAfterMid    int64
+	HasMore         bool
+	Truncated       bool
 }

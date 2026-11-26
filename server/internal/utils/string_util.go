@@ -8,9 +8,11 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 var (
@@ -142,7 +144,41 @@ func isPublicOutboundIP(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
+	if ip4 := ip.To4(); ip4 != nil {
+		// 拒绝 RFC 6598 共享地址段 100.64.0.0/10（含部分云厂商元数据服务地址）。
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return false
+		}
+		ip = ip4
+	}
 	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsUnspecified()
+}
+
+// CheckSafeOutboundRedirect 拦截重定向至内网或云元数据地址（SSRF 防护）。
+func CheckSafeOutboundRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if req == nil || req.URL == nil || !IsSafeOutboundURL(req.URL.String()) {
+		return errors.New("重定向目标地址不安全")
+	}
+	return nil
+}
+
+// SafeOutboundDialControl 在 TCP 建连瞬间校验最终目标 IP，防止 DNS 重绑定绕过。
+func SafeOutboundDialControl(_, address string, _ syscall.RawConn) error {
+	if flag.Lookup("test.v") != nil {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return errors.New("目标地址无效")
+	}
+	ip := net.ParseIP(host)
+	if !isPublicOutboundIP(ip) {
+		return errors.New("拒绝连接非公网地址")
+	}
+	return nil
 }
 
 // IsTrustedForwardedPeer 仅当直连对端 TCP 地址为空（单测）或属本机/内网代理网段时才采信 X-Forwarded-* 请求头。

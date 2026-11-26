@@ -13,6 +13,12 @@ import (
 	"server/internal/utils"
 )
 
+// 流式账本刷新阈值（包级变量，便于测试调小验证分块流式写入）。
+var (
+	collectLedgerFlushBatch    = 2000
+	collectLedgerFlushInterval = 2 * time.Second
+)
+
 func copyFailedPages(pages []int) []int {
 	if len(pages) == 0 {
 		return nil
@@ -73,6 +79,9 @@ func (b *collectBatchContext) recordStart() error {
 	}
 	details := make([]model.CollectRecordSourceDetail, 0, len(b.sources))
 	for _, src := range b.sources {
+		if b.sourceDroppedLocked(src.Id) {
+			continue
+		}
 		name := strings.TrimSpace(src.Name)
 		if name == "" {
 			name = src.Id
@@ -83,6 +92,9 @@ func (b *collectBatchContext) recordStart() error {
 			Status:     model.CollectRecordStatusRunning,
 			Hour:       sourceHourLocked(b, src.Id),
 		})
+	}
+	if len(details) == 0 {
+		return nil
 	}
 	detailJSON, err := json.Marshal(details)
 	if err != nil {
@@ -95,13 +107,14 @@ func (b *collectBatchContext) recordStart() error {
 		Tag:           b.tag,
 		Hour:          b.hour,
 		Status:        model.CollectRecordStatusRunning,
-		SourceCount:   len(b.sources),
+		SourceCount:   len(details),
 		DetailJson:    string(detailJSON),
 		StartedAt:     b.startedAt,
 	}
 	if err := ledger.CreateCollectRecord(rec); err != nil {
 		return err
 	}
+	b.recordID = rec.ID
 	b.recordStarted = true
 	return nil
 }
@@ -186,135 +199,111 @@ func sourceHourLocked(b *collectBatchContext, sourceID string) int {
 	return b.hour
 }
 
-func (b *collectBatchContext) sourceFilmCount(sourceID string) int {
-	if b == nil {
-		return 0
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.sourceDroppedLocked(sourceID) {
-		return 0
-	}
-	return len(b.sourceFilmMIDs[sourceID])
-}
-
-func (b *collectBatchContext) trackFilmsLocked(sourceID string, mids []int64) {
-	if b.sourceDroppedLocked(sourceID) {
-		return
-	}
-	if b.sourceFilmMIDs == nil {
-		b.sourceFilmMIDs = map[string]map[int64]struct{}{}
-	}
-	if b.filmMIDs == nil {
-		b.filmMIDs = map[int64]struct{}{}
-	}
-	set := b.sourceFilmMIDs[sourceID]
-	if set == nil {
-		set = map[int64]struct{}{}
-		b.sourceFilmMIDs[sourceID] = set
+// enqueueLedgerLocked 将本页受影响影片追加进有界流式缓冲，达到批量或时间阈值时提示调用方刷库。调用方须持有 b.mu。
+func (b *collectBatchContext) enqueueLedgerLocked(sourceID string, mids []int64) bool {
+	if b.ledgerFlushErr != nil || b.sourceDroppedLocked(sourceID) || len(mids) == 0 {
+		return false
 	}
 	for _, mid := range mids {
-		if mid <= 0 {
-			continue
+		if mid > 0 {
+			b.ledgerPending = append(b.ledgerPending, pendingLedgerFilm{sourceID: sourceID, mid: mid})
 		}
-		if _, ok := set[mid]; ok {
-			continue
-		}
-		set[mid] = struct{}{}
-		b.filmMIDs[mid] = struct{}{}
 	}
+	if b.recordID == 0 || len(b.ledgerPending) == 0 {
+		return false
+	}
+	batch := collectLedgerFlushBatch
+	if batch < 1 {
+		batch = 2000
+	}
+	if len(b.ledgerPending) >= batch {
+		return true
+	}
+	return collectLedgerFlushInterval > 0 && time.Since(b.ledgerFlushAt) >= collectLedgerFlushInterval
 }
 
-// ledgerFilmsLocked 这一批要写入清单的编号。调用方须持有 b.mu。
-// 普通批次是实际入库的编号。单片批次只存要重放的编号：有入库的站只挂自己的，一个站都没入库时只挂请求过的站。
-func (b *collectBatchContext) ledgerFilmsLocked() map[string][]int64 {
-	if len(b.replayFilmIDs) > 0 {
-		return b.singleReplayLedgerLocked()
-	}
-	return b.storedFilmsLocked()
-}
-
-func (b *collectBatchContext) storedFilmsLocked() map[string][]int64 {
-	films := make(map[string][]int64, len(b.sourceFilmMIDs))
-	for sourceID, set := range b.sourceFilmMIDs {
-		if b.sourceDroppedLocked(sourceID) || len(set) == 0 {
-			continue
-		}
-		mids := make([]int64, 0, len(set))
-		for mid := range set {
-			mids = append(mids, mid)
-		}
-		films[sourceID] = mids
-	}
-	if len(films) == 0 {
-		return nil
-	}
-	return films
-}
-
-func (b *collectBatchContext) singleReplayLedgerLocked() map[string][]int64 {
-	films := make(map[string][]int64)
-	for sourceID, set := range b.sourceFilmMIDs {
-		if b.sourceDroppedLocked(sourceID) || len(set) == 0 {
-			continue
-		}
-		kept := make([]int64, 0, len(b.replayFilmIDs))
-		for _, mid := range b.replayFilmIDs {
-			if _, ok := set[mid]; ok {
-				kept = append(kept, mid)
-			}
-		}
-		if len(kept) > 0 {
-			films[sourceID] = kept
-		}
-	}
-	if len(films) > 0 {
-		return films
-	}
-	for _, src := range b.sources {
-		if b.sourceDroppedLocked(src.Id) || strings.TrimSpace(src.Id) == "" {
-			continue
-		}
-		if _, attempted := b.sourceSnapshots[src.Id]; !attempted {
-			continue
-		}
-		films[src.Id] = append([]int64(nil), b.replayFilmIDs...)
-	}
-	if len(films) == 0 {
-		return nil
-	}
-	return films
-}
-
-func (b *collectBatchContext) collectRecordFilms() map[string][]int64 {
+// flushLedger 持有 recordMu 后刷空当前缓冲，与删站摘除逻辑严格串行。
+func (b *collectBatchContext) flushLedger() {
 	if b == nil {
-		return nil
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if !b.recordStarted {
-		return nil
-	}
-	return b.ledgerFilmsLocked()
-}
-
-func (b *collectBatchContext) saveRecordFilms(films map[string][]int64) map[string][]int64 {
-	if b == nil || strings.TrimSpace(b.batchID) == "" {
-		return nil
+		return
 	}
 	b.recordMu.Lock()
 	defer b.recordMu.Unlock()
-	return b.saveRecordFilmsLocked(films)
+	if err := b.flushLedgerLocked(); err != nil {
+		log.Printf("[Spider] 流式写入采集账本失败 batchID=%s: %v", b.batchID, err)
+	}
 }
 
-func (b *collectBatchContext) saveRecordFilmsLocked(films map[string][]int64) map[string][]int64 {
-	films = b.withoutDroppedFilms(films)
-	var missed map[string][]int64
-	if len(films) > 0 {
-		if err := ledger.BatchSaveCollectRecordFilms(b.batchID, films); err != nil {
-			log.Printf("[Spider] 保存采集批次影片清单失败 batchID=%s: %v", b.batchID, err)
-			missed = ledger.UnstoredCollectFilms(err)
+// flushLedgerLocked 将缓冲里的账本行写入数据库。调用方须持有 b.recordMu。
+func (b *collectBatchContext) flushLedgerLocked() error {
+	b.mu.Lock()
+	if b.ledgerFlushErr != nil {
+		b.ledgerPending = nil
+		err := b.ledgerFlushErr
+		b.mu.Unlock()
+		return err
+	}
+	recordID := b.recordID
+	if recordID == 0 || len(b.ledgerPending) == 0 {
+		b.mu.Unlock()
+		return nil
+	}
+	raw := b.ledgerPending
+	b.ledgerPending = nil
+	b.ledgerFlushAt = time.Now()
+	items := make([]model.CollectRecordFilmItem, 0, len(raw))
+	for _, p := range raw {
+		if b.sourceDroppedLocked(p.sourceID) || p.mid <= 0 {
+			continue
+		}
+		items = append(items, model.CollectRecordFilmItem{
+			RecordID: recordID,
+			SourceID: p.sourceID,
+			Mid:      p.mid,
+		})
+	}
+	b.mu.Unlock()
+
+	if len(items) == 0 {
+		return nil
+	}
+	if err := ledger.AppendCollectRecordFilms(items); err != nil {
+		b.mu.Lock()
+		if b.ledgerFlushErr == nil {
+			b.ledgerFlushErr = err
+		}
+		b.mu.Unlock()
+		return err
+	}
+	b.mu.Lock()
+	b.ledgerWritten = true
+	b.mu.Unlock()
+	return nil
+}
+
+// singleReplayItemsLocked 当单片更新没有任何站发生实质变更时，为已尝试过的站点生成重放账本行，便于列表展示片名与重试。
+func (b *collectBatchContext) singleReplayItemsLocked() []model.CollectRecordFilmItem {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.recordID == 0 || len(b.replayFilmIDs) == 0 {
+		return nil
+	}
+	var items []model.CollectRecordFilmItem
+	for _, src := range b.sources {
+		sid := strings.TrimSpace(src.Id)
+		if sid == "" || b.sourceDroppedLocked(sid) {
+			continue
+		}
+		if _, attempted := b.sourceSnapshots[sid]; !attempted {
+			continue
+		}
+		for _, mid := range b.replayFilmIDs {
+			items = append(items, model.CollectRecordFilmItem{
+				RecordID: b.recordID,
+				SourceID: sid,
+				Mid:      mid,
+			})
 		}
 	}
-	return missed
+	return items
 }

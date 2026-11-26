@@ -283,12 +283,7 @@ func (s *CollectService) delFilmSource(id string) (int, error) {
 			return err
 		}
 		defer release()
-		var orphanMids []int64
-		err = collect.PauseActiveBatchRecords(id, func() error {
-			var purgeErr error
-			orphanMids, purgeErr = collect.DelCollectResource(id)
-			return purgeErr
-		})
+		orphanMids, err := collect.DelCollectResource(id)
 		if err != nil {
 			if len(orphanMids) > 0 {
 				filmsnapshot.InvalidateCachesAfterSourceDelete(id)

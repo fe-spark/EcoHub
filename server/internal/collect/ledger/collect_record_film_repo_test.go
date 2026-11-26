@@ -1,7 +1,7 @@
 package ledger
 
 import (
-	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -23,36 +23,34 @@ func setupRecordFilmsTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	prev := db.Mdb
 	db.Mdb = testDB
+	t.Cleanup(func() { db.Mdb = prev })
 	if err := testDB.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}, &model.FilmIndex{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	return testDB
 }
 
-func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
+func TestCollectRecordFilms_SaveBrowseAndSearchPagination(t *testing.T) {
 	testDB := setupRecordFilmsTestDB(t)
 
-	// 准备电影片名
-	testDB.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101},
-		FilmIndexContent:  model.FilmIndexContent{Name: "黑客帝国"},
-	})
-	testDB.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102},
-		FilmIndexContent:  model.FilmIndexContent{Name: "黑客帝国2"},
-	})
-	testDB.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103},
-		FilmIndexContent:  model.FilmIndexContent{Name: "盗梦空间"},
-	})
+	for _, item := range []struct {
+		mid  int64
+		name string
+	}{
+		{101, "黑客帝国"},
+		{102, "黑客帝国2"},
+		{103, "盗梦空间"},
+	} {
+		testDB.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: item.mid},
+			FilmIndexContent:  model.FilmIndexContent{Name: item.name},
+		})
+	}
 
 	batchID := "batch_test_123"
-	items := map[string][]int64{
-		"src_1": {101, 102},
-		"src_2": {102, 103},
-	}
-	if err := testDB.Create(&model.CollectRecord{
+	rec := &model.CollectRecord{
 		BatchID:    batchID,
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
@@ -60,94 +58,214 @@ func TestCollectRecordFilms_BatchSaveAndQuery(t *testing.T) {
 		FilmCount:  4,
 		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":2}]`,
 		StartedAt:  time.Now(),
-	}).Error; err != nil {
+	}
+	if err := testDB.Create(rec).Error; err != nil {
 		t.Fatal(err)
 	}
 
-	if err := BatchSaveCollectRecordFilms(batchID, items); err != nil {
-		t.Fatalf("BatchSaveCollectRecordFilms failed: %v", err)
+	items := map[string][]int64{
+		"src_1": {101, 102},
+		"src_2": {102, 103},
 	}
-
-	// 查 src_1
-	q := model.CollectRecordFilmQuery{
-		BatchID:  batchID,
-		SourceID: "src_1",
-		AfterID:  0,
-		PageSize: 10,
+	if err := SaveCollectRecordFilms(rec.ID, items); err != nil {
+		t.Fatalf("SaveCollectRecordFilms failed: %v", err)
 	}
-	list, total, err := GetCollectRecordFilms(q)
-	if err != nil {
-		t.Fatalf("GetCollectRecordFilms failed: %v", err)
-	}
-	if total != 2 || len(list) != 2 {
-		t.Fatalf("expected total 2, got %d, len=%d", total, len(list))
-	}
-	if list[0].Name != "黑客帝国" || list[1].Name != "黑客帝国2" {
-		t.Fatalf("unexpected names: %+v", list)
-	}
-
-	// 关键字筛选
-	q.Keyword = "黑客帝国2"
-	listFiltered, totalFiltered, err := GetCollectRecordFilms(q)
-	if err != nil {
-		t.Fatalf("filtered query failed: %v", err)
-	}
-	if totalFiltered != 1 || len(listFiltered) != 1 || listFiltered[0].Mid != 102 {
-		t.Fatalf("unexpected filtered result: %+v", listFiltered)
-	}
-
-	// 同一批次重复结算不累加行数
-	if err := BatchSaveCollectRecordFilms(batchID, items); err != nil {
+	// 重复写入不累加行数。
+	if err := SaveCollectRecordFilms(rec.ID, items); err != nil {
 		t.Fatalf("repeated save failed: %v", err)
 	}
 	var saved int64
-	if err := testDB.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID).Count(&saved).Error; err != nil {
-		t.Fatalf("count saved rows failed: %v", err)
-	}
+	testDB.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&saved)
 	if saved != 4 {
 		t.Fatalf("expected 4 rows after repeated save, got %d", saved)
 	}
 
-	// 全部站点的总数是各站清单行数之和，和分页列表一致。
-	allQuery := model.CollectRecordFilmQuery{BatchID: batchID, PageSize: 10}
-	all, allTotal, err := GetCollectRecordFilms(allQuery)
-	if err != nil {
-		t.Fatalf("all-source query failed: %v", err)
-	}
-	if allTotal != 4 || len(all) != 4 {
-		t.Fatalf("expected total 4 and 4 rows, got total=%d list=%+v", allTotal, all)
-	}
-	named, namedTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, Keyword: "黑客", PageSize: 10,
+	// 单站浏览分页。
+	srcPage1, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, SourceID: "src_1", PageSize: 1,
 	})
-	if err != nil || namedTotal != 3 || len(named) != 3 {
-		t.Fatalf("expected 3 keyword rows, got total=%d list=%+v err=%v", namedTotal, named, err)
+	if err != nil || srcPage1.Total != 2 || !srcPage1.HasMore || len(srcPage1.List) != 1 || srcPage1.List[0].Name != "黑客帝国" {
+		t.Fatalf("src_1 page1 = %+v err=%v", srcPage1, err)
 	}
-	firstPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, Keyword: "黑客", PageSize: 1,
+	srcPage2, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: batchID, SourceID: "src_1", AfterMid: srcPage1.NextAfterMid, PageSize: 1,
 	})
-	if err != nil || firstPage.Total != 3 || len(firstPage.List) != 1 || !firstPage.HasMore || firstPage.List[0].Name != "黑客帝国" {
-		t.Fatalf("first search page %+v err=%v", firstPage, err)
-	}
-	secondPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID:   batchID,
-		Keyword:   "黑客",
-		PageSize:  1,
-		AfterName: firstPage.NextAfterName,
-		AfterMid:  firstPage.NextAfterMid,
-		AfterID:   firstPage.NextAfterID,
-	})
-	if err != nil || secondPage.Total != 3 || len(secondPage.List) != 1 || secondPage.List[0].Name != "黑客帝国2" {
-		t.Fatalf("second search page %+v err=%v", secondPage, err)
+	if err != nil || srcPage2.Total != 2 || srcPage2.HasMore || len(srcPage2.List) != 1 || srcPage2.List[0].Name != "黑客帝国2" {
+		t.Fatalf("src_1 page2 = %+v err=%v", srcPage2, err)
 	}
 
-	// 清理
-	if err := testDB.Where("batch_id = ?", batchID).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
-		t.Fatalf("delete failed: %v", err)
+	// 全站浏览游标翻页（覆盖跨站边界）。
+	var allGot []string
+	var afterSrc string
+	var afterMid int64
+	for {
+		p, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+			BatchID: batchID, AfterSource: afterSrc, AfterMid: afterMid, PageSize: 2,
+		})
+		if err != nil {
+			t.Fatalf("all browse failed: %v", err)
+		}
+		if p.Total != 4 {
+			t.Fatalf("all total=%d, want 4", p.Total)
+		}
+		for _, f := range p.List {
+			allGot = append(allGot, fmt.Sprintf("%s:%d", f.SourceID, f.Mid))
+		}
+		if !p.HasMore {
+			break
+		}
+		afterSrc = p.NextAfterSource
+		afterMid = p.NextAfterMid
 	}
-	_, totalAfter, _ := GetCollectRecordFilms(q)
-	if totalAfter != 0 {
-		t.Fatalf("expected 0 after delete, got %d", totalAfter)
+	if fmt.Sprint(allGot) != "[src_1:101 src_1:102 src_2:102 src_2:103]" {
+		t.Fatalf("all browse sequence = %v", allGot)
+	}
+
+	// 搜索态：多站同片（mid=102 同属 src_1 与 src_2）按 (name, mid, source_id) 逐页遍历，不漏不重且不做精确 COUNT。
+	var searchGot []string
+	var sName, sSrc string
+	var sMid int64
+	for {
+		p, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+			BatchID: batchID, Keyword: "黑客", AfterName: sName, AfterMid: sMid, AfterSource: sSrc, PageSize: 1,
+		})
+		if err != nil {
+			t.Fatalf("search failed: %v", err)
+		}
+		if p.Total != -1 || p.Truncated {
+			t.Fatalf("search page unexpected meta: %+v", p)
+		}
+		for _, f := range p.List {
+			searchGot = append(searchGot, fmt.Sprintf("%s:%s:%d", f.Name, f.SourceID, f.Mid))
+		}
+		if !p.HasMore {
+			break
+		}
+		sName, sMid, sSrc = p.NextAfterName, p.NextAfterMid, p.NextAfterSource
+	}
+	if fmt.Sprint(searchGot) != "[黑客帝国:src_1:101 黑客帝国2:src_1:102 黑客帝国2:src_2:102]" {
+		t.Fatalf("search sequence = %v", searchGot)
+	}
+
+	// 分批清理账本。
+	prevChunk := collectCleanFilmChunk
+	collectCleanFilmChunk = 2
+	t.Cleanup(func() { collectCleanFilmChunk = prevChunk })
+	if err := DeleteCollectRecordFilms(rec.ID); err != nil {
+		t.Fatalf("DeleteCollectRecordFilms failed: %v", err)
+	}
+	testDB.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&saved)
+	if saved != 0 {
+		t.Fatalf("expected 0 after chunked delete, got %d", saved)
+	}
+}
+
+func TestSearchCollectRecordFilms_ScanBudgetTruncation(t *testing.T) {
+	testDB := setupRecordFilmsTestDB(t)
+	prevChunk, prevBudget := searchFilmScanChunk, maxSearchFilmScan
+	searchFilmScanChunk = 3
+	maxSearchFilmScan = 5
+	t.Cleanup(func() {
+		searchFilmScanChunk = prevChunk
+		maxSearchFilmScan = prevBudget
+	})
+
+	// 插入 10 部以 "测试" 开头的影片，但本批次只包含第 9 部（超出 5 行扫描预算）。
+	for i := 1; i <= 10; i++ {
+		testDB.Create(&model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: int64(i)},
+			FilmIndexContent:  model.FilmIndexContent{Name: fmt.Sprintf("测试%02d", i)},
+		})
+	}
+	rec := &model.CollectRecord{
+		BatchID:    "batch_trunc",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		Ledger:     true,
+		FilmCount:  1,
+		DetailJson: `[{"sourceId":"src_1","filmsTotal":1}]`,
+		StartedAt:  time.Now(),
+	}
+	if err := testDB.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCollectRecordFilms(rec.ID, map[string][]int64{"src_1": {9}}); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: "batch_trunc", SourceID: "src_1", Keyword: "测试", PageSize: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !page.Truncated || len(page.List) != 0 || page.Total != -1 {
+		t.Fatalf("expected truncated empty page, got %+v", page)
+	}
+}
+
+func TestSearchCollectRecordFilms_TrailingSpaceAndRoundBudget(t *testing.T) {
+	testDB := setupRecordFilmsTestDB(t)
+	testDB.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 301},
+		FilmIndexContent:  model.FilmIndexContent{Name: "黑客帝国 "}, // 含尾部空格
+	})
+	testDB.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 302},
+		FilmIndexContent:  model.FilmIndexContent{Name: "黑客帝国2"},
+	})
+	rec := &model.CollectRecord{
+		BatchID:    "batch_space",
+		Trigger:    model.CollectTriggerManual,
+		Status:     model.CollectRecordStatusSuccess,
+		Ledger:     true,
+		FilmCount:  3,
+		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":1}]`,
+		StartedAt:  time.Now(),
+	}
+	if err := testDB.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCollectRecordFilms(rec.ID, map[string][]int64{
+		"src_1": {301, 302},
+		"src_2": {301},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	var sName, sSrc string
+	var sMid int64
+	for step := 0; step < 10; step++ {
+		p, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+			BatchID: "batch_space", Keyword: "黑客", AfterName: sName, AfterMid: sMid, AfterSource: sSrc, PageSize: 1,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range p.List {
+			got = append(got, fmt.Sprintf("%s:%s:%d", f.Name, f.SourceID, f.Mid))
+		}
+		if !p.HasMore {
+			break
+		}
+		sName, sMid, sSrc = p.NextAfterName, p.NextAfterMid, p.NextAfterSource
+	}
+	if fmt.Sprint(got) != "[黑客帝国:src_1:301 黑客帝国:src_2:301 黑客帝国2:src_1:302]" {
+		t.Fatalf("trailing-space pagination got %v", got)
+	}
+
+	// 验证轮次上限截断。
+	prevChunk, prevRounds, prevScan := searchFilmScanChunk, maxSearchFilmRounds, maxSearchFilmScan
+	searchFilmScanChunk, maxSearchFilmRounds, maxSearchFilmScan = 1, 1, 100
+	t.Cleanup(func() {
+		searchFilmScanChunk, maxSearchFilmRounds, maxSearchFilmScan = prevChunk, prevRounds, prevScan
+	})
+	truncPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
+		BatchID: "batch_space", SourceID: "src_1", Keyword: "黑客", PageSize: 5,
+	})
+	if err != nil || !truncPage.Truncated || len(truncPage.List) != 1 {
+		t.Fatalf("expected round-budget truncation with 1 hit, got %+v err=%v", truncPage, err)
 	}
 }
 
@@ -159,10 +277,7 @@ func TestGetCollectRecordFilms_NameLookupError(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("batch-names", map[string][]int64{"src_1": {101}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := testDB.Create(&model.CollectRecord{
+	rec := &model.CollectRecord{
 		BatchID:    "batch-names",
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
@@ -170,66 +285,31 @@ func TestGetCollectRecordFilms_NameLookupError(t *testing.T) {
 		FilmCount:  1,
 		DetailJson: `[{"sourceId":"src_1","filmsTotal":1}]`,
 		StartedAt:  time.Now(),
-	}).Error; err != nil {
+	}
+	if err := testDB.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCollectRecordFilms(rec.ID, map[string][]int64{"src_1": {101}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := testDB.Migrator().DropTable(&model.FilmIndex{}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if _, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "batch-names", SourceID: "src_1", PageSize: 10,
-	})
-	if err == nil {
+	}); err == nil {
 		t.Fatal("expected name lookup error")
 	}
 }
 
-func TestBatchSaveCollectRecordFilms_ContinuesAfterChunkError(t *testing.T) {
-	testDB := setupRecordFilmsTestDB(t)
-	prevSize := collectFilmChunkSize
-	prevInsert := insertCollectFilmChunk
-	collectFilmChunkSize = 2
-	calls := 0
-	insertCollectFilmChunk = func(chunk []model.CollectRecordFilmItem) error {
-		calls++
-		if calls == 2 {
-			return errors.New("lock")
-		}
-		return prevInsert(chunk)
-	}
-	t.Cleanup(func() {
-		collectFilmChunkSize = prevSize
-		insertCollectFilmChunk = prevInsert
-	})
-
-	err := BatchSaveCollectRecordFilms("batch-chunk", map[string][]int64{
-		"s1": {1, 2, 3, 4, 5},
-	})
-	missed := UnstoredCollectFilms(err)
-	if err == nil || len(missed["s1"]) != 2 || missed["s1"][0] != 3 || missed["s1"][1] != 4 {
-		t.Fatalf("err=%v missed=%v calls=%d", err, missed, calls)
-	}
-	var saved []int64
-	if err := testDB.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", "batch-chunk").Order("mid ASC").Pluck("mid", &saved).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(saved) != 3 || saved[0] != 1 || saved[1] != 2 || saved[2] != 5 {
-		t.Fatalf("saved=%v", saved)
-	}
-}
-
-func TestGetCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
+func TestQueryCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
 	testDB := setupRecordFilmsTestDB(t)
 	batchID := "batch_running_test"
 	testDB.Create(&model.FilmIndex{
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 201},
 		FilmIndexContent:  model.FilmIndexContent{Name: "运行中测试影片"},
 	})
-	if err := BatchSaveCollectRecordFilms(batchID, map[string][]int64{"src_run": {201}}); err != nil {
-		t.Fatal(err)
-	}
-	// 清单行数写在记录上。没有站点明细时，单站总数为 0。
-	if err := testDB.Create(&model.CollectRecord{
+	rec := &model.CollectRecord{
 		BatchID:    batchID,
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusRunning,
@@ -237,90 +317,34 @@ func TestGetCollectRecordFilms_RunningBatchWithoutDetailJson(t *testing.T) {
 		FilmCount:  1,
 		DetailJson: "",
 		StartedAt:  time.Now(),
-	}).Error; err != nil {
+	}
+	if err := testDB.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveCollectRecordFilms(rec.ID, map[string][]int64{"src_run": {201}}); err != nil {
 		t.Fatal(err)
 	}
 
-	list, total, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	allPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: batchID, PageSize: 10,
 	})
-	if err != nil {
-		t.Fatalf("query failed: %v", err)
+	if err != nil || allPage.Total != 1 || len(allPage.List) != 1 || allPage.List[0].Mid != 201 {
+		t.Fatalf("expected total 1 and mid 201, got %+v err=%v", allPage, err)
 	}
-	if total != 1 || len(list) != 1 || list[0].Mid != 201 {
-		t.Fatalf("expected total 1 and mid 201, got total=%d list=%+v", total, list)
-	}
-	if _, totalSrc, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if srcPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: batchID, SourceID: "src_run", PageSize: 10,
-	}); err != nil || totalSrc != 0 {
-		t.Fatalf("source without detail total=%d err=%v", totalSrc, err)
+	}); err != nil || srcPage.Total != 0 {
+		t.Fatalf("source without detail total=%d err=%v", srcPage.Total, err)
 	}
 
-	if err := testDB.Model(&model.CollectRecord{}).Where("batch_id = ?", batchID).
+	if err := testDB.Model(&model.CollectRecord{}).Where("id = ?", rec.ID).
 		Update("detail_json", `[{"sourceId":"src_run","filmsTotal":1}]`).Error; err != nil {
 		t.Fatal(err)
 	}
-	listSrc, totalSrc, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	srcPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: batchID, SourceID: "src_run", PageSize: 10,
 	})
-	if err != nil {
-		t.Fatalf("query src failed: %v", err)
-	}
-	if totalSrc != 1 || len(listSrc) != 1 || listSrc[0].Mid != 201 {
-		t.Fatalf("expected total 1 and mid 201, got total=%d list=%+v", totalSrc, listSrc)
-	}
-}
-
-func TestGetCollectRecordFilms_AllSitesTotalCountsRowsNotFilmCount(t *testing.T) {
-	testDB := setupRecordFilmsTestDB(t)
-	batchID := "batch_rows"
-	for _, item := range []struct {
-		mid  int64
-		name string
-	}{
-		{201, "甲"},
-		{202, "乙"},
-	} {
-		testDB.Create(&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: item.mid},
-			FilmIndexContent:  model.FilmIndexContent{Name: item.name},
-		})
-	}
-	if err := BatchSaveCollectRecordFilms(batchID, map[string][]int64{
-		"src_1": {201, 202},
-		"src_2": {202},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// 同一影片在两站各算一行。总数用记录上的清单行数，单站用明细行数。
-	if err := testDB.Create(&model.CollectRecord{
-		BatchID:    batchID,
-		Trigger:    model.CollectTriggerManual,
-		Status:     model.CollectRecordStatusRunning,
-		Ledger:     true,
-		FilmCount:  3,
-		DetailJson: `[{"sourceId":"src_1","filmsTotal":2},{"sourceId":"src_2","filmsTotal":1}]`,
-		StartedAt:  time.Now(),
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	all := model.CollectRecordFilmQuery{BatchID: batchID, PageSize: 10}
-	list, total, err := GetCollectRecordFilms(all)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total != 3 || len(list) != 3 {
-		t.Fatalf("all total=%d list=%d", total, len(list))
-	}
-	if _, total, err = GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, SourceID: "src_1", PageSize: 10,
-	}); err != nil || total != 2 {
-		t.Fatalf("src_1 total=%d err=%v", total, err)
-	}
-	if _, total, err = GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batchID, SourceID: "src_2", PageSize: 10,
-	}); err != nil || total != 1 {
-		t.Fatalf("src_2 total=%d err=%v", total, err)
+	if err != nil || srcPage.Total != 1 || len(srcPage.List) != 1 || srcPage.List[0].Mid != 201 {
+		t.Fatalf("expected total 1 and mid 201, got %+v err=%v", srcPage, err)
 	}
 }

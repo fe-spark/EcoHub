@@ -93,11 +93,14 @@ func TestCollectBatchContext_StreamEnqueueKeepsTagMIDsIsolated(t *testing.T) {
 	batchA.addAffectedMIDs(&sourceA, -1, []int64{100, 200})
 	batchB.addAffectedMIDs(&sourceB, 24, []int64{300, 400})
 
-	if got := sortedMIDSlice(batchA.affectedMIDs); !reflect.DeepEqual(got, []int64{100, 200}) {
-		t.Fatalf("batch A 标签集 = %v; want [100 200]", got)
+	if got := sortedMIDSlice(batchA.takeAffectedMIDs()); !reflect.DeepEqual(got, []int64{100, 200}) {
+		t.Fatalf("batch A 主站待封口集 = %v; want [100 200]", got)
 	}
-	if got := sortedMIDSlice(batchB.affectedMIDs); !reflect.DeepEqual(got, []int64{300, 400}) {
-		t.Fatalf("batch B 标签集 = %v; want [300 400]", got)
+	if got := batchB.takeAffectedMIDs(); len(got) != 0 {
+		t.Fatalf("batch B 非主站不应堆积待封口集 = %v; want []", got)
+	}
+	if len(batchB.ledgerPending) != 2 || batchB.ledgerPending[0].mid != 300 || batchB.ledgerPending[1].mid != 400 {
+		t.Fatalf("batch B 账本缓冲应独立保留 = %+v", batchB.ledgerPending)
 	}
 }
 
@@ -169,8 +172,8 @@ func TestTakeSourceMIDs_LeavesOtherSource(t *testing.T) {
 	if !reflect.DeepEqual(got, []int64{1, 2}) {
 		t.Fatalf("taken = %v", got)
 	}
-	if !reflect.DeepEqual(batch.affectedMIDs, []int64{3}) {
-		t.Fatalf("left = %v", batch.affectedMIDs)
+	if left := batch.takeAffectedMIDs(); !reflect.DeepEqual(left, []int64{3}) {
+		t.Fatalf("left = %v", left)
 	}
 	if again := batch.takeSourceMIDs("a"); len(again) != 0 {
 		t.Fatalf("second take = %v", again)

@@ -197,7 +197,7 @@ func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 		return
 	}
 	if len(data) <= 0 {
-		dto.Failed("暂无分类信息", c)
+		dto.Success([]*model.Category{}, "暂无分类信息", c)
 		return
 	}
 	dto.Success(data, "分类信息获取成功", c)

@@ -28,8 +28,9 @@ const (
 )
 
 type pollerInstance struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel   context.CancelFunc
+	pollDone chan struct{}
+	done     chan struct{}
 }
 
 var (
@@ -96,9 +97,11 @@ func ensurePollerState(token, proxyURL string) {
 	pollerMu.Unlock()
 
 	if old != nil {
+		// 等待旧 getUpdates 循环退出再启动新轮询，避免同 Token 并发拉取触发 409 冲突。
 		select {
+		case <-old.pollDone:
 		case <-old.done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(5 * time.Second):
 		}
 	}
 
@@ -113,8 +116,9 @@ func ensurePollerState(token, proxyURL string) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	inst := &pollerInstance{
-		cancel: cancel,
-		done:   make(chan struct{}),
+		cancel:   cancel,
+		pollDone: make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 	activePoller = inst
 	activeBotToken = token
@@ -123,7 +127,7 @@ func ensurePollerState(token, proxyURL string) {
 
 	go func(p *pollerInstance, tok string) {
 		defer close(p.done)
-		runTelegramPoller(ctx, tok)
+		runTelegramPoller(ctx, tok, p.pollDone)
 	}(inst, token)
 }
 
@@ -158,12 +162,13 @@ func savePollerOffset(ctx context.Context, token string, offset int64) {
 	_ = db.Rdb.Set(opCtx, pollerOffsetKey(token), offset, pollerOffsetTTL).Err()
 }
 
-func runTelegramPoller(ctx context.Context, token string) {
+func runTelegramPoller(ctx context.Context, token string, pollDone chan struct{}) {
 	offset := loadPollerOffset(ctx, token)
 	var errStreak int
 	callbackSem := make(chan struct{}, maxCallbackWorkers)
 	var callbackWg sync.WaitGroup
 	defer callbackWg.Wait()
+	defer close(pollDone)
 
 	for {
 		select {
@@ -326,6 +331,20 @@ func parseNotifyCallbackCmd(data string) (notifyCallbackCmd, bool) {
 	return notifyCallbackCmd{}, false
 }
 
+func isAllowedNotifyChat(chatIDs []string, chatID, threadID int64) bool {
+	wantChat := strconv.FormatInt(chatID, 10)
+	for _, raw := range chatIDs {
+		cid, tid, err := parseChatTarget(raw)
+		if err != nil || cid != wantChat {
+			continue
+		}
+		if tid == 0 || tid == threadID {
+			return true
+		}
+	}
+	return false
+}
+
 func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbackQuery) {
 	if cb == nil {
 		return
@@ -342,13 +361,23 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 		}
 	}
 
+	if cb.Message == nil || cb.Message.Chat == nil {
+		answerCallback("无法定位原消息", true)
+		return
+	}
+	cfg, cfgErr := GetNotifyConfig()
+	if cfgErr != nil || !cfg.Enabled || !isAllowedNotifyChat(cfg.ChatIDs, cb.Message.Chat.ID, cb.Message.MessageThreadID) {
+		answerCallback("当前会话无权操作", true)
+		return
+	}
+
 	cmd, ok := parseNotifyCallbackCmd(cb.Data)
 	if !ok {
 		answerCallback("无效操作", false)
 		return
 	}
 
-	sess, err := LoadNotifyBatchSession(cmd.batchID)
+	sess, err := LoadNotifyBatchSessionContext(ctx, cmd.batchID)
 	if err != nil {
 		answerCallback("该批次记录已过期", true)
 		return
@@ -427,7 +456,7 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 			return
 		}
 		dbCtx, dbCancel := context.WithTimeout(ctx, callbackDBTimeout)
-		text, totalPages, err := formatSourceFilmListPageHTML(dbCtx, sess, cmd.srcIdx, cmd.catIdx, cmd.page)
+		text, curPage, totalPages, err := formatSourceFilmListPageHTML(dbCtx, sess, cmd.srcIdx, cmd.catIdx, cmd.page)
 		dbCancel()
 		if err != nil {
 			log.Printf("[Notify] 构建站点片单失败 srcIdx=%d catIdx=%d page=%d err=%v", cmd.srcIdx, cmd.catIdx, cmd.page, err)
@@ -438,13 +467,13 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 			}
 			return
 		}
-		markup := buildSourcePagedKeyboard(sess.BatchID, cmd.srcIdx, cmd.catIdx, cmd.page, totalPages)
+		markup := buildSourcePagedKeyboard(sess.BatchID, cmd.srcIdx, cmd.catIdx, curPage, totalPages)
 		if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
 			log.Printf("[Notify] 站点片单翻页更新失败: %v", err)
 			answerCallback("翻页失败", false)
 			return
 		}
-		answerCallback(fmt.Sprintf("第 %d/%d 页", cmd.page, totalPages), false)
+		answerCallback(fmt.Sprintf("第 %d/%d 页", curPage, totalPages), false)
 		return
 	}
 	answerCallback("无效操作", false)

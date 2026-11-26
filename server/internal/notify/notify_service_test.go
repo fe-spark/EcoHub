@@ -152,12 +152,21 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:s1:1", RootCategoryKey: "source:s1:1"},
 			FilmIndexContent:  model.FilmIndexContent{Name: "影片C"},
 		},
-		&model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now},
-		&model.CollectRecordFilmItem{BatchID: batchID, SourceID: "s1", Mid: 101, CreatedAt: now},
-		&model.CollectRecordFilmItem{BatchID: batchID, SourceID: "s1", Mid: 102, CreatedAt: now},
-		&model.CollectRecordFilmItem{BatchID: batchID, SourceID: "s1", Mid: 103, CreatedAt: now},
 	} {
 		if err := gdb.Create(item).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := &model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}
+	if err := gdb.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []model.CollectRecordFilmItem{
+		{RecordID: rec.ID, SourceID: "s1", Mid: 101},
+		{RecordID: rec.ID, SourceID: "s1", Mid: 102},
+		{RecordID: rec.ID, SourceID: "s1", Mid: 103},
+	} {
+		if err := gdb.Create(&row).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -166,6 +175,14 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 	taxonomy.RefreshCategoryCache()
 	catalog.InvalidatePublicSourceCache()
 	catalog.MarkCategoryChanged()
+
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABCDEF",
+		ChatIDs:  []string{"-100111", "-100222:5"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	sess := model.NotifyBatchSession{
 		BatchID:        "b123",
@@ -206,7 +223,7 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 	}
 
 	// 未配置 SiteURL 时，片单正常展示但不附带超链接
-	pageHTML, totalPages, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, 0, 1)
+	pageHTML, _, totalPages, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, 0, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +238,7 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 	if err := repobase.SaveSiteBasic(model.BasicConfig{SiteName: "EcoHub", SiteURL: "http://localhost:3300/"}); err != nil {
 		t.Fatal(err)
 	}
-	linkedHTML, _, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, -1, 1)
+	linkedHTML, _, _, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, -1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +246,7 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 		t.Fatalf("expected film play link in page html: %s", linkedHTML)
 	}
 
-	page2HTML, _, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, 0, 2)
+	page2HTML, _, _, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, 0, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,6 +288,14 @@ func TestSendTestAndCallbackEditWithMockServer(t *testing.T) {
 		t.Fatalf("unexpected SendTest result: %+v", res)
 	}
 
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABCDEF",
+		ChatIDs:  []string{"-100111", "-100222:5"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	sess := model.NotifyBatchSession{
 		BatchID:      "t999",
 		SiteName:     "TestSite",
@@ -291,10 +316,29 @@ func TestSendTestAndCallbackEditWithMockServer(t *testing.T) {
 		},
 	})
 
+	// 未授权 chat_id 必须被白名单拦截，不触发 editMessageText
+	handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
+		ID:   "cb_unauth",
+		Data: "nfp:t999:sc:0:-1:1",
+		Message: &tgMessage{
+			MessageID: 89,
+			Chat:      &tgChat{ID: -999999},
+		},
+	})
+
 	mu.Lock()
 	defer mu.Unlock()
 	if len(methods) < 4 {
 		t.Fatalf("expected at least 4 telegram API calls, got %v", methods)
+	}
+	editCount := 0
+	for _, m := range methods {
+		if strings.HasSuffix(m, "/editMessageText") {
+			editCount++
+		}
+	}
+	if editCount != 1 {
+		t.Fatalf("expected unauthorized callback not to trigger editMessageText, got %d edits (%v)", editCount, methods)
 	}
 }
 
@@ -566,14 +610,15 @@ func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
 
 	const batchID = "batch_hide_01"
 	now := time.Now()
-	if err := gdb.Create(&model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}).Error; err != nil {
+	hideRec := &model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}
+	if err := gdb.Create(hideRec).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, row := range []model.CollectRecordFilmItem{
-		{BatchID: batchID, SourceID: "src_notify_hide", Mid: 101, CreatedAt: now},
-		{BatchID: batchID, SourceID: "src_notify_hide", Mid: 102, CreatedAt: now},
-		{BatchID: batchID, SourceID: "src_peer_other", Mid: 103, CreatedAt: now},
-		{BatchID: batchID, SourceID: "src_notify_hide", Mid: 104, CreatedAt: now},
+		{RecordID: hideRec.ID, SourceID: "src_notify_hide", Mid: 101},
+		{RecordID: hideRec.ID, SourceID: "src_notify_hide", Mid: 102},
+		{RecordID: hideRec.ID, SourceID: "src_peer_other", Mid: 103},
+		{RecordID: hideRec.ID, SourceID: "src_notify_hide", Mid: 104},
 	} {
 		if err := gdb.Create(&row).Error; err != nil {
 			t.Fatal(err)
@@ -716,13 +761,14 @@ func TestNotifyPerSiteReplyAndCategoryDrilldown(t *testing.T) {
 
 	const batchID = "batch_drill_01"
 	now := time.Now()
-	if err := gdb.Create(&model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}).Error; err != nil {
+	drillRec := &model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}
+	if err := gdb.Create(drillRec).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, row := range []model.CollectRecordFilmItem{
-		{BatchID: batchID, SourceID: "src_main", Mid: 201, CreatedAt: now},
-		{BatchID: batchID, SourceID: "src_sub", Mid: 202, CreatedAt: now},
-		{BatchID: batchID, SourceID: "src_sub", Mid: 203, CreatedAt: now},
+		{RecordID: drillRec.ID, SourceID: "src_main", Mid: 201},
+		{RecordID: drillRec.ID, SourceID: "src_sub", Mid: 202},
+		{RecordID: drillRec.ID, SourceID: "src_sub", Mid: 203},
 	} {
 		if err := gdb.Create(&row).Error; err != nil {
 			t.Fatal(err)
@@ -794,6 +840,14 @@ func TestNotifyPerSiteReplyAndCategoryDrilldown(t *testing.T) {
 	oldBase := tgAPIBaseURL
 	tgAPIBaseURL = ts.URL
 	defer func() { tgAPIBaseURL = oldBase }()
+
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABCDEF",
+		ChatIDs:  []string{"-100111"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// 2. 点击站点按钮应回复新消息并附带该站点对应分类按钮
 	handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
@@ -938,22 +992,23 @@ func TestNotifyLedgerAggregationAndSQLPagination(t *testing.T) {
 
 	const collectBatchID = "batch_ledger_01"
 	now := time.Now()
-	if err := gdb.Create(&model.CollectRecord{
+	ledgerRec := &model.CollectRecord{
 		BatchID:   collectBatchID,
 		Trigger:   model.CollectTriggerManual,
 		Status:    "done",
 		Ledger:    true,
 		StartedAt: now,
-	}).Error; err != nil {
+	}
+	if err := gdb.Create(ledgerRec).Error; err != nil {
 		t.Fatal(err)
 	}
 	ledgerItems := []model.CollectRecordFilmItem{
-		{BatchID: collectBatchID, SourceID: "src_main", Mid: 501, CreatedAt: now},
-		{BatchID: collectBatchID, SourceID: "src_main", Mid: 502, CreatedAt: now},
-		{BatchID: collectBatchID, SourceID: "src_sub", Mid: 601, CreatedAt: now},
-		{BatchID: collectBatchID, SourceID: "src_sub", Mid: 602, CreatedAt: now},
-		{BatchID: collectBatchID, SourceID: "src_sub", Mid: 603, CreatedAt: now},
-		{BatchID: collectBatchID, SourceID: "src_sub", Mid: 604, CreatedAt: now},
+		{RecordID: ledgerRec.ID, SourceID: "src_main", Mid: 501},
+		{RecordID: ledgerRec.ID, SourceID: "src_main", Mid: 502},
+		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 601},
+		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 602},
+		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 603},
+		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 604},
 	}
 	if err := gdb.Create(&ledgerItems).Error; err != nil {
 		t.Fatal(err)
@@ -1022,6 +1077,14 @@ func TestNotifyLedgerAggregationAndSQLPagination(t *testing.T) {
 	oldBase := tgAPIBaseURL
 	tgAPIBaseURL = ts.URL
 	defer func() { tgAPIBaseURL = oldBase }()
+
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABCDEF",
+		ChatIDs:  []string{"-100111"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	fire := func(data string) {
 		handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
@@ -1143,6 +1206,14 @@ func TestNotifyLedgerAggregationAndSQLPagination(t *testing.T) {
 func TestRunTelegramPoller_ConcurrentCallbackHandling(t *testing.T) {
 	setupNotifyConfigDB(t)
 
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABCDEF",
+		ChatIDs:  []string{"-100111", "-100222:5"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	sess := model.NotifyBatchSession{
 		BatchID:      "conc_batch",
 		SiteName:     "EcoHub",
@@ -1243,11 +1314,20 @@ func TestRunTelegramPoller_ConcurrentCallbackHandling(t *testing.T) {
 	tgAPIBaseURL = ts.URL
 	defer func() { tgAPIBaseURL = oldBase }()
 
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABCDEF",
+		ChatIDs:  []string{"1001"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
+	pollDone := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runTelegramPoller(ctx, "123456:ABCDEF")
+		runTelegramPoller(ctx, "123456:ABCDEF", pollDone)
 	}()
 
 	select {

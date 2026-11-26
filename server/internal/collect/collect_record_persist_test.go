@@ -312,21 +312,23 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 	batch.noteSourceHour(src.Id, 48)
 	batch.AddAffectedMIDs(&src, 48, []int64{11, 12})
 
-	var films int64
-	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batch.batchID).Count(&films).Error; err != nil {
-		t.Fatal(err)
-	}
-	if films != 0 {
-		t.Fatalf("running batch wrote %d film rows", films)
-	}
 	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var films int64
+	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&films).Error; err != nil {
+		t.Fatal(err)
+	}
+	if films != 0 {
+		t.Fatalf("below flush threshold wrote %d film rows", films)
 	}
 	if rec.Status != model.CollectRecordStatusRunning || rec.FilmCount != 0 || !strings.Contains(rec.DetailJson, `"status":"running"`) || strings.Contains(rec.DetailJson, `"filmsTotal":2`) {
 		t.Fatalf("running record status=%s films=%d detail=%s", rec.Status, rec.FilmCount, rec.DetailJson)
 	}
 
+	// 流式刷入后发生服务重启，中断兜底能按已落账本找回影片部数。
+	batch.flushLedger()
 	if err := ledger.MarkInterruptedCollectRecords(); err != nil {
 		t.Fatal(err)
 	}
@@ -334,8 +336,8 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Status != model.CollectRecordStatusInterrupted || rec.FilmCount != 0 || rec.Hour != 24 {
-		t.Fatalf("interrupted record status=%s films=%d hour=%d", rec.Status, rec.FilmCount, rec.Hour)
+	if rec.Status != model.CollectRecordStatusInterrupted || rec.FilmCount != 2 || !rec.Ledger || rec.Hour != 24 {
+		t.Fatalf("interrupted record status=%s films=%d ledger=%v hour=%d", rec.Status, rec.FilmCount, rec.Ledger, rec.Hour)
 	}
 }
 
@@ -433,7 +435,7 @@ func TestFullCollectStoresFilmLedger(t *testing.T) {
 		t.Fatalf("status=%s films=%d ledger=%v", rec.Status, rec.FilmCount, rec.Ledger)
 	}
 	var rows int64
-	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batch.batchID).Count(&rows).Error; err != nil {
+	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 	if rows != 3 {
@@ -468,16 +470,16 @@ func TestIncrementalCollectStoresSmallFilmLedger(t *testing.T) {
 		PageTotal: 1, SuccessCnt: 1, FilmsTotal: 2,
 	}})
 
+	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var rows int64
-	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batch.batchID).Count(&rows).Error; err != nil {
+	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 	if rows != 2 {
 		t.Fatalf("incremental ledger rows=%d", rows)
-	}
-	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
-	if err != nil {
-		t.Fatal(err)
 	}
 	if !rec.Ledger {
 		t.Fatal("incremental collect should keep the film ledger")

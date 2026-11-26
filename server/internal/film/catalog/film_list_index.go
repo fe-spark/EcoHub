@@ -1,11 +1,8 @@
 package catalog
 
 import (
-	"database/sql"
 	"errors"
 	"log"
-	"strings"
-	"time"
 
 	"github.com/go-sql-driver/mysql"
 
@@ -25,9 +22,6 @@ const FilmSourceDeletedIndex = "idx_film_index_source_del"
 
 // FilmCategoryDeletedIndex 统计各分类未删除影片数走覆盖索引，避免非主站百万数据回表。
 const FilmCategoryDeletedIndex = "idx_film_index_cat_del"
-
-// CollectRecordFilmSourceIndex 让删站清理历史采集影片清单按 source_id 走索引，避免全表扫删。
-const CollectRecordFilmSourceIndex = "idx_crf_source_id"
 
 // EnsureFilmCategoryScoreIndex 让一键排片按分类键和评分取前几部。
 // 不写进模型标签，避免启动时用 30 秒读超时去建这个索引。
@@ -76,12 +70,6 @@ func ensureTablePrefixIndex(tableName, name, colPrefix, columns string) error {
 	return ensureTableIndex(tableName, name, columns)
 }
 
-// EnsureCollectRecordFilmSourceIndex 为 collect_record_film_items 补建 source_id 索引。
-// 不写进模型标签，避免启动 AutoMigrate 时用 30 秒读超时在大表上建索引超时。
-func EnsureCollectRecordFilmSourceIndex() error {
-	return ensureTableIndex(model.TableCollectRecordFilm, CollectRecordFilmSourceIndex, "source_id")
-}
-
 func ensureTableIndex(tableName, name, columns string) error {
 	if db.Mdb == nil || db.Mdb.Dialector.Name() != "mysql" {
 		return nil
@@ -98,7 +86,7 @@ func ensureTableIndex(tableName, name, columns string) error {
 		return nil
 	}
 	log.Printf("[Init] 正在建立索引 %s.%s，数据较大时会久一些", tableName, name)
-	conn, err := OpenLongReadConn(config.MysqlDsn)
+	conn, err := db.OpenLongReadConn(config.MysqlDsn)
 	if err != nil {
 		return err
 	}
@@ -116,29 +104,4 @@ func ensureTableIndex(tableName, name, columns string) error {
 		return nil
 	}
 	return err
-}
-
-// OpenLongReadConn 建立带长读超时的直连 MySQL 连接（30 分钟），供建索引与大表统计使用。
-func OpenLongReadConn(dsn string) (*sql.DB, error) {
-	if parsed, err := mysql.ParseDSN(dsn); err == nil {
-		parsed.ReadTimeout = 30 * time.Minute
-		parsed.WriteTimeout = 30 * time.Minute
-		dsn = parsed.FormatDSN()
-	} else if strings.Contains(dsn, "readTimeout=") {
-		dsn = strings.Replace(dsn, "readTimeout=30s", "readTimeout=30m", 1)
-	} else if strings.Contains(dsn, "?") {
-		dsn += "&readTimeout=30m"
-	} else {
-		dsn += "?readTimeout=30m"
-	}
-	conn, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return nil, err
-	}
-	conn.SetMaxOpenConns(1)
-	if err = conn.Ping(); err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return conn, nil
 }

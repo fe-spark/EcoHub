@@ -6,7 +6,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/testutil"
 	"testing"
-	"time"
 
 	"server/internal/model"
 
@@ -93,10 +92,9 @@ func TestAssertSourceDataCleanedTx_CatchesRemainingData(t *testing.T) {
 
 	// 5. 残留 CollectRecordFilmItem 清单时阻断
 	item := &model.CollectRecordFilmItem{
-		BatchID:   "batch-1",
-		SourceID:  srcID,
-		Mid:       904,
-		CreatedAt: time.Now(),
+		RecordID: 1,
+		SourceID: srcID,
+		Mid:      904,
 	}
 	if err := gdb.Create(item).Error; err != nil {
 		t.Fatal(err)
@@ -152,10 +150,9 @@ func TestDelCollectResource_PreservesSourceWhenRemainingDataDetected(t *testing.
 	if err := gdb.Transaction(func(tx *gorm.DB) error {
 		// 故意插入一条关联数据测试门禁
 		item := &model.CollectRecordFilmItem{
-			BatchID:   "batch-leak",
-			SourceID:  src.Id,
-			Mid:       888,
-			CreatedAt: time.Now(),
+			RecordID: 2,
+			SourceID: src.Id,
+			Mid:      888,
 		}
 		if err := tx.Create(item).Error; err != nil {
 			return err

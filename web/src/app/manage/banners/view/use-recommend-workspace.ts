@@ -64,8 +64,14 @@ export function useRecommendWorkspace({
   const [presetting, setPresetting] = useState(false);
   const [importingCategories, setImportingCategories] = useState(false);
   const [syncingGroupId, setSyncingGroupId] = useState<string | null>(null);
+  const requestSeqRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const loadData = useCallback(async (targetSourceId: string) => {
+    const seq = ++requestSeqRef.current;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setLoading(true);
     try {
       const recRes = await ApiGet<{
@@ -79,7 +85,11 @@ export function useRecommendWorkspace({
         targetSourceId
           ? `/manage/recommends?sourceId=${encodeURIComponent(targetSourceId)}`
           : "/manage/recommends",
+        undefined,
+        undefined,
+        { signal: controller.signal },
       );
+      if (seq !== requestSeqRef.current) return;
       if (recRes.code === 0 && recRes.data) {
         const nextGroups = recRes.data.groups || [];
         const nextResolved = recRes.data.sourceId || targetSourceId;
@@ -96,15 +106,21 @@ export function useRecommendWorkspace({
         messageRef.current.error(recRes.msg || "加载首页推荐失败");
       }
     } catch {
+      if (seq !== requestSeqRef.current || controller.signal.aborted) return;
       messageRef.current.error("加载首页推荐失败");
     } finally {
-      setLoading(false);
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     if (primaryLoading) return;
     void loadData(sourceId);
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, [loadData, primaryLoading, sourceId]);
 
   const activeSourceId = sourceId || resolvedSourceId;

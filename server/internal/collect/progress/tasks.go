@@ -64,7 +64,8 @@ func RequestStop(id string) {
 		taskCancel = val.(task).cancel
 		tasks.Delete(id)
 	} else {
-		setStatusIf(id, StatusStopped, StatusStarting, StatusRunning, StatusPaused, StatusStopping)
+		// StatusStopping 须由原运行退出收口，二次停止不得提前翻成 StatusStopped。
+		setStatusIf(id, StatusStopped, StatusStarting, StatusRunning, StatusPaused)
 	}
 	cancels := takeProbeCancelsLocked(id)
 	taskMu.Unlock()

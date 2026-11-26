@@ -57,7 +57,7 @@ func TestRetryBatchFailedSources_RejectsZeroHourBeforeStart(t *testing.T) {
 
 func TestRetryBatchFailedSources_ReplaysSingleFilm(t *testing.T) {
 	setupRetryRecordDB(t)
-	if err := ledger.CreateCollectRecord(&model.CollectRecord{
+	rec := &model.CollectRecord{
 		BatchID:    "film-1",
 		Trigger:    model.CollectTriggerSingleUpdate,
 		Hour:       0,
@@ -65,10 +65,11 @@ func TestRetryBatchFailedSources_ReplaysSingleFilm(t *testing.T) {
 		Status:     model.CollectRecordStatusFailed,
 		StartedAt:  time.Now(),
 		DetailJson: `[{"sourceId":"s1","status":"failed"}]`,
-	}); err != nil {
+	}
+	if err := ledger.CreateCollectRecord(rec); err != nil {
 		t.Fatal(err)
 	}
-	if err := ledger.BatchSaveCollectRecordFilms("film-1", map[string][]int64{"s1": {42, 7}}); err != nil {
+	if err := ledger.SaveCollectRecordFilms(rec.ID, map[string][]int64{"s1": {42, 7}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,28 +117,27 @@ func TestGetHistoryList_AttachesSingleFilmName(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	for _, rec := range []model.CollectRecord{
-		{
-			BatchID:   "single-named",
-			Trigger:   model.CollectTriggerSingleUpdate,
-			Tag:       model.CollectTagSingleUpdate,
-			Ledger:    true,
-			Status:    model.CollectRecordStatusSuccess,
-			StartedAt: now,
-		},
-		{
-			BatchID:   "batch-plain",
-			Trigger:   model.CollectTriggerManual,
-			Tag:       model.CollectTagBatchCollect,
-			Status:    model.CollectRecordStatusSuccess,
-			StartedAt: now.Add(-time.Second),
-		},
-	} {
-		if err := ledger.CreateCollectRecord(&rec); err != nil {
+	singleRec := &model.CollectRecord{
+		BatchID:   "single-named",
+		Trigger:   model.CollectTriggerSingleUpdate,
+		Tag:       model.CollectTagSingleUpdate,
+		Ledger:    true,
+		Status:    model.CollectRecordStatusSuccess,
+		StartedAt: now,
+	}
+	plainRec := &model.CollectRecord{
+		BatchID:   "batch-plain",
+		Trigger:   model.CollectTriggerManual,
+		Tag:       model.CollectTagBatchCollect,
+		Status:    model.CollectRecordStatusSuccess,
+		StartedAt: now.Add(-time.Second),
+	}
+	for _, rec := range []*model.CollectRecord{singleRec, plainRec} {
+		if err := ledger.CreateCollectRecord(rec); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := ledger.BatchSaveCollectRecordFilms("single-named", map[string][]int64{"s1": {42, 7}}); err != nil {
+	if err := ledger.SaveCollectRecordFilms(singleRec.ID, map[string][]int64{"s1": {42, 7}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -180,7 +180,7 @@ func TestRetryBatchFailedSources_SingleFilmWithoutIDs(t *testing.T) {
 
 func TestRetryBatchFailedSources_ReplaysSingleFilmByTag(t *testing.T) {
 	setupRetryRecordDB(t)
-	if err := ledger.CreateCollectRecord(&model.CollectRecord{
+	tagRec := &model.CollectRecord{
 		BatchID:    "film-tag-only",
 		Trigger:    model.CollectTriggerManual,
 		Tag:        model.CollectTagSingleUpdate,
@@ -189,10 +189,11 @@ func TestRetryBatchFailedSources_ReplaysSingleFilmByTag(t *testing.T) {
 		Status:     model.CollectRecordStatusFailed,
 		StartedAt:  time.Now(),
 		DetailJson: `[{"sourceId":"s1","status":"failed"}]`,
-	}); err != nil {
+	}
+	if err := ledger.CreateCollectRecord(tagRec); err != nil {
 		t.Fatal(err)
 	}
-	if err := ledger.BatchSaveCollectRecordFilms("film-tag-only", map[string][]int64{"s1": {99}}); err != nil {
+	if err := ledger.SaveCollectRecordFilms(tagRec.ID, map[string][]int64{"s1": {99}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -222,10 +223,7 @@ func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001},
 		FilmIndexContent:  model.FilmIndexContent{Name: "星际穿越"},
 	})
-	_ = ledger.BatchSaveCollectRecordFilms("batch-films-svc", map[string][]int64{
-		"s1": {1001},
-	})
-	_ = ledger.CreateCollectRecord(&model.CollectRecord{
+	svcRec := &model.CollectRecord{
 		BatchID:    "batch-films-svc",
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
@@ -233,12 +231,15 @@ func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 		FilmCount:  1,
 		DetailJson: `[{"sourceId":"s1","filmsTotal":1}]`,
 		StartedAt:  time.Now(),
+	}
+	_ = ledger.CreateCollectRecord(svcRec)
+	_ = ledger.SaveCollectRecordFilms(svcRec.ID, map[string][]int64{
+		"s1": {1001},
 	})
 
 	q := model.CollectRecordFilmQuery{
 		BatchID:  "batch-films-svc",
 		SourceID: "s1",
-		AfterID:  0,
 		PageSize: 10,
 	}
 	got, err := CollectRecordSvc.GetBatchFilms(q)
@@ -251,10 +252,9 @@ func TestCollectRecordService_GetBatchFilms(t *testing.T) {
 		BatchID:  "batch-films-svc",
 		SourceID: "s1",
 		Keyword:  "不存在的片名",
-		AfterID:  0,
 		PageSize: 10,
 	})
-	if err != nil || missedPage.Total != 0 || len(missedPage.List) != 0 {
+	if err != nil || missedPage.Total != -1 || len(missedPage.List) != 0 {
 		t.Fatalf("keyword miss got %+v total=%d err=%v", missedPage.List, missedPage.Total, err)
 	}
 }

@@ -62,17 +62,17 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 	if total != 3 || len(list) != 3 {
 		t.Fatalf("expected 3 records, got total=%d len=%d", total, len(list))
 	}
-	batchIDs := make([]string, 0, len(list))
+	recordIDs := make([]uint, 0, len(list))
 	for _, rec := range list {
-		batchIDs = append(batchIDs, rec.BatchID)
+		recordIDs = append(recordIDs, rec.ID)
 	}
-	midsByBatch, err := ledger.ListCollectRecordMids(batchIDs)
+	midsByRecord, err := ledger.ListCollectRecordMids(recordIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	byFilm := map[int64]model.CollectRecord{}
 	for _, rec := range list {
-		mids := midsByBatch[rec.BatchID]
+		mids := midsByRecord[rec.ID]
 		if len(mids) != 1 {
 			t.Fatalf("batch %s mids=%v", rec.BatchID, mids)
 		}

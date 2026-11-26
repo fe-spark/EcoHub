@@ -9,8 +9,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-
-	"gorm.io/gorm"
 )
 
 // BannerFilmOption 轮播选片弹窗使用的采集站影片摘要。
@@ -118,7 +116,7 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 
 	if mids == nil {
 		query := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
-			Where(bannerFilmPlaySourceSQL(db.Mdb), sourceID, model.LineKindPlay)
+			Where(model.FilmHasPlaySourceSQL(), sourceID, model.LineKindPlay)
 		if keyword != "" {
 			needle := escapeBannerLikeNeedle(keyword)
 			query = query.Where(
@@ -238,11 +236,4 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 		})
 	}
 	return out, nil
-}
-
-func bannerFilmPlaySourceSQL(conn *gorm.DB) string {
-	if conn != nil && conn.Dialector != nil && conn.Dialector.Name() == "mysql" {
-		return "EXISTS (SELECT 1 FROM " + model.TableFilmSourcePlaylist + " AS p FORCE INDEX (PRIMARY) WHERE p.mid = " + model.TableFilmIndex + ".mid AND p.source_id = ? AND p.line_kind = ?)"
-	}
-	return model.FilmHasPlaySourceSQL()
 }

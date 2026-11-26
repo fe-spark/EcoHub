@@ -71,7 +71,7 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 		return
 	}
 	sourceID := strings.TrimSpace(c.Query("sourceId"))
-	afterID, _ := strconv.ParseUint(c.Query("afterId"), 10, 64)
+	afterSource := strings.TrimSpace(c.Query("afterSource"))
 	afterMid, _ := strconv.ParseInt(c.Query("afterMid"), 10, 64)
 	afterName := c.Query("afterName")
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
@@ -83,13 +83,13 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 	keyword := strings.TrimSpace(c.Query("keyword"))
 
 	page, err := CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
-		BatchID:   batchID,
-		SourceID:  sourceID,
-		AfterID:   uint(afterID),
-		AfterName: afterName,
-		AfterMid:  afterMid,
-		PageSize:  pageSize,
-		Keyword:   keyword,
+		BatchID:     batchID,
+		SourceID:    sourceID,
+		AfterSource: afterSource,
+		AfterName:   afterName,
+		AfterMid:    afterMid,
+		PageSize:    pageSize,
+		Keyword:     keyword,
 	})
 	if err != nil {
 		dto.Failed("获取批次影片清单失败: "+err.Error(), c)
@@ -100,14 +100,14 @@ func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
 	}
 
 	dto.Success(gin.H{
-		"list":          page.List,
-		"total":         page.Total,
-		"pageSize":      pageSize,
-		"afterId":       afterID,
-		"nextAfterId":   page.NextAfterID,
-		"nextAfterName": page.NextAfterName,
-		"nextAfterMid":  page.NextAfterMid,
-		"hasMore":       page.HasMore,
+		"list":            page.List,
+		"total":           page.Total,
+		"pageSize":        pageSize,
+		"nextAfterSource": page.NextAfterSource,
+		"nextAfterName":   page.NextAfterName,
+		"nextAfterMid":    page.NextAfterMid,
+		"hasMore":         page.HasMore,
+		"truncated":       page.Truncated,
 	}, "获取批次影片清单成功", c)
 }
 

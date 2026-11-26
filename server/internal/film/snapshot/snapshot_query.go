@@ -188,7 +188,8 @@ func GetSnapshotBannerCandidates(ctx context.Context, version string, strategy s
 	}
 
 	if strategy == "random" {
-		return scanRandomBannerCandidates(ctx, baseQuery(exclude), len(categoryPids) > 0, limit)
+		// 仅单一级分类时走 (pid, mid) 二级索引按 mid 有序扫描；多 pid 强制走该索引会触发 filesort。
+		return scanRandomBannerCandidates(ctx, baseQuery(exclude), len(categoryPids) == 1, limit)
 	}
 
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {

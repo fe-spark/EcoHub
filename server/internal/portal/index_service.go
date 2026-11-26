@@ -121,10 +121,14 @@ func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[s
 		banners = make(model.Banners, 0)
 		cacheable = false
 	}
+	recommends, recCacheable := recommend.HomeRecommendSvc.HomeSections(sourceId)
+	if !recCacheable {
+		cacheable = false
+	}
 	res := map[string]any{
 		"category":      tree,
 		"banners":       banners,
-		"recommends":    recommend.HomeRecommendSvc.HomeSections(sourceId),
+		"recommends":    recommends,
 		"currentSource": sourceId,
 	}
 	if db.Rdb != nil && cacheable && repobase.IndexPageGeneration() == pageGen {

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"server/internal/config"
-	"server/internal/film/catalog"
+	"server/internal/infra/db"
 	"server/internal/model"
 
 	"gorm.io/driver/mysql"
@@ -23,7 +23,7 @@ func openInventoryReadDB(fallback *gorm.DB) (*gorm.DB, func()) {
 	if fallback == nil || fallback.Dialector == nil || fallback.Dialector.Name() != "mysql" || strings.TrimSpace(config.MysqlDsn) == "" {
 		return fallback, func() {}
 	}
-	sqlDB, err := catalog.OpenLongReadConn(config.MysqlDsn)
+	sqlDB, err := db.OpenLongReadConn(config.MysqlDsn)
 	if err != nil {
 		return fallback, func() {}
 	}

@@ -99,13 +99,13 @@ func TestCleanOldCollectRecords(t *testing.T) {
 	oldTime := time.Now().AddDate(0, 0, -35)
 	newTime := time.Now().AddDate(0, 0, -5)
 
-	_ = CreateCollectRecord(&model.CollectRecord{
+	oldRec := &model.CollectRecord{
 		BatchID:   "batch-old",
 		Trigger:   model.CollectTriggerCron,
 		Status:    model.CollectRecordStatusSuccess,
 		StartedAt: oldTime,
-	})
-	_ = CreateCollectRecord(&model.CollectRecord{
+	}
+	newRec := &model.CollectRecord{
 		BatchID:    "batch-new",
 		Trigger:    model.CollectTriggerCron,
 		Status:     model.CollectRecordStatusSuccess,
@@ -113,19 +113,20 @@ func TestCleanOldCollectRecords(t *testing.T) {
 		FilmCount:  1,
 		DetailJson: `[{"sourceId":"s1","filmsTotal":1}]`,
 		StartedAt:  newTime,
-	})
+	}
+	_ = CreateCollectRecord(oldRec)
+	_ = CreateCollectRecord(newRec)
 
-	if err := BatchSaveCollectRecordFilms("batch-old", map[string][]int64{"s1": {1}}); err != nil {
+	if err := SaveCollectRecordFilms(oldRec.ID, map[string][]int64{"s1": {1}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("batch-new", map[string][]int64{"s1": {2}}); err != nil {
+	if err := SaveCollectRecordFilms(newRec.ID, map[string][]int64{"s1": {2}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Mdb.Create(&model.CollectRecordFilmItem{
-		BatchID:   "batch-orphan",
-		SourceID:  "s1",
-		Mid:       3,
-		CreatedAt: oldTime,
+		RecordID: 999999,
+		SourceID: "s1",
+		Mid:      3,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -138,23 +139,22 @@ func TestCleanOldCollectRecords(t *testing.T) {
 	if err != nil || total != 1 || list[0].BatchID != "batch-new" {
 		t.Fatalf("expected only batch-new, got total=%d, list=%+v", total, list)
 	}
-	_, oldTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	oldPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "batch-old", SourceID: "s1", PageSize: 10,
 	})
-	if err != nil || oldTotal != 0 {
-		t.Fatalf("old batch films should be gone, total=%d err=%v", oldTotal, err)
+	if err != nil || oldPage.Total != 0 {
+		t.Fatalf("old batch films should be gone, total=%d err=%v", oldPage.Total, err)
 	}
-	_, orphanTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: "batch-orphan", SourceID: "s1", PageSize: 10,
-	})
-	if err != nil || orphanTotal != 0 {
-		t.Fatalf("orphan films should be gone, total=%d err=%v", orphanTotal, err)
+	var orphanCount int64
+	db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", 999999).Count(&orphanCount)
+	if orphanCount != 0 {
+		t.Fatalf("orphan films should be gone, count=%d", orphanCount)
 	}
-	keptFilms, keptTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	keptPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "batch-new", SourceID: "s1", PageSize: 10,
 	})
-	if err != nil || keptTotal != 1 || len(keptFilms) != 1 || keptFilms[0].Mid != 2 {
-		t.Fatalf("new batch films should stay, total=%d list=%+v err=%v", keptTotal, keptFilms, err)
+	if err != nil || keptPage.Total != 1 || len(keptPage.List) != 1 || keptPage.List[0].Mid != 2 {
+		t.Fatalf("new batch films should stay, total=%d list=%+v err=%v", keptPage.Total, keptPage.List, err)
 	}
 }
 
@@ -162,14 +162,15 @@ func TestMarkInterruptedCollectRecords(t *testing.T) {
 	setupTestDB(t)
 
 	started := time.Now().Add(-2 * time.Minute)
-	_ = CreateCollectRecord(&model.CollectRecord{
+	runRec := &model.CollectRecord{
 		BatchID:    "batch-running",
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusRunning,
 		StartedAt:  started,
 		DetailJson: `[{"sourceId":"s1","sourceName":"站","status":"running","filmsTotal":0}]`,
-	})
-	if err := BatchSaveCollectRecordFilms("batch-running", map[string][]int64{"s1": {11, 12}}); err != nil {
+	}
+	_ = CreateCollectRecord(runRec)
+	if err := SaveCollectRecordFilms(runRec.ID, map[string][]int64{"s1": {11, 12}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -345,10 +346,10 @@ func TestPurgeSourceCollectHistory(t *testing.T) {
 	if err := CreateCollectRecord(shared); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("only-a", map[string][]int64{"src-a": {1}}); err != nil {
+	if err := SaveCollectRecordFilms(alone.ID, map[string][]int64{"src-a": {1}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("a-and-b", map[string][]int64{
+	if err := SaveCollectRecordFilms(shared.ID, map[string][]int64{
 		"src-a": {2},
 		"src-b": {3},
 	}); err != nil {
@@ -371,23 +372,21 @@ func TestPurgeSourceCollectHistory(t *testing.T) {
 	if strings.Contains(sharedLeft.DetailJson, "src-a") || sharedLeft.SourceCount != 1 || sharedLeft.FilmCount != 1 {
 		t.Fatalf("src-a should be removed from the batch, got %+v", sharedLeft)
 	}
-	_, goneTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if gonePage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "only-a", SourceID: "src-a", PageSize: 10,
-	})
-	if err != nil || goneTotal != 0 {
-		t.Fatalf("deleted batch films should be gone, total=%d err=%v", goneTotal, err)
+	}); err != nil || gonePage.Total != 0 {
+		t.Fatalf("deleted batch films should be gone, total=%d err=%v", gonePage.Total, err)
 	}
-	_, aTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if aPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "a-and-b", SourceID: "src-a", PageSize: 10,
-	})
-	if err != nil || aTotal != 0 {
-		t.Fatalf("src-a films should be gone, total=%d err=%v", aTotal, err)
+	}); err != nil || aPage.Total != 0 {
+		t.Fatalf("src-a films should be gone, total=%d err=%v", aPage.Total, err)
 	}
-	kept, keptTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	keptPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "a-and-b", SourceID: "src-b", PageSize: 10,
 	})
-	if err != nil || keptTotal != 1 || len(kept) != 1 || kept[0].Mid != 3 {
-		t.Fatalf("src-b films should stay, total=%d list=%+v err=%v", keptTotal, kept, err)
+	if err != nil || keptPage.Total != 1 || len(keptPage.List) != 1 || keptPage.List[0].Mid != 3 {
+		t.Fatalf("src-b films should stay, total=%d list=%+v err=%v", keptPage.Total, keptPage.List, err)
 	}
 	var statCount int64
 	if err := gdb.Model(&model.CollectSourceStats{}).Where("source_id = ?", "src-a").Count(&statCount).Error; err != nil {
@@ -440,10 +439,10 @@ func TestClearAndDeleteKeepRunningFilms(t *testing.T) {
 	if err := CreateCollectRecord(done); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("batch-running", map[string][]int64{"s1": {11}}); err != nil {
+	if err := SaveCollectRecordFilms(running.ID, map[string][]int64{"s1": {11}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("batch-done", map[string][]int64{"s1": {22}}); err != nil {
+	if err := SaveCollectRecordFilms(done.ID, map[string][]int64{"s1": {22}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -457,17 +456,16 @@ func TestClearAndDeleteKeepRunningFilms(t *testing.T) {
 	if err != nil || kept.Status != model.CollectRecordStatusRunning {
 		t.Fatalf("running record missing: %v", err)
 	}
-	runningFilms, runningTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	runningPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "batch-running", SourceID: "s1", PageSize: 10,
 	})
-	if err != nil || runningTotal != 1 || len(runningFilms) != 1 || runningFilms[0].Mid != 11 {
-		t.Fatalf("running films = %+v total=%d err=%v", runningFilms, runningTotal, err)
+	if err != nil || runningPage.Total != 1 || len(runningPage.List) != 1 || runningPage.List[0].Mid != 11 {
+		t.Fatalf("running films = %+v total=%d err=%v", runningPage.List, runningPage.Total, err)
 	}
-	_, doneTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if donePage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "batch-done", SourceID: "s1", PageSize: 10,
-	})
-	if err != nil || doneTotal != 0 {
-		t.Fatalf("finished films should be gone, total=%d err=%v", doneTotal, err)
+	}); err != nil || donePage.Total != 0 {
+		t.Fatalf("finished films should be gone, total=%d err=%v", donePage.Total, err)
 	}
 
 	extra := &model.CollectRecord{
@@ -479,7 +477,7 @@ func TestClearAndDeleteKeepRunningFilms(t *testing.T) {
 	if err := CreateCollectRecord(extra); err != nil {
 		t.Fatal(err)
 	}
-	if err := BatchSaveCollectRecordFilms("batch-extra", map[string][]int64{"s1": {33}}); err != nil {
+	if err := SaveCollectRecordFilms(extra.ID, map[string][]int64{"s1": {33}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := DeleteCollectRecords([]uint{extra.ID, kept.ID}); err != nil {
@@ -491,16 +489,14 @@ func TestClearAndDeleteKeepRunningFilms(t *testing.T) {
 	if _, err := GetCollectRecordByBatchID("batch-running"); err != nil {
 		t.Fatal("running record should stay when selected")
 	}
-	_, extraTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if extraPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "batch-extra", SourceID: "s1", PageSize: 10,
-	})
-	if err != nil || extraTotal != 0 {
-		t.Fatalf("deleted batch films should be gone, total=%d err=%v", extraTotal, err)
+	}); err != nil || extraPage.Total != 0 {
+		t.Fatalf("deleted batch films should be gone, total=%d err=%v", extraPage.Total, err)
 	}
-	_, stillTotal, err := GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if stillPage, err := QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: "batch-running", SourceID: "s1", PageSize: 10,
-	})
-	if err != nil || stillTotal != 1 {
-		t.Fatalf("running films should stay, total=%d err=%v", stillTotal, err)
+	}); err != nil || stillPage.Total != 1 {
+		t.Fatalf("running films should stay, total=%d err=%v", stillPage.Total, err)
 	}
 }

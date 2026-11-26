@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"server/internal/repobase"
 	"server/internal/utils"
 	"strconv"
@@ -126,7 +127,12 @@ func callTelegramJSON(ctx context.Context, token, method string, payload any, ti
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return apiResp, fmt.Errorf("请求 Telegram 失败: %w", err)
+		// 剥离 *url.Error 中的完整 URL，避免路径里的 Bot Token 泄露到响应或日志。
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return apiResp, fmt.Errorf("请求 Telegram %s 失败: %w", method, ue.Err)
+		}
+		return apiResp, fmt.Errorf("请求 Telegram %s 失败: %w", method, err)
 	}
 	defer resp.Body.Close()
 

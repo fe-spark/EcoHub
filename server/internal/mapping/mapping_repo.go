@@ -298,7 +298,7 @@ func ReplaceMappingRules(exports []model.MappingRuleExport) error {
 		if len(rows) == 0 {
 			return nil
 		}
-		return tx.Create(&rows).Error
+		return tx.CreateInBatches(&rows, 500).Error
 	}); err != nil {
 		return err
 	}

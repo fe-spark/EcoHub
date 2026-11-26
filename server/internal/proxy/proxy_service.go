@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"server/internal/repobase"
@@ -127,7 +128,12 @@ func (s *ProxyService) TestProxy(proxyURL string, preserveAuth bool) (int64, err
 
 	target := defaultProxyTestTarget
 
-	transport := utils.GetOrCreateProxyTransport(proxyURL)
+	// 测试代理使用独立一次性 Transport，不写入并污染全局生产代理池。
+	transport, err := utils.NewEphemeralProxyTransport(proxyURL)
+	if err != nil {
+		return 0, err
+	}
+	defer transport.CloseIdleConnections()
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   10 * time.Second,
@@ -148,7 +154,10 @@ func (s *ProxyService) TestProxy(proxyURL string, preserveAuth bool) (int64, err
 	if err != nil {
 		return duration, fmt.Errorf("代理连通失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return duration, fmt.Errorf("目标返回异常状态码: %d", resp.StatusCode)

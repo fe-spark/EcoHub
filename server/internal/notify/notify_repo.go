@@ -211,6 +211,14 @@ func SaveNotifyBatchSession(sess model.NotifyBatchSession) error {
 
 // LoadNotifyBatchSession 加载批次翻页会话（内存优先，Redis 兜底）
 func LoadNotifyBatchSession(batchID string) (model.NotifyBatchSession, error) {
+	return LoadNotifyBatchSessionContext(db.Cxt, batchID)
+}
+
+// LoadNotifyBatchSessionContext 加载批次翻页会话，支持上下文取消。
+func LoadNotifyBatchSessionContext(ctx context.Context, batchID string) (model.NotifyBatchSession, error) {
+	if ctx == nil {
+		ctx = db.Cxt
+	}
 	batchID = strings.TrimSpace(batchID)
 	if batchID == "" {
 		return model.NotifyBatchSession{}, errors.New("empty batch id")
@@ -223,11 +231,11 @@ func LoadNotifyBatchSession(batchID string) (model.NotifyBatchSession, error) {
 	}
 	if db.Rdb != nil {
 		key := config.NotifyBatchCachePrefix + ":" + batchID
-		if data, err := db.Rdb.Get(db.Cxt, key).Result(); err == nil && data != "" {
+		if data, err := db.Rdb.Get(ctx, key).Result(); err == nil && data != "" {
 			var sess model.NotifyBatchSession
 			if json.Unmarshal([]byte(data), &sess) == nil {
 				ttl := notifyBatchSessionTTL
-				if rem, err := db.Rdb.TTL(db.Cxt, key).Result(); err == nil && rem > 0 {
+				if rem, err := db.Rdb.TTL(ctx, key).Result(); err == nil && rem > 0 {
 					ttl = rem
 				}
 				rememberNotifyMemSession(sess, time.Now().Add(ttl))
@@ -331,7 +339,7 @@ func notifySourcePageCacheKey(q BatchSourceCategoryPageQuery) string {
 
 var loadBatchSourceCategoryStatsFn = LoadBatchSourceCategoryStatsForSource
 
-// LoadBatchSourceCategoryStatsForSource 基于 collect_record_films 账本按单站条件聚合分类计数，利用 (batch_id, source_id, id) 索引拆分超大批量查询。
+// LoadBatchSourceCategoryStatsForSource 基于 collect_record_films 账本按单站条件聚合分类计数，沿聚簇主键 (record_id, source_id, mid) 顺序扫描。
 func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceID string) ([]BatchSourceCategoryStatRow, error) {
 	batchID = strings.TrimSpace(batchID)
 	sourceID = strings.TrimSpace(sourceID)
@@ -344,6 +352,10 @@ func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceI
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	recordID, ready, err := sourcecatalog.ResolveCollectRecordLedgerContext(ctx, batchID)
+	if err != nil || !ready || recordID == 0 {
+		return nil, err
+	}
 	type statRaw struct {
 		FirstSourceId   sql.NullString
 		Pid             sql.NullInt64
@@ -353,10 +365,10 @@ func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceI
 		Count           int64
 	}
 	var rows []statRaw
-	err := db.Mdb.WithContext(ctx).Table("collect_record_films AS crf").
+	err = db.Mdb.WithContext(ctx).Table("collect_record_films AS crf").
 		Select("fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key, COUNT(*) AS count").
 		Joins(filmIndexJoinClause(db.Mdb)).
-		Where("crf.batch_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", batchID, sourceID).
+		Where("crf.record_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", recordID, sourceID).
 		Group("fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key").
 		Scan(&rows).Error
 	if err != nil {
@@ -408,10 +420,18 @@ func LoadBatchSourceCategoryPage(ctx context.Context, q BatchSourceCategoryPageQ
 		}
 	}
 
+	recordID, ready, err := sourcecatalog.ResolveCollectRecordLedgerContext(ctx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	if !ready || recordID == 0 {
+		return []model.NotifyFilmItem{}, nil
+	}
+
 	var mids []int64
 	query := db.Mdb.WithContext(ctx).Table("collect_record_films AS crf").
 		Joins(filmIndexJoinClause(db.Mdb)).
-		Where("crf.batch_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", batchID, sourceID)
+		Where("crf.record_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", recordID, sourceID)
 
 	if !q.CategoryAll {
 		switch {
@@ -446,8 +466,8 @@ func LoadBatchSourceCategoryPage(ctx context.Context, q BatchSourceCategoryPageQ
 		}
 	}
 
-	// 按 crf.id ASC 沿 idx_crf_batch_source_id 顺序扫描，STRAIGHT_JOIN 主键校验 deleted_at 后早停，与统计口径一致且避免 filesort。
-	if err := query.Select("crf.mid").Order("crf.id ASC").Limit(q.Limit).Offset(offset).Pluck("crf.mid", &mids).Error; err != nil {
+	// 按 crf.mid ASC 沿聚簇主键 (record_id, source_id, mid) 顺序扫描，STRAIGHT_JOIN 主键校验 deleted_at 后早停，避免 filesort。
+	if err := query.Select("crf.mid").Order("crf.mid ASC").Limit(q.Limit).Offset(offset).Pluck("crf.mid", &mids).Error; err != nil {
 		return nil, err
 	}
 	if len(mids) == 0 {

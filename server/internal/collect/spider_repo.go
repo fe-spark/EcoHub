@@ -126,28 +126,30 @@ func DelCollectResource(id string) ([]int64, error) {
 		return nil, errors.New("database not available")
 	}
 	_ = catalog.EnsureFilmSourceDeletedIndex()
-	_ = catalog.EnsureCollectRecordFilmSourceIndex()
 	orphanMids, err := catalog.CleanSourceDataBatched(id)
 	if err != nil {
 		return orphanMids, err
 	}
-	if err := catalog.DeleteBySourceBatched(&model.CollectRecordFilmItem{}, model.TableCollectRecordFilm, "source_id", id); err != nil {
-		return orphanMids, err
-	}
-	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := catalog.ClearSourceCategoryDataTx(tx, id); err != nil {
+	// 仅在清理账本与收口阶段暂停同批其他站刷账，避免耗时影片清库阻塞活跃批次。
+	err = PauseActiveBatchRecords(id, func() error {
+		if err := catalog.DeleteBySourceBatched(&model.CollectRecordFilmItem{}, model.TableCollectRecordFilm, "source_id", id); err != nil {
 			return err
 		}
-		if err := ledger.PurgeSourceCollectHistoryTx(tx, id); err != nil {
-			return err
-		}
-		if err := catalog.AssertSourceDataCleanedTx(tx, id); err != nil {
-			return err
-		}
-		if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
-			return err
-		}
-		return EnsureDefaultPosterSourceTx(tx)
+		return db.Mdb.Transaction(func(tx *gorm.DB) error {
+			if err := catalog.ClearSourceCategoryDataTx(tx, id); err != nil {
+				return err
+			}
+			if err := ledger.PurgeSourceCollectHistoryTx(tx, id); err != nil {
+				return err
+			}
+			if err := catalog.AssertSourceDataCleanedTx(tx, id); err != nil {
+				return err
+			}
+			if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
+				return err
+			}
+			return EnsureDefaultPosterSourceTx(tx)
+		})
 	})
 	if err != nil {
 		return orphanMids, err

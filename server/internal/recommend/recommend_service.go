@@ -125,7 +125,7 @@ func (s *HomeRecommendService) ListAdmin(ctx context.Context, sourceID string) (
 
 	visibleRoots, visibleCatMap := visibleRootCategories(src.Id)
 	adminCatNames := adminRootCategoryNames(src.Id)
-	catSlots, catInfos := collectCategorySlots(filmsnapshot.GetActiveReadModelVersion(), src.Id, groups, visibleCatMap, false)
+	catSlots, catInfos, _ := collectCategorySlots(filmsnapshot.GetActiveReadModelVersion(), src.Id, groups, visibleCatMap, false)
 
 	out := make([]model.HomeRecommendAdminGroup, 0, len(groups))
 	for _, g := range groups {

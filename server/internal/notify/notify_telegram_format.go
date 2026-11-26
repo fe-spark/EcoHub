@@ -154,6 +154,9 @@ func isTelegramSupportedWebURL(raw string) bool {
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
+// maxNotifyListPages 限制 Telegram 内联片单最大翻页深度，避免全量批次下深 OFFSET 回表超时。
+const maxNotifyListPages = 100
+
 func clampPageRange(total, pageSize, page int) (curPage, totalPages, start, end int) {
 	if pageSize <= 0 {
 		pageSize = model.DefaultNotifyPageSize
@@ -161,6 +164,9 @@ func clampPageRange(total, pageSize, page int) (curPage, totalPages, start, end 
 	totalPages = 1
 	if total > 0 {
 		totalPages = (total + pageSize - 1) / pageSize
+		if totalPages > maxNotifyListPages {
+			totalPages = maxNotifyListPages
+		}
 	}
 	curPage = page
 	if curPage < 1 {
@@ -212,12 +218,12 @@ func formatFilmItemsPageHTML(siteName, title string, page, totalPages, start, to
 	return b.String(), nil
 }
 
-func formatSourceFilmListPageHTML(ctx context.Context, sess model.NotifyBatchSession, srcIdx, catIdx, page int) (string, int, error) {
+func formatSourceFilmListPageHTML(ctx context.Context, sess model.NotifyBatchSession, srcIdx, catIdx, page int) (string, int, int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if srcIdx < 0 || srcIdx >= len(sess.Sources) {
-		return "", 1, errors.New("站点不存在")
+		return "", 1, 1, errors.New("站点不存在")
 	}
 	src := sess.Sources[srcIdx]
 	catTitle := "全部"
@@ -232,14 +238,14 @@ func formatSourceFilmListPageHTML(ctx context.Context, sess model.NotifyBatchSes
 	if total > 0 && strings.TrimSpace(sess.CollectBatchID) != "" {
 		matcher, err := loadSourceCategoryMatcher(src.SourceID)
 		if err != nil {
-			return "", 1, err
+			return "", curPage, totalPages, err
 		}
 		items, err = LoadBatchSourceCategoryPage(
 			ctx,
 			matcher.buildPageQuery(sess.CollectBatchID, src.SourceID, src.Categories, catIdx, end-start, start),
 		)
 		if err != nil {
-			return "", 1, err
+			return "", curPage, totalPages, err
 		}
 	}
 	srcTitle := singleLine(src.SourceName)
@@ -247,7 +253,7 @@ func formatSourceFilmListPageHTML(ctx context.Context, sess model.NotifyBatchSes
 		srcTitle = src.SourceID
 	}
 	text, err := formatFilmItemsPageHTML(sess.SiteName, fmt.Sprintf("%s · %s", srcTitle, catTitle), curPage, totalPages, start, total, items)
-	return text, totalPages, err
+	return text, curPage, totalPages, err
 }
 
 const maxSiteButtonsPerPage = 90

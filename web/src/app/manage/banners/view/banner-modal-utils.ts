@@ -59,8 +59,8 @@ export function buildBannerFields({ values, currentRow, scrapedData }: BuildFiel
   const isCustom = Boolean(values.isCustomPic);
   const poster = isCustom ? (values.picture || "").trim() : "";
   const backdrop = isCustom ? (values.pictureSlide || "").trim() : "";
-  const blurb = (values.blurb ?? scrapedData.blurb ?? "").trim();
-  const score = Number(values.score ?? scrapedData.score ?? 0) || 0;
+  const blurb = (values.blurb ?? "").trim();
+  const score = Number(values.score ?? 0) || 0;
   const year = Number(values.year ?? 0) || 0;
   const target: Required<BannerFields> = {
     mid: Number(values.mid || 0),

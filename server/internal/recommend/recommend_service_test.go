@@ -141,9 +141,9 @@ func TestHomeRecommendService_Lifecycle(t *testing.T) {
 	if err := HomeRecommendSvc.ReorderGroups(ctx, "src1", []string{g2.Id, g1.Id}); err != nil {
 		t.Fatalf("ReorderGroups failed: %v", err)
 	}
-	sections := HomeRecommendSvc.HomeSections("src1")
-	if len(sections) != 2 || sections[0].Id != g2.Id || sections[1].Id != g1.Id {
-		t.Fatalf("unexpected sections order: %+v", sections)
+	sections, ok := HomeRecommendSvc.HomeSections("src1")
+	if !ok || len(sections) != 2 || sections[0].Id != g2.Id || sections[1].Id != g1.Id {
+		t.Fatalf("unexpected sections order: ok=%v %+v", ok, sections)
 	}
 
 	// 4. 删除条目应递增首页缓存世代
@@ -176,9 +176,9 @@ func TestHomeRecommendService_Lifecycle(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("PublishQuickDeck failed: %v", err)
 	}
-	afterSections := HomeRecommendSvc.HomeSections("src1")
-	if len(afterSections) != 2 || afterSections[1].Items[0].Id != 1002 {
-		t.Fatalf("unexpected sections after PublishQuickDeck: %+v", afterSections)
+	afterSections, ok := HomeRecommendSvc.HomeSections("src1")
+	if !ok || len(afterSections) != 2 || afterSections[1].Items[0].Id != 1002 {
+		t.Fatalf("unexpected sections after PublishQuickDeck: ok=%v %+v", ok, afterSections)
 	}
 
 	// 6. 榜单模式与自动同步开关解耦：关闭 autoSync 保留榜单绑定，切回自选模式传入空字符串才解绑
@@ -295,7 +295,7 @@ func TestHomeRecommendService_CategoryControlAndVisibility(t *testing.T) {
 	if err := HomeRecommendSvc.UpdateGroup(ctx, tvGroupID, RecommendGroupInput{Enabled: &off}); err != nil {
 		t.Fatalf("disable tv recommend group failed: %v", err)
 	}
-	sections := HomeRecommendSvc.HomeSections("src1")
+	sections, _ := HomeRecommendSvc.HomeSections("src1")
 	foundMovieCatSection := false
 	for _, sec := range sections {
 		if sec.Id == tvGroupID {
@@ -328,7 +328,7 @@ func TestHomeRecommendService_CategoryControlAndVisibility(t *testing.T) {
 	}
 	catalog.MarkCategoryChanged()
 
-	sectionsAfterHide := HomeRecommendSvc.HomeSections("src1")
+	sectionsAfterHide, _ := HomeRecommendSvc.HomeSections("src1")
 	for _, sec := range sectionsAfterHide {
 		if sec.Kind == "category" && sec.CategoryId == 1 {
 			t.Fatalf("hidden catalog category should not appear as category section in HomeSections")

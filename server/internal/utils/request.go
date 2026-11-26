@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	xproxy "golang.org/x/net/proxy"
@@ -25,17 +26,25 @@ import (
 网络请求, 数据爬取
 */
 
-// 共享 HTTP Transport，复用 TCP 长连接与 DNS 缓存
+// 共享 HTTP Transport，复用 TCP 长连接与 DNS 缓存，带拨号/握手超时与直连公网 IP 防护。
 var sharedTransport = &http.Transport{
-	MaxIdleConns:        200,
-	MaxIdleConnsPerHost: 30,
-	IdleConnTimeout:     90 * time.Second,
+	DialContext: (&net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   SafeOutboundDialControl,
+	}).DialContext,
+	MaxIdleConns:          200,
+	MaxIdleConnsPerHost:   30,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
 }
 
 // 代理 Transport 缓存池 (proxyURL -> *http.Transport)，避免高并发下频繁建连
 var (
 	proxyTransportsMu sync.RWMutex
 	proxyTransports   = map[string]*http.Transport{}
+	proxyTransportGen atomic.Uint64
 )
 
 const maxProxyTransports = 16
@@ -47,11 +56,32 @@ func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
 	return t
 }
 
+// NewEphemeralProxyTransport 创建独立的一次性代理 Transport（供连通性测试使用，不进入全局连接池）。
+func NewEphemeralProxyTransport(proxyStr string) (*http.Transport, error) {
+	proxyStr = normalizeProxyURL(proxyStr)
+	if proxyStr == "" {
+		return nil, fmt.Errorf("代理地址不能为空")
+	}
+	return newProxyTransport(proxyStr)
+}
+
+func redactProxyForErr(raw string) string {
+	if u, err := url.Parse(strings.TrimSpace(raw)); err == nil && u.Host != "" {
+		u.User = nil
+		return u.String()
+	}
+	if at := strings.LastIndex(raw, "@"); at >= 0 {
+		return raw[at+1:]
+	}
+	return raw
+}
+
 func resolveProxyTransport(proxyStr string) (*http.Transport, bool) {
 	proxyStr = normalizeProxyURL(proxyStr)
 	if proxyStr == "" {
 		return sharedTransport, true
 	}
+	gen := proxyTransportGen.Load()
 	proxyTransportsMu.RLock()
 	if t, ok := proxyTransports[proxyStr]; ok {
 		proxyTransportsMu.RUnlock()
@@ -71,6 +101,11 @@ func resolveProxyTransport(proxyStr string) (*http.Transport, bool) {
 
 	proxyTransportsMu.Lock()
 	defer proxyTransportsMu.Unlock()
+	if proxyTransportGen.Load() != gen {
+		// 创建期间发生过 ResetProxyTransports，避免把过期配置回写进连接池。
+		t.CloseIdleConnections()
+		return t, true
+	}
 	if existing, ok := proxyTransports[proxyStr]; ok {
 		if t != existing {
 			t.CloseIdleConnections()
@@ -107,12 +142,18 @@ func normalizeProxyURL(proxyStr string) string {
 func newProxyTransport(proxyStr string) (*http.Transport, error) {
 	u, err := url.Parse(proxyStr)
 	if err != nil || u.Host == "" {
-		return nil, fmt.Errorf("代理地址无效: %s", proxyStr)
+		return nil, fmt.Errorf("代理地址无效: %s", redactProxyForErr(proxyStr))
 	}
 	base := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		IdleConnTimeout:     90 * time.Second,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
@@ -146,8 +187,9 @@ func newProxyTransport(proxyStr string) (*http.Transport, error) {
 
 // 共享单例 HTTP 客户端
 var httpClient = &http.Client{
-	Transport: sharedTransport,
-	Timeout:   20 * time.Second,
+	Transport:     sharedTransport,
+	Timeout:       20 * time.Second,
+	CheckRedirect: CheckSafeOutboundRedirect,
 }
 
 // RequestInfo 请求参数结构体
@@ -293,6 +335,7 @@ func getOrCreateInsecureTransport(base *http.Transport, proxyURL string) *http.T
 
 // ResetProxyTransports 清理并关闭全部代理传输池（代理配置变更或重置时调用）。
 func ResetProxyTransports() {
+	proxyTransportGen.Add(1)
 	sharedTransport.CloseIdleConnections()
 	sharedInsecureTransport.CloseIdleConnections()
 
@@ -360,8 +403,9 @@ func ApiGet(r *RequestInfo) {
 		client = httpClient
 	} else {
 		client = &http.Client{
-			Transport: transport,
-			Timeout:   timeout,
+			Transport:     transport,
+			Timeout:       timeout,
+			CheckRedirect: CheckSafeOutboundRedirect,
 		}
 	}
 

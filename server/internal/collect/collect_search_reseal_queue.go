@@ -28,6 +28,7 @@ type searchResealQueue struct {
 	retryWait          time.Duration
 	retryTimer         *time.Timer
 	rebuildRetries     int
+	sealRetries        int
 	// awaitDone 停等本轮触发的整表重建终态。只有这时才响应 done/idle。
 	awaitDone bool
 }
@@ -208,12 +209,36 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 			(tok != progressBefore && tok != nil && tok.Status != "waiting")
 		if handedOff {
 			searchSealRunning.Store(false)
-			q.resetSealRetryWait()
-			log.Printf("[Spider] 封口未写入检索索引，进度已变化，编号交给重建 mids=%d", len(mids))
-			return false
+			if tok != nil && tok.Status == "done" {
+				q.resetSealRetryWait()
+				log.Printf("[Spider] 封口未写入检索索引，重建已完成，交由下一轮收口 mids=%d", len(mids))
+				return false
+			}
+			// 全量重建已快速失败并回退至 idle，禁止直接标完成，转入带上限的重试收敛。
+			q.mu.Lock()
+			q.running = false
+			q.sealRetries = 0
+			q.scheduleIdleRebuildRetryLocked()
+			q.mu.Unlock()
+			log.Printf("[Spider] 封口触发的重建已失败回退，调度退避重试 mids=%d", len(mids))
+			return true
+		}
+		searchSealRunning.Store(false)
+		q.mu.Lock()
+		q.sealRetries++
+		exhausted := q.sealRetries >= maxRebuildSealingRetries
+		if exhausted {
+			q.running = false
+			q.sealRetries = 0
+			q.retryWait = 0
+		}
+		q.mu.Unlock()
+		if exhausted {
+			log.Printf("[Spider] 封口重试达到上限(%d)，标记检索失败并释放准入 mids=%d", maxRebuildSealingRetries, len(mids))
+			q.finishSealingCycle(true)
+			return true
 		}
 		q.restorePending(mids, verifiedPrimary)
-		searchSealRunning.Store(false)
 		retryWait := q.nextSealRetryWait()
 		log.Printf("[Spider] 封口未写入检索索引，编号留在队列稍后重试 mids=%d retry_in=%s", len(mids), retryWait)
 		unfreezeCollectQueues()
@@ -260,6 +285,7 @@ func (q *searchResealQueue) nextSealRetryWait() time.Duration {
 func (q *searchResealQueue) resetSealRetryWait() {
 	q.mu.Lock()
 	q.retryWait = 0
+	q.sealRetries = 0
 	q.mu.Unlock()
 }
 

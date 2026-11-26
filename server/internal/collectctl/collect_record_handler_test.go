@@ -133,10 +133,7 @@ func TestCollectRecordHandler_HistoryFilms(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 888},
 		FilmIndexContent:  model.FilmIndexContent{Name: "流浪地球"},
 	})
-	_ = ledger.BatchSaveCollectRecordFilms("b-film-1", map[string][]int64{
-		"src_earth": {888},
-	})
-	_ = ledger.CreateCollectRecord(&model.CollectRecord{
+	rec := &model.CollectRecord{
 		BatchID:    "b-film-1",
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
@@ -144,6 +141,10 @@ func TestCollectRecordHandler_HistoryFilms(t *testing.T) {
 		FilmCount:  1,
 		DetailJson: `[{"sourceId":"src_earth","filmsTotal":1}]`,
 		StartedAt:  time.Now(),
+	}
+	_ = ledger.CreateCollectRecord(rec)
+	_ = ledger.SaveCollectRecordFilms(rec.ID, map[string][]int64{
+		"src_earth": {888},
 	})
 
 	r := gin.New()

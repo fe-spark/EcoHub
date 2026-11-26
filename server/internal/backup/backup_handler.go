@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"net/http"
 	"strings"
 
 	"server/internal/httpx"
@@ -37,11 +38,15 @@ func (h *BackupHandler) ExportConfigBackup(c *gin.Context) {
 	dto.Success(bk, "配置备份导出成功", c)
 }
 
+// maxBackupImportBodyBytes 限制配置备份导入请求体上限（16MB），避免密码校验前超大 JSON 触发 OOM。
+const maxBackupImportBodyBytes = 16 << 20
+
 // ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）
 func (h *BackupHandler) ImportConfigBackup(c *gin.Context) {
 	if _, ok := httpx.RequireAdminClaims(c, "权限不足，仅超级管理员可导入配置备份"); !ok {
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBackupImportBodyBytes)
 	var req model.ConfigBackupImportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)

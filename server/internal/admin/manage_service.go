@@ -42,6 +42,9 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 		curr.Notice = bc.Notice
 	}
 	if bc.MediaProxy.Enabled || strings.TrimSpace(bc.MediaProxy.Template) != "" {
+		if err := mediaproxy.ValidateMediaProxyConfig(bc.MediaProxy); err != nil {
+			return err
+		}
 		curr.MediaProxy = bc.MediaProxy
 	}
 	if err := repobase.SaveSiteBasic(curr); err != nil {

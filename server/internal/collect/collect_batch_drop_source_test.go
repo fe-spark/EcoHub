@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/collect/ledger"
 	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -13,7 +14,6 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"server/internal/collect/ledger"
 )
 
 func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
@@ -40,6 +40,7 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	}
 	batch.AddAffectedMIDs(&srcA, 24, []int64{1})
 	batch.AddAffectedMIDs(&srcB, 24, []int64{2})
+	batch.flushLedger()
 	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
 		SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone,
 		PageTotal: 3, SuccessCnt: 3, FilmsTotal: 1,
@@ -48,25 +49,24 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 		SourceID: srcB.Id, SourceName: srcB.Name, Status: progress.StatusRunning,
 		PageTotal: 4, SuccessCnt: 2, FilmsTotal: 1,
 	})
-	if missed := batch.saveRecordFilms(batch.collectRecordFilms()); len(missed) > 0 {
-		t.Fatalf("save films missed %+v", missed)
-	}
 
 	err = PauseActiveBatchRecords(srcA.Id, func() error {
-		if err := db.Mdb.Where("batch_id = ? AND source_id = ?", batch.batchID, srcA.Id).
+		if err := db.Mdb.Where("record_id = ? AND source_id = ?", batch.recordID, srcA.Id).
 			Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
 			return err
 		}
-		return db.Mdb.Model(&model.CollectRecord{}).Where("batch_id = ?", batch.batchID).
+		return db.Mdb.Model(&model.CollectRecord{}).Where("id = ?", batch.recordID).
 			Updates(map[string]any{"source_count": 1}).Error
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if missed := batch.saveRecordFilms(map[string][]int64{srcA.Id: {9}, srcB.Id: {2}}); len(missed) > 0 {
-		t.Fatalf("save films missed %+v", missed)
-	}
+	// 已摘除的站点再追加也不会落库。
+	batch.AddAffectedMIDs(&srcA, 24, []int64{9})
+	batch.AddAffectedMIDs(&srcB, 24, []int64{2})
+	batch.flushLedger()
+
 	running, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
@@ -77,15 +77,15 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	if !strings.Contains(running.DetailJson, `"status":"running"`) || strings.Contains(running.DetailJson, `"filmsTotal":1`) {
 		t.Fatalf("running detail should stay the start roster, detail=%s", running.DetailJson)
 	}
-	if _, total, err := ledger.GetCollectRecordFilms(model.CollectRecordFilmQuery{
+	if page, err := ledger.QueryCollectRecordFilms(model.CollectRecordFilmQuery{
 		BatchID: batch.batchID, SourceID: srcA.Id, PageSize: 10,
-	}); err != nil || total != 0 {
-		t.Fatalf("deleted source films total=%d err=%v", total, err)
+	}); err != nil || page.Total != 0 {
+		t.Fatalf("deleted source films total=%d err=%v", page.Total, err)
 	}
 
 	persistCollectRecord(batch, []model.SourceNotifyResult{
-		{SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone, PageTotal: 3, SuccessCnt: 3, FilmsTotal: 1},
-		{SourceID: srcB.Id, SourceName: srcB.Name, Status: progress.StatusDone, PageTotal: 4, SuccessCnt: 2, FilmsTotal: 1},
+		{SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone, PageTotal: 3, SuccessCnt: 3},
+		{SourceID: srcB.Id, SourceName: srcB.Name, Status: progress.StatusDone, PageTotal: 4, SuccessCnt: 2},
 	})
 
 	settled, err := ledger.GetCollectRecordByBatchID(batch.batchID)

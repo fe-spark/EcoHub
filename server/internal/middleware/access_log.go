@@ -80,11 +80,29 @@ func sanitizeAccessLogURI(uri string) string {
 	uri = strings.ReplaceAll(uri, "\n", "")
 	uri = strings.ReplaceAll(uri, "\r", "")
 	if i := strings.Index(uri, "?"); i >= 0 {
-		q, err := url.ParseQuery(uri[i+1:])
-		if err == nil {
+		rawQuery := uri[i+1:]
+		if q, err := url.ParseQuery(rawQuery); err == nil {
 			q.Del("key")
 			if enc := q.Encode(); enc != "" {
 				uri = uri[:i] + "?" + enc
+			} else {
+				uri = uri[:i]
+			}
+		} else {
+			// 查询串含非法百分号转义时按段剔除 key 参数，避免明文订阅密钥落盘。
+			parts := strings.Split(rawQuery, "&")
+			kept := make([]string, 0, len(parts))
+			for _, part := range parts {
+				k, _, _ := strings.Cut(part, "=")
+				if k == "key" {
+					continue
+				}
+				if part != "" {
+					kept = append(kept, part)
+				}
+			}
+			if len(kept) > 0 {
+				uri = uri[:i] + "?" + strings.Join(kept, "&")
 			} else {
 				uri = uri[:i]
 			}

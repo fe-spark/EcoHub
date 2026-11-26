@@ -23,19 +23,18 @@ export interface BatchFilmsModalProps {
 }
 
 interface FilmItem {
-  id: number;
   mid: number;
   name: string;
   sourceId?: string;
 }
 
 interface FilmCursor {
-  id: number;
+  source: string;
   name: string;
   mid: number;
 }
 
-const firstFilmCursor: FilmCursor = { id: 0, name: "", mid: 0 };
+const firstFilmCursor: FilmCursor = { source: "", name: "", mid: 0 };
 
 export function BatchFilmsModal({
   open,
@@ -49,6 +48,7 @@ export function BatchFilmsModal({
   const [list, setList] = useState<FilmItem[]>([]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [truncated, setTruncated] = useState(false);
   const [nextCursor, setNextCursor] = useState<FilmCursor>(firstFilmCursor);
   const [cursorStack, setCursorStack] = useState<FilmCursor[]>([firstFilmCursor]);
   const [errorText, setErrorText] = useState("");
@@ -58,7 +58,7 @@ export function BatchFilmsModal({
   const requestSeq = useRef(0);
 
   const fetchFilms = useCallback(
-    async (cursor: FilmCursor, pKeyword: string) => {
+    async (cursor: FilmCursor, pKeyword: string, onSuccess?: () => void) => {
       const seq = ++requestSeq.current;
       if (!batchId) {
         setHasLoaded(true);
@@ -70,14 +70,15 @@ export function BatchFilmsModal({
         const resp = await ApiGet<{
           list: FilmItem[];
           total: number;
-          nextAfterId: number;
+          nextAfterSource?: string;
           nextAfterName?: string;
           nextAfterMid?: number;
           hasMore: boolean;
+          truncated?: boolean;
         }>("/manage/collect/history/films", {
           batchId,
           sourceId,
-          afterId: cursor.id,
+          afterSource: cursor.source,
           afterName: cursor.name,
           afterMid: cursor.mid,
           pageSize,
@@ -87,26 +88,34 @@ export function BatchFilmsModal({
         if (resp.code === 0 && resp.data) {
           const rows = resp.data.list || [];
           setList(rows);
-          setTotal(resp.data.total || 0);
+          setTotal(typeof resp.data.total === "number" ? resp.data.total : 0);
           setHasMore(Boolean(resp.data.hasMore));
+          setTruncated(Boolean(resp.data.truncated));
           setNextCursor(
             resp.data.hasMore
               ? {
-                  id: resp.data.nextAfterId || 0,
+                  source: resp.data.nextAfterSource || "",
                   name: resp.data.nextAfterName || "",
                   mid: resp.data.nextAfterMid || 0,
                 }
               : firstFilmCursor,
           );
+          onSuccess?.();
           return;
         }
         setList([]);
         setTotal(0);
+        setHasMore(false);
+        setNextCursor(firstFilmCursor);
+        setTruncated(false);
         setErrorText(resp.msg || "加载失败");
       } catch (err) {
         if (seq !== requestSeq.current) return;
         setList([]);
         setTotal(0);
+        setHasMore(false);
+        setNextCursor(firstFilmCursor);
+        setTruncated(false);
         setErrorText(err instanceof Error && err.message ? err.message : "加载失败");
       } finally {
         if (seq === requestSeq.current) {
@@ -124,6 +133,7 @@ export function BatchFilmsModal({
       setKeyword("");
       setCursorStack([firstFilmCursor]);
       setErrorText("");
+      setTruncated(false);
       setHasLoaded(false);
       void fetchFilms(firstFilmCursor, "");
     } else {
@@ -131,6 +141,7 @@ export function BatchFilmsModal({
       setList([]);
       setTotal(0);
       setHasMore(false);
+      setTruncated(false);
       setNextCursor(firstFilmCursor);
       setLoading(false);
       setErrorText("");
@@ -153,25 +164,26 @@ export function BatchFilmsModal({
   };
 
   const handleNext = () => {
-    if (!hasMore || nextCursor.id <= 0) return;
+    if (!hasMore || (nextCursor.mid <= 0 && !nextCursor.source && !nextCursor.name)) return;
     const cursor = nextCursor;
-    setCursorStack((stack) => [...stack, cursor]);
-    void fetchFilms(cursor, appliedKeyword.current);
+    void fetchFilms(cursor, appliedKeyword.current, () => {
+      setCursorStack((stack) => [...stack, cursor]);
+    });
   };
 
   const handlePrev = () => {
-    setCursorStack((stack) => {
-      if (stack.length <= 1) return stack;
-      const next = stack.slice(0, -1);
-      void fetchFilms(next[next.length - 1], appliedKeyword.current);
-      return next;
+    if (cursorStack.length <= 1) return;
+    const next = cursorStack.slice(0, -1);
+    void fetchFilms(next[next.length - 1], appliedKeyword.current, () => {
+      setCursorStack(next);
     });
   };
 
   const sourceLabel = sourceName || sourceId || "全部站点";
   const filmManageUrl = sourceId ? `/manage/film?sourceId=${encodeURIComponent(sourceId)}` : "/manage/film";
   const isInitialSearching = !hasLoaded && loading;
-  const isBatchZeroUpdate = total === 0 && hasLoaded && !errorText && !appliedKeyword.current;
+  const isSearchMode = Boolean(appliedKeyword.current);
+  const isBatchZeroUpdate = total === 0 && hasLoaded && !errorText && !isSearchMode;
 
   return (
     <Modal
@@ -187,7 +199,7 @@ export function BatchFilmsModal({
             <span>更新影片</span>
           </span>
           <Tag variant="filled">{sourceLabel}</Tag>
-          {!isInitialSearching ? (
+          {!isInitialSearching && total >= 0 ? (
             <span className={styles.headerCount}>共 {total.toLocaleString("zh-CN")} 部</span>
           ) : null}
         </div>
@@ -196,6 +208,9 @@ export function BatchFilmsModal({
       <div className={styles.modalBody}>
         {errorText && list.length > 0 ? (
           <Alert type="error" showIcon title={errorText} />
+        ) : null}
+        {truncated ? (
+          <Alert type="info" showIcon title="匹配范围较大，已提前截断扫描，请输入更精确的片名开头" />
         ) : null}
 
         <div className={styles.toolbar}>
@@ -249,9 +264,9 @@ export function BatchFilmsModal({
             <div className={styles.emptyBox}>
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={appliedKeyword.current ? "无匹配影片" : "暂无入库影片"}
+                description={isSearchMode ? "无匹配影片" : "暂无入库影片"}
               >
-                {appliedKeyword.current ? (
+                {isSearchMode ? (
                   <Button size="small" icon={<ReloadOutlined />} onClick={handleResetSearch}>
                     清除搜索
                   </Button>
@@ -291,7 +306,9 @@ export function BatchFilmsModal({
         {cursorStack.length > 1 || hasMore ? (
           <div className={styles.paginationWrapper}>
             <span className={styles.paginationTotal}>
-              第 {cursorStack.length} 页 · 共 {total.toLocaleString("zh-CN")} 部
+              {total >= 0
+                ? `第 ${cursorStack.length} 页 · 共 ${total.toLocaleString("zh-CN")} 部`
+                : `第 ${cursorStack.length} 页`}
             </span>
             <Space>
               <Button size="small" disabled={cursorStack.length <= 1 || loading} onClick={handlePrev}>

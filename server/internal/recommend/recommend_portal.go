@@ -11,19 +11,25 @@ import (
 )
 
 // HomeSections 构建前台首页统一展示楼层（仅返回已启用、未在分类管理隐藏且有可播影片的分组）。
-func (s *HomeRecommendService) HomeSections(sourceID string) []model.HomeRecommendSection {
+// 返回值 cacheable 为 false 表示存在 DB/读模型超时或异常，调用方不得将该结果写入长 TTL 缓存。
+func (s *HomeRecommendService) HomeSections(sourceID string) ([]model.HomeRecommendSection, bool) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
-		return []model.HomeRecommendSection{}
+		return []model.HomeRecommendSection{}, true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	groups, err := ListEnabledHomeRecommendGroups(ctx, sourceID)
-	if err != nil || len(groups) == 0 {
-		return []model.HomeRecommendSection{}
+	if err != nil {
+		log.Printf("[HomeRecommend] 读取首页推荐分组失败 source=%s: %v", sourceID, err)
+		return []model.HomeRecommendSection{}, false
+	}
+	if len(groups) == 0 {
+		return []model.HomeRecommendSection{}, true
 	}
 
+	cacheable := true
 	hasRecommendGroup := false
 	hasCategoryGroup := false
 	for _, g := range groups {
@@ -42,7 +48,10 @@ func (s *HomeRecommendService) HomeSections(sourceID string) []model.HomeRecomme
 	)
 	if hasRecommendGroup {
 		items, itemErr := ListHomeRecommendItemsBySource(ctx, sourceID)
-		if itemErr == nil && len(items) > 0 {
+		if itemErr != nil {
+			log.Printf("[HomeRecommend] 读取首页推荐条目失败 source=%s: %v", sourceID, itemErr)
+			cacheable = false
+		} else if len(items) > 0 {
 			mids := make([]int64, 0, len(items))
 			for _, it := range items {
 				if it.Mid > 0 {
@@ -52,7 +61,11 @@ func (s *HomeRecommendService) HomeSections(sourceID string) []model.HomeRecomme
 			if len(mids) > 0 {
 				if vis, visErr := filmsnapshot.VisiblePlayableMIDs(ctx, sourceID, mids); visErr != nil {
 					log.Printf("[HomeRecommend] 校验影片可见性失败 source=%s: %v", sourceID, visErr)
-				} else if loadedByID, infoErr := filmsnapshot.MovieBasicInfosByMIDs(version, mids); infoErr == nil {
+					cacheable = false
+				} else if loadedByID, infoErr := filmsnapshot.MovieBasicInfosByMIDs(version, mids); infoErr != nil {
+					log.Printf("[HomeRecommend] 读取推荐影片信息失败 source=%s: %v", sourceID, infoErr)
+					cacheable = false
+				} else {
 					visiblePlayMID = vis
 					byID = loadedByID
 				}
@@ -71,7 +84,11 @@ func (s *HomeRecommendService) HomeSections(sourceID string) []model.HomeRecomme
 	)
 	if hasCategoryGroup {
 		_, visibleCatMap = visibleRootCategories(sourceID)
-		catSlots, catInfos = collectCategorySlots(version, sourceID, groups, visibleCatMap, true)
+		var catOK bool
+		catSlots, catInfos, catOK = collectCategorySlots(version, sourceID, groups, visibleCatMap, true)
+		if !catOK {
+			cacheable = false
+		}
 	}
 
 	sections := make([]model.HomeRecommendSection, 0, len(groups))
@@ -116,5 +133,5 @@ func (s *HomeRecommendService) HomeSections(sourceID string) []model.HomeRecomme
 		}
 	}
 
-	return sections
+	return sections, cacheable
 }

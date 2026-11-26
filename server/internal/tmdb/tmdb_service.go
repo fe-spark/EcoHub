@@ -74,8 +74,17 @@ func (s *TMDBService) GetConfig() (model.TMDBConfig, error) {
 	return PublicTMDBConfig(cfg), nil
 }
 
-// validateTMDBImageDomain 校验图片域名前缀是否为合法的 http/https 地址
-func validateTMDBImageDomain(raw string) error {
+// sanitizeTMDBHTTPErr 剥离 *url.Error 中的完整 URL，防止查询参数中的 api_key 泄露。
+func sanitizeTMDBHTTPErr(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}
+
+// ValidateTMDBImageDomain 校验图片域名前缀是否为合法的 http/https 地址
+func ValidateTMDBImageDomain(raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
@@ -93,7 +102,7 @@ func validateTMDBImageDomain(raw string) error {
 
 // UpdateConfig 更新 TMDB 配置
 func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
-	if err := validateTMDBImageDomain(cfg.ImageDomain); err != nil {
+	if err := ValidateTMDBImageDomain(cfg.ImageDomain); err != nil {
 		return err
 	}
 	existing, err := GetTMDBConfig()
@@ -112,7 +121,7 @@ func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 
 // TestConnection 验证 API Key 与网络代理连通性
 func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
-	if err := validateTMDBImageDomain(cfg.ImageDomain); err != nil {
+	if err := ValidateTMDBImageDomain(cfg.ImageDomain); err != nil {
 		return err
 	}
 	apiKey := strings.TrimSpace(cfg.ApiKey)
@@ -140,7 +149,7 @@ func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("连接 TMDB 失败，请检查网络或代理设置: %w", err)
+		return fmt.Errorf("连接 TMDB 失败，请检查网络或代理设置: %w", sanitizeTMDBHTTPErr(err))
 	}
 	defer resp.Body.Close()
 
@@ -234,7 +243,7 @@ func (s *TMDBService) fetchTMDBCandidates(cfg model.TMDBConfig, kw, year, mediaT
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求 TMDB 失败: %w", err)
+		return nil, fmt.Errorf("请求 TMDB 失败: %w", sanitizeTMDBHTTPErr(err))
 	}
 	defer resp.Body.Close()
 
@@ -349,7 +358,7 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求 TMDB 详情失败: %w", err)
+		return nil, fmt.Errorf("请求 TMDB 详情失败: %w", sanitizeTMDBHTTPErr(err))
 	}
 	defer resp.Body.Close()
 

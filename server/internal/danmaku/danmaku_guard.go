@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/netip"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 const (
 	maxDanmakuResponseBytes = 4 << 20 // 4MB
 	maxDanmakuPostPerMin    = 20
+	maxDanmakuRateLimitKeys = 4096
 )
 
 var (
@@ -54,26 +56,52 @@ func validateDanmakuPostInput(mid int64, t float64, color string, mode int) (str
 	return color, ""
 }
 
-func allowDanmakuPost(ip string) bool {
+func normalizeDanmakuIPKey(ip string) string {
 	ip = strings.TrimSpace(ip)
 	if ip == "" {
-		ip = "unknown"
+		return "unknown"
 	}
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	addr = addr.Unmap()
+	if addr.Is6() {
+		if prefix, pErr := addr.Prefix(64); pErr == nil {
+			return prefix.Masked().String()
+		}
+	}
+	return addr.String()
+}
+
+func allowDanmakuPost(ip string) bool {
+	key := normalizeDanmakuIPKey(ip)
 	now := time.Now()
 	cutoff := now.Add(-time.Minute)
 
 	danmakuPostLimitMu.Lock()
 	defer danmakuPostLimitMu.Unlock()
 
-	if len(danmakuPostLimitMap) > 4096 {
+	if len(danmakuPostLimitMap) >= maxDanmakuRateLimitKeys {
 		for k, times := range danmakuPostLimitMap {
 			if len(times) == 0 || times[len(times)-1].Before(cutoff) {
 				delete(danmakuPostLimitMap, k)
 			}
 		}
+		// 活跃 IP 仍超硬上限时批量淘汰，防止高并发洪水下 map 无界增长。
+		if len(danmakuPostLimitMap) >= maxDanmakuRateLimitKeys {
+			drop := len(danmakuPostLimitMap) - maxDanmakuRateLimitKeys/2
+			for k := range danmakuPostLimitMap {
+				delete(danmakuPostLimitMap, k)
+				drop--
+				if drop <= 0 {
+					break
+				}
+			}
+		}
 	}
 
-	hist := danmakuPostLimitMap[ip]
+	hist := danmakuPostLimitMap[key]
 	kept := hist[:0]
 	for _, ts := range hist {
 		if ts.After(cutoff) {
@@ -81,9 +109,9 @@ func allowDanmakuPost(ip string) bool {
 		}
 	}
 	if len(kept) >= maxDanmakuPostPerMin {
-		danmakuPostLimitMap[ip] = kept
+		danmakuPostLimitMap[key] = kept
 		return false
 	}
-	danmakuPostLimitMap[ip] = append(kept, now)
+	danmakuPostLimitMap[key] = append(kept, now)
 	return true
 }

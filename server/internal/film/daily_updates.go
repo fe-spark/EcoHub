@@ -189,7 +189,7 @@ func (n dailyNavIndex) matches(meta *filmsnapshot.FilmSearchMeta, pid int64) boo
 	}
 }
 
-func dailyMetaStop(meta *filmsnapshot.FilmSearchMeta, sourceID string, fromUnix, toUnix int64) (skip bool, stop bool) {
+func dailyMetaStop(meta *filmsnapshot.FilmSearchMeta, sourceID string, fromUnix, toUnix int64, categoryVisible func(categoryKey, rootCategoryKey string, cid, pid int64) bool) (skip bool, stop bool) {
 	stamp := meta.Item.UpdateStamp
 	if stamp > toUnix {
 		return true, false
@@ -197,11 +197,10 @@ func dailyMetaStop(meta *filmsnapshot.FilmSearchMeta, sourceID string, fromUnix,
 	if stamp < fromUnix {
 		return false, true
 	}
-	sourceID = strings.TrimSpace(sourceID)
 	if sourceID != "" && !meta.HasPlaySource(sourceID) {
 		return true, false
 	}
-	if !filmsnapshot.SourceCategoryVisible(sourceID, meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
+	if categoryVisible != nil && !categoryVisible(meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
 		return true, false
 	}
 	return false, false
@@ -244,10 +243,12 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 		}
 	}
 	fromUnix, toUnix := q.From.Unix(), q.To.Unix()
+	sourceID := strings.TrimSpace(q.SourceId)
+	categoryVisible := filmsnapshot.SourceCategoryVisibility(sourceID)
 	start := (current - 1) * pageSize
 	pool := make([]int64, 0)
 	err = filmsnapshot.VisitSearchMetasByUpdate(func(meta *filmsnapshot.FilmSearchMeta) bool {
-		skip, stop := dailyMetaStop(meta, q.SourceId, fromUnix, toUnix)
+		skip, stop := dailyMetaStop(meta, sourceID, fromUnix, toUnix, categoryVisible)
 		if stop {
 			return false
 		}
@@ -314,8 +315,10 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64, sourceID string) (
 	}
 	nav := buildDailyNavIndex(sourceID, navIDs)
 	fromUnix, toUnix := from.Unix(), to.Unix()
+	trimmedSourceID := strings.TrimSpace(sourceID)
+	categoryVisible := filmsnapshot.SourceCategoryVisibility(trimmedSourceID)
 	err = filmsnapshot.VisitSearchMetasByUpdate(func(meta *filmsnapshot.FilmSearchMeta) bool {
-		skip, stop := dailyMetaStop(meta, sourceID, fromUnix, toUnix)
+		skip, stop := dailyMetaStop(meta, trimmedSourceID, fromUnix, toUnix, categoryVisible)
 		if stop {
 			return false
 		}

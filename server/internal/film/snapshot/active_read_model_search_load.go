@@ -58,7 +58,10 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	return buildAndStoreFilmSearchMetaIndex(version)
 }
 
-// buildAndStoreFilmSearchMetaIndex 只重建当前主站的检索索引。先丢掉旧索引再加载。
+// searchFullLoadMu 串行化全量扫库构建，与 activeFilmSearchMetasMu（短锁指针切换/增量封口）解耦。
+var searchFullLoadMu sync.Mutex
+
+// buildAndStoreFilmSearchMetaIndex 只重建当前主站的检索索引，锁外加载并在完成后短锁原子替换。
 func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	version = strings.TrimSpace(version)
 	if version == "" || db.Mdb == nil {
@@ -70,12 +73,11 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		seen := searchRebuild.gen
 		searchRebuild.mu.Unlock()
 
-		activeFilmSearchMetasMu.Lock()
-		defer activeFilmSearchMetasMu.Unlock()
+		searchFullLoadMu.Lock()
+		defer searchFullLoadMu.Unlock()
 		if cur := activeFilmSearchMetas.Load(); indexMatches(cur, version, primary) {
 			return cur, nil
 		}
-		activeFilmSearchMetas.Store(nil)
 		started := time.Now()
 		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s primary=%s", version, primary)
 		items, plays, err := loadSearchIndexParts(version, primary)
@@ -92,7 +94,9 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		plays = nil
 		idx := sealSearchMetaIndex(version, items)
 		idx.PrimaryID = primary
+		activeFilmSearchMetasMu.Lock()
 		activeFilmSearchMetas.Store(idx)
+		activeFilmSearchMetasMu.Unlock()
 		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s primary=%s count=%d cost=%s", version, primary, len(items), time.Since(started).Round(time.Millisecond))
 		notifySearchIndexIfCurrent(seen, int64(len(items)), int64(len(items)), "done")
 		return idx, nil

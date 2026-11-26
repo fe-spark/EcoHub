@@ -10,6 +10,7 @@ import (
 
 	"server/internal/collect/ledger"
 	"server/internal/collect/progress"
+	"server/internal/infra/db"
 	"server/internal/model"
 )
 
@@ -65,13 +66,6 @@ func emitBatchNotify(b *collectBatchContext) {
 		return
 	}
 	b.mu.Lock()
-	countBySource := make(map[string]int, len(b.sourceFilmMIDs))
-	for sid, set := range b.sourceFilmMIDs {
-		if b.sourceDroppedLocked(sid) {
-			continue
-		}
-		countBySource[sid] = len(set)
-	}
 	sourceHours := make(map[string]int, len(b.sourceHours))
 	for sid, hour := range b.sourceHours {
 		sourceHours[sid] = hour
@@ -130,19 +124,13 @@ func emitBatchNotify(b *collectBatchContext) {
 				SuccessCnt:  snap.Success,
 				FailedCnt:   snap.Failed,
 				FailedPages: copyFailedPages(snap.FailedPages),
-				FilmsTotal:  countBySource[src.Id],
 				Error:       errMsg,
 			}
-		} else {
-			if count, ok := countBySource[src.Id]; ok && count > detail.FilmsTotal {
-				detail.FilmsTotal = count
-			}
-			if detail.Hour == 0 {
-				if hour := sourceHours[src.Id]; hour != 0 {
-					detail.Hour = hour
-				} else {
-					detail.Hour = batchHour
-				}
+		} else if detail.Hour == 0 {
+			if hour := sourceHours[src.Id]; hour != 0 {
+				detail.Hour = hour
+			} else {
+				detail.Hour = batchHour
 			}
 		}
 		results = append(results, model.SourceNotifyResult{
@@ -160,15 +148,18 @@ func emitBatchNotify(b *collectBatchContext) {
 			CategorySkip: b.CategorySkip(src.Id),
 		})
 	}
-	ledgerSaved := persistCollectRecord(b, results)
+	settledResults, ledgerSaved := persistCollectRecord(b, results)
+	if len(settledResults) == 0 {
+		return
+	}
 
 	d := getNotifyDispatcher()
 	if d.OnBatchSummary == nil {
 		return
 	}
 
-	notifyResults := make([]model.SourceNotifyResult, len(results))
-	for i, r := range results {
+	notifyResults := make([]model.SourceNotifyResult, len(settledResults))
+	for i, r := range settledResults {
 		r.Error = stripCategorySkipError(r.Error, r.CategorySkip)
 		notifyResults[i] = r
 	}
@@ -228,18 +219,57 @@ func settleSourceStatus(status, errMsg string, successCnt int) (string, string) 
 	return status, errMsg
 }
 
-func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyResult) bool {
+func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyResult) ([]model.SourceNotifyResult, bool) {
 	if b == nil || strings.TrimSpace(b.batchID) == "" {
-		return false
+		return results, false
 	}
 	if err := b.recordStart(); err != nil {
 		log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", b.batchID, err)
-		return false
+		return results, false
 	}
 
 	b.recordMu.Lock()
 	defer b.recordMu.Unlock()
-	films := b.withoutDroppedFilms(b.collectRecordFilms())
+
+	finalFlushErr := b.flushLedgerLocked()
+
+	b.mu.Lock()
+	recordID := b.recordID
+	flushErr := b.ledgerFlushErr
+	ledgerWritten := b.ledgerWritten
+	isSingleReplay := len(b.replayFilmIDs) > 0
+	b.mu.Unlock()
+
+	var bySource map[string]int
+	ledgerReady := false
+	if finalFlushErr != nil || flushErr != nil {
+		err := flushErr
+		if err == nil {
+			err = finalFlushErr
+		}
+		log.Printf("[Spider] 采集账本写入异常，清理半截账本并继续结算终态 batchID=%s err=%v", b.batchID, err)
+		b.cleanupIncompleteLedgerLocked()
+	} else if ledgerWritten {
+		storedTotal, counts, err := ledger.FilmRowCounts(db.Mdb, recordID)
+		if err != nil {
+			log.Printf("[Spider] 对账采集账本行数失败，清理半截账本并继续结算终态 batchID=%s err=%v", b.batchID, err)
+			b.cleanupIncompleteLedgerLocked()
+		} else {
+			bySource = counts
+			ledgerReady = storedTotal > 0
+		}
+	} else if isSingleReplay {
+		// 单片更新所有站都未发生实质变更时，写入重放目标编号以支持列表展示片名与重试。
+		if replayItems := b.singleReplayItemsLocked(); len(replayItems) > 0 {
+			if err := ledger.AppendCollectRecordFilms(replayItems); err != nil {
+				log.Printf("[Spider] 单片重放账本写入失败，继续结算终态 batchID=%s err=%v", b.batchID, err)
+				b.cleanupIncompleteLedgerLocked()
+			} else {
+				ledgerReady = true
+			}
+		}
+	}
+
 	if next, removed := b.withoutDroppedResults(results); removed {
 		results = next
 	}
@@ -259,6 +289,9 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		status, errMsg := settleSourceStatus(results[i].Status, results[i].Error, results[i].SuccessCnt)
 		results[i].Status = status
 		results[i].Error = errMsg
+		if bySource != nil {
+			results[i].FilmsTotal = bySource[results[i].SourceID]
+		}
 		r := results[i]
 		totalPage += r.PageTotal
 		succPage += r.SuccessCnt
@@ -298,7 +331,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	detailBytes, err := json.Marshal(details)
 	if err != nil {
 		log.Printf("[Spider] 采集明细序列化失败 batchID=%s: %v", b.batchID, err)
-		return false
+		return results, false
 	}
 
 	var errSummary strings.Builder
@@ -323,6 +356,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	comp := model.CollectRecordCompletion{
 		Status:         status,
 		Hour:           b.hour,
+		SourceCount:    len(results),
 		SuccessSources: doneCount,
 		FailedSources:  failedCount + partialCount,
 		FinishedAt:     now,
@@ -333,26 +367,34 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		PageFailed:     failPage,
 		ErrorMsg:       errSummary.String(),
 		DetailJson:     string(detailBytes),
-		Ledger:         len(films) > 0,
+		Ledger:         ledgerReady,
 	}
 
 	log.Printf("[Spider] 结算采集记录 batchID=%s status=%s sources=%d done=%d partial=%d failed=%d stopped=%d interrupted=%d pageTotal=%d pageSuccess=%d pageFailed=%d filmRows=%d durationMs=%d err=%s",
 		b.batchID, status, len(results), doneCount, partialCount, failedCount, stoppedCount, interruptedCount, totalPage, succPage, failPage, filmCount, duration, errSummary.String())
-	if len(films) > 0 {
-		if err := ledger.SaveCollectRecordFilmsChunked(b.batchID, films); err != nil {
-			log.Printf("[Spider] 采集清单写入未完成，记录保持进行中 batchID=%s err=%v", b.batchID, err)
-			if delErr := ledger.DeleteCollectRecordFilms(b.batchID); delErr != nil {
-				log.Printf("[Spider] 清理半截清单失败 batchID=%s err=%v", b.batchID, delErr)
-			}
-			return false
+
+	var completeErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if completeErr = ledger.CompleteCollectRecord(b.batchID, comp); completeErr == nil {
+			return results, ledgerReady
+		}
+		if attempt < 2 {
+			time.Sleep(time.Duration(200<<attempt) * time.Millisecond)
 		}
 	}
-	if err := ledger.CompleteCollectRecord(b.batchID, comp); err != nil {
-		log.Printf("[Spider] 结算采集记录写入失败 batchID=%s status=%s err=%v", b.batchID, status, err)
-		if delErr := ledger.DeleteCollectRecordFilms(b.batchID); delErr != nil {
-			log.Printf("[Spider] 清理未结算清单失败 batchID=%s err=%v", b.batchID, delErr)
-		}
-		return false
+	log.Printf("[Spider] 结算采集记录写入失败 batchID=%s status=%s err=%v", b.batchID, status, completeErr)
+	b.cleanupIncompleteLedgerLocked()
+	return results, false
+}
+
+func (b *collectBatchContext) cleanupIncompleteLedgerLocked() {
+	b.mu.Lock()
+	recordID := b.recordID
+	b.mu.Unlock()
+	if recordID == 0 {
+		return
 	}
-	return len(films) > 0
+	if err := ledger.DeleteCollectRecordFilms(recordID); err != nil {
+		log.Printf("[Spider] 清理未结算账本失败 batchID=%s recordID=%d err=%v", b.batchID, recordID, err)
+	}
 }

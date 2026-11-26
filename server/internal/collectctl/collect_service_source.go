@@ -160,10 +160,15 @@ func (s *CollectService) UpdateFilmSourceWithAuth(source model.FilmSource, newPr
 			return err
 		}
 
-		// 耗时分批清库在全局主站锁外执行（受单站独占锁 WithSourceExclusive 保护），避免阻塞全站写操作
+		// 耗时分批清库在全局主站锁外执行（受单站独占锁与采集准入互斥保护），避免与旧地址采集并发读写删冲突
 		cleaned = true
 		cleaningURISources.Store(source.Id, struct{}{})
 		defer cleaningURISources.Delete(source.Id)
+		releaseClean, stopErr := collect.StopSourceForDelete(source.Id)
+		if stopErr != nil {
+			return stopErr
+		}
+		defer releaseClean()
 		var cleanErr error
 		orphanMids, cleanErr = collect.CleanCollectSourceData(source.Id)
 		if cleanErr != nil {

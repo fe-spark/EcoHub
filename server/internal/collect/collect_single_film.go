@@ -85,7 +85,9 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 		return scheduler.Mids{}, errors.New("get movie detail failed: film not found or unplayable")
 	}
 
-	written, err := saveCollectedFilmForCollect(ctx, s, 1, list)
+	writeCtx, cancelWrite := context.WithTimeout(ctx, 30*time.Second)
+	written, err := saveCollectedFilmForCollect(writeCtx, s, 1, list)
+	cancelWrite()
 	if err != nil {
 		return scheduler.Mids{}, err
 	}

@@ -1,6 +1,7 @@
 package sourcecatalog
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -10,44 +11,33 @@ import (
 	"gorm.io/gorm"
 )
 
-// CollectRecordHasLedger 检查批次是否已写入 collect_record_films 账本。
-func CollectRecordHasLedger(batchID string) (bool, error) {
-	batchID = strings.TrimSpace(batchID)
-	if batchID == "" || db.Mdb == nil {
-		return false, nil
-	}
-	var rec model.CollectRecord
-	err := db.Mdb.Select("ledger").Where("batch_id = ?", batchID).Take(&rec).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if rec.Ledger {
-		return true, nil
-	}
-	return MarkCollectRecordLedgerIfPresent(batchID)
+// ResolveCollectRecordLedger 按批次号解析采集记录主键与账本就绪状态。
+func ResolveCollectRecordLedger(batchID string) (uint, bool, error) {
+	return ResolveCollectRecordLedgerContext(context.Background(), batchID)
 }
 
-// MarkCollectRecordLedgerIfPresent 终态已记下部数，但清单标记没写上。表里已经有编号就补上。
-func MarkCollectRecordLedgerIfPresent(batchID string) (bool, error) {
-	if db.Mdb == nil {
-		return false, nil
-	}
+// ResolveCollectRecordLedgerContext 按批次号解析采集记录主键与账本就绪状态，支持上下文取消。
+func ResolveCollectRecordLedgerContext(ctx context.Context, batchID string) (uint, bool, error) {
 	batchID = strings.TrimSpace(batchID)
-	if batchID == "" {
-		return false, nil
+	if batchID == "" || db.Mdb == nil {
+		return 0, false, nil
 	}
-	var n int64
-	if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batchID).Limit(1).Count(&n).Error; err != nil {
-		return false, err
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if n == 0 {
-		return false, nil
+	var rec model.CollectRecord
+	err := db.Mdb.WithContext(ctx).Select("id", "ledger").Where("batch_id = ?", batchID).Take(&rec).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, nil
 	}
-	if err := db.Mdb.Model(&model.CollectRecord{}).Where("batch_id = ? AND ledger = ?", batchID, false).Update("ledger", true).Error; err != nil {
-		return false, err
+	if err != nil {
+		return 0, false, err
 	}
-	return true, nil
+	return rec.ID, rec.Ledger, nil
+}
+
+// CollectRecordHasLedger 检查批次是否已写入 collect_record_films 账本。
+func CollectRecordHasLedger(batchID string) (bool, error) {
+	_, ready, err := ResolveCollectRecordLedger(batchID)
+	return ready, err
 }

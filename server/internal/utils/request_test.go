@@ -13,8 +13,8 @@ func TestGetOrCreateProxyTransportHTTP(t *testing.T) {
 	if tr.Proxy == nil {
 		t.Fatal("http proxy transport has no Proxy")
 	}
-	if tr.DialContext != nil {
-		t.Fatal("http proxy should keep the default dialer")
+	if tr.DialContext == nil || tr.TLSHandshakeTimeout <= 0 {
+		t.Fatal("http proxy transport should configure dial and TLS handshake timeouts")
 	}
 	req, err := http.NewRequest(http.MethodGet, "https://example.com/vod", nil)
 	if err != nil {

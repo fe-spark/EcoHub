@@ -253,15 +253,15 @@ func notifySearchIndexIfCurrent(seen uint64, total, current int64, status string
 var errSearchRebuildSkipped = errors.New("检索索引重建跳过：无版本或数据库")
 
 // scanAndStoreActiveFilmSearchIndex 只扫描当前主站并换上新索引，返回影片数。终态由 runSearchRebuild 发。
+// 耗时的 DB 扫描与封口在 activeFilmSearchMetasMu 之外执行，保留旧索引继续服务同主站读请求，仅在最终切换指针时短锁提交。
 func scanAndStoreActiveFilmSearchIndex() (int64, error) {
 	version := currentSearchIndexVersion()
 	if version == "" || db.Mdb == nil {
 		return 0, errSearchRebuildSkipped
 	}
 	primary := currentPrimarySourceID()
-	activeFilmSearchMetasMu.Lock()
-	defer activeFilmSearchMetasMu.Unlock()
-	activeFilmSearchMetas.Store(nil)
+	searchFullLoadMu.Lock()
+	defer searchFullLoadMu.Unlock()
 
 	started := time.Now()
 	items, plays, err := loadSearchIndexParts(version, primary)
@@ -275,7 +275,9 @@ func scanAndStoreActiveFilmSearchIndex() (int64, error) {
 	plays = nil
 	idx := sealSearchMetaIndex(version, items)
 	idx.PrimaryID = primary
+	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(idx)
+	activeFilmSearchMetasMu.Unlock()
 	cost := time.Since(started).Round(time.Millisecond)
 	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s primary=%s count=%d cost=%s", version, primary, len(items), cost)
 	return int64(len(items)), nil
