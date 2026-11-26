@@ -1,3 +1,20 @@
+Release **v3.1.7**, image `ghcr.io/fe-spark/ecohub:v3.1.7` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.7 changes
+
+- **Home management (#119)**: upgrade the banner admin menu into a two-tab "Home Management" view ("Banners" and "Recommendations") to reorder and toggle built-in sections and custom recommendation groups.
+- **Douban & Bangumi charts (#119)**: add a "Douban" quick-banner strategy and support manual picks, two-step quick generation, and 6-hour automatic chart syncing against the local library.
+- **Public homepage layout (#119)**: render built-in and custom recommendation sections according to the admin layout order and visibility, with rank and Douban rating badges.
+
+---
+
 Release **v3.1.6**, image `ghcr.io/fe-spark/ecohub:v3.1.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

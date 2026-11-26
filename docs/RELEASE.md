@@ -1,3 +1,20 @@
+正式版 **v3.1.7**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.1.7 更新内容
+
+- **首页管理（#119）**：原「首页轮播」升级为包含「首页轮播」与「首页推荐」的「首页管理」，支持统一编排内置板块与自定义推荐分组的顺序和显隐。
+- **豆瓣与 Bangumi 推荐（#119）**：轮播一键排片新增「豆瓣推荐」策略，推荐分组支持选片排序、两段式一键排片及每 6 小时自动同步榜单反查本地片库。
+- **前台首页渲染（#119）**：依据后台板块配置动态渲染内置板块及自定义推荐行，并展示排名与豆瓣评分角标。
+
+---
+
 正式版 **v3.1.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
