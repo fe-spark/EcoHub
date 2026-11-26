@@ -8,10 +8,7 @@ import (
 )
 
 func buildOverviewKeyboard(sess model.NotifyBatchSession, sitePage int) *InlineKeyboardMarkup {
-	if len(sess.Sources) == 0 {
-		return buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
-	}
-	if strings.TrimSpace(sess.BatchID) == "" {
+	if len(sess.Sources) == 0 || strings.TrimSpace(sess.BatchID) == "" {
 		return nil
 	}
 	total := len(sess.Sources)
@@ -63,12 +60,11 @@ func buildSourceCategoryKeyboard(batchID string, srcIdx int, cats []model.Notify
 	var rows [][]InlineKeyboardButton
 	var row []InlineKeyboardButton
 	for idx, c := range cats {
-		cnt := c.FilmCount()
-		if cnt == 0 {
+		if c.Count <= 0 {
 			continue
 		}
 		row = append(row, InlineKeyboardButton{
-			Text:         fmt.Sprintf("%s (%d)", c.CategoryName, cnt),
+			Text:         fmt.Sprintf("%s (%d)", c.CategoryName, c.Count),
 			CallbackData: fmt.Sprintf("%s:%s:sc:%d:%d:1", telegramCallbackPref, batchID, srcIdx, idx),
 		})
 		if len(row) == 2 {
@@ -80,38 +76,6 @@ func buildSourceCategoryKeyboard(batchID string, srcIdx int, cats []model.Notify
 		row = append(row, InlineKeyboardButton{
 			Text:         fmt.Sprintf("📋 全部 (%d)", total),
 			CallbackData: fmt.Sprintf("%s:%s:sc:%d:-1:1", telegramCallbackPref, batchID, srcIdx),
-		})
-	}
-	if len(row) > 0 {
-		rows = append(rows, row)
-	}
-	return &InlineKeyboardMarkup{InlineKeyboard: rows}
-}
-
-// buildCategoryKeyboard 构建采集汇总底部的分类内联翻页按钮（点击进入对应分类的分页片单）
-func buildCategoryKeyboard(batchID string, cats []model.NotifyCategoryGroup, total int) *InlineKeyboardMarkup {
-	if total <= 0 || strings.TrimSpace(batchID) == "" {
-		return nil
-	}
-	var rows [][]InlineKeyboardButton
-	var row []InlineKeyboardButton
-	for idx, c := range cats {
-		if len(c.Films) == 0 {
-			continue
-		}
-		row = append(row, InlineKeyboardButton{
-			Text:         fmt.Sprintf("%s (%d)", c.CategoryName, len(c.Films)),
-			CallbackData: fmt.Sprintf("%s:%s:%d:1", telegramCallbackPref, batchID, idx),
-		})
-		if len(row) == 2 {
-			rows = append(rows, row)
-			row = nil
-		}
-	}
-	if len(cats) > 1 || len(rows) == 0 {
-		row = append(row, InlineKeyboardButton{
-			Text:         fmt.Sprintf("📋 全部 (%d)", total),
-			CallbackData: fmt.Sprintf("%s:%s:-1:1", telegramCallbackPref, batchID),
 		})
 	}
 	if len(row) > 0 {
@@ -138,20 +102,6 @@ func buildPagedNavRow(batchID string, page, totalPages, infoSrcIdx int, pageCall
 		{Text: fmt.Sprintf("%d / %d", page, totalPages), CallbackData: fmt.Sprintf("%s:%s:info:%d", telegramCallbackPref, batchID, infoSrcIdx)},
 		{Text: nextText, CallbackData: nextData},
 	}
-}
-
-func buildPagedKeyboard(batchID string, catIdx, page, totalPages int) *InlineKeyboardMarkup {
-	var rows [][]InlineKeyboardButton
-	if totalPages > 1 {
-		rows = append(rows, buildPagedNavRow(batchID, page, totalPages, notifyInfoPrimary, func(p int) string {
-			return fmt.Sprintf("%s:%s:%d:%d", telegramCallbackPref, batchID, catIdx, p)
-		}))
-	}
-	rows = append(rows, []InlineKeyboardButton{{
-		Text:         "🔙 返回采集汇总",
-		CallbackData: fmt.Sprintf("%s:%s:back:0", telegramCallbackPref, batchID),
-	}})
-	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
 func buildSourcePagedKeyboard(batchID string, srcIdx, catIdx, page, totalPages int) *InlineKeyboardMarkup {

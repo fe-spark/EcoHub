@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -22,6 +23,8 @@ const (
 	pollerConflictWait = 60 * time.Second
 	pollerMaxBackoff   = 30 * time.Second
 	pollerOffsetTTL    = 7 * 24 * time.Hour
+	maxCallbackWorkers = 8
+	callbackDBTimeout  = 6 * time.Second
 )
 
 type pollerInstance struct {
@@ -129,11 +132,13 @@ func pollerOffsetKey(token string) string {
 	return config.NotifyBatchCachePrefix + ":offset:" + hex.EncodeToString(sum[:8])
 }
 
-func loadPollerOffset(token string) int64 {
+func loadPollerOffset(ctx context.Context, token string) int64 {
 	if db.Rdb == nil {
 		return 0
 	}
-	val, err := db.Rdb.Get(db.Cxt, pollerOffsetKey(token)).Result()
+	opCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	val, err := db.Rdb.Get(opCtx, pollerOffsetKey(token)).Result()
 	if err != nil {
 		return 0
 	}
@@ -144,16 +149,21 @@ func loadPollerOffset(token string) int64 {
 	return offset
 }
 
-func savePollerOffset(token string, offset int64) {
+func savePollerOffset(ctx context.Context, token string, offset int64) {
 	if db.Rdb == nil || offset <= 0 {
 		return
 	}
-	_ = db.Rdb.Set(db.Cxt, pollerOffsetKey(token), offset, pollerOffsetTTL).Err()
+	opCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_ = db.Rdb.Set(opCtx, pollerOffsetKey(token), offset, pollerOffsetTTL).Err()
 }
 
 func runTelegramPoller(ctx context.Context, token string) {
-	offset := loadPollerOffset(token)
+	offset := loadPollerOffset(ctx, token)
 	var errStreak int
+	callbackSem := make(chan struct{}, maxCallbackWorkers)
+	var callbackWg sync.WaitGroup
+	defer callbackWg.Wait()
 
 	for {
 		select {
@@ -192,12 +202,32 @@ func runTelegramPoller(ctx context.Context, token string) {
 			if u.UpdateID >= offset {
 				offset = u.UpdateID + 1
 			}
-			if u.CallbackQuery != nil {
-				handleNotifyCallback(ctx, token, u.CallbackQuery)
-			}
 		}
 		if offset > prevOffset {
-			savePollerOffset(token, offset)
+			savePollerOffset(ctx, token, offset)
+		}
+		// 并发处理回调，避免单个大站点查库或慢代理阻塞整个 getUpdates 轮询与后续点击响应
+		for _, u := range updates {
+			if u.CallbackQuery == nil {
+				continue
+			}
+			cq := u.CallbackQuery
+			select {
+			case callbackSem <- struct{}{}:
+				callbackWg.Add(1)
+				go func(cb *tgCallbackQuery) {
+					defer func() {
+						callbackWg.Done()
+						<-callbackSem
+						if r := recover(); r != nil {
+							syslog.Errorf("[Notify] Telegram 回调处理异常: %v", r)
+						}
+					}()
+					handleNotifyCallback(ctx, token, cb)
+				}(cq)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }
@@ -232,17 +262,8 @@ type notifyCallbackCmd struct {
 	page    int
 }
 
-// parseNotifyCallback 解析内联按钮 callback_data：
-// - nfp:{batchId}:{catIdx|action}:{page}
-// - nfp:{batchId}:s:{srcIdx} / sb:{srcIdx} / sp:{sitePage} / sc:{srcIdx}:{catIdx}:{page}
-func parseNotifyCallback(data string) (batchID, action string, catIdx, page int, ok bool) {
-	cmd, ok := parseNotifyCallbackCmd(data)
-	if !ok {
-		return "", "", -1, 0, false
-	}
-	return cmd.batchID, cmd.action, cmd.catIdx, cmd.page, true
-}
-
+// parseNotifyCallbackCmd 解析内联按钮 callback_data：
+// - nfp:{batchId}:noop:0 / info:{srcIdx} / s:{srcIdx} / sb:{srcIdx} / sp:{sitePage} / sc:{srcIdx}:{catIdx}:{page}
 func parseNotifyCallbackCmd(data string) (notifyCallbackCmd, bool) {
 	parts := strings.Split(strings.TrimSpace(data), ":")
 	if len(parts) < 4 || parts[0] != telegramCallbackPref {
@@ -254,7 +275,7 @@ func parseNotifyCallbackCmd(data string) (notifyCallbackCmd, bool) {
 	}
 	third := strings.TrimSpace(parts[2])
 	switch third {
-	case "noop", "back":
+	case "noop":
 		if len(parts) != 4 {
 			return notifyCallbackCmd{}, false
 		}
@@ -302,29 +323,23 @@ func parseNotifyCallbackCmd(data string) (notifyCallbackCmd, bool) {
 		}
 		return notifyCallbackCmd{batchID: batchID, action: "spage_cat", srcIdx: srcIdx, catIdx: catIdx, page: p}, true
 	}
-	if len(parts) != 4 {
-		return notifyCallbackCmd{}, false
-	}
-	cIdx, err1 := strconv.Atoi(third)
-	p, err2 := strconv.Atoi(strings.TrimSpace(parts[3]))
-	if err1 != nil || err2 != nil || p < 1 {
-		return notifyCallbackCmd{}, false
-	}
-	return notifyCallbackCmd{batchID: batchID, action: "page", srcIdx: -1, catIdx: cIdx, page: p}, true
+	return notifyCallbackCmd{}, false
 }
 
 func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbackQuery) {
 	if cb == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(parentCtx, 12*time.Second)
+	ctx, cancel := context.WithTimeout(parentCtx, 15*time.Second)
 	defer cancel()
 
 	// 独立短超时回答回调，避免 editTelegramMessage 超时取消 ctx 后客户端按钮一直转圈
 	answerCallback := func(text string, showAlert bool) {
 		ansCtx, ansCancel := context.WithTimeout(parentCtx, 5*time.Second)
 		defer ansCancel()
-		_ = answerTelegramCallback(ansCtx, token, cb.ID, text, showAlert)
+		if err := answerTelegramCallback(ansCtx, token, cb.ID, text, showAlert); err != nil {
+			log.Printf("[Notify] answerCallbackQuery 失败 data=%q err=%v", cb.Data, err)
+		}
 	}
 
 	cmd, ok := parseNotifyCallbackCmd(cb.Data)
@@ -348,14 +363,12 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 		case cmd.srcIdx >= 0 && cmd.srcIdx < len(sess.Sources):
 			src := sess.Sources[cmd.srcIdx]
 			answerCallback(fmt.Sprintf("%s 本次入库 %d 部", src.SourceName, src.FilmsTotal), false)
-		case cmd.srcIdx == notifyInfoAllSources:
+		default:
 			totalStored := 0
 			for _, src := range sess.Sources {
 				totalStored += src.FilmsTotal
 			}
 			answerCallback(fmt.Sprintf("共 %d 个站点，入库 %d 部", len(sess.Sources), totalStored), false)
-		default:
-			answerCallback(fmt.Sprintf("本次共更新 %d 部影片", len(sess.AllFilms)), false)
 		}
 		return
 	}
@@ -373,7 +386,7 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 			return
 		}
 		src := sess.Sources[cmd.srcIdx]
-		markup := buildSourceCategoryKeyboard(sess.BatchID, cmd.srcIdx, src.Categories, src.TotalFilmCount())
+		markup := buildSourceCategoryKeyboard(sess.BatchID, cmd.srcIdx, src.Categories, src.AllCount)
 		if err := sendTelegramReplyMessage(ctx, token, chatID, cb.Message.MessageThreadID, cb.Message.MessageID, src.OverviewHTML, markup); err != nil {
 			log.Printf("[Notify] 回复站点分类失败 source=%s err=%v", src.SourceName, err)
 			answerCallback("回复失败", false)
@@ -387,7 +400,7 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 			return
 		}
 		src := sess.Sources[cmd.srcIdx]
-		markup := buildSourceCategoryKeyboard(sess.BatchID, cmd.srcIdx, src.Categories, src.TotalFilmCount())
+		markup := buildSourceCategoryKeyboard(sess.BatchID, cmd.srcIdx, src.Categories, src.AllCount)
 		if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, src.OverviewHTML, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
 			log.Printf("[Notify] 返回站点分类失败: %v", err)
 			answerCallback("返回失败", false)
@@ -409,10 +422,20 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 			answerCallback("站点信息不存在", true)
 			return
 		}
-		text, totalPages, err := formatSourceFilmListPageHTML(sess, cmd.srcIdx, cmd.catIdx, cmd.page)
+		if cmd.catIdx < -1 || cmd.catIdx >= len(sess.Sources[cmd.srcIdx].Categories) {
+			answerCallback("分类不存在", true)
+			return
+		}
+		dbCtx, dbCancel := context.WithTimeout(ctx, callbackDBTimeout)
+		text, totalPages, err := formatSourceFilmListPageHTML(dbCtx, sess, cmd.srcIdx, cmd.catIdx, cmd.page)
+		dbCancel()
 		if err != nil {
-			log.Printf("[Notify] 构建站点片单失败: %v", err)
-			answerCallback("翻页失败", false)
+			log.Printf("[Notify] 构建站点片单失败 srcIdx=%d catIdx=%d page=%d err=%v", cmd.srcIdx, cmd.catIdx, cmd.page, err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				answerCallback("片单查询超时，请稍后重试", true)
+			} else {
+				answerCallback("片单加载失败", false)
+			}
 			return
 		}
 		markup := buildSourcePagedKeyboard(sess.BatchID, cmd.srcIdx, cmd.catIdx, cmd.page, totalPages)
@@ -423,28 +446,6 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 		}
 		answerCallback(fmt.Sprintf("第 %d/%d 页", cmd.page, totalPages), false)
 		return
-	case "back":
-		markup := buildOverviewKeyboard(sess, 1)
-		if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, sess.OverviewHTML, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
-			log.Printf("[Notify] 返回汇总失败: %v", err)
-			answerCallback("返回失败", false)
-			return
-		}
-		answerCallback("已返回采集汇总", false)
-		return
 	}
-
-	text, totalPages, err := formatFilmListPageHTML(sess, cmd.catIdx, cmd.page)
-	if err != nil {
-		log.Printf("[Notify] 读取站点配置失败: %v", err)
-		answerCallback("翻页失败", false)
-		return
-	}
-	markup := buildPagedKeyboard(sess.BatchID, cmd.catIdx, cmd.page, totalPages)
-	if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
-		log.Printf("[Notify] 翻页更新失败: %v", err)
-		answerCallback("翻页失败", false)
-		return
-	}
-	answerCallback(fmt.Sprintf("第 %d/%d 页", cmd.page, totalPages), false)
+	answerCallback("无效操作", false)
 }

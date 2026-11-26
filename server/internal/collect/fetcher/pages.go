@@ -27,8 +27,6 @@ type Batch interface {
 	IsStandalone() bool
 	// AddAffectedMIDs 记录影响到的全局 mid，供本轮发布使用。
 	AddAffectedMIDs(s *model.FilmSource, h int, mids []int64)
-	// AddNotifyMIDs 记录应进通知更新列表的全局 mid（新片或播放线路实质变更）。
-	AddNotifyMIDs(sourceID string, mids []int64)
 	// RecordSourceError 记录站点采集错误原因。
 	RecordSourceError(sourceID, reason string)
 	// AddCategorySkip 累计分类未映射而没有入库的部数。页请求仍算成功。
@@ -216,11 +214,10 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		}
 		logProgress(false)
 	}
-	recordPageSuccess := func(page int, notifyMIDs, affectedMIDs []int64) {
+	recordPageSuccess := func(page int, affectedMIDs []int64) {
 		snapshot := recordPageFinished(page, true, nil)
 		if batch != nil {
 			batch.AddAffectedMIDs(s, h, affectedMIDs)
-			batch.AddNotifyMIDs(s.Id, notifyMIDs)
 		}
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Success = snapshot.success
@@ -400,7 +397,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		if batch != nil && completion.Unmapped > 0 {
 			batch.AddCategorySkip(s.Id, completion.Unmapped)
 		}
-		recordPageSuccess(completion.Page, completion.NotifyMIDs, completion.AffectedMIDs)
+		recordPageSuccess(completion.Page, completion.AffectedMIDs)
 	}
 	logProgress(true)
 	if ctx.Err() != nil {

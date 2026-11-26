@@ -92,7 +92,6 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 	if batchCtx != nil {
 		batchCtx.markSourceFinished(*s)
 		batchCtx.addAffectedMIDs(s, 1, written.Affected)
-		batchCtx.AddNotifyMIDs(s.Id, written.Notify)
 	}
 	return written, nil
 }

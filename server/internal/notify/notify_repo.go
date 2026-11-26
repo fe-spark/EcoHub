@@ -1,17 +1,20 @@
 package notify
 
 import (
+	"context"
+	"crypto/sha1"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repobase"
 	"server/internal/sourcecatalog"
@@ -196,7 +199,11 @@ func SaveNotifyBatchSession(sess model.NotifyBatchSession) error {
 	if db.Rdb != nil {
 		if raw, err := json.Marshal(sess); err == nil {
 			key := config.NotifyBatchCachePrefix + ":" + sess.BatchID
-			_ = db.Rdb.Set(db.Cxt, key, raw, notifyBatchSessionTTL).Err()
+			if setErr := db.Rdb.Set(db.Cxt, key, raw, notifyBatchSessionTTL).Err(); setErr != nil {
+				syslog.Warnf("[Notify] 写入批次会话缓存失败 batch=%s err=%v", sess.BatchID, setErr)
+			}
+		} else {
+			syslog.Warnf("[Notify] 序列化批次会话失败 batch=%s err=%v", sess.BatchID, err)
 		}
 	}
 	return nil
@@ -263,91 +270,6 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 	notifyMemSessions[sess.BatchID] = notifyMemSession{sess: sess, expiresAt: expiresAt}
 }
 
-// NotifyFilmMeta 影片通知归类与排序元数据
-type NotifyFilmMeta struct {
-	Mid             int64
-	FirstSourceId   string
-	Name            string
-	Pid             int64
-	Cid             int64
-	CategoryKey     string
-	RootCategoryKey string
-	UpdateStamp     int64
-}
-
-// LoadNotifyFilmMetas 查询变更影片的标题、分类与更新时间戳，并按与前台每日更新一致的顺序（update_stamp DESC, mid DESC）返回
-func LoadNotifyFilmMetas(mids []int64) ([]NotifyFilmMeta, error) {
-	if len(mids) == 0 || db.Mdb == nil {
-		return nil, nil
-	}
-	seen := make(map[int64]struct{}, len(mids))
-	uniq := make([]int64, 0, len(mids))
-	for _, m := range mids {
-		if m > 0 {
-			if _, ok := seen[m]; !ok {
-				seen[m] = struct{}{}
-				uniq = append(uniq, m)
-			}
-		}
-	}
-	if len(uniq) == 0 {
-		return nil, nil
-	}
-
-	out := make([]NotifyFilmMeta, 0, len(uniq))
-	const chunk = 500
-	for start := 0; start < len(uniq); start += chunk {
-		end := start + chunk
-		if end > len(uniq) {
-			end = len(uniq)
-		}
-		var rows []struct {
-			Mid             int64          `gorm:"column:mid"`
-			FirstSourceId   sql.NullString `gorm:"column:first_source_id"`
-			Name            string         `gorm:"column:name"`
-			Pid             sql.NullInt64  `gorm:"column:pid"`
-			Cid             sql.NullInt64  `gorm:"column:cid"`
-			CategoryKey     sql.NullString `gorm:"column:category_key"`
-			RootCategoryKey sql.NullString `gorm:"column:root_category_key"`
-			UpdateStamp     int64          `gorm:"column:update_stamp"`
-		}
-		if err := db.Mdb.Table(model.TableFilmIndex).
-			Select("mid, first_source_id, name, pid, cid, category_key, root_category_key, update_stamp").
-			Where("mid IN ? AND deleted_at IS NULL", uniq[start:end]).
-			Scan(&rows).Error; err != nil {
-			return nil, err
-		}
-		for _, r := range rows {
-			var pid, cid int64
-			if r.Pid.Valid {
-				pid = r.Pid.Int64
-			}
-			if r.Cid.Valid {
-				cid = r.Cid.Int64
-			}
-			out = append(out, NotifyFilmMeta{
-				Mid:             r.Mid,
-				FirstSourceId:   strings.TrimSpace(r.FirstSourceId.String),
-				Name:            strings.TrimSpace(r.Name),
-				Pid:             pid,
-				Cid:             cid,
-				CategoryKey:     strings.TrimSpace(r.CategoryKey.String),
-				RootCategoryKey: strings.TrimSpace(r.RootCategoryKey.String),
-				UpdateStamp:     r.UpdateStamp,
-			})
-		}
-	}
-
-	// 与前台「每日更新」完全一致的排序：update_stamp DESC, mid DESC
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].UpdateStamp != out[j].UpdateStamp {
-			return out[i].UpdateStamp > out[j].UpdateStamp
-		}
-		return out[i].Mid > out[j].Mid
-	})
-	return out, nil
-}
-
 // BatchSourceCategoryStatRow 表示按站点与影片分类字段聚合后的计数行
 type BatchSourceCategoryStatRow struct {
 	SourceID        string
@@ -379,6 +301,34 @@ func HasCollectBatchLedger(batchID string) (bool, error) {
 	return sourcecatalog.CollectRecordHasLedger(batchID)
 }
 
+func filmIndexJoinClause(conn *gorm.DB) string {
+	if conn != nil && conn.Dialector != nil && conn.Dialector.Name() == "mysql" {
+		return "STRAIGHT_JOIN " + model.TableFilmIndex + " AS fi ON fi.mid = crf.mid"
+	}
+	return "JOIN " + model.TableFilmIndex + " AS fi ON fi.mid = crf.mid"
+}
+
+const notifyPageCacheTTL = 30 * time.Minute
+
+func notifySourcePageCacheKey(q BatchSourceCategoryPageQuery) string {
+	raw := fmt.Sprintf(
+		"%s|%s|%t|%t|%t|%s|%s|%v|%v|%d|%d",
+		strings.TrimSpace(q.BatchID),
+		strings.TrimSpace(q.SourceID),
+		q.CategoryAll,
+		q.IsOther,
+		q.UseCategoryKeys,
+		strings.Join(q.IncludeKeys, ","),
+		strings.Join(q.KnownKeys, ","),
+		q.IncludePids,
+		q.KnownPids,
+		q.Limit,
+		q.Offset,
+	)
+	sum := sha1.Sum([]byte(raw))
+	return config.NotifyBatchCachePrefix + ":pg:" + hex.EncodeToString(sum[:12])
+}
+
 // LoadBatchSourceCategoryStats 基于 collect_record_films 账本在数据库侧按分类聚合计数
 func LoadBatchSourceCategoryStats(batchID string) ([]BatchSourceCategoryStatRow, error) {
 	batchID = strings.TrimSpace(batchID)
@@ -397,7 +347,7 @@ func LoadBatchSourceCategoryStats(batchID string) ([]BatchSourceCategoryStatRow,
 	var rows []statRaw
 	err := db.Mdb.Table("collect_record_films AS crf").
 		Select("crf.source_id, fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key, COUNT(*) AS count").
-		Joins("JOIN film_index AS fi ON fi.mid = crf.mid").
+		Joins(filmIndexJoinClause(db.Mdb)).
 		Where("crf.batch_id = ? AND fi.deleted_at IS NULL", batchID).
 		Group("crf.source_id, fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key").
 		Scan(&rows).Error
@@ -419,16 +369,40 @@ func LoadBatchSourceCategoryStats(batchID string) ([]BatchSourceCategoryStatRow,
 	return out, nil
 }
 
-// LoadBatchSourceCategoryPage 基于 collect_record_films 账本按需查询单页通知影片
-func LoadBatchSourceCategoryPage(q BatchSourceCategoryPageQuery) ([]model.NotifyFilmItem, error) {
+// LoadBatchSourceCategoryPage 基于 collect_record_films 账本按需查询单页通知影片（对齐采集记录，按账本 id ASC 索引顺序单页提取后再回表补片名，避免跨表 filesort）。
+func LoadBatchSourceCategoryPage(ctx context.Context, q BatchSourceCategoryPageQuery) ([]model.NotifyFilmItem, error) {
 	batchID := strings.TrimSpace(q.BatchID)
 	sourceID := strings.TrimSpace(q.SourceID)
 	if batchID == "" || sourceID == "" || db.Mdb == nil || q.Limit <= 0 {
 		return nil, nil
 	}
-	query := db.Mdb.Table("collect_record_films AS crf").
-		Select("fi.mid, fi.name").
-		Joins("JOIN film_index AS fi ON fi.mid = crf.mid").
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	offset := q.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	q.Offset = offset
+
+	cacheKey := notifySourcePageCacheKey(q)
+	if db.Rdb != nil {
+		if raw, err := db.Rdb.Get(ctx, cacheKey).Result(); err == nil && raw != "" {
+			var cached []model.NotifyFilmItem
+			if json.Unmarshal([]byte(raw), &cached) == nil {
+				return cached, nil
+			}
+		} else if err != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+
+	var mids []int64
+	query := db.Mdb.WithContext(ctx).Table("collect_record_films AS crf").
+		Joins(filmIndexJoinClause(db.Mdb)).
 		Where("crf.batch_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", batchID, sourceID)
 
 	if !q.CategoryAll {
@@ -464,24 +438,42 @@ func LoadBatchSourceCategoryPage(q BatchSourceCategoryPageQuery) ([]model.Notify
 		}
 	}
 
-	offset := q.Offset
-	if offset < 0 {
-		offset = 0
+	// 按 crf.id ASC 沿 idx_crf_batch_source_id 顺序扫描，STRAIGHT_JOIN 主键校验 deleted_at 后早停，与统计口径一致且避免 filesort。
+	if err := query.Select("crf.mid").Order("crf.id ASC").Limit(q.Limit).Offset(offset).Pluck("crf.mid", &mids).Error; err != nil {
+		return nil, err
 	}
-	type pageRow struct {
+	if len(mids) == 0 {
+		return []model.NotifyFilmItem{}, nil
+	}
+
+	type nameRow struct {
 		Mid  int64
 		Name string
 	}
-	var rows []pageRow
-	if err := query.Order("fi.update_stamp DESC, fi.mid DESC").Limit(q.Limit).Offset(offset).Scan(&rows).Error; err != nil {
+	var nameRows []nameRow
+	if err := db.Mdb.WithContext(ctx).Unscoped().Table(model.TableFilmIndex).
+		Select("mid, name").
+		Where("mid IN ?", mids).
+		Scan(&nameRows).Error; err != nil {
 		return nil, err
 	}
-	items := make([]model.NotifyFilmItem, 0, len(rows))
-	for _, r := range rows {
+	nameByMid := make(map[int64]string, len(nameRows))
+	for _, r := range nameRows {
+		nameByMid[r.Mid] = strings.TrimSpace(r.Name)
+	}
+	items := make([]model.NotifyFilmItem, 0, len(mids))
+	for _, mid := range mids {
 		items = append(items, model.NotifyFilmItem{
-			Mid:  r.Mid,
-			Name: strings.TrimSpace(r.Name),
+			Mid:  mid,
+			Name: nameByMid[mid],
 		})
+	}
+	if db.Rdb != nil && ctx.Err() == nil {
+		if raw, err := json.Marshal(items); err == nil {
+			if err := db.Rdb.Set(ctx, cacheKey, raw, notifyPageCacheTTL).Err(); err != nil && ctx.Err() == nil {
+				syslog.Warnf("[Notify] 写入分页缓存失败 key=%s err=%v", cacheKey, err)
+			}
+		}
 	}
 	return items, nil
 }

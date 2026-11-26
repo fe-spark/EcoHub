@@ -59,8 +59,6 @@ type collectBatchContext struct {
 	isStandalone      bool
 	primaryWarmedUp   bool
 	affectedMIDs      []int64
-	notifyMIDs        map[int64]struct{}
-	sourceNotifyMIDs  map[string]map[int64]struct{}
 	filmMIDs          map[int64]struct{}
 	sourceFilmMIDs    map[string]map[int64]struct{}
 	sourceHours       map[string]int
@@ -93,8 +91,6 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		sources:          sources,
 		startedAt:        startedAt,
 		isStandalone:     standalone,
-		notifyMIDs:       make(map[int64]struct{}),
-		sourceNotifyMIDs: make(map[string]map[int64]struct{}, len(sources)),
 		filmMIDs:         make(map[int64]struct{}),
 		sourceFilmMIDs:   make(map[string]map[int64]struct{}, len(sources)),
 		sourceHours:      make(map[string]int),
@@ -175,36 +171,6 @@ func (b *collectBatchContext) IsStandalone() bool {
 // AddAffectedMIDs 实现 fetcher.Batch：记录影响到的全局 mid。
 func (b *collectBatchContext) AddAffectedMIDs(s *model.FilmSource, h int, mids []int64) {
 	b.addAffectedMIDs(s, h, mids)
-}
-
-// AddNotifyMIDs 实现 fetcher.Batch：记录本批次新增或播放线路实质变更的 mid（含分源去重统计）。
-func (b *collectBatchContext) AddNotifyMIDs(sourceID string, mids []int64) {
-	if b == nil || len(mids) == 0 {
-		return
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	b.mu.Lock()
-	if b.sourceDroppedLocked(sourceID) {
-		b.mu.Unlock()
-		return
-	}
-	var srcSet map[int64]struct{}
-	if sourceID != "" {
-		srcSet = b.sourceNotifyMIDs[sourceID]
-		if srcSet == nil {
-			srcSet = make(map[int64]struct{}, len(mids))
-			b.sourceNotifyMIDs[sourceID] = srcSet
-		}
-	}
-	for _, mid := range mids {
-		if mid > 0 {
-			b.notifyMIDs[mid] = struct{}{}
-			if srcSet != nil {
-				srcSet[mid] = struct{}{}
-			}
-		}
-	}
-	b.mu.Unlock()
 }
 
 type categorySkipCount struct {

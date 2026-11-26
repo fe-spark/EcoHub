@@ -98,7 +98,6 @@ type errBatch struct {
 
 func (b *errBatch) IsStandalone() bool                              { return false }
 func (b *errBatch) AddAffectedMIDs(*model.FilmSource, int, []int64) {}
-func (b *errBatch) AddNotifyMIDs(string, []int64)                   {}
 func (b *errBatch) AddCategorySkip(string, int)                     {}
 func (b *errBatch) RecordSourceError(sourceID, reason string) {
 	b.mu.Lock()

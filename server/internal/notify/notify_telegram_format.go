@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html"
@@ -205,64 +206,34 @@ func formatFilmItemsPageHTML(siteName, title string, page, totalPages, start, to
 	return b.String(), nil
 }
 
-func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (string, int, error) {
-	var films []model.NotifyFilmItem
-	catTitle := "全部"
-	if catIdx >= 0 && catIdx < len(sess.Categories) {
-		films = sess.Categories[catIdx].Films
-		catTitle = sess.Categories[catIdx].CategoryName
-	} else {
-		films = sess.AllFilms
+func formatSourceFilmListPageHTML(ctx context.Context, sess model.NotifyBatchSession, srcIdx, catIdx, page int) (string, int, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	total := len(films)
-	curPage, totalPages, start, end := clampPageRange(total, sess.PageSize, page)
-	text, err := formatFilmItemsPageHTML(sess.SiteName, catTitle, curPage, totalPages, start, total, films[start:end])
-	return text, totalPages, err
-}
-
-func formatSourceFilmListPageHTML(sess model.NotifyBatchSession, srcIdx, catIdx, page int) (string, int, error) {
 	if srcIdx < 0 || srcIdx >= len(sess.Sources) {
 		return "", 1, errors.New("站点不存在")
 	}
 	src := sess.Sources[srcIdx]
-	mids := src.AllMids
 	catTitle := "全部"
-	total := src.TotalFilmCount()
-	var selectedCat model.NotifySourceCategoryGroup
+	total := src.AllCount
 	if catIdx >= 0 && catIdx < len(src.Categories) {
-		selectedCat = src.Categories[catIdx]
-		mids = selectedCat.Mids
+		selectedCat := src.Categories[catIdx]
 		catTitle = selectedCat.CategoryName
-		total = selectedCat.FilmCount()
+		total = selectedCat.Count
 	}
 	curPage, totalPages, start, end := clampPageRange(total, sess.PageSize, page)
 	var items []model.NotifyFilmItem
-	if total > 0 {
-		if len(mids) > 0 {
-			pageMids := mids[start:end]
-			metas, err := LoadNotifyFilmMetas(pageMids)
-			if err != nil {
-				return "", 1, err
-			}
-			nameByMid := make(map[int64]string, len(metas))
-			for _, m := range metas {
-				nameByMid[m.Mid] = m.Name
-			}
-			items = make([]model.NotifyFilmItem, 0, len(pageMids))
-			for _, mid := range pageMids {
-				items = append(items, model.NotifyFilmItem{Mid: mid, Name: nameByMid[mid]})
-			}
-		} else if strings.TrimSpace(sess.CollectBatchID) != "" {
-			matcher, err := loadSourceCategoryMatcher(src.SourceID)
-			if err != nil {
-				return "", 1, err
-			}
-			items, err = LoadBatchSourceCategoryPage(
-				matcher.buildPageQuery(sess.CollectBatchID, src.SourceID, catIdx, selectedCat, end-start, start),
-			)
-			if err != nil {
-				return "", 1, err
-			}
+	if total > 0 && strings.TrimSpace(sess.CollectBatchID) != "" {
+		matcher, err := loadSourceCategoryMatcher(src.SourceID)
+		if err != nil {
+			return "", 1, err
+		}
+		items, err = LoadBatchSourceCategoryPage(
+			ctx,
+			matcher.buildPageQuery(sess.CollectBatchID, src.SourceID, src.Categories, catIdx, end-start, start),
+		)
+		if err != nil {
+			return "", 1, err
 		}
 	}
 	srcTitle := singleLine(src.SourceName)

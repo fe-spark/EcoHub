@@ -19,7 +19,6 @@ const (
 	telegramAPIBase       = "https://api.telegram.org"
 	telegramCallbackPref  = "nfp"
 	telegramMaxMessageLen = 4096
-	notifyInfoPrimary     = -1
 	notifyInfoAllSources  = -2
 )
 

@@ -179,21 +179,18 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 			}
 			totalStored += src.FilmsTotal
 		}
-		if cfg.OnlyNotifyOnUpdate && totalStored == 0 && len(payload.NotifyMIDs) == 0 && failedSources == 0 {
+		if cfg.OnlyNotifyOnUpdate && totalStored == 0 && failedSources == 0 {
 			return
 		}
 
-		sess, visibleCount, err := buildNotifyBatchSessionWithCount(payload, cfg.MaxFilmsInMessage)
+		sess, err := buildNotifyBatchSession(payload, cfg.MaxFilmsInMessage)
 		if err != nil {
 			syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
 			return
 		}
-		if cfg.OnlyNotifyOnUpdate && totalStored == 0 && visibleCount == 0 && failedSources == 0 {
-			return
-		}
 
 		var markup *InlineKeyboardMarkup
-		if len(sess.Sources) > 0 || len(sess.AllFilms) > 0 {
+		if len(sess.Sources) > 0 {
 			_ = SaveNotifyBatchSession(sess)
 			markup = buildOverviewKeyboard(sess, 1)
 		}

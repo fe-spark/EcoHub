@@ -100,21 +100,6 @@ func (b *collectBatchContext) midListedLocked(mid int64) bool {
 	return false
 }
 
-func (b *collectBatchContext) notifyMidLiveLocked(mid int64) bool {
-	ownedByDropped := false
-	for id, set := range b.sourceNotifyMIDs {
-		if _, ok := set[mid]; !ok {
-			continue
-		}
-		if b.sourceDroppedLocked(id) {
-			ownedByDropped = true
-			continue
-		}
-		return true
-	}
-	return !ownedByDropped
-}
-
 func (b *collectBatchContext) withoutDroppedFilms(films map[string][]int64) map[string][]int64 {
 	if b == nil || len(films) == 0 {
 		return nil

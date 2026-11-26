@@ -54,7 +54,6 @@ type SourceNotifyResult struct {
 	FailedPages  []int   `json:"failedPages,omitempty"`
 	FilmsTotal   int     `json:"filmsTotal"`
 	CategorySkip int     `json:"categorySkip,omitempty"`
-	FilmMIDs     []int64 `json:"filmMids,omitempty"`
 }
 
 // CollectBatchNotifyPayload 采集批次汇总通知载荷
@@ -64,7 +63,6 @@ type CollectBatchNotifyPayload struct {
 	StartedAt      time.Time            `json:"startedAt"`
 	FinishedAt     time.Time            `json:"finishedAt"`
 	Sources        []SourceNotifyResult `json:"sources"`
-	NotifyMIDs     []int64              `json:"notifyMids"`
 }
 
 // NotifyFilmItem 通知翻页会话中的单片精简项
@@ -73,27 +71,11 @@ type NotifyFilmItem struct {
 	Name string `json:"name"`
 }
 
-// NotifyCategoryGroup 通知翻页会话中的分类聚合项
-type NotifyCategoryGroup struct {
-	CategoryID   int64            `json:"categoryId"`
-	CategoryName string           `json:"categoryName"`
-	Films        []NotifyFilmItem `json:"films"`
-}
-
-// NotifySourceCategoryGroup 单站分类聚合（优先仅存计数与分类 ID，由采集清单表 SQL 分页；Mids 仅作无清单兜底）
+// NotifySourceCategoryGroup 单站分类聚合计数，实际翻页片单统一从 collect_record_films 账本按需查询。
 type NotifySourceCategoryGroup struct {
-	CategoryID   int64   `json:"categoryId"`
-	CategoryName string  `json:"categoryName"`
-	Count        int     `json:"count,omitempty"`
-	Mids         []int64 `json:"mids,omitempty"`
-}
-
-// FilmCount 返回该分类下的影片总数。
-func (g NotifySourceCategoryGroup) FilmCount() int {
-	if g.Count > 0 {
-		return g.Count
-	}
-	return len(g.Mids)
+	CategoryID   int64  `json:"categoryId"`
+	CategoryName string `json:"categoryName"`
+	Count        int    `json:"count,omitempty"`
 }
 
 // NotifySourceSession 采集汇总内单个站点的交互会话状态
@@ -111,15 +93,6 @@ type NotifySourceSession struct {
 	CategorySkip int                         `json:"categorySkip,omitempty"`
 	OverviewHTML string                      `json:"overviewHtml"`
 	Categories   []NotifySourceCategoryGroup `json:"categories,omitempty"`
-	AllMids      []int64                     `json:"allMids,omitempty"`
-}
-
-// TotalFilmCount 返回交互片单可用的影片总数。
-func (s NotifySourceSession) TotalFilmCount() int {
-	if s.AllCount > 0 {
-		return s.AllCount
-	}
-	return len(s.AllMids)
 }
 
 // NotifyBatchSession TG 消息内联按钮翻页会话（存于内存 + Redis，TTL 24h）
@@ -129,8 +102,6 @@ type NotifyBatchSession struct {
 	SiteName       string                `json:"siteName"`
 	OverviewHTML   string                `json:"overviewHtml"`
 	PageSize       int                   `json:"pageSize"`
-	Categories     []NotifyCategoryGroup `json:"categories"`
-	AllFilms       []NotifyFilmItem      `json:"allFilms"`
 	Sources        []NotifySourceSession `json:"sources,omitempty"`
 }
 

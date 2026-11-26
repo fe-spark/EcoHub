@@ -43,7 +43,6 @@ func TestEmitSingleFilmSnapshotPersistsDetail(t *testing.T) {
 		defer batch.close()
 		if len(changed) > 0 {
 			batch.AddAffectedMIDs(&src, 1, changed)
-			batch.AddNotifyMIDs(src.Id, changed)
 		}
 		if errMsg != "" {
 			batch.RecordSourceError(src.Id, errMsg)
@@ -148,7 +147,6 @@ func TestReplayFilmIDsAreNotCopiedToIdleSources(t *testing.T) {
 	).withReplayFilmIDs([]int64{43})
 	defer batch.close()
 	batch.AddAffectedMIDs(&srcA, 1, []int64{43})
-	batch.AddNotifyMIDs(srcA.Id, []int64{43})
 	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
 		SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone,
 		PageTotal: 1, PageCurrent: 1, SuccessCnt: 1, FilmsTotal: 1,

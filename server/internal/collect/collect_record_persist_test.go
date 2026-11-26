@@ -311,7 +311,6 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 	}
 	batch.noteSourceHour(src.Id, 48)
 	batch.AddAffectedMIDs(&src, 48, []int64{11, 12})
-	batch.AddNotifyMIDs(src.Id, []int64{11})
 
 	var films int64
 	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("batch_id = ?", batch.batchID).Count(&films).Error; err != nil {
