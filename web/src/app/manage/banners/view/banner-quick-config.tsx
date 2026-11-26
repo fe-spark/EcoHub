@@ -2,10 +2,16 @@
 
 import React, { useMemo, useRef } from "react";
 import { Button, InputNumber } from "antd";
-import { FieldTimeOutlined, FireOutlined, RetweetOutlined, StarOutlined } from "@ant-design/icons";
+import {
+  CompassOutlined,
+  FieldTimeOutlined,
+  FireOutlined,
+  RetweetOutlined,
+  StarOutlined,
+} from "@ant-design/icons";
 import styles from "./banner-quick.module.less";
 
-export type QuickStrategy = "latest" | "hot" | "score" | "random";
+export type QuickStrategy = "latest" | "hot" | "score" | "random" | "douban";
 
 // 一键排片单个分类最多排几部，和后端 bannerQuotaMax 一致。
 export const QUOTA_MAX = 5;
@@ -18,6 +24,7 @@ export interface QuickConfigMemo {
 
 export interface CategoryQuotaItem {
   id: number;
+  key?: string;
   name: string;
   count: number;
 }
@@ -28,6 +35,9 @@ interface BannerQuickConfigProps {
   categories: CategoryQuotaItem[];
   onCategoriesChange: (next: CategoryQuotaItem[]) => void;
   disabled?: boolean;
+  quotaTitle?: string;
+  quotaMax?: number;
+  fillPresets?: { label: string; count: number }[];
 }
 
 const STRATEGY_OPTIONS: {
@@ -40,6 +50,7 @@ const STRATEGY_OPTIONS: {
   { value: "hot", title: "最热排片", desc: "播放热度高的优先", icon: <FireOutlined /> },
   { value: "score", title: "评分优先", desc: "评分高的影片优先", icon: <StarOutlined /> },
   { value: "random", title: "随机排片", desc: "按分类随机抽取影片", icon: <RetweetOutlined /> },
+  { value: "douban", title: "豆瓣推荐", desc: "按豆瓣热映/热门榜单反查本地可播影片", icon: <CompassOutlined /> },
 ];
 
 const FILL_PRESETS = [
@@ -55,6 +66,9 @@ export default function BannerQuickConfig({
   categories,
   onCategoriesChange,
   disabled = false,
+  quotaTitle = "分类数量配额",
+  quotaMax = QUOTA_MAX,
+  fillPresets = FILL_PRESETS,
 }: BannerQuickConfigProps) {
   const totalPlannedCount = useMemo(
     () => categories.reduce((sum, item) => sum + (item.count || 0), 0),
@@ -128,11 +142,11 @@ export default function BannerQuickConfig({
       <div className={styles.configGroup}>
         <div className={styles.configGroupHeader}>
           <span className={styles.configGroupTitle}>
-            分类数量配额（共 {totalPlannedCount} 部）
+            {quotaTitle}（共 {totalPlannedCount} 部）
           </span>
           {categories.length > 0 && (
             <div className={styles.quickActions}>
-              {FILL_PRESETS.map((preset) => (
+              {fillPresets.map((preset) => (
                 <Button
                   key={preset.count}
                   size="small"
@@ -150,9 +164,10 @@ export default function BannerQuickConfig({
         <div className={styles.quotaGrid}>
           {categories.map((cat) => {
             const active = (cat.count || 0) > 0;
+            const itemKey = cat.key ?? cat.id;
             return (
               <div
-                key={cat.id}
+                key={itemKey}
                 className={`${styles.quotaItem} ${active ? styles.quotaItemActive : ""}`}
               >
                 <span className={`${styles.quotaName} ${active ? styles.quotaNameActive : ""}`}>
@@ -160,7 +175,7 @@ export default function BannerQuickConfig({
                 </span>
                 <InputNumber
                   min={0}
-                  max={QUOTA_MAX}
+                  max={quotaMax}
                   size="small"
                   value={cat.count}
                   disabled={disabled}
@@ -169,7 +184,7 @@ export default function BannerQuickConfig({
                     const nextCount = Math.max(0, Number(val) || 0);
                     onCategoriesChange(
                       categories.map((item) =>
-                        item.id === cat.id ? { ...item, count: nextCount } : item,
+                        (item.key ?? item.id) === itemKey ? { ...item, count: nextCount } : item,
                       ),
                     );
                   }}

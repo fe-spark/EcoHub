@@ -8,10 +8,14 @@ import (
 
 	"server/internal/film"
 	"server/internal/film/catalog"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/sourcecatalog"
 	"server/internal/taxonomy"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestBannerGenerate_Validation(t *testing.T) {
@@ -407,5 +411,50 @@ func TestBannerGenerate_FallbackIgnoresDifferentSubcategoryUnderSameRoot(t *test
 	}
 	if fmt.Sprint(bannerMidList(res.Items)) != "[10]" {
 		t.Fatalf("expected only aggregated matching subcategory [10] and exclude hidden subcategory 20, got %v", bannerMidList(res.Items))
+	}
+}
+
+func TestBannerGenerate_DoubanStrategy(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis run: %v", err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	gdb := setupBannerSvcDB(t)
+	db.Rdb = rdb
+
+	_ = gdb.Create(&[]model.SourceCategory{
+		{SourceId: "src1", SourceTypeId: 22, RawName: "电影", Sort: 1},
+	}).Error
+	_ = gdb.Create(&[]model.Category{
+		{Id: 1, Pid: 0, Name: "电影", Show: true, Sort: 1},
+	}).Error
+	_ = gdb.Create(&[]model.CategoryMapping{
+		{SourceId: "src1", SourceTypeId: 22, CategoryId: 1},
+	}).Error
+	taxonomy.RefreshCategoryCache()
+	catalog.MarkCategoryChanged()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+
+	seedBannerFilm(t, gdb, 101, "src1", 22, "豆瓣热映测试片", 100)
+
+	rawBundle := `{"buckets":[{"key":"movie_showing","title":"院线热映","mediaKind":"movie","entries":[{"doubanId":0,"title":"豆瓣热映测试片","year":2024,"rate":"8.6"}]}],"updatedAt":1700000000}`
+	if err := rdb.Set(context.Background(), "EcoHub:Home:HotCharts:Raw:v1", rawBundle, 0).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := BannerSvc.Generate(context.Background(), BannerGenerateReq{
+		SourceId: "src1",
+		Strategy: "douban",
+		Quotas:   []BannerQuota{{CategoryID: 22, Count: 1}},
+	})
+	if err != nil {
+		t.Fatalf("douban generate failed: %v", err)
+	}
+	if fmt.Sprint(bannerMidList(res.Items)) != "[101]" {
+		t.Fatalf("expected [101], got %v", bannerMidList(res.Items))
 	}
 }

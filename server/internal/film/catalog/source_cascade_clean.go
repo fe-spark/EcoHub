@@ -20,6 +20,21 @@ func CascadeCleanSourceData(id string) ([]int64, error) {
 	return CleanSourceDataBatched(id)
 }
 
+// deleteHomeRecommendsBySource 清理指定采集站的首页推荐分组与条目。
+func deleteHomeRecommendsBySource(conn *gorm.DB, sourceID string) error {
+	if conn.Migrator().HasTable(&model.HomeRecommendItem{}) {
+		if err := conn.Where("source_id = ?", sourceID).Delete(&model.HomeRecommendItem{}).Error; err != nil {
+			return err
+		}
+	}
+	if conn.Migrator().HasTable(&model.HomeRecommendGroup{}) {
+		if err := conn.Where("source_id = ?", sourceID).Delete(&model.HomeRecommendGroup{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CascadeCleanSourceDataTx 在调用方事务内删除该站档案和挂载数据。
 // 返回被删除的档案 mid；其他站的档案不删。
 func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
@@ -37,8 +52,11 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 		return nil, err
 	}
-	// 该站的轮播整组删除；其他站轮播里的该站影片随档案一起删。
+	// 该站的轮播与首页推荐整组删除；其他站轮播/推荐里的该站影片随档案一起删。
 	if err := tx.Where("source_id = ?", id).Delete(&model.BannerSlot{}).Error; err != nil {
+		return nil, err
+	}
+	if err := deleteHomeRecommendsBySource(tx, id); err != nil {
 		return nil, err
 	}
 	if err := DeleteFilmCascadeTx(tx, owned); err != nil {
@@ -77,6 +95,9 @@ func CleanSourceDataBatched(id string) ([]int64, error) {
 		return allOwned, err
 	}
 	if err := db.Mdb.Where("source_id = ?", id).Delete(&model.BannerSlot{}).Error; err != nil {
+		return allOwned, err
+	}
+	if err := deleteHomeRecommendsBySource(db.Mdb, id); err != nil {
 		return allOwned, err
 	}
 	return allOwned, nil
@@ -198,6 +219,11 @@ func deleteOwnedFilmChunk(tx *gorm.DB, mids []int64) error {
 	}
 	if err := tx.Where("mid IN ?", mids).Delete(&model.BannerSlot{}).Error; err != nil {
 		return err
+	}
+	if tx.Migrator().HasTable(&model.HomeRecommendItem{}) {
+		if err := tx.Where("mid IN ?", mids).Delete(&model.HomeRecommendItem{}).Error; err != nil {
+			return err
+		}
 	}
 	if err := tx.Where("mid IN ?", mids).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
 		return err

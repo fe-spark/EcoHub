@@ -1,13 +1,19 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Empty, Space, Spin, Tag } from "antd";
-import { DesktopOutlined, PlusOutlined } from "@ant-design/icons";
+import {
+  DesktopOutlined,
+  FireOutlined,
+  PictureOutlined,
+  PlusOutlined,
+} from "@ant-design/icons";
 
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
+import ManagePageHeader from "@/app/manage/components/page-header";
 import {
-  ContentPageShell,
   ContentSectionCard,
   ContentSourceSelect,
 } from "@/app/manage/components/content-shell";
@@ -16,12 +22,37 @@ import BannerDrawer from "./banner-drawer";
 import BannerQuickDrawer from "./banner-quick-drawer";
 import BannerQuickModal from "./banner-quick-modal";
 import BannerGrid from "./banner-grid";
+import RecommendManager from "./recommend-manager";
 import { QuickConfigMemo, QuickStrategy } from "./banner-quick-config";
 import { useBannerWorkspace } from "./use-banner-workspace";
-import { BannerRecord, EditorMode } from "./types";
+import { useHomeSource } from "./use-home-source";
+import { BannerRecord, BannerSourceOption, EditorMode } from "./types";
 import styles from "./index.module.less";
+import tabStyles from "./home-tabs.module.less";
 
-export default function BannersPageView() {
+interface BannersTabViewProps {
+  targetSourceId: string;
+  primaryId: string;
+  primaryLoading: boolean;
+  onSourcesSync: (
+    sources: BannerSourceOption[] | undefined,
+    resolvedSourceId: string,
+    primarySourceId?: string,
+  ) => void;
+  onDirtyChange: (dirty: boolean) => void;
+  onBusyChange: (busy: boolean) => void;
+  resetSignal: number;
+}
+
+function BannersTabView({
+  targetSourceId,
+  primaryId,
+  primaryLoading,
+  onSourcesSync,
+  onDirtyChange,
+  onBusyChange,
+  resetSignal,
+}: BannersTabViewProps) {
   const tmdbEnabled = useTmdbEnabled();
   const { message, modal } = useAppMessage();
   const messageRef = useRef(message);
@@ -55,17 +86,20 @@ export default function BannersPageView() {
     setCurrentRow(null);
   }, []);
 
+  useEffect(() => {
+    if (resetSignal > 0) {
+      resetModals();
+    }
+  }, [resetModals, resetSignal]);
+
   const {
-    sources,
     sourceId,
-    primaryId,
     banners,
     orderDirty,
     loading,
     orderSaving,
     canWrite,
     refreshAfterWrite,
-    selectSource,
     handleSortList,
     handleMoveOrder,
     handleSaveOrder,
@@ -73,24 +107,31 @@ export default function BannersPageView() {
     discardOrder,
     applyPublishedDeck,
   } = useBannerWorkspace({
+    targetSourceId,
+    primaryId,
+    primaryLoading,
+    onSourcesSync,
     hasPendingModal: editorVisible || quickDrawerOpen || quickModalOpen,
     onResetModals: resetModals,
   });
 
-  const handleSourceChange = (nextSourceId: string) => {
-    if (!nextSourceId || nextSourceId === sourceId || orderSaving) return;
-    if (!orderDirty) {
-      void selectSource(nextSourceId);
-      return;
-    }
-    modal.confirm({
-      title: "切换采集源？",
-      content: "当前排片顺序还没保存，继续后会丢掉这次调整。",
-      okText: "切换",
-      cancelText: "留下",
-      onOk: () => selectSource(nextSourceId),
-    });
-  };
+  useEffect(() => {
+    onDirtyChange(orderDirty);
+  }, [onDirtyChange, orderDirty]);
+
+  useEffect(() => {
+    onBusyChange(loading || orderSaving);
+  }, [loading, onBusyChange, orderSaving]);
+
+  useEffect(() => {
+    if (!orderDirty) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [orderDirty]);
 
   const openCreateEditor = () => {
     setCurrentRow(null);
@@ -112,20 +153,7 @@ export default function BannersPageView() {
   const isCurrentPrimary = Boolean(sourceId && primaryId && sourceId === primaryId);
 
   return (
-    <ContentPageShell
-      title="首页轮播"
-      description="按采集站安排首页轮播展示的影片。"
-      headerActions={
-        <ContentSourceSelect
-          sources={sources}
-          sourceId={sourceId}
-          primaryId={primaryId}
-          disabled={loading || orderSaving}
-          onChange={handleSourceChange}
-        />
-      }
-      dirty={orderDirty}
-    >
+    <div>
       <ContentSectionCard
         icon={<DesktopOutlined />}
         title="已排轮播"
@@ -201,7 +229,6 @@ export default function BannersPageView() {
         )}
       </ContentSectionCard>
 
-      {/* 一键排片：每次先确认配置，再执行 */}
       <BannerQuickModal
         open={quickModalOpen}
         sourceId={sourceId}
@@ -223,7 +250,6 @@ export default function BannersPageView() {
         }}
       />
 
-      {/* 排片结果抽屉 */}
       <BannerQuickDrawer
         open={quickDrawerOpen}
         sourceId={quickSourceId}
@@ -252,7 +278,6 @@ export default function BannersPageView() {
         }}
       />
 
-      {/* 手动添加/编辑轮播抽屉 */}
       <BannerDrawer
         open={editorVisible}
         mode={editorMode}
@@ -271,6 +296,144 @@ export default function BannersPageView() {
         onDiscard={discardOrder}
         onSave={() => void handleSaveOrder()}
       />
-    </ContentPageShell>
+    </div>
+  );
+}
+
+type HomeManageTab = "banners" | "recommends";
+
+const HOME_MANAGE_TABS: { key: HomeManageTab; label: string; icon: React.ReactNode }[] = [
+  { key: "banners", label: "首页轮播", icon: <PictureOutlined /> },
+  { key: "recommends", label: "首页推荐", icon: <FireOutlined /> },
+];
+
+function HomeManageBody() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { message, modal } = useAppMessage();
+  const currentTab: HomeManageTab =
+    searchParams.get("tab") === "recommends" ? "recommends" : "banners";
+
+  const [bannerDirty, setBannerDirty] = useState(false);
+  const [bannerBusy, setBannerBusy] = useState(false);
+  const [recommendDirty, setRecommendDirty] = useState(false);
+  const [recommendBusy, setRecommendBusy] = useState(false);
+  const [resetSignal, setResetSignal] = useState(0);
+
+  const activeDirty = currentTab === "recommends" ? recommendDirty : bannerDirty;
+  const activeBusy = currentTab === "recommends" ? recommendBusy : bannerBusy;
+
+  const {
+    sources,
+    sourceId,
+    primaryId,
+    primaryLoading,
+    syncSources,
+    handleSourceChange,
+  } = useHomeSource({
+    activeDirty,
+    activeBusy,
+    onPrimaryFollow: (hadPending) => {
+      setResetSignal((n) => n + 1);
+      if (hadPending) {
+        message.warning("主站已变更，未保存的调整已重置");
+      }
+    },
+  });
+
+  const replaceTabQuery = useCallback(
+    (tab: HomeManageTab) => {
+      if (tab === currentTab) return;
+      const doSwitch = () => {
+        setBannerDirty(false);
+        setRecommendDirty(false);
+        const params = new URLSearchParams(searchParams.toString());
+        params.set("tab", tab);
+        const qs = params.toString();
+        router.replace(qs ? `/manage/banners?${qs}` : "/manage/banners");
+      };
+      if (!activeDirty) {
+        doSwitch();
+        return;
+      }
+      modal.confirm({
+        title: "切换标签页？",
+        content: "当前调整还没保存，切换后会丢掉这次修改。",
+        okText: "切换",
+        cancelText: "留下",
+        onOk: doSwitch,
+      });
+    },
+    [activeDirty, currentTab, modal, router, searchParams],
+  );
+
+  return (
+    <div className={tabStyles.page}>
+      <ManagePageHeader
+        className={tabStyles.pageHeader}
+        title="首页管理"
+        description="统一管理首页轮播与首页推荐板块内容。"
+        actions={
+          <ContentSourceSelect
+            sources={sources}
+            sourceId={sourceId}
+            primaryId={primaryId}
+            disabled={activeBusy}
+            onChange={handleSourceChange}
+          />
+        }
+      />
+
+      <div className={tabStyles.tabBar} role="tablist" aria-label="首页管理分类">
+        {HOME_MANAGE_TABS.map((tab) => {
+          const active = currentTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={`${tabStyles.tabItem} ${active ? tabStyles.tabItemActive : ""}`}
+              onClick={() => replaceTabQuery(tab.key)}
+            >
+              <span className={tabStyles.tabIcon}>{tab.icon}</span>
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className={tabStyles.tabContent} role="tabpanel">
+        {currentTab === "recommends" ? (
+          <RecommendManager
+            sourceId={sourceId}
+            primaryLoading={primaryLoading}
+            onSourcesSync={syncSources}
+            onDirtyChange={setRecommendDirty}
+            onBusyChange={setRecommendBusy}
+          />
+        ) : (
+          <div className={tabStyles.tabPaneScrollable}>
+            <BannersTabView
+              targetSourceId={sourceId}
+              primaryId={primaryId}
+              primaryLoading={primaryLoading}
+              onSourcesSync={syncSources}
+              onDirtyChange={setBannerDirty}
+              onBusyChange={setBannerBusy}
+              resetSignal={resetSignal}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function BannersPageView() {
+  return (
+    <Suspense fallback={null}>
+      <HomeManageBody />
+    </Suspense>
   );
 }

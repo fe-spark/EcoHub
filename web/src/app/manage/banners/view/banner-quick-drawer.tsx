@@ -26,6 +26,7 @@ const STRATEGY_LABEL: Record<QuickStrategy, string> = {
   hot: "最热排片",
   score: "评分优先",
   random: "随机排片",
+  douban: "豆瓣推荐",
 };
 
 interface BannerQuickDrawerProps {

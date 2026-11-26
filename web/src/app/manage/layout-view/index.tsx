@@ -82,7 +82,9 @@ function ManageLayoutInner({
 
   const router = useRouter();
   const pathname = usePathname();
-  const isFixedTabbedPage = pathname.startsWith("/manage/system/website");
+  const isFixedTabbedPage =
+    pathname.startsWith("/manage/system/website") ||
+    pathname.startsWith("/manage/banners");
   const selectedKey = resolveMenuKey(pathname);
   const [openKeys, setOpenKeys] = useState<string[]>(() => resolveParentMenuKeys(menuItems, resolveMenuKey(pathname)));
 

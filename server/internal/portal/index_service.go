@@ -7,15 +7,14 @@ import (
 	"server/internal/banner"
 	"server/internal/film/catalog"
 	"strings"
-	"sync"
 	"time"
 
 	"server/internal/config"
-	filmshared "server/internal/film/shared"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/recommend"
 	"server/internal/repobase"
 	"server/internal/sourcecatalog"
 
@@ -55,49 +54,7 @@ func logSlowIndexServiceStep(name string, startedAt time.Time, fields ...any) {
 	log.Println(args...)
 }
 
-func categoryHomeField(cat *model.CategoryTree) (string, int64) {
-	field := "cid"
-	if cat != nil && len(cat.Children) > 0 {
-		field = "pid"
-	}
-	id := int64(0)
-	if cat != nil {
-		id = cat.Id
-	}
-	return field, id
-}
-
-func infosByMid(version string, mids []int64) (map[int64]model.MovieBasicInfo, error) {
-	if len(mids) == 0 {
-		return map[int64]model.MovieBasicInfo{}, nil
-	}
-	snaps, err := filmsnapshot.GetSnapshotsByMidsOrdered(version, mids)
-	if err != nil {
-		return nil, err
-	}
-	infos := filmshared.BuildMovieBasicInfosFromSnapshots(snaps...)
-	byID := make(map[int64]model.MovieBasicInfo, len(infos))
-	for _, info := range infos {
-		if info.Id > 0 {
-			byID[info.Id] = info
-		}
-	}
-	return byID, nil
-}
-
-func pickInfos(byID map[int64]model.MovieBasicInfo, mids []int64) []model.MovieBasicInfo {
-	out := make([]model.MovieBasicInfo, 0, len(mids))
-	for _, mid := range mids {
-		info, ok := byID[mid]
-		if !ok {
-			continue
-		}
-		out = append(out, info)
-	}
-	return out
-}
-
-// IndexPage 首页。推荐片从热度池抽样，热播按热度排序。结果缓存 10 分钟，抽样在缓存期内不变。
+// IndexPage 首页。所有推荐与分类展示楼层均按后台推荐编排输出，结果缓存 10 分钟。
 func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) {
 	if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
 		return nil, err
@@ -117,8 +74,8 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 				Id: 0, Pid: -1, Name: "分类信息", Show: true,
 				Children: make([]*model.CategoryTree, 0),
 			},
-			"content":       []map[string]any{},
 			"banners":       make(model.Banners, 0),
+			"recommends":    []model.HomeRecommendSection{},
 			"currentSource": "",
 		}, nil
 	}
@@ -156,69 +113,6 @@ func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	type homeSlot struct {
-		nav    *model.CategoryTree
-		movies []int64
-		hot    []int64
-	}
-	const maxHomeSections = 12
-	children := tree.Children
-	if len(children) > maxHomeSections {
-		children = children[:maxHomeSections]
-	}
-	slots := make([]homeSlot, len(children))
-	var wg sync.WaitGroup
-	var errMu sync.Mutex
-	var pageErr error
-	for idx, c := range children {
-		wg.Add(1)
-		go func(i int, cat *model.CategoryTree) {
-			defer wg.Done()
-			field, id := categoryHomeField(cat)
-			movies, hot, err := filmsnapshot.HomeCategoryMids(version, sourceId, field, id, 14, 50)
-			if err != nil {
-				errMu.Lock()
-				if pageErr == nil {
-					pageErr = err
-				}
-				errMu.Unlock()
-				return
-			}
-			slots[i] = homeSlot{nav: cat, movies: movies, hot: hot}
-		}(idx, c)
-	}
-	wg.Wait()
-	if pageErr != nil {
-		return nil, pageErr
-	}
-	allMids := make([]int64, 0)
-	for _, slot := range slots {
-		allMids = append(allMids, slot.movies...)
-		allMids = append(allMids, slot.hot...)
-	}
-	byID, err := infosByMid(version, allMids)
-	if err != nil {
-		return nil, err
-	}
-	filteredList := make([]map[string]any, 0, len(slots))
-	for _, slot := range slots {
-		if slot.nav == nil {
-			continue
-		}
-		movies := pickInfos(byID, slot.movies)
-		if movies == nil {
-			movies = make([]model.MovieBasicInfo, 0)
-		}
-		hot := pickInfos(byID, slot.hot)
-		if hot == nil {
-			hot = make([]model.MovieBasicInfo, 0)
-		}
-		filteredList = append(filteredList, map[string]any{
-			"nav":    slot.nav,
-			"movies": movies,
-			"hot":    pickInfos(byID, slot.hot),
-		})
-	}
 	// 轮播读失败时首页照常返回（轮播为空），但这次结果不进缓存，避免空轮播被缓存 10 分钟。
 	cacheable := true
 	banners, err := banner.BannerSvc.HomeBanners(sourceId)
@@ -229,8 +123,8 @@ func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[s
 	}
 	res := map[string]any{
 		"category":      tree,
-		"content":       filteredList,
 		"banners":       banners,
+		"recommends":    recommend.HomeRecommendSvc.HomeSections(sourceId),
 		"currentSource": sourceId,
 	}
 	if db.Rdb != nil && cacheable && repobase.IndexPageGeneration() == pageGen {

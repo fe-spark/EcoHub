@@ -11,42 +11,10 @@ import FilmList from "@/components/public/FilmList";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import HomeHero, { type HeroBannerItem } from "./HomeHero";
+import { RecommendSectionRow, type RecommendSection } from "./HomeRecommends";
 import DailyUpdates from "./DailyUpdates";
 import EmptyCollectGuide from "@/components/public/EmptyCollectGuide";
 import styles from "./index.module.less";
-
-interface NavChildItem {
-  id: string;
-  pid: string;
-  name: string;
-}
-
-interface NavItem {
-  id: string;
-  name: string;
-  show: boolean;
-  children: NavChildItem[];
-}
-
-interface MovieBasicInfo {
-  id: string;
-  mid?: string;
-  name: string;
-  picture: string;
-  year: string;
-  cName: string;
-  area: string;
-  language?: string;
-  classTag?: string;
-  remarks: string;
-  blurb?: string;
-}
-
-interface ContentSection {
-  nav: NavItem;
-  movies: MovieBasicInfo[];
-  hot: MovieBasicInfo[];
-}
 
 function asHeroBanner(item: HeroBannerItem & { remark?: string }): HeroBannerItem {
   const id = String(item.mid || item.id || "").trim();
@@ -63,11 +31,12 @@ export default function HomePageView({
 }: {
   data: {
     banners: HeroBannerItem[];
-    content: ContentSection[];
+    recommends?: RecommendSection[];
   };
 }) {
   const { navigate } = useContentNavigate();
   const heroDeck = (data.banners || []).map(asHeroBanner);
+  const sections = Array.isArray(data.recommends) ? data.recommends : [];
 
   // 与 Hero 一致：走布局级 navigate，展示整页内容 loading
   const goPlay = (id: string) => {
@@ -87,15 +56,12 @@ export default function HomePageView({
     return <RocketOutlined className={styles.icon} />;
   };
 
-  const hasContent =
-    Array.isArray(data.content) &&
-    data.content.some(
-      (section) =>
-        Boolean(section.nav?.show) &&
-        ((Array.isArray(section.movies) && section.movies.length > 0) ||
-          (Array.isArray(section.hot) && section.hot.length > 0)),
-    );
-  const isEmpty = heroDeck.length === 0 && !hasContent;
+  const hasSections = sections.some(
+    (sec) =>
+      (Array.isArray(sec.items) && sec.items.length > 0) ||
+      (Array.isArray(sec.hot) && sec.hot.length > 0),
+  );
+  const isEmpty = heroDeck.length === 0 && !hasSections;
 
   if (isEmpty) {
     return <EmptyCollectGuide />;
@@ -107,31 +73,36 @@ export default function HomePageView({
 
       <DailyUpdates />
 
-      {data.content.map((section, idx) => {
-        if (!section.nav?.show) {
+      {sections.map((section) => {
+        if (section.kind !== "category") {
+          return <RecommendSectionRow key={section.id} section={section} />;
+        }
+        const nav = section.nav;
+        if (!nav || !nav.show) {
           return null;
         }
-        const movies = section.movies || [];
+        const movies = section.items || [];
         const hot = section.hot || [];
+        const displayTitle = section.title || nav.name;
 
         return (
-          <section key={idx} className={styles.section}>
+          <section key={section.id} className={styles.section}>
             <div className={styles.sectionHeader}>
               <div className={styles.left}>
-                {getSectionIcon(section.nav.name)}
+                {getSectionIcon(nav.name || displayTitle)}
                 <a
                   onClick={() => {
-                    navigate(`/category?pid=${section.nav.id}`, "分类加载中");
+                    navigate(`/category?pid=${nav.id}`, "分类加载中");
                   }}
                   style={{ cursor: "pointer" }}
                 >
-                  {section.nav.name}
+                  {displayTitle}
                 </a>
               </div>
               <div className={styles.nav}>
-                {section.nav.children?.slice(0, 6).map((child, childIndex) => (
+                {nav.children?.slice(0, 6).map((child) => (
                   <a
-                    key={childIndex}
+                    key={child.id}
                     onClick={() => {
                       navigate(
                         `/category/filter?pid=${child.pid}&category=${child.id}`,
@@ -146,7 +117,7 @@ export default function HomePageView({
                 <a
                   className={styles.more}
                   onClick={() => {
-                    navigate(`/category?pid=${section.nav.id}`, "分类加载中");
+                    navigate(`/category?pid=${nav.id}`, "分类加载中");
                   }}
                   style={{ cursor: "pointer" }}
                 >
@@ -158,7 +129,7 @@ export default function HomePageView({
             <div className={styles.sectionBody}>
               <div className={styles.filmGrid}>
                 <FilmList
-                  list={movies.slice(0, 12)}
+                  list={movies.slice(0, 12) as any}
                   className={styles.homeList}
                   col={6}
                 />
@@ -167,14 +138,14 @@ export default function HomePageView({
               <div className={styles.sideList}>
                 <div className={styles.sideTitle}>
                   <FireOutlined style={{ color: "#ff4d4f" }} />
-                  热播{section.nav.name}
+                  热播{nav.name || displayTitle}
                 </div>
                 {hot.length > 0 ? (
                   hot.slice(0, 12).map((movie, movieIndex) => (
                     <div
-                      key={movieIndex}
+                      key={`${section.id}-hot-${movie.id}`}
                       className={styles.hotItem}
-                      onClick={() => goPlay(movie.id)}
+                      onClick={() => goPlay(String(movie.id))}
                     >
                       <span className={styles.rank}>{movieIndex + 1}.</span>
                       <span className={styles.name}>{movie.name}</span>

@@ -38,6 +38,16 @@ func wrapAnyList(raw any) any {
 		return mediaproxy.WrapBanners(v)
 	case []model.Banner:
 		return mediaproxy.WrapBanners(v)
+	case []model.HomeRecommendPublicItem:
+		return wrapRecommendPublicItems(v)
+	case []model.HomeRecommendSection:
+		out := make([]model.HomeRecommendSection, len(v))
+		copy(out, v)
+		for i := range out {
+			out[i].Items = wrapRecommendPublicItems(out[i].Items)
+			out[i].Hot = mediaproxy.WrapMovieBasicInfos(out[i].Hot)
+		}
+		return out
 	case []map[string]any:
 		out := make([]map[string]any, len(v))
 		for i := range v {
@@ -65,6 +75,64 @@ func wrapAnyList(raw any) any {
 	}
 }
 
+func wrapRecommendPublicItems(items []model.HomeRecommendPublicItem) []model.HomeRecommendPublicItem {
+	if len(items) == 0 {
+		return items
+	}
+	out := make([]model.HomeRecommendPublicItem, len(items))
+	copy(out, items)
+	for i := range out {
+		mediaproxy.WrapMovieBasicInfo(&out[i].MovieBasicInfo)
+	}
+	return out
+}
+
+func wrapRecommendSectionMap(sec map[string]any) map[string]any {
+	if sec == nil {
+		return nil
+	}
+	clone := make(map[string]any, len(sec))
+	for k, v := range sec {
+		clone[k] = v
+	}
+	if items, ok := clone["items"]; ok {
+		clone["items"] = wrapAnyList(items)
+	}
+	if hot, ok := clone["hot"]; ok {
+		clone["hot"] = wrapAnyList(hot)
+	}
+	return clone
+}
+
+func wrapHomeRecommendsList(raw any) any {
+	switch v := raw.(type) {
+	case []model.HomeRecommendSection:
+		return wrapAnyList(v)
+	case []map[string]any:
+		out := make([]map[string]any, len(v))
+		for i := range v {
+			out[i] = wrapRecommendSectionMap(v[i])
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				out[i] = wrapRecommendSectionMap(m)
+			} else if sec, ok := item.(model.HomeRecommendSection); ok {
+				sec.Items = wrapRecommendPublicItems(sec.Items)
+				sec.Hot = mediaproxy.WrapMovieBasicInfos(sec.Hot)
+				out[i] = sec
+			} else {
+				out[i] = item
+			}
+		}
+		return out
+	default:
+		return raw
+	}
+}
+
 // WrapHomeData 包装首页聚合数据中的图片字段（深度兼容结构体切片及 Redis JSON 弱类型切片）
 func WrapHomeData(data map[string]any) map[string]any {
 	if data == nil {
@@ -77,45 +145,8 @@ func WrapHomeData(data map[string]any) map[string]any {
 	if b, ok := out["banners"]; ok {
 		out["banners"] = wrapAnyList(b)
 	}
-	if content, ok := out["content"]; ok {
-		switch c := content.(type) {
-		case []map[string]any:
-			newContent := make([]map[string]any, len(c))
-			for i, sec := range c {
-				newSec := make(map[string]any, len(sec))
-				for k, v := range sec {
-					newSec[k] = v
-				}
-				if movies, ok := newSec["movies"]; ok {
-					newSec["movies"] = wrapAnyList(movies)
-				}
-				if hot, ok := newSec["hot"]; ok {
-					newSec["hot"] = wrapAnyList(hot)
-				}
-				newContent[i] = newSec
-			}
-			out["content"] = newContent
-		case []any:
-			newContent := make([]any, len(c))
-			for i, rawSec := range c {
-				if sec, ok := rawSec.(map[string]any); ok {
-					newSec := make(map[string]any, len(sec))
-					for k, v := range sec {
-						newSec[k] = v
-					}
-					if movies, ok := newSec["movies"]; ok {
-						newSec["movies"] = wrapAnyList(movies)
-					}
-					if hot, ok := newSec["hot"]; ok {
-						newSec["hot"] = wrapAnyList(hot)
-					}
-					newContent[i] = newSec
-				} else {
-					newContent[i] = rawSec
-				}
-			}
-			out["content"] = newContent
-		}
+	if r, ok := out["recommends"]; ok {
+		out["recommends"] = wrapHomeRecommendsList(r)
 	}
 	return out
 }

@@ -6,9 +6,11 @@ import (
 	"server/internal/collect"
 	"server/internal/collectctl"
 	"server/internal/film"
+	"server/internal/hotchart"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/portal"
+	"server/internal/recommend"
 	"server/internal/siteops"
 )
 
@@ -41,6 +43,7 @@ func Wire() {
 		siteops.OnResetRecoverAccess = func() { _ = InitSvc.AnalyticsConfigInit() }
 		siteops.OnResetRecoverCrontab = func() { _ = InitSvc.CollectCrontabInit() }
 		siteops.OnResetReinitSite = InitSvc.ReinitAfterReset
+		hotchart.OnRefreshed = recommend.HomeRecommendSvc.SyncAllAutoGroups
 	})
 }
 

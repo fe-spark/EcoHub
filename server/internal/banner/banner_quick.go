@@ -7,7 +7,9 @@ import (
 
 	"server/internal/film/catalog"
 	"server/internal/film/snapshot"
+	"server/internal/hotchart"
 	"server/internal/model"
+	"server/internal/taxonomy"
 )
 
 // 一键排片单个分类最多排几部，和后台输入框上限一致。
@@ -51,6 +53,13 @@ var bannerStrategies = map[string]string{
 	"hot":    "hot_random",
 	"score":  "score_random",
 	"random": "random",
+	"douban": "douban",
+}
+
+// SnapshotStrategyKey 返回排片策略对应的快照检索策略标识。
+func SnapshotStrategyKey(strategy string) (string, bool) {
+	v, ok := bannerStrategies[strings.TrimSpace(strategy)]
+	return v, ok
 }
 
 // Generate 按策略和每个分类的数量为指定采集站生成预览，不落库、不保存配置。
@@ -61,7 +70,7 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 	}
 	strategy, ok := bannerStrategies[strings.TrimSpace(req.Strategy)]
 	if !ok {
-		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 latest、hot、score 或 random")
+		return BannerGenerateResult{}, bannerInputErr("排片策略只能是 latest、hot、score、random 或 douban")
 	}
 	quotas := make([]BannerQuota, 0, len(req.Quotas))
 	seen := make(map[int64]bool, len(req.Quotas))
@@ -96,6 +105,18 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 		return BannerGenerateResult{}, err
 	}
 	version := snapshot.GetActiveSnapshotVersion()
+	readVersion := snapshot.GetActiveReadModelVersion()
+	var sourceCategoryNames map[int64]string
+	if strategy == "douban" {
+		if tree, treeErr := catalog.GetActiveCategoryTree(src.Id); treeErr == nil {
+			sourceCategoryNames = make(map[int64]string, len(tree.Children))
+			for _, ch := range tree.Children {
+				if ch != nil && ch.Id > 0 {
+					sourceCategoryNames[ch.Id] = ch.Name
+				}
+			}
+		}
+	}
 
 	picks := make([][]model.FilmListSnapshot, len(quotas))
 	skipped := make([]BannerSkipped, 0)
@@ -112,12 +133,32 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 			skipped = append(skipped, BannerSkipped{CategoryID: q.CategoryID, Reason: "not_site_category", Requested: q.Count})
 			continue
 		}
-		cands, err := snapshot.GetSnapshotBannerCandidates(ctx, version, strategy, src.Id, cats, q.Count, used)
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return BannerGenerateResult{}, ctxErr
+		var cands []model.FilmListSnapshot
+		if strategy == "douban" {
+			catName := strings.TrimSpace(sourceCategoryNames[q.CategoryID])
+			if catName == "" {
+				catName = taxonomy.GetCategoryNameById(q.CategoryID)
 			}
-			return BannerGenerateResult{}, err
+			rawCands, err := hotchart.HotChartsSvc.GetRawCandidatesByCategoryName(catName)
+			if err != nil {
+				return BannerGenerateResult{}, bannerInputErr("获取豆瓣推荐榜单失败: %v", err)
+			}
+			mids, _, err := snapshot.MatchHotChartCandidates(readVersion, src.Id, rawCands, q.Count, used...)
+			if err != nil {
+				return BannerGenerateResult{}, err
+			}
+			cands, err = snapshot.ListSnapshotsByMIDsForHotCharts(ctx, mids)
+			if err != nil {
+				return BannerGenerateResult{}, err
+			}
+		} else {
+			cands, err = snapshot.GetSnapshotBannerCandidates(ctx, version, strategy, src.Id, cats, q.Count, used)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return BannerGenerateResult{}, ctxErr
+				}
+				return BannerGenerateResult{}, err
+			}
 		}
 		picks[i] = cands
 		for _, c := range cands {

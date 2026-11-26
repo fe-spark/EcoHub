@@ -65,6 +65,20 @@ var migrations = []Migration{
 		Name:    "清理 film_index 冗余单列与超宽过滤复合索引以降低写入放大",
 		Run:     migrateFilmIndexPruneUnused,
 	},
+	{
+		Version: "20261126_home_recommend",
+		Name:    "新增首页推荐分组与条目表",
+		Run: func(gdb *gorm.DB) error {
+			return gdb.AutoMigrate(&model.HomeRecommendGroup{}, &model.HomeRecommendItem{})
+		},
+	},
+	{
+		Version: "20261126_home_recommend_category",
+		Name:    "首页推荐分组增加站点分类绑定字段",
+		Run: func(gdb *gorm.DB) error {
+			return gdb.AutoMigrate(&model.HomeRecommendGroup{})
+		},
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

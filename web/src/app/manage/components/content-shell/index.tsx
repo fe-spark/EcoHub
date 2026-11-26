@@ -157,6 +157,8 @@ interface ContentSectionCardProps {
   actions?: React.ReactNode;
   footer?: React.ReactNode;
   bodyPadding?: boolean;
+  className?: string;
+  bodyClassName?: string;
   children: React.ReactNode;
 }
 
@@ -169,10 +171,17 @@ export function ContentSectionCard({
   actions,
   footer,
   bodyPadding = false,
+  className,
+  bodyClassName,
   children,
 }: ContentSectionCardProps) {
+  const cardClassName = [styles.sectionCard, className].filter(Boolean).join(" ");
+  const resolvedBodyClass =
+    [bodyPadding ? styles.sectionCardBody : "", bodyClassName].filter(Boolean).join(" ") ||
+    undefined;
+
   return (
-    <div className={styles.sectionCard}>
+    <div className={cardClassName}>
       <div className={styles.sectionCardHeader}>
         <ContentSectionHeader
           icon={icon}
@@ -182,7 +191,7 @@ export function ContentSectionCard({
           actions={actions}
         />
       </div>
-      <div className={bodyPadding ? styles.sectionCardBody : undefined}>{children}</div>
+      <div className={resolvedBodyClass}>{children}</div>
       {footer ? <div className={styles.sectionCardFooter}>{footer}</div> : null}
     </div>
   );

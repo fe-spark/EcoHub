@@ -68,6 +68,11 @@ func toBannerSourceOptions(sources []model.FilmSource) []BannerSourceOption {
 	return out
 }
 
+// ResolveBannerSource 解析目标采集站。sourceID 为空时默认当前主站；requireTarget 为 true 时要求必须解析出站点。
+func ResolveBannerSource(sourceID string, requireTarget bool) (*model.FilmSource, []BannerSourceOption, string, error) {
+	return resolveBannerSource(sourceID, requireTarget)
+}
+
 // resolveBannerSource 解析目标采集站。sourceID 为空时默认当前主站；requireTarget 为 true 时要求必须解析出站点。
 func resolveBannerSource(sourceID string, requireTarget bool) (*model.FilmSource, []BannerSourceOption, string, error) {
 	sources, err := sourcecatalog.GetCollectSourceListDB(db.Mdb)

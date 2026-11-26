@@ -32,6 +32,8 @@ var (
 		model.TableCollectSourceStats,
 		model.TableSearchTag,
 		model.TableBannerSlot,
+		model.TableHomeRecommendItem,
+		model.TableHomeRecommendGroup,
 		model.TableCategoryMapping,
 		model.TableSourceCategory,
 		model.TableCategory,

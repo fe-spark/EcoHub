@@ -25,6 +25,7 @@ import (
 	"server/internal/file"
 	"server/internal/mapping"
 	"server/internal/proxy"
+	"server/internal/recommend"
 	"server/internal/siteops"
 )
 
@@ -140,6 +141,26 @@ func SetupRouter() *gin.Engine {
 			bannerRoute.PUT(`/deck`, banner.BannerHd.BannerDeck)
 			bannerRoute.PATCH(`/:id`, banner.BannerHd.BannerUpdate)
 			bannerRoute.DELETE(`/:id`, banner.BannerHd.BannerDelete)
+		}
+
+		// 首页推荐管理：按采集站区分分组与影片
+		recommendRoute := manageRoute.Group(`/recommends`)
+		{
+			recommendRoute.GET(``, recommend.RecommendHd.List)
+			recommendRoute.POST(`/presets`, recommend.RecommendHd.InitPresets)
+			recommendRoute.POST(`/categories/import`, recommend.RecommendHd.ImportCategories)
+			recommendRoute.POST(`/groups`, recommend.RecommendHd.CreateGroup)
+			recommendRoute.PATCH(`/groups/:id`, recommend.RecommendHd.UpdateGroup)
+			recommendRoute.DELETE(`/groups/:id`, recommend.RecommendHd.DeleteGroup)
+			recommendRoute.PUT(`/groups/order`, recommend.RecommendHd.ReorderGroups)
+			recommendRoute.POST(`/groups/:id/items`, recommend.RecommendHd.AddItem)
+			recommendRoute.PUT(`/groups/:id/items/order`, recommend.RecommendHd.ReorderItems)
+			recommendRoute.DELETE(`/groups/:id/items`, recommend.RecommendHd.ClearGroupItems)
+			recommendRoute.POST(`/groups/:id/sync`, recommend.RecommendHd.SyncGroup)
+			recommendRoute.POST(`/sync-all`, recommend.RecommendHd.SyncAll)
+			recommendRoute.DELETE(`/items/:itemId`, recommend.RecommendHd.DeleteItem)
+			recommendRoute.POST(`/generate`, recommend.RecommendHd.Generate)
+			recommendRoute.PUT(`/deck`, recommend.RecommendHd.PublishDeck)
 		}
 
 		// 映射规则管理

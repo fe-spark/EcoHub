@@ -41,6 +41,10 @@ func formatLiveRemark(last string, n int) string {
 type LiveBannerSnapshot struct {
 	Mid                int64
 	Name               string
+	Pid                int64
+	Cid                int64
+	CategoryKey        string
+	RootCategoryKey    string
 	Year               int64
 	CName              string
 	Remarks            string
@@ -89,6 +93,9 @@ func LiveBannerSnapshotsByMIDs(ctx context.Context, sourceID string, mids []int6
 		DbId               int64
 		Name               string
 		Pid                int64
+		Cid                int64
+		CategoryKey        string
+		RootCategoryKey    string
 		Year               int64
 		CName              string
 		Remarks            string
@@ -107,7 +114,7 @@ func LiveBannerSnapshotsByMIDs(ctx context.Context, sourceID string, mids []int6
 	}
 	var rows []row
 	query := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
-		Select("mid, first_source_id, db_id, name, pid, year, c_name, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
+		Select("mid, first_source_id, db_id, name, pid, cid, category_key, root_category_key, year, c_name, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
 		Where("mid IN ?", mids)
 	if sourceID = strings.TrimSpace(sourceID); sourceID != "" {
 		query = query.Where(model.FilmHasPlaySourceSQL(), sourceID, model.LineKindPlay)
@@ -120,6 +127,10 @@ func LiveBannerSnapshotsByMIDs(ctx context.Context, sourceID string, mids []int6
 		snap := LiveBannerSnapshot{
 			Mid:                r.Mid,
 			Name:               strings.TrimSpace(r.Name),
+			Pid:                r.Pid,
+			Cid:                r.Cid,
+			CategoryKey:        strings.TrimSpace(r.CategoryKey),
+			RootCategoryKey:    strings.TrimSpace(r.RootCategoryKey),
 			Year:               r.Year,
 			CName:              strings.TrimSpace(r.CName),
 			Remarks:            strings.TrimSpace(r.Remarks),
