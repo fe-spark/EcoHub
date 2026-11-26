@@ -578,3 +578,185 @@ func TestSchedulePrimarySearchReseal_PassesVerifiedPrimaryToSeal(t *testing.T) {
 		t.Fatal("expected mixed queue to fall back to sealSearchIndex")
 	}
 }
+
+func TestSearchResealIdleRetry_AddSealingPreservesRetryCount(t *testing.T) {
+	resetSearchReseal()
+	prevWait := sealRetryWait
+	prevIdle := waitCollectIdle
+	sealRetryWait = time.Hour
+	waitCollectIdle = func() {}
+	t.Cleanup(func() {
+		sealRetryWait = prevWait
+		waitCollectIdle = prevIdle
+		filmsnapshot.NotifySearchIndexProgress(0, 0, "idle")
+		resetSearchReseal()
+	})
+
+	for _, id := range []string{"preserve-s1", "preserve-s2"} {
+		progress.Ensure(id, id)
+		progress.Update(id, func(p *model.CollectProgress) {
+			p.Status = progress.StatusSealing
+		})
+	}
+	searchReseal.mu.Lock()
+	searchReseal.sealing["preserve-s1"] = struct{}{}
+	searchReseal.mu.Unlock()
+
+	for i := 0; i < maxRebuildSealingRetries-1; i++ {
+		searchReseal.mu.Lock()
+		searchReseal.awaitDone = true
+		searchReseal.mu.Unlock()
+		searchReseal.onSearchIndexTerminal("idle")
+	}
+
+	// 退避窗口内新站进入 addSealing 且检索索引仍在构建，不应把已累积的 rebuildRetries 清零。
+	filmsnapshot.NotifySearchIndexProgress(1, 0, "indexing")
+	searchReseal.addSealing("preserve-s2")
+
+	parked := false
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		searchReseal.mu.Lock()
+		running := searchReseal.running
+		awaiting := searchReseal.awaitDone
+		retries := searchReseal.rebuildRetries
+		searchReseal.mu.Unlock()
+		if !running && awaiting {
+			if retries != maxRebuildSealingRetries-1 {
+				t.Fatalf("addSealing 不应清零 rebuildRetries，got=%d want=%d", retries, maxRebuildSealingRetries-1)
+			}
+			parked = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !parked {
+		t.Fatal("等待 addSealing 重新进入 awaitDone 挂起态超时")
+	}
+
+	// 第 5 次触发退避，第 6 次达到上限后两个站点均应释放为 StatusFailed。
+	searchReseal.onSearchIndexTerminal("idle")
+	searchReseal.mu.Lock()
+	searchReseal.awaitDone = true
+	searchReseal.mu.Unlock()
+	searchReseal.onSearchIndexTerminal("idle")
+
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		s1, ok1 := progress.Snapshot("preserve-s1")
+		s2, ok2 := progress.Snapshot("preserve-s2")
+		if ok1 && ok2 && s1.Status == progress.StatusFailed && s2.Status == progress.StatusFailed {
+			if s1.Sealed || s2.Sealed {
+				t.Fatalf("失败释放时 Sealed 必须为 false，s1=%+v s2=%+v", s1, s2)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s1, _ := progress.Snapshot("preserve-s1")
+	s2, _ := progress.Snapshot("preserve-s2")
+	t.Fatalf("达到最大重试上限后应释放全部 sealing 站点，s1=%q s2=%q", s1.Status, s2.Status)
+}
+
+func TestSearchResealRetryAfterIdle_WithoutDBStillConvergesToFailed(t *testing.T) {
+	resetSearchReseal()
+	prevDB := db.Mdb
+	prevWait := sealRetryWait
+	db.Mdb = nil
+	sealRetryWait = 2 * time.Millisecond
+	t.Cleanup(func() {
+		db.Mdb = prevDB
+		sealRetryWait = prevWait
+		resetSearchReseal()
+	})
+
+	progress.Ensure("no-db-seal", "NoDB")
+	progress.Update("no-db-seal", func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+	searchReseal.mu.Lock()
+	searchReseal.sealing["no-db-seal"] = struct{}{}
+	searchReseal.mu.Unlock()
+
+	searchReseal.retryAfterIdle()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if snap, ok := progress.Snapshot("no-db-seal"); ok && snap.Status == progress.StatusFailed {
+			if snap.Sealed {
+				t.Fatalf("无库收敛释放时 Sealed 必须为 false，got %+v", snap)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	snap, _ := progress.Snapshot("no-db-seal")
+	t.Fatalf("无库时 retryAfterIdle 也应按上限释放 sealing，actual=%q", snap.Status)
+}
+
+func TestSearchReseal_NewSealingDuringRebuildDoesNotCompletePrematurely(t *testing.T) {
+	resetSearchReseal()
+	prevSeal := sealSearchIndex
+	t.Cleanup(func() {
+		resetSearchReseal()
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			searchReseal.mu.Lock()
+			running := searchReseal.running
+			searchReseal.mu.Unlock()
+			if !running {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		sealSearchIndex = prevSeal
+	})
+
+	progress.Ensure("new-seal-b", "NewSealB")
+	progress.Update("new-seal-b", func(p *model.CollectProgress) {
+		p.Status = progress.StatusSealing
+	})
+
+	// 模拟上一轮全量重建正在等待终态。
+	searchReseal.mu.Lock()
+	searchReseal.sealing["old-seal-a"] = struct{}{}
+	searchReseal.awaitDone = true
+	searchReseal.mu.Unlock()
+
+	sealed := make(chan []int64, 1)
+	sealSearchIndex = func(mids []int64) bool {
+		sealed <- append([]int64(nil), mids...)
+		return true
+	}
+
+	// 占住采集队列让新一轮 run() 停在排队等待阶段，再让新站 B 与编号 42 入队。
+	beginCollectQueue()
+	searchReseal.addSealing("new-seal-b")
+	scheduleSearchReseal([]int64{42})
+
+	// 旧重建在 B 的 42 尚未封口前发出 done，不应提前把 B 收成 done。
+	searchReseal.onSearchIndexTerminal("done")
+	if snap, ok := progress.Snapshot("new-seal-b"); !ok || snap.Status != progress.StatusSealing {
+		endCollectQueue()
+		t.Fatalf("新站 B 尚有待封口编号时不应提前收口，got=%q ok=%v", snap.Status, ok)
+	}
+
+	endCollectQueue()
+	select {
+	case mids := <-sealed:
+		if len(mids) != 1 || mids[0] != 42 {
+			t.Fatalf("sealed mids = %v, want [42]", mids)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("等待新一轮封口超时")
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if snap, ok := progress.Snapshot("new-seal-b"); ok && snap.Status == progress.StatusDone {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	snap, _ := progress.Snapshot("new-seal-b")
+	t.Fatalf("新一轮封口完成后新站 B 应收口为 done，got=%q", snap.Status)
+}

@@ -73,7 +73,7 @@ func (q *searchResealQueue) addSealing(sourceID string) {
 	q.mu.Lock()
 	q.sealing[sourceID] = struct{}{}
 	q.stopRetryTimerLocked()
-	q.rebuildRetries = 0
+	q.awaitDone = false
 	start := !q.running
 	if start {
 		q.running = true
@@ -110,6 +110,8 @@ func scheduleSearchResealWithPrimary(verifiedPrimary string, mids []int64) {
 		q.mu.Unlock()
 		return
 	}
+	q.stopRetryTimerLocked()
+	q.awaitDone = false
 	start := !q.running
 	if start {
 		q.running = true
@@ -191,11 +193,12 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 				return
 			}
 			q.running = false
-			q.retryWait = 0
+			if q.rebuildRetries == 0 {
+				q.retryWait = 0
+			}
 			q.awaitDone = true
 			parked = true
 		})
-		q.resetSealRetryWait()
 		return parked
 	}
 	if !sealed {
@@ -230,12 +233,13 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	return false
 }
 
-func (q *searchResealQueue) nextSealRetryWait() time.Duration {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+func (q *searchResealQueue) advanceRetryWaitLocked(fallback time.Duration) time.Duration {
 	wait := q.retryWait
 	if wait <= 0 {
 		wait = sealRetryWait
+	}
+	if wait <= 0 {
+		wait = fallback
 	}
 	if wait <= 0 {
 		return 0
@@ -245,6 +249,12 @@ func (q *searchResealQueue) nextSealRetryWait() time.Duration {
 	}
 	q.retryWait = min(wait*2, maxSealRetryWait)
 	return wait
+}
+
+func (q *searchResealQueue) nextSealRetryWait() time.Duration {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.advanceRetryWaitLocked(0)
 }
 
 func (q *searchResealQueue) resetSealRetryWait() {
@@ -333,6 +343,10 @@ func (q *searchResealQueue) onSearchIndexTerminal(status string) {
 		return
 	}
 	q.awaitDone = false
+	if q.running || len(q.pending) > 0 {
+		q.mu.Unlock()
+		return
+	}
 	if status == "done" {
 		q.stopRetryTimerLocked()
 		q.rebuildRetries = 0
@@ -367,17 +381,7 @@ func (q *searchResealQueue) scheduleIdleRebuildRetryLocked() {
 		go q.finishSealingCycle(true)
 		return
 	}
-	wait := q.retryWait
-	if wait <= 0 {
-		wait = sealRetryWait
-	}
-	if wait <= 0 {
-		wait = 2 * time.Second
-	}
-	if wait > maxSealRetryWait {
-		wait = maxSealRetryWait
-	}
-	q.retryWait = min(wait*2, maxSealRetryWait)
+	wait := q.advanceRetryWaitLocked(2 * time.Second)
 	q.rebuildRetries++
 	q.stopRetryTimerLocked()
 	q.retryTimer = time.AfterFunc(wait, q.retryAfterIdle)
@@ -392,6 +396,8 @@ func (q *searchResealQueue) retryAfterIdle() {
 	}
 	q.retryTimer = nil
 	if db.Mdb == nil {
+		// 无库时无法重建，仍需走退避重试并在达上限后释放待检索站点，避免永久卡在 StatusSealing。
+		q.scheduleIdleRebuildRetryLocked()
 		q.mu.Unlock()
 		return
 	}
