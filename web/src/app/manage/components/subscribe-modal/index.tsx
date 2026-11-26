@@ -5,6 +5,7 @@ import {
   Button,
   Input,
   Modal,
+  QRCode,
   Space,
   Tag,
   Tooltip,
@@ -13,6 +14,7 @@ import {
 import {
   CopyOutlined,
   LinkOutlined,
+  QrcodeOutlined,
 } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
@@ -41,6 +43,7 @@ export default function SubscribeModal(props: SubscribeModalProps) {
     provideKey?: string;
     privateAccess?: boolean;
   } | null>(null);
+  const [activeQrKey, setActiveQrKey] = useState<string | null>("client");
 
   // 后台工作台弹窗拉取具备管理员鉴权的 /manage/config/basic，以获取完整 provideKey
   useEffect(() => {
@@ -158,6 +161,14 @@ export default function SubscribeModal(props: SubscribeModalProps) {
     },
   ];
 
+  const activeQrItem = useMemo(
+    () => items.find((item) => item.key === activeQrKey) ?? null,
+    // items 静态定义，仅随 activeQrKey 变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeQrKey],
+  );
+  const activeQrUrl = activeQrItem ? getUrl(activeQrItem) : "";
+
   return (
     <Modal
       open={open}
@@ -176,6 +187,7 @@ export default function SubscribeModal(props: SubscribeModalProps) {
       <div className={styles.modalContent}>
         {items.map((item) => {
           const fullUrl = getUrl(item);
+          const isQrActive = activeQrKey === item.key;
 
           return (
             <div key={item.key} className={styles.itemRow}>
@@ -200,6 +212,15 @@ export default function SubscribeModal(props: SubscribeModalProps) {
                   />
                 </Tooltip>
                 <Button
+                  type={isQrActive ? "primary" : "default"}
+                  icon={<QrcodeOutlined />}
+                  onClick={() =>
+                    setActiveQrKey((prev) => (prev === item.key ? null : item.key))
+                  }
+                >
+                  二维码
+                </Button>
+                <Button
                   type="primary"
                   icon={<CopyOutlined />}
                   onClick={(e) => {
@@ -213,6 +234,26 @@ export default function SubscribeModal(props: SubscribeModalProps) {
             </div>
           );
         })}
+
+        {activeQrItem && activeQrUrl && (
+          <div className={styles.qrPanel}>
+            <div className={styles.qrHeader}>
+              <span>{activeQrItem.title}</span>
+              <Tag variant="filled" style={{ margin: 0 }}>
+                {activeQrItem.tag}
+              </Tag>
+            </div>
+            <div className={styles.qrBox}>
+              <QRCode
+                value={activeQrUrl}
+                size={156}
+                bordered={false}
+                color="#000000"
+                bgColor="#ffffff"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );

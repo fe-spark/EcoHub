@@ -11,6 +11,7 @@ import (
 	"server/internal/danmaku"
 	"server/internal/httpx"
 	"server/internal/mediaproxy"
+	"server/internal/middleware"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/utils"
@@ -60,6 +61,17 @@ func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
 		return
 	}
 	if !httpx.IsAdminRequest(c) {
+		if cfg.PrivateAccess && !middleware.HasValidPrivateRequestAuth(c, cfg.ProvideKey) {
+			cfg = model.BasicConfig{
+				SiteName:      cfg.SiteName,
+				Logo:          cfg.Logo,
+				State:         cfg.State,
+				Hint:          cfg.Hint,
+				PrivateAccess: cfg.PrivateAccess,
+			}
+			dto.Success(cfg, "网站基本信息获取成功", c)
+			return
+		}
 		cfg.ProvideKey = ""
 		cfg.Danmaku.AppID = ""
 		cfg.Danmaku.AppSecret = ""
@@ -122,10 +134,12 @@ func (h *ManageHandler) UpdateSiteAccess(c *gin.Context) {
 		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
 		return
 	}
-	if ac.PrivateAccess && len(strings.TrimSpace(ac.ProvideKey)) <= 0 {
-		dto.Failed("开启私有化访问时，必须配置订阅密钥", c)
+	cleanKey, err := model.ValidateProvideKey(ac.PrivateAccess, ac.ProvideKey)
+	if err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
+	ac.ProvideKey = cleanKey
 	if err := ManageSvc.UpdateSiteAccessConfig(ac); err != nil {
 		dto.Failed(fmt.Sprint("访问控制配置更新失败: ", err), c)
 		return

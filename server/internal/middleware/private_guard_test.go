@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -175,5 +176,113 @@ func TestPrivateAccessGuard(t *testing.T) {
 			t.Errorf("expected 200 for valid token in redis, got %d", w4.Code)
 		}
 		_ = user.ClearUserToken(999)
+
+		// 6. 开启私有化但密钥为空，携带 ?key= 应直接返回 403
+		emptyCfg, _ := json.Marshal(model.BasicConfig{PrivateAccess: true, ProvideKey: ""})
+		_ = db.Rdb.Set(db.Cxt, config.SiteConfigBasic, emptyCfg, 0).Err()
+		w5 := httptest.NewRecorder()
+		req5, _ := http.NewRequest(http.MethodGet, "/api/test-front?key=anything", nil)
+		r.ServeHTTP(w5, req5)
+		if w5.Code != http.StatusForbidden {
+			t.Errorf("expected 403 when provideKey is empty and ?key= supplied, got %d", w5.Code)
+		}
+	}
+}
+
+func TestProvideKey_RateLimit(t *testing.T) {
+	if db.Rdb == nil {
+		t.Skip("redis unavailable")
+	}
+	resetProvideKeyRateLimit()
+	t.Cleanup(resetProvideKeyRateLimit)
+
+	cfgData, _ := json.Marshal(model.BasicConfig{
+		PrivateAccess: true,
+		ProvideKey:    "valid-secret-key",
+	})
+	_ = db.Rdb.Set(db.Cxt, config.SiteConfigBasic, cfgData, 0).Err()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(ProvideKeyGuard())
+	r.GET("/api/provide/app", func(c *gin.Context) {
+		dto.Success("ok", "ok", c)
+	})
+
+	for i := 0; i < provideKeyMaxFailures-1; i++ {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/provide/app?key=wrong-key", nil)
+		req.RemoteAddr = "198.51.100.88:12345"
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("attempt %d expected 403, got %d", i+1, w.Code)
+		}
+	}
+
+	// 第 10 次错误应触发 429 锁定
+	wLock := httptest.NewRecorder()
+	reqLock, _ := http.NewRequest(http.MethodGet, "/api/provide/app?key=wrong-key", nil)
+	reqLock.RemoteAddr = "198.51.100.88:12345"
+	r.ServeHTTP(wLock, reqLock)
+	if wLock.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 on threshold, got %d", wLock.Code)
+	}
+
+	// 锁定期内即便传正确密钥也应拒绝
+	wBlocked := httptest.NewRecorder()
+	reqBlocked, _ := http.NewRequest(http.MethodGet, "/api/provide/app?key=valid-secret-key", nil)
+	reqBlocked.RemoteAddr = "198.51.100.88:12345"
+	r.ServeHTTP(wBlocked, reqBlocked)
+	if wBlocked.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 while locked, got %d", wBlocked.Code)
+	}
+
+	// 其他 IP 不受影响
+	wOther := httptest.NewRecorder()
+	reqOther, _ := http.NewRequest(http.MethodGet, "/api/provide/app?key=valid-secret-key", nil)
+	reqOther.RemoteAddr = "198.51.100.89:12345"
+	r.ServeHTTP(wOther, reqOther)
+	if wOther.Code != http.StatusOK {
+		t.Fatalf("expected 200 for other IP, got %d", wOther.Code)
+	}
+}
+
+func TestProvideKey_RateLimit_BasicAuthAndIPv6AndCap(t *testing.T) {
+	resetProvideKeyRateLimit()
+	t.Cleanup(resetProvideKeyRateLimit)
+	gin.SetMode(gin.TestMode)
+
+	// 1. HasValidPrivateRequestAuth 共享失败限流，且同 /64 IPv6 地址归入同一限流桶
+	for i := 0; i < provideKeyMaxFailures; i++ {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		req, _ := http.NewRequest(http.MethodGet, "/api/config/basic?key=wrong-key", nil)
+		req.RemoteAddr = fmt.Sprintf("[2001:db8:85a3:1::%x]:12345", i+1)
+		c.Request = req
+		if HasValidPrivateRequestAuth(c, "valid-secret-key") {
+			t.Fatalf("attempt %d should fail", i+1)
+		}
+	}
+	// 同一 /64 下换新主机后缀携带正确密钥也应被锁定拒绝
+	w6 := httptest.NewRecorder()
+	c6, _ := gin.CreateTestContext(w6)
+	req6, _ := http.NewRequest(http.MethodGet, "/api/config/basic?key=valid-secret-key", nil)
+	req6.RemoteAddr = "[2001:db8:85a3:1::ffff]:12345"
+	c6.Request = req6
+	if HasValidPrivateRequestAuth(c6, "valid-secret-key") {
+		t.Fatalf("expected IPv6 /64 bucket to block valid key after threshold")
+	}
+
+	// 2. 窗口期内超量独立 IP 注入不得突破 provideKeyMaxEntries 上限
+	resetProvideKeyRateLimit()
+	for i := 0; i < provideKeyMaxEntries+1000; i++ {
+		ip := fmt.Sprintf("10.%d.%d.%d", (i>>16)&0xff, (i>>8)&0xff, i&0xff)
+		recordProvideKeyFailure(ip)
+	}
+	provideKeyFailMu.Lock()
+	gotLen := len(provideKeyFailState)
+	provideKeyFailMu.Unlock()
+	if gotLen > provideKeyMaxEntries {
+		t.Fatalf("provideKeyFailState len=%d exceeds max %d", gotLen, provideKeyMaxEntries)
 	}
 }

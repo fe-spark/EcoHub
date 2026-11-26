@@ -264,8 +264,15 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 
 func validateImportPayload(req model.ConfigBackupImportRequest) error {
 	b := req.Backup
-	if req.Modules.Site && b.Site == nil {
-		return errors.New("备份中缺少网站配置数据")
+	if req.Modules.Site {
+		if b.Site == nil {
+			return errors.New("备份中缺少网站配置数据")
+		}
+		cleanKey, err := model.ValidateProvideKey(b.Site.PrivateAccess, b.Site.ProvideKey)
+		if err != nil {
+			return err
+		}
+		b.Site.ProvideKey = cleanKey
 	}
 	if req.Modules.FilmSources {
 		if b.FilmSources == nil {

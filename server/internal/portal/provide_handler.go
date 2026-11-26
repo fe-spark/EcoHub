@@ -211,6 +211,9 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		return
 	}
 	key := strings.TrimSpace(c.Query("key"))
+	if key == "" {
+		key = strings.TrimSpace(c.GetHeader("X-Provide-Key"))
+	}
 	cfg, err := ProvideSvc.GetTVBoxConfig(baseURL, key)
 	if err != nil {
 		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})

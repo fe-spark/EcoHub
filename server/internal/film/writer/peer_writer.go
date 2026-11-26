@@ -22,6 +22,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// ownedFilmSyncSelect 增量同步比对所需的最小字段集，避免 SELECT * 额外拉取无关列与自定义封面大字段。
+const ownedFilmSyncSelect = "mid, first_source_id, db_id, cid, pid, root_category_key, category_key, original_category, c_name, series_key, name, sub_title, class_tag, area, language, year, initial, score, hits, state, actor, director, writer, blurb, content, release_date, picture, picture_slide, is_custom_picture, locked_fields"
+
 func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail) (*model.FilmIndex, error) {
 	categoryVersion := taxonomy.GetCategoryVersion()
 	ruleVersion := taxonomy.GetRuleVersion()
@@ -327,7 +330,7 @@ func saveSinglePeerDetailTxCtx(ctx context.Context, source *model.FilmSource, de
 		var filmIndex *model.FilmIndex
 		if hasMapping {
 			var fi model.FilmIndex
-			if err := tx.Where("mid = ?", mid).First(&fi).Error; err == nil {
+			if err := tx.Select(ownedFilmSyncSelect).Where("mid = ?", mid).First(&fi).Error; err == nil {
 				filmIndex = &fi
 			}
 		}

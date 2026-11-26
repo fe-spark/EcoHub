@@ -60,6 +60,11 @@ var migrations = []Migration{
 		Name:    "重建 film_index 分类排片复合索引列序为 (cid, update_stamp/hits, mid)",
 		Run:     migrateFilmIndexCidComposite,
 	},
+	{
+		Version: "20261126_film_index_prune_unused",
+		Name:    "清理 film_index 冗余单列与超宽过滤复合索引以降低写入放大",
+		Run:     migrateFilmIndexPruneUnused,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

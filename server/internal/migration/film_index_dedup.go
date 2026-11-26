@@ -27,11 +27,15 @@ var redundantFilmIndexes = []string{
 }
 
 func migrateFilmIndexDedup(gdb *gorm.DB) error {
+	return dropFilmIndexes(gdb, redundantFilmIndexes)
+}
+
+func dropFilmIndexes(gdb *gorm.DB, names []string) error {
 	if gdb == nil || !gdb.Migrator().HasTable(&model.FilmIndex{}) {
 		return nil
 	}
 	isSQLite := gdb.Dialector != nil && gdb.Dialector.Name() == "sqlite"
-	for _, name := range redundantFilmIndexes {
+	for _, name := range names {
 		if !gdb.Migrator().HasIndex(&model.FilmIndex{}, name) {
 			continue
 		}

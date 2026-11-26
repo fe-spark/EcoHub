@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"server/internal/access"
 	"server/internal/collect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -265,6 +266,27 @@ func TestImportConfig_RejectsInvalidProxyConfig(t *testing.T) {
 		}
 		if err := BackupSvc.ImportConfig(req); err == nil {
 			t.Fatalf("expected error for invalid backup proxy config: %+v", cfg)
+		}
+	}
+}
+
+func TestImportConfig_RejectsInvalidPrivateSiteKey(t *testing.T) {
+	setupBackupTestDB(t)
+
+	for _, key := range []string{"", "1234567", strings.Repeat("a", 65)} {
+		req := model.ConfigBackupImportRequest{
+			Modules: model.ConfigBackupModules{Site: true},
+			Backup: model.ConfigBackup{
+				Version: model.ConfigBackupVersion,
+				Site: &model.BasicConfig{
+					SiteName:      "Private",
+					PrivateAccess: true,
+					ProvideKey:    key,
+				},
+			},
+		}
+		if err := BackupSvc.ImportConfig(req); err == nil {
+			t.Fatalf("expected error for invalid site provideKey %q", key)
 		}
 	}
 }

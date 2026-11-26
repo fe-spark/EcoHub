@@ -1,13 +1,12 @@
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import { serverGet } from "@/lib/server-api";
+import { redirectToLogin, serverGet } from "@/lib/server-api";
 import ManageLayoutView from "./layout-view";
 
 async function verifyManageUser() {
   const cookieStore = await cookies();
   const authCookie = cookieStore.get("ecohub_auth_token");
   if (!authCookie?.value) {
-    redirect("/login");
+    await redirectToLogin();
   }
 
   try {
@@ -15,10 +14,10 @@ async function verifyManageUser() {
       Cookie: cookieStore.toString(),
     });
     if (response.code !== 0) {
-      redirect("/login");
+      await redirectToLogin();
     }
   } catch {
-    redirect("/login");
+    await redirectToLogin();
   }
 }
 

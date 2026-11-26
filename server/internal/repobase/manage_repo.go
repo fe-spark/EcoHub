@@ -101,6 +101,7 @@ func SaveSiteBasic(c model.BasicConfig) error {
 		return err
 	}
 	ClearIndexPageCache()
+	ClearProvideNetworkConfigCache()
 	return nil
 }
 

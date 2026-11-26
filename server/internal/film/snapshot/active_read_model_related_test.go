@@ -290,3 +290,154 @@ func TestRelatedSnapshotCandidates_SameFranchiseTheatricalVersions(t *testing.T)
 		t.Fatalf("expected both theatrical versions (440, 38861) to occupy top 2 positions, got [0]=%d, [1]=%d", res[0].Mid, res[1].Mid)
 	}
 }
+
+func TestRelatedSnapshotCandidates_UsesMemoryIndexWhenLoaded(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	srcID := "source_master"
+
+	currentFilm := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 701, FirstSourceId: srcID},
+		FilmIndexCategory: model.FilmIndexCategory{CName: "动漫", RootCategoryKey: "dongman", CategoryKey: "dongman:tv"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", Area: "中国大陆", Hits: 50},
+	}
+	theatrical := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 702, FirstSourceId: srcID},
+		FilmIndexCategory: model.FilmIndexCategory{CName: "动漫电影", RootCategoryKey: "dianying", CategoryKey: "dianying:dongman"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆剧场版", Area: "中国大陆", Hits: 10},
+	}
+	sameCat := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 703, FirstSourceId: srcID},
+		FilmIndexCategory: model.FilmIndexCategory{CName: "动漫", RootCategoryKey: "dongman", CategoryKey: "dongman:tv"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "凡人修仙传", Area: "中国大陆", Hits: 900},
+	}
+	otherCat := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 704, FirstSourceId: srcID},
+		FilmIndexCategory: model.FilmIndexCategory{CName: "动作片", RootCategoryKey: "dianying", CategoryKey: "dianying:action", Pid: 1},
+		FilmIndexContent:  model.FilmIndexContent{Name: "战狼", Area: "中国大陆", Hits: 9999},
+	}
+	for _, f := range []model.FilmIndex{currentFilm, theatrical, sameCat, otherCat} {
+		if err := gdb.Create(&f).Error; err != nil {
+			t.Fatalf("create film %d: %v", f.Mid, err)
+		}
+		if err := gdb.Create(&model.FilmSourcePlaylist{
+			Mid: f.Mid, SourceId: srcID, LineKind: "play", GroupIndex: 0, GroupName: "默认", EpisodeCount: 1, ContentHash: "h",
+		}).Error; err != nil {
+			t.Fatalf("create playlist %d: %v", f.Mid, err)
+		}
+	}
+
+	if err := LoadActiveFilmReadModel(LiveReadVersion); err != nil {
+		t.Fatalf("load active read model: %v", err)
+	}
+
+	snap := buildFilmListSnapshot("live", currentFilm)
+	page := dto.Page{Current: 1, PageSize: 14}
+	res, err := ListRelatedSnapshotsReadModel(LiveReadVersion, snap, &page, srcID)
+	if err != nil {
+		t.Fatalf("ListRelatedSnapshotsReadModel failed: %v", err)
+	}
+	if len(res) < 2 {
+		t.Fatalf("expected >= 2 related films from memory index, got %d", len(res))
+	}
+	if res[0].Mid != 702 {
+		t.Fatalf("expected franchise match 702 first, got %d (%s)", res[0].Mid, res[0].Name)
+	}
+	for _, item := range res {
+		if item.Mid == 704 {
+			t.Fatalf("unrelated movie 704 must not be recalled")
+		}
+	}
+}
+
+func TestRelatedSnapshotCandidates_MemoryIndexEdgeCases(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	srcID := "source_master"
+	otherSrc := "source_other"
+	gdb.Create(&model.FilmSource{Id: otherSrc, Name: "非主站", State: true, Sort: 10})
+
+	rows := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 801, FirstSourceId: srcID},
+			FilmIndexCategory: model.FilmIndexCategory{CName: "动漫", RootCategoryKey: "dongman", CategoryKey: "dongman:jp"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "のんのんびより", Hits: 10},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 802, FirstSourceId: srcID},
+			FilmIndexCategory: model.FilmIndexCategory{CName: "电影", RootCategoryKey: "dianying", CategoryKey: "dianying:sci"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "のんのんびより ばけーしょん", Hits: 20},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 803, FirstSourceId: srcID},
+			FilmIndexCategory: model.FilmIndexCategory{CName: "电影", RootCategoryKey: "dianying", CategoryKey: "dianying:en"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "Matrix", Hits: 30},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 804, FirstSourceId: srcID},
+			FilmIndexCategory: model.FilmIndexCategory{CName: "电影", RootCategoryKey: "dianying", CategoryKey: "dianying:en"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "matrix reloaded", Hits: 40},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 805, FirstSourceId: otherSrc},
+			FilmIndexCategory: model.FilmIndexCategory{CName: "动漫", RootCategoryKey: "dongman", CategoryKey: "other:sub"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "非主站A", Hits: 50},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 806, FirstSourceId: otherSrc},
+			FilmIndexCategory: model.FilmIndexCategory{CName: "动漫", RootCategoryKey: "dongman", CategoryKey: "other:sub"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "非主站B", Hits: 60},
+		},
+	}
+	for _, f := range rows {
+		if err := gdb.Create(&f).Error; err != nil {
+			t.Fatalf("create film %d: %v", f.Mid, err)
+		}
+		if err := gdb.Create(&model.FilmSourcePlaylist{
+			Mid: f.Mid, SourceId: f.FirstSourceId, LineKind: "play", GroupIndex: 0, GroupName: "默认", EpisodeCount: 1, ContentHash: "h",
+		}).Error; err != nil {
+			t.Fatalf("create playlist %d: %v", f.Mid, err)
+		}
+	}
+
+	if err := LoadActiveFilmReadModel(LiveReadVersion); err != nil {
+		t.Fatalf("load active read model: %v", err)
+	}
+
+	// 1. 纯假名片名不被 CleanCompactText 窄化为空集，应召回 802
+	kanaSnap := buildFilmListSnapshot("live", rows[0])
+	kanaPage := dto.Page{Current: 1, PageSize: 10}
+	kanaRes, err := ListRelatedSnapshotsReadModel(LiveReadVersion, kanaSnap, &kanaPage, srcID)
+	if err != nil {
+		t.Fatalf("kana related failed: %v", err)
+	}
+	if len(kanaRes) == 0 || kanaRes[0].Mid != 802 {
+		t.Fatalf("expected kana theatrical 802 first, got %+v", kanaRes)
+	}
+
+	// 2. 英文片名大小写不敏感前缀召回 804
+	enSnap := buildFilmListSnapshot("live", rows[2])
+	enPage := dto.Page{Current: 1, PageSize: 10}
+	enRes, err := ListRelatedSnapshotsReadModel(LiveReadVersion, enSnap, &enPage, srcID)
+	if err != nil {
+		t.Fatalf("english related failed: %v", err)
+	}
+	if len(enRes) == 0 || enRes[0].Mid != 804 {
+		t.Fatalf("expected case-insensitive prefix match 804 first, got %+v", enRes)
+	}
+
+	// 3. sourceID="" 且当前影片来自非主站时，应回退 SQL 召回同站子分类 806
+	otherSnap := buildFilmListSnapshot("live", rows[4])
+	otherPage := dto.Page{Current: 1, PageSize: 10}
+	otherRes, err := ListRelatedSnapshotsReadModel(LiveReadVersion, otherSnap, &otherPage, "")
+	if err != nil {
+		t.Fatalf("non-primary related failed: %v", err)
+	}
+	foundOther := false
+	for _, it := range otherRes {
+		if it.Mid == 806 {
+			foundOther = true
+		}
+	}
+	if !foundOther {
+		t.Fatalf("expected non-primary peer 806 via SQL fallback, got %+v", otherRes)
+	}
+}

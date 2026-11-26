@@ -5,9 +5,12 @@ import (
 	"strings"
 
 	filmshared "server/internal/film/shared"
+	"server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+
+	"gorm.io/gorm"
 )
 
 // BannerFilmOption 轮播选片弹窗使用的采集站影片摘要。
@@ -76,22 +79,21 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 		ctx = context.Background()
 	}
 
-	query := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
-		Where(model.FilmHasPlaySourceSQL(), sourceID, model.LineKindPlay)
-	if keyword != "" {
-		needle := escapeBannerLikeNeedle(keyword)
-		query = query.Where(
-			"(name LIKE ? ESCAPE '!' OR sub_title LIKE ? ESCAPE '!' OR actor LIKE ? ESCAPE '!' OR director LIKE ? ESCAPE '!')",
-			needle, needle, needle, needle,
-		)
-	}
-	if err := dto.GetPage(query, page); err != nil {
-		return nil, err
-	}
-	if page.Total == 0 {
-		return []BannerFilmOption{}, nil
+	offset := (page.Current - 1) * page.PageSize
+	var mids []int64
+	if keyword == "" {
+		if fastMids, total, ok := snapshot.PagePrimarySourceFilmMids(sourceID, sortField, offset, page.PageSize); ok {
+			page.Total = total
+			if total == 0 {
+				page.PageCount = 0
+				return []BannerFilmOption{}, nil
+			}
+			page.PageCount = (total + page.PageSize - 1) / page.PageSize
+			mids = fastMids
+		}
 	}
 
+	const selectCols = "mid, first_source_id, db_id, pid, name, c_name, year, remarks, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, area, director, actor, score, hits"
 	type row struct {
 		Mid                int64
 		FirstSourceId      string
@@ -113,20 +115,58 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 		Hits               int64
 	}
 	var rows []row
-	offset := (page.Current - 1) * page.PageSize
-	if err := query.
-		Select("mid, first_source_id, db_id, pid, name, c_name, year, remarks, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, area, director, actor, score, hits").
-		Order(bannerFilmOrderClause(sortField, keyword != "")).
-		Offset(offset).
-		Limit(page.PageSize).
-		Scan(&rows).Error; err != nil {
+
+	if mids == nil {
+		query := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
+			Where(bannerFilmPlaySourceSQL(db.Mdb), sourceID, model.LineKindPlay)
+		if keyword != "" {
+			needle := escapeBannerLikeNeedle(keyword)
+			query = query.Where(
+				"(name LIKE ? ESCAPE '!' OR sub_title LIKE ? ESCAPE '!' OR actor LIKE ? ESCAPE '!' OR director LIKE ? ESCAPE '!')",
+				needle, needle, needle, needle,
+			)
+		}
+		if err := dto.GetPage(query, page); err != nil {
+			return nil, err
+		}
+		if page.Total == 0 {
+			return []BannerFilmOption{}, nil
+		}
+		// 延迟关联：先按排序取当前页 mid，再按主键批量回表取展示字段，避免深分页排序携带大字段。
+		if err := query.
+			Select("mid").
+			Order(bannerFilmOrderClause(sortField, keyword != "")).
+			Offset(offset).
+			Limit(page.PageSize).
+			Pluck("mid", &mids).Error; err != nil {
+			return nil, err
+		}
+	}
+	if len(mids) == 0 {
+		return []BannerFilmOption{}, nil
+	}
+	if err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
+		Select(selectCols).
+		Where("mid IN ?", mids).
+		Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	byMid := make(map[int64]row, len(rows))
+	for _, r := range rows {
+		byMid[r.Mid] = r
+	}
+	orderedRows := make([]row, 0, len(mids))
+	for _, id := range mids {
+		if r, ok := byMid[id]; ok {
+			orderedRows = append(orderedRows, r)
+		}
+	}
+	rows = orderedRows
 
-	mids := make([]int64, 0, len(rows))
+	rowMids := make([]int64, 0, len(rows))
 	posters := make([]model.FilmListSnapshot, 0, len(rows))
 	for _, r := range rows {
-		mids = append(mids, r.Mid)
+		rowMids = append(rowMids, r.Mid)
 		pic := strings.TrimSpace(r.Picture)
 		if r.IsCustomPicture && strings.TrimSpace(r.CustomPicture) != "" {
 			pic = strings.TrimSpace(r.CustomPicture)
@@ -152,11 +192,11 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 		posterByMid[snap.Mid] = snap
 	}
 
-	scrapedSet := make(map[int64]bool, len(mids))
-	if len(mids) > 0 {
+	scrapedSet := make(map[int64]bool, len(rowMids))
+	if len(rowMids) > 0 {
 		var scrapeMids []int64
 		if err := db.Mdb.WithContext(ctx).Model(&model.FilmTMDBScrape{}).
-			Where("mid IN ? AND tmdb_id > 0", mids).
+			Where("mid IN ? AND tmdb_id > 0", rowMids).
 			Pluck("mid", &scrapeMids).Error; err == nil {
 			for _, mid := range scrapeMids {
 				scrapedSet[mid] = true
@@ -198,4 +238,11 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 		})
 	}
 	return out, nil
+}
+
+func bannerFilmPlaySourceSQL(conn *gorm.DB) string {
+	if conn != nil && conn.Dialector != nil && conn.Dialector.Name() == "mysql" {
+		return "EXISTS (SELECT 1 FROM " + model.TableFilmSourcePlaylist + " AS p FORCE INDEX (PRIMARY) WHERE p.mid = " + model.TableFilmIndex + ".mid AND p.source_id = ? AND p.line_kind = ?)"
+	}
+	return model.FilmHasPlaySourceSQL()
 }

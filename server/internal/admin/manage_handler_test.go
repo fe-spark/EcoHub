@@ -159,6 +159,15 @@ func TestUpdateSiteAccess_Validation(t *testing.T) {
 			t.Fatalf("code=%d want %d", resp.Code, dto.FAILED)
 		}
 	})
+
+	t.Run("PrivateAccess true requires min length ProvideKey", func(t *testing.T) {
+		c, w := testutil.NewJSONContext(http.MethodPost, "/api/manage/config/access", `{"state":true,"privateAccess":true,"provideKey":"short"}`)
+		h.UpdateSiteAccess(c)
+		resp := testutil.DecodeResponse(t, w)
+		if resp.Code != dto.FAILED {
+			t.Fatalf("code=%d want %d", resp.Code, dto.FAILED)
+		}
+	})
 }
 
 func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {

@@ -82,6 +82,65 @@ func TestSiteBasicAndDanmakuConfig_RedactsDanmakuApiURLForNonAdmin(t *testing.T)
 	if !strings.Contains(string(raw3), "my-secret-token") {
 		t.Fatalf("admin SiteDanmakuConfig should retain ApiURL, got %s", string(raw3))
 	}
+
+	// 4. 开启私有化时，匿名请求 SiteBasicConfig 应额外隐去公告/赞赏/站点链接/描述
+	privateCfg := model.BasicConfig{
+		SiteName:      "PrivateSite",
+		SiteURL:       "https://private.example.com",
+		Describe:      "Secret Description",
+		Keyword:       "secret-kw",
+		PrivateAccess: true,
+		ProvideKey:    "prov-secret-1234",
+		Tip:           model.TipConfig{Enabled: true, Title: "私密打赏", Message: "Secret Tip"},
+		Notice:        model.NoticeConfig{Enabled: true, Title: "内部公告", Content: "Secret Notice"},
+		MediaProxy:    model.MediaProxyConfig{Enabled: true, Template: "https://worker.secret/{url}"},
+	}
+	if err := repobase.SaveSiteBasic(privateCfg); err != nil {
+		t.Fatal(err)
+	}
+	c4, w4 := testutil.NewTestContext(http.MethodGet, "/api/config/basic")
+	ManageHd.SiteBasicConfig(c4)
+	resp4 := testutil.DecodeResponse(t, w4)
+	raw4, _ := json.Marshal(resp4.Data)
+	body4 := string(raw4)
+	for _, hidden := range []string{"Secret Description", "secret-kw", "Secret Tip", "Secret Notice", "worker.secret", "private.example.com", "prov-secret-1234"} {
+		if strings.Contains(body4, hidden) {
+			t.Fatalf("anonymous private SiteBasicConfig leaked %q in %s", hidden, body4)
+		}
+	}
+	if !strings.Contains(body4, `"privateAccess":true`) || !strings.Contains(body4, "PrivateSite") {
+		t.Fatalf("expected privateAccess and siteName preserved, got %s", body4)
+	}
+
+	// 5. 携带有效 X-Provide-Key 请求 SiteBasicConfig 应返回公告等展示信息，仍隐藏 ProvideKey
+	c5, w5 := testutil.NewTestContext(http.MethodGet, "/api/config/basic")
+	c5.Request.RemoteAddr = "198.51.100.76:12345"
+	c5.Request.Header.Set("X-Provide-Key", "prov-secret-1234")
+	ManageHd.SiteBasicConfig(c5)
+	resp5 := testutil.DecodeResponse(t, w5)
+	raw5, _ := json.Marshal(resp5.Data)
+	body5 := string(raw5)
+	if !strings.Contains(body5, "Secret Notice") || strings.Contains(body5, "prov-secret-1234") {
+		t.Fatalf("expected Notice visible and ProvideKey hidden for authorized client, got %s", body5)
+	}
+
+	// 6. 同一 IP 连续尝试错误 key 触发限流后，SiteBasicConfig 即使携带正确 key 也只能拿到脱敏配置
+	for i := 0; i < 10; i++ {
+		cb, wb := testutil.NewTestContext(http.MethodGet, "/api/config/basic?key=wrong-guess")
+		cb.Request.RemoteAddr = "198.51.100.77:12345"
+		ManageHd.SiteBasicConfig(cb)
+		if wb.Code != http.StatusOK {
+			t.Fatalf("unexpected status %d", wb.Code)
+		}
+	}
+	cLocked, wLocked := testutil.NewTestContext(http.MethodGet, "/api/config/basic?key=prov-secret-1234")
+	cLocked.Request.RemoteAddr = "198.51.100.77:12345"
+	ManageHd.SiteBasicConfig(cLocked)
+	respLocked := testutil.DecodeResponse(t, wLocked)
+	rawLocked, _ := json.Marshal(respLocked.Data)
+	if strings.Contains(string(rawLocked), "Secret Notice") {
+		t.Fatalf("expected rate-limited IP on SiteBasicConfig to remain redacted, got %s", string(rawLocked))
+	}
 }
 
 func TestCors_UntrustedPeerIgnoresForwardedHost(t *testing.T) {

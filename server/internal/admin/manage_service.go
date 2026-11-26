@@ -106,16 +106,24 @@ func (s *ManageService) UpdateSiteAccessConfig(ac model.AccessConfig) error {
 	curr.PrivateAccess = ac.PrivateAccess
 	if curr.PrivateAccess {
 		if strings.TrimSpace(ac.ProvideKey) == "" {
-			key, err := utils.RandomString(8)
+			key, err := utils.RandomString(16)
 			if err != nil {
 				return err
 			}
 			curr.ProvideKey = key
 		} else {
-			curr.ProvideKey = strings.TrimSpace(ac.ProvideKey)
+			cleanKey, err := model.ValidateProvideKey(true, ac.ProvideKey)
+			if err != nil {
+				return err
+			}
+			curr.ProvideKey = cleanKey
 		}
 	} else {
-		curr.ProvideKey = ac.ProvideKey
+		cleanKey, err := model.ValidateProvideKey(false, ac.ProvideKey)
+		if err != nil {
+			return err
+		}
+		curr.ProvideKey = cleanKey
 	}
 	return repobase.SaveSiteBasic(curr)
 }

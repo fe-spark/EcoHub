@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -101,6 +102,28 @@ type BasicConfig struct {
 	Tip           TipConfig        `json:"tip"`           // 前台赞赏
 	Notice        NoticeConfig     `json:"notice"`        // 开屏公告
 	MediaProxy    MediaProxyConfig `json:"mediaProxy"`    // 媒体图片边缘反代配置
+}
+
+const (
+	MinProvideKeyLen = 8
+	MaxProvideKeyLen = 64
+)
+
+// ValidateProvideKey 校验私有化订阅密钥长度规范，返回去除首尾空白后的密钥。
+func ValidateProvideKey(privateAccess bool, rawKey string) (string, error) {
+	key := strings.TrimSpace(rawKey)
+	if len(key) > MaxProvideKeyLen {
+		return "", errors.New("订阅密钥长度不能超过 64 位")
+	}
+	if privateAccess {
+		if len(key) == 0 {
+			return "", errors.New("开启私有化访问时，必须配置订阅密钥")
+		}
+		if len(key) < MinProvideKeyLen {
+			return "", errors.New("开启私有化访问时，订阅密钥长度不能少于 8 位")
+		}
+	}
+	return key, nil
 }
 
 // AccessConfig 网站访问控制配置（运行状态/维护提示/私有化/订阅密钥）

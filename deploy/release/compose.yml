@@ -3,6 +3,11 @@ services:
     container_name: Eco-mysql
     image: mysql:8.4
     restart: always
+    command:
+      - --innodb-buffer-pool-size=${MYSQL_INNODB_BUFFER_POOL_SIZE:-1G}
+      - --innodb-redo-log-capacity=${MYSQL_INNODB_REDO_LOG_CAPACITY:-512M}
+      - --innodb-flush-log-at-trx-commit=2
+      - --sync-binlog=0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ecohub}
       MYSQL_DATABASE: ${MYSQL_DBNAME:-eco}

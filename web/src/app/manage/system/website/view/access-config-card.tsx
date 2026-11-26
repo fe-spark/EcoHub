@@ -56,6 +56,7 @@ const DEFAULT_ACCESS_CONFIG: AccessConfigPayload = {
 };
 
 const MAX_HINT_LEN = 256;
+const MIN_PROVIDE_KEY_LEN = 8;
 const MAX_PROVIDE_KEY_LEN = 64;
 
 function normalizeAccessConfig(
@@ -113,8 +114,13 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
 
   const handleSave = async () => {
     if (!canWrite) return;
-    if (draft.privateAccess && !draft.provideKey.trim()) {
+    const trimmedKey = draft.provideKey.trim();
+    if (draft.privateAccess && !trimmedKey) {
       message.error("开启私有化访问时，订阅密钥不能为空");
+      return;
+    }
+    if (draft.privateAccess && trimmedKey.length < MIN_PROVIDE_KEY_LEN) {
+      message.error(`开启私有化访问时，订阅密钥长度不能少于 ${MIN_PROVIDE_KEY_LEN} 位`);
       return;
     }
     setSaving(true);
@@ -235,9 +241,10 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
                 <Input
                   disabled={!canWrite}
                   maxLength={MAX_PROVIDE_KEY_LEN}
-                  placeholder="必填，请输入订阅密钥，例如 mysecret888"
+                  placeholder="必填，至少 8 位，例如 mysecret888"
                   status={
-                    !currentValues.provideKey.trim()
+                    !currentValues.provideKey.trim() ||
+                    currentValues.provideKey.trim().length < MIN_PROVIDE_KEY_LEN
                       ? "error"
                       : undefined
                   }
@@ -265,7 +272,7 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
                 </Button>
               </Space.Compact>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                开启私有化后必填。客户端及 TVBox 订阅地址均需在末尾追加 ?key=您的密钥（可在右上角订阅地址直接复制）。
+                开启私有化后必填，至少 8 位。客户端及 TVBox 订阅地址需在末尾追加 ?key=您的密钥。
               </Typography.Text>
             </div>
           )}

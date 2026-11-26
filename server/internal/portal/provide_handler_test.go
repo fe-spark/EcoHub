@@ -22,6 +22,7 @@ import (
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/sourcecatalog"
 	"server/internal/taxonomy"
 	"server/internal/testutil"
 )
@@ -843,5 +844,36 @@ func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
 
 	for err := range errCh {
 		t.Fatal(err)
+	}
+}
+
+func TestHandleProvideConfig_ReadsHeaderProvideKey(t *testing.T) {
+	gdb := setupProvideRedisNilTestDB(t)
+	if err := gdb.Create(&model.FilmSource{
+		Id:    "src_hdr",
+		Name:  "Header主站",
+		Uri:   "https://hdr.example/api",
+		State: true,
+		Sort:  0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourcecatalog.InvalidatePrimarySourceCache()
+	t.Cleanup(sourcecatalog.InvalidatePrimarySourceCache)
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req, _ := http.NewRequest(http.MethodGet, "/api/provide/tvbox", nil)
+	req.Host = "movie.example.com"
+	req.Header.Set("X-Provide-Key", "header-key-1234")
+	c.Request = req
+
+	ProvideHd.HandleProvideConfig(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "?key=header-key-1234") {
+		t.Fatalf("expected tvbox api url to embed ?key from X-Provide-Key header, got %s", w.Body.String())
 	}
 }

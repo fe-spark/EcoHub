@@ -16,6 +16,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/taxonomy"
+	"server/internal/utils"
 
 	"gorm.io/gorm"
 )
@@ -181,6 +182,19 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 		}
 	}
 
+	if len(list) < candidatePoolLimit {
+		if idx := activeFilmSearchMetas.Load(); canRecallRelatedFromIndex(idx, current, sourceID) {
+			if mids := recallRelatedMidsFromIndex(idx, current, sourceID, seen, candidatePoolLimit-len(list)); len(mids) > 0 {
+				rows, err := GetSnapshotsByMidsOrdered(version, mids)
+				if err != nil {
+					return nil, err
+				}
+				appendUnique(rows)
+			}
+			return rankRelatedCandidates(current, list, maxCandidates), nil
+		}
+	}
+
 	coreToken := extractCoreSearchToken(current.Name)
 	if len(list) < candidatePoolLimit && len([]rune(coreToken)) >= 2 && db.Mdb != nil {
 		if err := recall(baseQuery().
@@ -243,4 +257,197 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	}
 
 	return rankRelatedCandidates(current, list, maxCandidates), nil
+}
+
+func canRecallRelatedFromIndex(idx *filmSearchMetaIndex, current model.FilmListSnapshot, sourceID string) bool {
+	if idx == nil || len(idx.Items) == 0 {
+		return false
+	}
+	if idx.PrimaryID == "" || idx.PrimaryID != currentPrimarySourceID() {
+		return false
+	}
+	if sourceID != "" {
+		return sourceID == idx.PrimaryID
+	}
+	curSrc := strings.TrimSpace(current.SourceId)
+	return curSrc == "" || curSrc == idx.PrimaryID
+}
+
+func hasTitlePrefixFold(name, lowerPrefix string) bool {
+	if lowerPrefix == "" {
+		return true
+	}
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(trimmed), lowerPrefix)
+}
+
+func recallRelatedMidsFromIndex(idx *filmSearchMetaIndex, current model.FilmListSnapshot, sourceID string, seen map[int64]struct{}, need int) []int64 {
+	if need <= 0 {
+		return nil
+	}
+	recalled := make([]int64, 0, need)
+	picked := make(map[int64]struct{}, len(seen)+need)
+	for mid := range seen {
+		picked[mid] = struct{}{}
+	}
+	accept := func(meta *FilmSearchMeta) bool {
+		if meta == nil || meta.Mid <= 0 {
+			return false
+		}
+		if _, exists := picked[meta.Mid]; exists {
+			return false
+		}
+		if !taxonomy.IsCategoryVisible(meta.Cid, meta.Pid) {
+			return false
+		}
+		if sourceID != "" && !meta.HasPlaySource(sourceID) {
+			return false
+		}
+		return true
+	}
+	addMids := func(mids []int64) int {
+		added := 0
+		for _, mid := range mids {
+			if len(recalled) >= need {
+				return added
+			}
+			pos, ok := idx.Pos[mid]
+			if !ok || pos < 0 || pos >= len(idx.Items) {
+				continue
+			}
+			if !accept(idx.Items[pos]) {
+				continue
+			}
+			picked[mid] = struct{}{}
+			recalled = append(recalled, mid)
+			added++
+		}
+		return added
+	}
+	takeTopByHits := func(cands []*FilmSearchMeta) {
+		remain := need - len(recalled)
+		if len(cands) == 0 || remain <= 0 {
+			return
+		}
+		top := topKSearchMetas(cands, remain, func(a, b *FilmSearchMeta) bool {
+			if a.Item.Hits != b.Item.Hits {
+				return a.Item.Hits > b.Item.Hits
+			}
+			return a.Mid > b.Mid
+		})
+		for _, meta := range top {
+			picked[meta.Mid] = struct{}{}
+			recalled = append(recalled, meta.Mid)
+		}
+	}
+
+	// 1. 核心片名前缀召回（非汉字/非 ASCII 字符经 CleanCompactText 置空时跳过倒排窄化，改走全量大小写不敏感前缀匹配）
+	coreToken := extractCoreSearchToken(current.Name)
+	if len([]rune(coreToken)) >= 2 {
+		lowerPrefix := strings.ToLower(strings.TrimSpace(coreToken))
+		var prefixHits []*FilmSearchMeta
+		q := utils.BuildQueryContext(coreToken)
+		positions, narrowed := ([]int32)(nil), false
+		if q.CleanKey != "" {
+			positions, narrowed = idx.SearchPosts.lookup(q)
+		}
+		if narrowed {
+			for _, pos := range positions {
+				if pos < 0 || int(pos) >= len(idx.Items) {
+					continue
+				}
+				meta := idx.Items[pos]
+				if accept(meta) && hasTitlePrefixFold(meta.Item.Name, lowerPrefix) {
+					prefixHits = append(prefixHits, meta)
+				}
+			}
+		} else {
+			for _, meta := range idx.Items {
+				if accept(meta) && hasTitlePrefixFold(meta.Item.Name, lowerPrefix) {
+					prefixHits = append(prefixHits, meta)
+				}
+			}
+		}
+		takeTopByHits(prefixHits)
+	}
+
+	// 2. 同子分类召回（HotPools 已含当前主站该分类按热度 Top 50，命中非空池时无需全表重扫）
+	if len(recalled) < need {
+		catKey := strings.TrimSpace(current.CategoryKey)
+		if catKey != "" {
+			hotPool := idx.HotPools[hotPoolMapKey(idx.PrimaryID, catKey)]
+			addMids(hotPool)
+			if len(recalled) < need && len(hotPool) == 0 {
+				var catCands []*FilmSearchMeta
+				for _, pos := range idx.ByCategory[catKey] {
+					if pos < 0 || pos >= len(idx.Items) {
+						continue
+					}
+					if meta := idx.Items[pos]; accept(meta) {
+						catCands = append(catCands, meta)
+					}
+				}
+				takeTopByHits(catCands)
+			}
+		} else if current.Cid > 0 {
+			var cidCands []*FilmSearchMeta
+			for _, meta := range idx.Items {
+				if accept(meta) && meta.Cid == current.Cid {
+					cidCands = append(cidCands, meta)
+				}
+			}
+			takeTopByHits(cidCands)
+		}
+	}
+
+	// 3. 同根分类召回（优先消费 HotPools，命中非空池时跳过全量扫描）
+	rootKey, pid := resolveCurrentRootCategory(current)
+	if len(recalled) < need {
+		if rootKey != "" {
+			hotPool := idx.HotPools[hotPoolMapKey(idx.PrimaryID, rootKey)]
+			addMids(hotPool)
+			if len(recalled) < need && len(hotPool) == 0 {
+				var rootCands []*FilmSearchMeta
+				for _, meta := range idx.Items {
+					if accept(meta) && meta.RootCategoryKey == rootKey {
+						rootCands = append(rootCands, meta)
+					}
+				}
+				takeTopByHits(rootCands)
+			}
+		}
+		if len(recalled) < need && pid > 0 && rootKey == "" {
+			var pidCands []*FilmSearchMeta
+			for _, meta := range idx.Items {
+				if accept(meta) && meta.Pid == pid {
+					pidCands = append(pidCands, meta)
+				}
+			}
+			takeTopByHits(pidCands)
+		}
+	}
+
+	// 4. 无分类归属时的热播兜底
+	if len(recalled) < need && rootKey == "" && pid <= 0 {
+		srcPoolKey := idx.PrimaryID
+		if sourceID != "" {
+			srcPoolKey = sourceID
+		}
+		hotPool := idx.SourceHot[srcPoolKey]
+		addMids(hotPool)
+		if len(recalled) < need && len(hotPool) == 0 {
+			var hotCands []*FilmSearchMeta
+			for _, meta := range idx.Items {
+				if accept(meta) {
+					hotCands = append(hotCands, meta)
+				}
+			}
+			takeTopByHits(hotCands)
+		}
+	}
+
+	return recalled
 }
