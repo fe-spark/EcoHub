@@ -299,3 +299,85 @@ func TestSaveDetail_ManualPlaylists_IsolatesSpiderLines(t *testing.T) {
 		t.Fatalf("expected 2 episodes for updated manual film, got %d", updatedManualLine.EpisodeCount)
 	}
 }
+
+func TestSaveDetail_CrossSourceOwnerConcurrentCollect_NoDeadlock(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	owner := model.FilmSource{Id: "src-owner", Name: "归属站", Uri: "http://owner", State: true}
+	if err := gdb.Create(&owner).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4001, FirstSourceId: owner.Id},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, CName: "电影"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "跨站锁序片"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.MovieSourceMapping{SourceId: owner.Id, SourceMid: 401, GlobalMid: 4001}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 8)
+	// 同时测试 editor < owner（"manual" < "src-owner"）与 editor > owner（"zzz-editor" > "src-owner"）两种锁序组合
+	for _, editor := range []string{"manual", "zzz-editor"} {
+		editorID := editor
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d := model.MovieDetail{
+				Id:   4001,
+				Name: "跨站锁序片-改",
+				Pid:  1,
+				MovieDescriptor: model.MovieDescriptor{
+					UpdateTime: "2026-10-16 15:00:00",
+				},
+			}
+			if err := SaveDetail(editorID, d); err != nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		d := model.MovieDetail{
+			Id:   401,
+			Name: "跨站锁序片",
+			Pid:  1,
+			PlayList: [][]model.MovieUrlInfo{
+				{{Episode: "第01集", Link: "http://owner/1.m3u8"}},
+			},
+			MovieDescriptor: model.MovieDescriptor{UpdateTime: "2026-10-16 15:01:00"},
+		}
+		if _, err := SaveCollectedPeerDetails(context.Background(), &owner, 1, []model.MovieDetail{d}); err != nil {
+			errCh <- err
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("cross-source SaveDetail and SaveCollectedPeerDetails timed out (deadlock)")
+	case <-done:
+	}
+
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+}

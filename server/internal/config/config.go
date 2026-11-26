@@ -56,7 +56,7 @@ const (
 // 页并发、取数在途和队列是各自的数，不从写槽推出来。
 var (
 	// CollectWriteMaxInflight 当前允许的同时写库事务数。启动时设为 WriteSlotMax。
-	CollectWriteMaxInflight = 8
+	CollectWriteMaxInflight = 16
 	// CollectWriteMaxPendingPagesPerSource 单站写库队列上限。
 	CollectWriteMaxPendingPagesPerSource = 256
 	// CollectWriteMaxPendingPagesGlobal 全局写库缓冲上限。

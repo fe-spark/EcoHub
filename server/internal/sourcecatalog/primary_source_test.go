@@ -309,3 +309,73 @@ func TestCurrentPrimarySource_DisabledReturnsNil(t *testing.T) {
 		t.Fatalf("expected src_2 as primary, got %+v", primary)
 	}
 }
+
+func TestCollectSourceCatalog_InvalidateAndConcurrency(t *testing.T) {
+	gdb := setupPrimaryTestDB(t)
+	InvalidateCollectSourceCatalog()
+	t.Cleanup(InvalidateCollectSourceCatalog)
+
+	if err := gdb.Create(&model.FilmSource{Id: "cat_a", Name: "站A", Uri: "http://a.test", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "cat_b", Name: "站B", Uri: "http://b.test", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 并发冷加载 + ForgetCollectSource + RefreshCollectSourceCatalog 在 -race 下不得出现竞态或复活
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = GetCollectSourceList()
+			_ = FindCollectSourceForDelete("cat_a")
+		}()
+	}
+	wg.Wait()
+
+	if list := GetCollectSourceList(); len(list) != 2 {
+		t.Fatalf("expected 2 sources in catalog, got %+v", list)
+	}
+
+	// 清表并调用 InvalidateCollectSourceCatalog（模拟 siteops.FilmZero 同 db.Mdb 重置场景）
+	if err := gdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	InvalidateCollectSourceCatalog()
+	if list := GetCollectSourceList(); len(list) != 0 {
+		t.Fatalf("expected empty catalog after invalidate, got %+v", list)
+	}
+	if src := FindCollectSourceForDelete("cat_a"); src != nil {
+		t.Fatalf("expected nil after invalidate, got %+v", src)
+	}
+
+	// 重新写入后验证 ForgetCollectSource 与并发 Refresh 无覆盖丢失
+	if err := gdb.Create(&model.FilmSource{Id: "cat_c", Name: "站C", Uri: "http://c.test", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "cat_d", Name: "站D", Uri: "http://d.test", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_ = RefreshCollectSourceCatalog()
+
+	if err := gdb.Where("id = ?", "cat_c").Delete(&model.FilmSource{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var opWG sync.WaitGroup
+	opWG.Add(2)
+	go func() {
+		defer opWG.Done()
+		ForgetCollectSource("cat_c")
+	}()
+	go func() {
+		defer opWG.Done()
+		_ = RefreshCollectSourceCatalog()
+	}()
+	opWG.Wait()
+
+	list := GetCollectSourceList()
+	if len(list) != 1 || list[0].Id != "cat_d" {
+		t.Fatalf("expected only cat_d remaining after concurrent forget+refresh, got %+v", list)
+	}
+}

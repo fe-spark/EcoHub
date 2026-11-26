@@ -13,45 +13,89 @@ import (
 	"gorm.io/gorm"
 )
 
+type collectSourceCatalogSnapshot struct {
+	dbPtr *gorm.DB
+	list  []model.FilmSource
+}
+
 var (
-	collectSourceCatalog atomic.Pointer[[]model.FilmSource]
+	collectSourceCatalog atomic.Pointer[collectSourceCatalogSnapshot]
 	collectCatalogMu     sync.Mutex
 )
 
 // RefreshCollectSourceCatalog 用当前库里的采集站覆盖内存目录。查询失败保留原目录。
 func RefreshCollectSourceCatalog() error {
-	if db.Mdb == nil {
+	conn := db.Mdb
+	if conn == nil {
 		return errors.New("采集站目录刷新失败")
 	}
 	collectCatalogMu.Lock()
 	defer collectCatalogMu.Unlock()
+	return refreshCollectSourceCatalogLocked(conn)
+}
+
+func refreshCollectSourceCatalogLocked(conn *gorm.DB) error {
+	if conn == nil {
+		return errors.New("采集站目录刷新失败")
+	}
 	list := make([]model.FilmSource, 0)
-	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+	if err := conn.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		return err
 	}
-	collectSourceCatalog.Store(&list)
+	collectSourceCatalog.Store(&collectSourceCatalogSnapshot{
+		dbPtr: conn,
+		list:  list,
+	})
 	InvalidatePrimarySourceCache()
 	return nil
 }
 
-// forgetCollectSource 站点行已经删掉、目录重读失败时，从当前目录摘掉这一条。
-func ForgetCollectSource(id string) {
+// InvalidateCollectSourceCatalog 清空采集站内存目录与主站缓存，下次读取时重查库。
+func InvalidateCollectSourceCatalog() {
+	collectCatalogMu.Lock()
+	collectSourceCatalog.Store(nil)
+	collectCatalogMu.Unlock()
 	InvalidatePrimarySourceCache()
-	for {
-		cur := collectSourceCatalog.Load()
-		if cur == nil {
-			return
-		}
-		next := make([]model.FilmSource, 0, len(*cur))
-		for _, src := range *cur {
-			if src.Id != id {
-				next = append(next, src)
-			}
-		}
-		if collectSourceCatalog.CompareAndSwap(cur, &next) {
-			return
+}
+
+func ensureCollectSourceCatalog() (*collectSourceCatalogSnapshot, error) {
+	conn := db.Mdb
+	if conn == nil {
+		return nil, errors.New("采集站目录刷新失败")
+	}
+	if snap := collectSourceCatalog.Load(); snap != nil && snap.dbPtr == conn {
+		return snap, nil
+	}
+	collectCatalogMu.Lock()
+	defer collectCatalogMu.Unlock()
+	if snap := collectSourceCatalog.Load(); snap != nil && snap.dbPtr == conn {
+		return snap, nil
+	}
+	if err := refreshCollectSourceCatalogLocked(conn); err != nil {
+		return nil, err
+	}
+	return collectSourceCatalog.Load(), nil
+}
+
+// ForgetCollectSource 站点行已经删掉、目录重读失败时，从当前目录摘掉这一条。
+func ForgetCollectSource(id string) {
+	collectCatalogMu.Lock()
+	defer collectCatalogMu.Unlock()
+	InvalidatePrimarySourceCache()
+	cur := collectSourceCatalog.Load()
+	if cur == nil {
+		return
+	}
+	next := make([]model.FilmSource, 0, len(cur.list))
+	for _, src := range cur.list {
+		if src.Id != id {
+			next = append(next, src)
 		}
 	}
+	collectSourceCatalog.Store(&collectSourceCatalogSnapshot{
+		dbPtr: cur.dbPtr,
+		list:  next,
+	})
 }
 
 // FindCollectSourceForDelete 只查内存目录。目录还没装过时先装一次。
@@ -60,19 +104,13 @@ func FindCollectSourceForDelete(id string) *model.FilmSource {
 	if id == "" {
 		return nil
 	}
-	list := collectSourceCatalog.Load()
-	if list == nil {
-		if err := RefreshCollectSourceCatalog(); err != nil {
-			return nil
-		}
-		list = collectSourceCatalog.Load()
-	}
-	if list == nil {
+	snap, err := ensureCollectSourceCatalog()
+	if err != nil || snap == nil {
 		return nil
 	}
-	for i := range *list {
-		if (*list)[i].Id == id {
-			src := (*list)[i]
+	for i := range snap.list {
+		if snap.list[i].Id == id {
+			src := snap.list[i]
 			return &src
 		}
 	}
@@ -157,7 +195,16 @@ func GetCollectSourceListTx(tx *gorm.DB) []model.FilmSource {
 	return list
 }
 
-// GetCollectSourceList 获取采集站 API 列表（按排序序号升序）。
+// GetCollectSourceList 获取采集站 API 列表（优先命中内存目录，避免每页写库重复查表）。
 func GetCollectSourceList() []model.FilmSource {
-	return GetCollectSourceListTx(nil)
+	snap, err := ensureCollectSourceCatalog()
+	if err != nil {
+		return GetCollectSourceListTx(nil)
+	}
+	if snap == nil {
+		return nil
+	}
+	out := make([]model.FilmSource, len(snap.list))
+	copy(out, snap.list)
+	return out
 }

@@ -2,6 +2,7 @@ package writer
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -60,8 +61,16 @@ func lockManualUpdate(source *model.FilmSource, existingFilm model.FilmIndex, de
 		mu.Lock()
 		held = append(held, mu)
 	}
-	if source != nil {
-		mu := getSourceWriteLock(source.Id)
+	srcLockIDs := make([]string, 0, 2)
+	if source != nil && strings.TrimSpace(source.Id) != "" {
+		srcLockIDs = append(srcLockIDs, strings.TrimSpace(source.Id))
+	}
+	if ownerID := strings.TrimSpace(existingFilm.FirstSourceId); ownerID != "" && (len(srcLockIDs) == 0 || srcLockIDs[0] != ownerID) {
+		srcLockIDs = append(srcLockIDs, ownerID)
+	}
+	sort.Strings(srcLockIDs)
+	for _, sid := range srcLockIDs {
+		mu := getSourceWriteLock(sid)
 		mu.Lock()
 		held = append(held, mu)
 	}

@@ -329,14 +329,22 @@ func notifySourcePageCacheKey(q BatchSourceCategoryPageQuery) string {
 	return config.NotifyBatchCachePrefix + ":pg:" + hex.EncodeToString(sum[:12])
 }
 
-// LoadBatchSourceCategoryStats 基于 collect_record_films 账本在数据库侧按分类聚合计数
-func LoadBatchSourceCategoryStats(batchID string) ([]BatchSourceCategoryStatRow, error) {
+var loadBatchSourceCategoryStatsFn = LoadBatchSourceCategoryStatsForSource
+
+// LoadBatchSourceCategoryStatsForSource 基于 collect_record_films 账本按单站条件聚合分类计数，利用 (batch_id, source_id, id) 索引拆分超大批量查询。
+func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceID string) ([]BatchSourceCategoryStatRow, error) {
 	batchID = strings.TrimSpace(batchID)
-	if batchID == "" || db.Mdb == nil {
+	sourceID = strings.TrimSpace(sourceID)
+	if batchID == "" || sourceID == "" || db.Mdb == nil {
 		return nil, nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	type statRaw struct {
-		SourceID        string
 		FirstSourceId   sql.NullString
 		Pid             sql.NullInt64
 		Cid             sql.NullInt64
@@ -345,11 +353,11 @@ func LoadBatchSourceCategoryStats(batchID string) ([]BatchSourceCategoryStatRow,
 		Count           int64
 	}
 	var rows []statRaw
-	err := db.Mdb.Table("collect_record_films AS crf").
-		Select("crf.source_id, fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key, COUNT(*) AS count").
+	err := db.Mdb.WithContext(ctx).Table("collect_record_films AS crf").
+		Select("fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key, COUNT(*) AS count").
 		Joins(filmIndexJoinClause(db.Mdb)).
-		Where("crf.batch_id = ? AND fi.deleted_at IS NULL", batchID).
-		Group("crf.source_id, fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key").
+		Where("crf.batch_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", batchID, sourceID).
+		Group("fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -357,7 +365,7 @@ func LoadBatchSourceCategoryStats(batchID string) ([]BatchSourceCategoryStatRow,
 	out := make([]BatchSourceCategoryStatRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, BatchSourceCategoryStatRow{
-			SourceID:        strings.TrimSpace(r.SourceID),
+			SourceID:        sourceID,
 			FirstSourceId:   strings.TrimSpace(r.FirstSourceId.String),
 			Pid:             r.Pid.Int64,
 			Cid:             r.Cid.Int64,

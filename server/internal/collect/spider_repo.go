@@ -422,7 +422,10 @@ func EnsureDefaultPosterSource() error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
-	return EnsureDefaultPosterSourceTx(db.Mdb)
+	if err := EnsureDefaultPosterSourceTx(db.Mdb); err != nil {
+		return err
+	}
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }
 
 // UpdateCollectSource 更新采集站。
@@ -430,7 +433,10 @@ func UpdateCollectSource(s model.FilmSource) error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		return UpdateCollectSourceTx(tx, s)
-	})
+	}); err != nil {
+		return err
+	}
+	return sourcecatalog.RefreshCollectSourceCatalog()
 }

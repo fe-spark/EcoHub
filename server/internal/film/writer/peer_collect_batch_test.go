@@ -486,3 +486,24 @@ func assertMatchKeys(t *testing.T, gdb *gorm.DB, mid int64, want []string) {
 		}
 	}
 }
+
+func TestLockPeerCollectPage_DoesNotBlockAcrossSourcesWithSameTitle(t *testing.T) {
+	detail := testPeerDetail(101, "同名并发影片", "第1集")
+	detail.DbId = 987654
+
+	unlockA := lockPeerCollectPage(&model.FilmSource{Id: "src-concurrent-a", Name: "站A"}, []model.MovieDetail{detail})
+	defer unlockA()
+
+	lockedB := make(chan struct{})
+	go func() {
+		unlockB := lockPeerCollectPage(&model.FilmSource{Id: "src-concurrent-b", Name: "站B"}, []model.MovieDetail{detail})
+		unlockB()
+		close(lockedB)
+	}()
+
+	select {
+	case <-lockedB:
+	case <-time.After(time.Second):
+		t.Fatal("lockPeerCollectPage blocked across distinct sources with same movie")
+	}
+}

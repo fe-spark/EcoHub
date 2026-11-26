@@ -1,16 +1,21 @@
 package notify
 
 import (
+	"context"
 	"server/internal/film"
 	"server/internal/film/catalog"
 	"server/internal/film/snapshot"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repobase"
 	"server/internal/sourcecatalog"
 	"server/internal/taxonomy"
 	"server/internal/utils"
 	"strings"
+	"time"
 )
+
+const notifySourceStatsTimeout = 10 * time.Second
 
 func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize int) (model.NotifyBatchSession, error) {
 	if pageSize <= 0 {
@@ -35,35 +40,77 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 
 	collectBatchID := strings.TrimSpace(payload.CollectBatchID)
 	hasLedger := false
-	var statsBySource map[string][]BatchSourceCategoryStatRow
+	primaryStatsUnavailable := false
+	statsBySource := make(map[string][]BatchSourceCategoryStatRow, len(payload.Sources))
+	statsFailed := make(map[string]bool, len(payload.Sources))
 	if collectBatchID != "" {
 		ok, err := HasCollectBatchLedger(collectBatchID)
 		if err != nil {
-			return model.NotifyBatchSession{}, err
-		}
-		if ok {
-			statsRows, err := LoadBatchSourceCategoryStats(collectBatchID)
-			if err != nil {
-				return model.NotifyBatchSession{}, err
+			syslog.Warnf("[Notify] 查询账本状态失败，降级仅发汇总 batch=%s err=%v", collectBatchID, err)
+			if activeSourceID != "" {
+				primaryStatsUnavailable = true
 			}
+		} else if ok {
 			hasLedger = true
-			statsBySource = make(map[string][]BatchSourceCategoryStatRow)
-			for _, r := range statsRows {
-				sid := strings.TrimSpace(r.SourceID)
-				statsBySource[sid] = append(statsBySource[sid], r)
+			seenSources := make(map[string]struct{}, len(payload.Sources)+1)
+			loadStats := func(sid string) {
+				sid = strings.TrimSpace(sid)
+				if sid == "" {
+					return
+				}
+				if _, done := seenSources[sid]; done {
+					return
+				}
+				seenSources[sid] = struct{}{}
+				statsCtx, cancel := context.WithTimeout(context.Background(), notifySourceStatsTimeout)
+				rows, statErr := loadBatchSourceCategoryStatsFn(statsCtx, collectBatchID, sid)
+				cancel()
+				if statErr != nil {
+					syslog.Warnf("[Notify] 统计站点分类失败，降级仅发汇总 batch=%s source=%s err=%v", collectBatchID, sid, statErr)
+					statsFailed[sid] = true
+					if sid == activeSourceID {
+						primaryStatsUnavailable = true
+					}
+					return
+				}
+				statsBySource[sid] = rows
+			}
+			for _, src := range payload.Sources {
+				loadStats(src.SourceID)
+			}
+			if activeSourceID != "" {
+				loadStats(activeSourceID)
 			}
 		}
 	}
 
-	visibleCount := countPrimaryVisibleFromStats(activeSourceID, statsBySource[activeSourceID])
+	visibleCount := 0
+	if primaryStatsUnavailable {
+		visibleCount = -1
+	} else {
+		visibleCount = countPrimaryVisibleFromStats(activeSourceID, statsBySource[activeSourceID])
+	}
 
 	sources := make([]model.NotifySourceSession, 0, len(payload.Sources))
 	for _, src := range payload.Sources {
 		srcID := strings.TrimSpace(src.SourceID)
 		isPrimary := activeSourceID != "" && srcID == activeSourceID
-		srcCats, srcAllCount, err := buildSourceCategoryCountsFromStats(srcID, statsBySource[srcID])
-		if err != nil {
-			return model.NotifyBatchSession{}, err
+		var (
+			srcCats     []model.NotifySourceCategoryGroup
+			srcAllCount int
+		)
+		if hasLedger {
+			if statsFailed[srcID] {
+				srcAllCount = src.FilmsTotal
+			} else {
+				var catErr error
+				srcCats, srcAllCount, catErr = buildSourceCategoryCountsFromStats(srcID, statsBySource[srcID])
+				if catErr != nil {
+					syslog.Warnf("[Notify] 聚合站点分类导航失败，降级仅发汇总 batch=%s source=%s err=%v", collectBatchID, srcID, catErr)
+					srcCats = nil
+					srcAllCount = src.FilmsTotal
+				}
+			}
 		}
 		displayTotal := src.FilmsTotal
 		if srcAllCount > displayTotal {

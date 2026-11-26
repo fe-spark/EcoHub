@@ -1272,3 +1272,132 @@ func TestRunTelegramPoller_ConcurrentCallbackHandling(t *testing.T) {
 		t.Fatal("poller did not stop after cancel")
 	}
 }
+
+func TestPublishBatchSummary_StatsTimeoutDegradesAndStillSends(t *testing.T) {
+	setupNotifyConfigDB(t)
+	gdb := db.Mdb
+	if err := gdb.AutoMigrate(
+		&model.FilmSource{},
+		&model.Category{},
+		&model.SourceCategory{},
+		&model.CategoryMapping{},
+		&model.PrimaryState{},
+		&model.MappingRule{},
+		&model.CollectRecord{},
+		&model.CollectRecordFilmItem{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	prevRdb := db.Rdb
+	db.Rdb = nil
+	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
+	sourcecatalog.InvalidateCollectSourceCatalog()
+	catalog.InvalidatePublicSourceCache()
+	catalog.MarkCategoryChanged()
+	t.Cleanup(func() {
+		db.Rdb = prevRdb
+		taxonomy.StoreMappingSnapshotForTest(prevSnap)
+		sourcecatalog.InvalidateCollectSourceCatalog()
+		catalog.InvalidatePublicSourceCache()
+		catalog.MarkCategoryChanged()
+	})
+
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABCDEF",
+		ChatIDs:  []string{"-100123"},
+		Events: model.NotifyEventSwitches{
+			CollectBatchSummary: true,
+		},
+		OnlyNotifyOnUpdate: true,
+		MaxFilmsInMessage:  15,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_p", Name: "主站P", Uri: "http://1", State: true, Sort: 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_s", Name: "备站S", Uri: "http://2", State: true, Sort: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: "src_p"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	const batchID = "batch_degrade_01"
+	now := time.Now()
+	if err := gdb.Create(&model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sourcecatalog.InvalidateCollectSourceCatalog()
+
+	prevStatsFn := loadBatchSourceCategoryStatsFn
+	loadBatchSourceCategoryStatsFn = func(ctx context.Context, bid, sourceID string) ([]BatchSourceCategoryStatRow, error) {
+		if sourceID == "src_p" {
+			return nil, context.DeadlineExceeded
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { loadBatchSourceCategoryStatsFn = prevStatsFn })
+
+	var (
+		mu       sync.Mutex
+		sentText string
+	)
+	sentCh := make(chan struct{}, 1)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			raw, _ := io.ReadAll(r.Body)
+			var body map[string]any
+			_ = json.Unmarshal(raw, &body)
+			mu.Lock()
+			sentText, _ = body["text"].(string)
+			mu.Unlock()
+			select {
+			case sentCh <- struct{}{}:
+			default:
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
+	}))
+	defer ts.Close()
+	oldBase := tgAPIBaseURL
+	tgAPIBaseURL = ts.URL
+	t.Cleanup(func() { tgAPIBaseURL = oldBase })
+
+	payload := model.CollectBatchNotifyPayload{
+		CollectBatchID: batchID,
+		Trigger:        model.CollectTriggerManual,
+		StartedAt:      now.Add(-5 * time.Minute),
+		FinishedAt:     now,
+		Sources: []model.SourceNotifyResult{
+			{SourceID: "src_p", SourceName: "主站P", Status: model.CollectStatusDone, FilmsTotal: 100},
+			{SourceID: "src_s", SourceName: "备站S", Status: model.CollectStatusDone, FilmsTotal: 50},
+		},
+	}
+
+	sess, err := buildNotifyBatchSession(payload, 15)
+	if err != nil {
+		t.Fatalf("expected degraded session instead of error: %v", err)
+	}
+	if sess.Sources[0].AllCount != 100 || len(sess.Sources[0].Categories) != 0 {
+		t.Fatalf("expected degraded primary source to fall back to FilmsTotal=100, got %+v", sess.Sources[0])
+	}
+	kb := buildSourceCategoryKeyboard(sess.BatchID, 0, sess.Sources[0].Categories, sess.Sources[0].AllCount)
+	if kb == nil || len(kb.InlineKeyboard) == 0 || !strings.Contains(kb.InlineKeyboard[0][0].Text, "全部 (100)") {
+		t.Fatalf("expected fallback all button for degraded source, got %+v", kb)
+	}
+
+	NotifySvc.PublishBatchSummary(payload)
+	select {
+	case <-sentCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for degraded summary notification")
+	}
+	mu.Lock()
+	gotText := sentText
+	mu.Unlock()
+	if !strings.Contains(gotText, "共入库 <b>150</b> 部") || !strings.Contains(gotText, "主站：<b>主站P</b> · 前台可见：统计超时") {
+		t.Fatalf("unexpected degraded summary html: %s", gotText)
+	}
+}

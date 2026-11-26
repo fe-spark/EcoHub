@@ -68,7 +68,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	if len(mapped) == 0 && !isPrimaryCollectSourceTx(tx, source) {
+	if len(mapped) == 0 && !isPrimaryCollectSource(tx, source, sources) {
 		return writePeerPageCreateTx(tx, source, details, sources)
 	}
 	if err = bindMappedFilmsTx(tx, items, mapped); err != nil {
@@ -209,6 +209,18 @@ func claimLightPageTx(tx *gorm.DB, sourceID string, items []peerPageItem) error 
 		}
 	}
 	return nil
+}
+
+func isPrimaryCollectSource(tx *gorm.DB, source *model.FilmSource, sources []model.FilmSource) bool {
+	if source == nil {
+		return true
+	}
+	for _, s := range sources {
+		if s.State {
+			return s.Id == source.Id
+		}
+	}
+	return isPrimaryCollectSourceTx(tx, source)
 }
 
 func isPrimaryCollectSourceTx(tx *gorm.DB, source *model.FilmSource) bool {

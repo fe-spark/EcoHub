@@ -99,7 +99,7 @@ func clearAllRuntimeAndRedisCaches() {
 	snapshot.BumpSearchCacheVersion()
 	film.RefreshMasterDataCaches()
 	repobase.ClearIndexPageCache()
-	sourcecatalog.InvalidatePrimarySourceCache()
+	sourcecatalog.InvalidateCollectSourceCatalog()
 	taxonomy.ResetCategoryNameCache()
 	taxonomy.ResetCategoryStableKeyCache()
 	taxonomy.TouchCategoryVersion()

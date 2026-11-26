@@ -185,7 +185,7 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 
 		sess, err := buildNotifyBatchSession(payload, cfg.MaxFilmsInMessage)
 		if err != nil {
-			syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+			syslog.Errorf("[Notify] 构建批次汇总会话失败: %v", err)
 			return
 		}
 

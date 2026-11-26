@@ -82,7 +82,13 @@ func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPa
 		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个 · 共入库 <b>%d</b> 部\n", successSrc, totalStored)
 	}
 	if name := strings.TrimSpace(primaryName); name != "" {
-		fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 前台可见 <b>%d</b> 部\n", html.EscapeString(singleLine(name)), updatedCount)
+		if updatedCount < 0 {
+			fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 前台可见：统计超时\n", html.EscapeString(singleLine(name)))
+		} else {
+			fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 前台可见 <b>%d</b> 部\n", html.EscapeString(singleLine(name)), updatedCount)
+		}
+	} else if updatedCount < 0 {
+		b.WriteString("🎬 前台可见：统计超时\n")
 	} else {
 		fmt.Fprintf(&b, "🎬 前台可见：<b>%d</b> 部\n", updatedCount)
 	}
