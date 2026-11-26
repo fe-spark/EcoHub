@@ -8,7 +8,7 @@ import {
 } from "@/lib/server-api";
 
 type HomeLoadResult =
-  | { status: "ok"; data: { banners: any[]; content: any[] } }
+  | { status: "ok"; data: { banners: any[]; content: any[]; recommends: any[]; homeLayout: any[] } }
   | { status: "unauthorized" }
   | { status: "error"; message: string };
 
@@ -17,6 +17,8 @@ async function getHomeData(): Promise<HomeLoadResult> {
     const response = await serverGet<{
       banners: any[];
       content: any[];
+      recommends?: any[];
+      homeLayout?: any[];
     }>("/home");
 
     if (response.code === 0 && response.data) {
@@ -25,6 +27,8 @@ async function getHomeData(): Promise<HomeLoadResult> {
         data: {
           banners: response.data.banners ?? [],
           content: response.data.content ?? [],
+          recommends: response.data.recommends ?? [],
+          homeLayout: response.data.homeLayout ?? [],
         },
       };
     }

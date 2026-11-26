@@ -17,6 +17,8 @@ const (
 	TableCrontabRecord      = "crontab_record"
 	TableSiteConfig         = "site_config_record"
 	TableBannerSlot         = "banner_slot"
+	TableHomeRecommendGroup = "home_recommend_group"
+	TableHomeRecommendItem  = "home_recommend_item"
 	TableFileInfo           = "files"
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
@@ -56,6 +58,8 @@ var AllModels = []any{
 	&PrimaryState{},
 	&MovieSourceMapping{},
 	&BannerSlot{},
+	&HomeRecommendGroup{},
+	&HomeRecommendItem{},
 	&MappingRule{},
 	&CategoryMapping{},
 	&SourceCategory{},

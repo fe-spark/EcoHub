@@ -11,6 +11,7 @@ import FilmList from "@/components/public/FilmList";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import HomeHero, { type HeroBannerItem } from "./HomeHero";
+import HomeRecommends, { type RecommendSection } from "./HomeRecommends";
 import DailyUpdates from "./DailyUpdates";
 import EmptyCollectGuide from "@/components/public/EmptyCollectGuide";
 import styles from "./index.module.less";
@@ -58,12 +59,20 @@ function asHeroBanner(item: HeroBannerItem & { remark?: string }): HeroBannerIte
   };
 }
 
+interface HomeLayoutSlot {
+  kind: "daily_updates" | "category" | "recommend";
+  categoryId?: string;
+  recommend?: RecommendSection;
+}
+
 export default function HomePageView({
   data,
 }: {
   data: {
     banners: HeroBannerItem[];
     content: ContentSection[];
+    recommends?: RecommendSection[];
+    homeLayout?: HomeLayoutSlot[];
   };
 }) {
   const { navigate } = useContentNavigate();
@@ -101,102 +110,130 @@ export default function HomePageView({
     return <EmptyCollectGuide />;
   }
 
+  const renderCategorySection = (section: ContentSection, key: string | number) => {
+    if (!section.nav?.show) {
+      return null;
+    }
+    const movies = section.movies || [];
+    const hot = section.hot || [];
+
+    return (
+      <section key={key} className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <div className={styles.left}>
+            {getSectionIcon(section.nav.name)}
+            <a
+              onClick={() => {
+                navigate(`/category?pid=${section.nav.id}`, "分类加载中");
+              }}
+              style={{ cursor: "pointer" }}
+            >
+              {section.nav.name}
+            </a>
+          </div>
+          <div className={styles.nav}>
+            {section.nav.children?.slice(0, 6).map((child, childIndex) => (
+              <a
+                key={childIndex}
+                onClick={() => {
+                  navigate(
+                    `/category/filter?pid=${child.pid}&category=${child.id}`,
+                    "分类加载中",
+                  );
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                {child.name}
+              </a>
+            ))}
+            <a
+              className={styles.more}
+              onClick={() => {
+                navigate(`/category?pid=${section.nav.id}`, "分类加载中");
+              }}
+              style={{ cursor: "pointer" }}
+            >
+              更多 &gt;
+            </a>
+          </div>
+        </div>
+
+        <div className={styles.sectionBody}>
+          <div className={styles.filmGrid}>
+            <FilmList
+              list={movies.slice(0, 12)}
+              className={styles.homeList}
+              col={6}
+            />
+          </div>
+
+          <div className={styles.sideList}>
+            <div className={styles.sideTitle}>
+              <FireOutlined style={{ color: "#ff4d4f" }} />
+              热播{section.nav.name}
+            </div>
+            {hot.length > 0 ? (
+              hot.slice(0, 12).map((movie, movieIndex) => (
+                <div
+                  key={movieIndex}
+                  className={styles.hotItem}
+                  onClick={() => goPlay(movie.id)}
+                >
+                  <span className={styles.rank}>{movieIndex + 1}.</span>
+                  <span className={styles.name}>{movie.name}</span>
+                </div>
+              ))
+            ) : (
+              <div
+                style={{
+                  color: "var(--public-text-3, rgba(255, 255, 255, 0.45))",
+                  fontSize: 13,
+                  padding: "24px 0",
+                  textAlign: "center",
+                }}
+              >
+                暂无热播影片
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  };
+
+  const sectionByCategoryId = new Map<string, ContentSection>();
+  for (const sec of data.content || []) {
+    if (sec.nav?.id) {
+      sectionByCategoryId.set(String(sec.nav.id), sec);
+    }
+  }
+  const hasExplicitLayout = Array.isArray(data.homeLayout) && data.homeLayout.length > 0;
+
   return (
     <div className={styles.container}>
       <HomeHero banners={heroDeck} />
 
-      <DailyUpdates />
-
-      {data.content.map((section, idx) => {
-        if (!section.nav?.show) {
+      {hasExplicitLayout ? (
+        data.homeLayout!.map((slot, idx) => {
+          if (slot.kind === "daily_updates") {
+            return <DailyUpdates key={`daily-${idx}`} />;
+          }
+          if (slot.kind === "recommend" && slot.recommend) {
+            return <HomeRecommends key={`rec-${slot.recommend.id}`} sections={[slot.recommend]} />;
+          }
+          if (slot.kind === "category" && slot.categoryId) {
+            const sec = sectionByCategoryId.get(String(slot.categoryId));
+            return sec ? renderCategorySection(sec, `cat-${slot.categoryId}`) : null;
+          }
           return null;
-        }
-        const movies = section.movies || [];
-        const hot = section.hot || [];
-
-        return (
-          <section key={idx} className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <div className={styles.left}>
-                {getSectionIcon(section.nav.name)}
-                <a
-                  onClick={() => {
-                    navigate(`/category?pid=${section.nav.id}`, "分类加载中");
-                  }}
-                  style={{ cursor: "pointer" }}
-                >
-                  {section.nav.name}
-                </a>
-              </div>
-              <div className={styles.nav}>
-                {section.nav.children?.slice(0, 6).map((child, childIndex) => (
-                  <a
-                    key={childIndex}
-                    onClick={() => {
-                      navigate(
-                        `/category/filter?pid=${child.pid}&category=${child.id}`,
-                        "分类加载中",
-                      );
-                    }}
-                    style={{ cursor: "pointer" }}
-                  >
-                    {child.name}
-                  </a>
-                ))}
-                <a
-                  className={styles.more}
-                  onClick={() => {
-                    navigate(`/category?pid=${section.nav.id}`, "分类加载中");
-                  }}
-                  style={{ cursor: "pointer" }}
-                >
-                  更多 &gt;
-                </a>
-              </div>
-            </div>
-
-            <div className={styles.sectionBody}>
-              <div className={styles.filmGrid}>
-                <FilmList
-                  list={movies.slice(0, 12)}
-                  className={styles.homeList}
-                  col={6}
-                />
-              </div>
-
-              <div className={styles.sideList}>
-                <div className={styles.sideTitle}>
-                  <FireOutlined style={{ color: "#ff4d4f" }} />
-                  热播{section.nav.name}
-                </div>
-                {hot.length > 0 ? (
-                  hot.slice(0, 12).map((movie, movieIndex) => (
-                    <div
-                      key={movieIndex}
-                      className={styles.hotItem}
-                      onClick={() => goPlay(movie.id)}
-                    >
-                      <span className={styles.rank}>{movieIndex + 1}.</span>
-                      <span className={styles.name}>{movie.name}</span>
-                    </div>
-                  ))
-                ) : (
-                  <div
-                    style={{
-                      color: "var(--public-text-3, rgba(255, 255, 255, 0.45))",
-                      fontSize: 13,
-                      padding: "24px 0",
-                      textAlign: "center",
-                    }}
-                  >
-                    暂无热播影片
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-        );
-      })}
+        })
+      ) : (
+        <>
+          <HomeRecommends sections={data.recommends || []} />
+          <DailyUpdates />
+          {data.content.map((section, idx) => renderCategorySection(section, idx))}
+        </>
+      )}
     </div>
   );
 }

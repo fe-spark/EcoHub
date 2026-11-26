@@ -1,13 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button, Empty, Space, Spin, Tag } from "antd";
-import { DesktopOutlined, PlusOutlined } from "@ant-design/icons";
+import { DesktopOutlined, FireOutlined, PictureOutlined, PlusOutlined } from "@ant-design/icons";
+import { useRouter, useSearchParams } from "next/navigation";
+
+import ManagePageHeader from "@/app/manage/components/page-header";
 
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import {
-  ContentPageShell,
   ContentSectionCard,
   ContentSourceSelect,
 } from "@/app/manage/components/content-shell";
@@ -16,12 +18,14 @@ import BannerDrawer from "./banner-drawer";
 import BannerQuickDrawer from "./banner-quick-drawer";
 import BannerQuickModal from "./banner-quick-modal";
 import BannerGrid from "./banner-grid";
+import RecommendManager from "./recommend-manager";
 import { QuickConfigMemo, QuickStrategy } from "./banner-quick-config";
 import { useBannerWorkspace } from "./use-banner-workspace";
 import { BannerRecord, EditorMode } from "./types";
 import styles from "./index.module.less";
+import tabStyles from "./home-tabs.module.less";
 
-export default function BannersPageView() {
+function BannersTabView() {
   const tmdbEnabled = useTmdbEnabled();
   const { message, modal } = useAppMessage();
   const messageRef = useRef(message);
@@ -112,10 +116,8 @@ export default function BannersPageView() {
   const isCurrentPrimary = Boolean(sourceId && primaryId && sourceId === primaryId);
 
   return (
-    <ContentPageShell
-      title="首页轮播"
-      description="按采集站安排首页轮播展示的影片。"
-      headerActions={
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <ContentSourceSelect
           sources={sources}
           sourceId={sourceId}
@@ -123,9 +125,7 @@ export default function BannersPageView() {
           disabled={loading || orderSaving}
           onChange={handleSourceChange}
         />
-      }
-      dirty={orderDirty}
-    >
+      </div>
       <ContentSectionCard
         icon={<DesktopOutlined />}
         title="已排轮播"
@@ -259,6 +259,77 @@ export default function BannersPageView() {
         onDiscard={discardOrder}
         onSave={() => void handleSaveOrder()}
       />
-    </ContentPageShell>
+    </div>
+  );
+}
+
+type HomeManageTab = "banners" | "recommends";
+
+const HOME_MANAGE_TABS: { key: HomeManageTab; label: string; icon: React.ReactNode }[] = [
+  { key: "banners", label: "首页轮播", icon: <PictureOutlined /> },
+  { key: "recommends", label: "首页推荐", icon: <FireOutlined /> },
+];
+
+function HomeManageBody() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const currentTab: HomeManageTab =
+    searchParams.get("tab") === "recommends" ? "recommends" : "banners";
+
+  const replaceTabQuery = useCallback(
+    (tab: HomeManageTab) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", tab);
+      const qs = params.toString();
+      router.replace(qs ? `/manage/banners?${qs}` : "/manage/banners");
+    },
+    [router, searchParams],
+  );
+
+  return (
+    <div className={tabStyles.page}>
+      <ManagePageHeader
+        className={tabStyles.pageHeader}
+        title="首页管理"
+        description="统一管理首页轮播与首页推荐板块内容。"
+      />
+
+      <div className={tabStyles.tabBar} role="tablist" aria-label="首页管理分类">
+        {HOME_MANAGE_TABS.map((tab) => {
+          const active = currentTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={`${tabStyles.tabItem} ${active ? tabStyles.tabItemActive : ""}`}
+              onClick={() => replaceTabQuery(tab.key)}
+            >
+              <span className={tabStyles.tabIcon}>{tab.icon}</span>
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className={tabStyles.tabContent} role="tabpanel">
+        {currentTab === "recommends" ? (
+          <RecommendManager />
+        ) : (
+          <div className={tabStyles.tabPaneScrollable}>
+            <BannersTabView />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function BannersPageView() {
+  return (
+    <Suspense fallback={null}>
+      <HomeManageBody />
+    </Suspense>
   );
 }

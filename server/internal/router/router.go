@@ -128,6 +128,24 @@ func SetupRouter() *gin.Engine {
 			banner.DELETE(`/:id`, handler.ManageHd.BannerDelete)
 		}
 
+		// 首页推荐管理：按采集站区分分组与影片
+		recommend := manageRoute.Group(`/recommends`)
+		{
+			recommend.GET(``, handler.ManageRecommendHd.List)
+			recommend.POST(`/presets`, handler.ManageRecommendHd.InitPresets)
+			recommend.POST(`/groups`, handler.ManageRecommendHd.CreateGroup)
+			recommend.PATCH(`/groups/:id`, handler.ManageRecommendHd.UpdateGroup)
+			recommend.DELETE(`/groups/:id`, handler.ManageRecommendHd.DeleteGroup)
+			recommend.PUT(`/groups/order`, handler.ManageRecommendHd.ReorderGroups)
+			recommend.POST(`/groups/:id/items`, handler.ManageRecommendHd.AddItem)
+			recommend.PUT(`/groups/:id/items/order`, handler.ManageRecommendHd.ReorderItems)
+			recommend.DELETE(`/groups/:id/items`, handler.ManageRecommendHd.ClearGroupItems)
+			recommend.POST(`/groups/:id/sync`, handler.ManageRecommendHd.SyncGroup)
+			recommend.DELETE(`/items/:itemId`, handler.ManageRecommendHd.DeleteItem)
+			recommend.POST(`/generate`, handler.ManageRecommendHd.Generate)
+			recommend.PUT(`/deck`, handler.ManageRecommendHd.PublishDeck)
+		}
+
 		// 映射规则管理
 		mapping := manageRoute.Group(`/mapping`)
 		{

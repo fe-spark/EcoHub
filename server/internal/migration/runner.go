@@ -55,6 +55,20 @@ var migrations = []Migration{
 		Name:    "清理 film_index 历史重复与残缺冗余索引",
 		Run:     migrateFilmIndexDedup,
 	},
+	{
+		Version: "20261126_home_recommend",
+		Name:    "新增首页推荐分组与条目表",
+		Run: func(gdb *gorm.DB) error {
+			return gdb.AutoMigrate(&model.HomeRecommendGroup{}, &model.HomeRecommendItem{})
+		},
+	},
+	{
+		Version: "20261126_home_recommend_builtin",
+		Name:    "首页推荐分组增加内置板块标识字段",
+		Run: func(gdb *gorm.DB) error {
+			return gdb.AutoMigrate(&model.HomeRecommendGroup{})
+		},
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

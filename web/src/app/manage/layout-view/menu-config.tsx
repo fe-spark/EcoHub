@@ -38,7 +38,7 @@ export const menuItems: MenuItem[] = [
     label: "内容管理",
     children: [
       { key: "/manage/film", label: <span data-tour="menu-film">影片列表</span> },
-      { key: "/manage/banners", label: "首页轮播" },
+      { key: "/manage/banners", label: "首页管理" },
       { key: "/manage/collect/category", label: <span data-tour="menu-category">分类管理</span> },
       { key: "/manage/collect/category/rules", label: <span data-tour="menu-rules">分类规则</span> },
     ],

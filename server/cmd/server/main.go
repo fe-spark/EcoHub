@@ -128,6 +128,7 @@ func start() {
 			}
 		}
 	}()
+	service.HotChartsSvc.StartPoller()
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		log.Fatalf("[Init] HTTP 监听失败: %v", err)
