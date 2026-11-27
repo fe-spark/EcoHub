@@ -1,84 +1,35 @@
-测试版 **v3.1.7-beta.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.4`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
+正式版 **v3.2.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
 
 ### 升级说明
 
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.4`，然后执行 `docker compose pull && docker compose up -d`。
+- v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
-### v3.1.7-beta.4 更新内容
+### v3.2.0 更新内容
 
-- **首页管理与榜单编排**：整合首页管理、豆瓣/Bangumi 榜单推荐、默认一次性导入站点分类分组、采集完成后自动同步榜单，并优化前台首页加载与媒体反代包装。
-- **采集账本、写库与并发稳定**：改为流式聚簇主键账本与容量淘汰，写库先抢占更新时间后再建档并统一 `mid` 锁序，修复状态机竞态、删除隔离、换源顺序及前台分类隐式写库问题。
-- **安全加固与入口保护**：密码存储升级 `bcrypt`（平滑兼容历史 MD5）、登录改用双维度限流防跨 IP 锁号、加固 SSRF/同源校验与代理凭据脱敏，补齐请求体上限、读写超时、优雅停机及端到端回归测试。
-- **前后端细节修复**：修复私有化空分类跳转死循环、推荐/轮播保存边界、批次翻页状态异常及服务端超限大文件拆分精简。
+- **采集调度、账本与写入稳定性**：重构采集并发控制、失权退出代次校验与流式聚簇主键账本，恢复 16 路并发写槽并消除跨站 `matchKey` 锁阻塞；写库改为先抢占更新时间后建档、统一 `mid` 锁序并清理孤儿风险，新增 `partial_stopped` 部分停止批次状态。
+- **首页管理与榜单自动同步**：整合随机/豆瓣排片策略、采集站默认导入首页分类分组与采集完成自动同步榜单，补齐大站兜底索引提示与相关片单缓存，并将前台分类访问链路收口为严格只读。
+- **安全加固、代理防护与私有化治理**：密码存储升级 `bcrypt`（登录兼容平滑升级历史 MD5），登录改为 IP / IP+账号双维度限流，完善 SSRF/同源严格校验、Telegram/TMDB/代理脱敏、私有化前后台及 `/provide` 接口访问校验与管理端订阅二维码。
+- **HTTP 策略、通知容错与架构重构（#117）**：按业务域重组服务端包结构并显式装配跨包钩子，拆分采集汇总账本统计与并发处理 TG 回调，补充全链路请求体上限、超时、优雅停机、前端交互细节修复与全量并发/安全回归测试。
 
 ---
 
-测试版 **v3.1.7-beta.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.3`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
+正式版 **v3.1.7**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
 
 ### 升级说明
 
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.3`，然后执行 `docker compose pull && docker compose up -d`。
+- v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
 
-### v3.1.7-beta.3 更新内容
+### v3.1.7 更新内容
 
-- **采集写入吞吐**：恢复 16 路并发写槽，移除全站平权入库时的跨站 `matchKey` 锁阻塞与每页冗余 `film_sources` 查库，并完善目录内存快照失效、更新刷新与并发同步。
-- **TG 通知容错**：将采集汇总账本分类统计拆分为按站点索引查询（设 10s 超时），统计失败时降级照常推送汇总并保留「全部」片单下钻。
-
----
-
-测试版 **v3.1.7-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
-
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`，然后执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.1.7-beta.2 更新内容
-
-- **Telegram 通知与回调**：采集通知彻底切换为基于 `collect_record_films` 账本按 `id ASC` 早停分页查询与 Redis 页缓存，移除全量内存 `MID` 传输；回调轮询改为并发 worker 处理并加设查询超时，解决大批量数据点击无响应。
-- **访问安全与站点配置**：加固私有化部署下前后台与 `/provide` 接口访问校验，新增站点访问配置与管理端订阅二维码弹窗，并补充并发与安全回归测试。
-- **采集封口与查询性能**：修复检索封口重建重试状态竞争与无库兜底收敛，优化横幅检索候选与相关片单缓存查询，清理服务端无引用死代码。
-
----
-
-测试版 **v3.1.7-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
-
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`，然后执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.1.7-beta.1 更新内容
-
-- **一键排片**：新增「随机排片」策略，优化大站兜底查询索引与 `cid` 复合索引列序以降低超时风险。
-- **内容与代理**：完善内容管理边界校验，修复网络代理全链路校验、凭据状态、传输池缓存及流式发布并发竞态。
-- **服务端结构（#117）**：按业务域重组服务端包结构并显式装配跨包钩子，收拢级联清理与统一鉴权辅助。
-
----
-
-测试版 **v3.1.7-beta.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.0`。带连字符的预发布标签不会把 `:latest` 指到此版本。正式版仍是下方的 v3.1.6。
-
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
-
-### 升级说明
-
-- 测试安装：在安装目录把 `ECOHUB_IMAGE` 设为 `ghcr.io/fe-spark/ecohub:v3.1.7-beta.0`，然后执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
-
-### v3.1.7-beta.0 更新内容
-
-- **采集与定时调度**：修复采集与定时链路并发占用、失权退出误读进度及检索封口重试边界；取消定时补采并统一按站点防重，明确非采集任务均属维护任务。
-- **采集记录与部分停止状态**：精简采集记录列表、详情抽屉与异常原因弹窗，移除异常站点接口与进行中实时明细叠加，修正单片重试判定，并新增 `partial_stopped`（部分停止）批次状态以区分全部停止与部分停止。
+- **首页管理（#119）**：原「首页轮播」升级为包含「首页轮播」与「首页推荐」的「首页管理」，支持统一编排内置板块与自定义推荐分组的顺序和显隐。
+- **豆瓣与 Bangumi 推荐（#119）**：轮播一键排片新增「豆瓣推荐」策略，推荐分组支持选片排序、两段式一键排片及每 6 小时自动同步榜单反查本地片库。
+- **前台首页渲染（#119）**：依据后台板块配置动态渲染内置板块及自定义推荐行，并展示排名与豆瓣评分角标。
 
 ---
 

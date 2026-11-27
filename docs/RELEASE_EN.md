@@ -1,84 +1,35 @@
-Pre-release **v3.1.7-beta.4**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.4`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
+Release **v3.2.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.4` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.1.7-beta.4 changes
+### v3.2.0 changes
 
-- **Home management & hot-chart sync**: unify homepage banner/recommend management with Douban & Bangumi ranking strategies, import default category groups once on first setup, auto-sync charts after collection, and wrap portal media proxy URLs.
-- **Collect ledger, writes & concurrency**: adopt streaming clustered ledger cleanup with bounded retention, claim `vod_time` before creating `film_index` with unified `mid` lock ordering, fix progress data races, source delete isolation, source swap order, and keep public category reads strictly read-only.
-- **Security hardening & HTTP policy**: upgrade passwords to `bcrypt` with transparent MD5 migration, replace global username login lockouts with IP / IP+account limiters, tighten SSRF/origin validation and credential redaction, and enforce HTTP body/timeout limits and graceful shutdown.
-- **UI & maintainability fixes**: fix private empty-category login redirect loops, recommend/banner editing guards, batch pagination state, and modularize oversized server files.
+- **Collect scheduling, ledger & write stability**: overhaul collect concurrency boundaries, epoch validation on displaced exits, and streaming clustered ledger cleanup; restore 16 concurrent write slots without cross-source `matchKey` lock contention; claim `vod_time` before creating `film_index` with unified `mid` lock ordering, and add the `partial_stopped` batch status.
+- **Home management & hot-chart sync**: add the random quick-banner strategy, import default source category groups once into homepage recommendations on first setup, auto-sync ranking charts after collection, align fallback `cid` composite index ordering, and keep public category reads strictly read-only.
+- **Security hardening, SSRF & private mode**: upgrade password hashing to `bcrypt` with seamless MD5 migration on login, replace global username login locks with IP / IP+account limiters, harden SSRF/same-origin checks and credential redaction, and enforce private-mode guards plus subscription QR code support.
+- **HTTP policy, TG resilience & server refactor (#117)**: reorganize internal server packages by domain with explicit hook wiring, isolate per-source Telegram ledger stats and process callbacks concurrently, and enforce HTTP body/timeout policies, graceful shutdown, web UX fixes, and full concurrency/security regression coverage.
 
 ---
 
-Pre-release **v3.1.7-beta.3**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.3`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
+Release **v3.1.7**, image `ghcr.io/fe-spark/ecohub:v3.1.7` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.3` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.1.7-beta.3 changes
+### v3.1.7 changes
 
-- **Collect write throughput**: restore 16 concurrent write slots, remove cross-source `matchKey` lock contention and per-page `film_sources` queries during peer collection, and harden source catalog cache invalidation and concurrency.
-- **TG notification resilience**: split batch ledger category aggregation into per-source indexed queries (10s timeout) and gracefully degrade to summary-only delivery with full-list drilldown on stats timeouts.
-
----
-
-Pre-release **v3.1.7-beta.2**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.2`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
-
-[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
-
-### Upgrade notes
-
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.2` in your install directory, then run `docker compose pull && docker compose up -d`.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.1.7-beta.2 changes
-
-- **Telegram notifications & callbacks**: migrate batch summary pagination strictly to the `collect_record_films` ledger with `id ASC` early-stop queries and Redis page caching, remove full in-memory `MID` payloads, and process bot callbacks concurrently with DB timeouts to keep large-batch interactions responsive.
-- **Access security & subscription UI**: harden private-mode guards across portal and `/provide` endpoints, add access configuration and admin subscription QR code modal support, and expand regression coverage.
-- **Collect resealing & query performance**: fix search reseal retry state races and empty-library fallback convergence, optimize banner search and related-film read-model caching, and prune unused server dead code.
-
----
-
-Pre-release **v3.1.7-beta.1**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.1`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
-
-[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
-
-### Upgrade notes
-
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.1` in your install directory, then run `docker compose pull && docker compose up -d`.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.1.7-beta.1 changes
-
-- **Quick banner generation**: add the random strategy and align `cid` fallback queries with composite index ordering to reduce query timeouts.
-- **Content & proxy**: tighten content management boundaries and fix proxy validation, credential state, transport cache resets, and stream publish test races.
-- **Server layout (#117)**: reorganize internal packages by domain, wire cross-package hooks explicitly, and consolidate cascade cleanup and auth helpers.
-
----
-
-Pre-release **v3.1.7-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
-
-[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
-
-### Upgrade notes
-
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.1.7-beta.0 changes
-
-- **Collect & cron pipeline**: fix concurrency boundaries, progress epoch checks on displaced exits, and search reseal retry convergence; remove scheduled backfill in favor of per-source deduplication and treat all non-collect tasks as maintenance.
-- **Collect records & partial stop status**: streamline the collect history table, detail drawer, and error modal, remove the open incidents endpoint and live running-detail overlay, align single-film retry detection, and add the `partial_stopped` batch status to distinguish partial completion from full stops.
+- **Home management (#119)**: upgrade the banner admin menu into a two-tab "Home Management" view ("Banners" and "Recommendations") to reorder and toggle built-in sections and custom recommendation groups.
+- **Douban & Bangumi charts (#119)**: add a "Douban" quick-banner strategy and support manual picks, two-step quick generation, and 6-hour automatic chart syncing against the local library.
+- **Public homepage layout (#119)**: render built-in and custom recommendation sections according to the admin layout order and visibility, with rank and Douban rating badges.
 
 ---
 

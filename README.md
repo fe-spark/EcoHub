@@ -84,7 +84,7 @@ flowchart LR
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.6 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.0 sh
 ```
 
 安装完成后终端将输出访问地址、初始账号与订阅地址，默认 Web 端口为 `3000`，数据目录为 `~/ecohub`，后续可通过 `ecohub` 命令管理。密码、端口、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/README-Deploy.md)。
