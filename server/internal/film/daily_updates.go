@@ -2,6 +2,7 @@ package film
 
 import (
 	"errors"
+	"math"
 	"math/rand"
 	"strings"
 	"time"
@@ -245,7 +246,12 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	fromUnix, toUnix := q.From.Unix(), q.To.Unix()
 	sourceID := strings.TrimSpace(q.SourceId)
 	categoryVisible := filmsnapshot.SourceCategoryVisibility(sourceID)
-	start := (current - 1) * pageSize
+	start := math.MaxInt
+	if current <= 1 {
+		start = 0
+	} else if current-1 <= math.MaxInt/pageSize {
+		start = (current - 1) * pageSize
+	}
 	pool := make([]int64, 0)
 	err = filmsnapshot.VisitSearchMetasByUpdate(func(meta *filmsnapshot.FilmSearchMeta) bool {
 		skip, stop := dailyMetaStop(meta, sourceID, fromUnix, toUnix, categoryVisible)

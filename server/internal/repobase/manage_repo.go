@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -11,6 +12,8 @@ import (
 
 	"gorm.io/gorm"
 )
+
+var siteBasicSaveMu sync.Mutex
 
 // AccessGuardConfig 返回私有化开关和订阅密钥。
 func AccessGuardConfig() (bool, string, error) {
@@ -84,6 +87,8 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
+	siteBasicSaveMu.Lock()
+	defer siteBasicSaveMu.Unlock()
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SiteConfigRecord{}).Error; err != nil {
 			return err
@@ -93,12 +98,10 @@ func SaveSiteBasic(c model.BasicConfig) error {
 		return err
 	}
 
-	if err := DropConfigCache(config.SiteConfigBasic); err != nil {
-		return err
-	}
+	dropErr := DropConfigCache(config.SiteConfigBasic)
 	ClearIndexPageCache()
 	ClearProvideNetworkConfigCache()
-	return nil
+	return dropErr
 }
 
 func cachedBasicHasDanmaku(data string) bool {

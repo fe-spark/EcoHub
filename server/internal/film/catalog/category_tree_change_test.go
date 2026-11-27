@@ -332,3 +332,23 @@ func TestCategoryTreeSync_ClearRequestedButNoChanges_DoesNotClearPlaylists(t *te
 		t.Fatalf("playlists must remain, count=%d", count)
 	}
 }
+
+func TestDeleteOrphanDisplayRootCategories_PreservesRuleRoots(t *testing.T) {
+	gdb := setupCategoryChangeTestDB(t)
+
+	gdb.Create(&model.Category{Id: 100, Pid: 0, Name: "规则根", Show: true, StableKey: "rule:root:src1:abc"})
+	gdb.Create(&model.Category{Id: 101, Pid: 0, Name: "孤儿根", Show: true, StableKey: "source:orphan:1"})
+
+	if err := deleteOrphanDisplayRootCategories(); err != nil {
+		t.Fatalf("deleteOrphanDisplayRootCategories: %v", err)
+	}
+
+	var ruleCat model.Category
+	if err := gdb.Where("id = ?", 100).First(&ruleCat).Error; err != nil {
+		t.Fatalf("rule:root category must be preserved, err=%v", err)
+	}
+	var orphanCat model.Category
+	if err := gdb.Where("id = ?", 101).First(&orphanCat).Error; err == nil {
+		t.Fatalf("unmapped non-rule root category must be deleted")
+	}
+}

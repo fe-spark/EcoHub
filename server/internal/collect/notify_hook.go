@@ -93,7 +93,11 @@ func emitBatchNotify(b *collectBatchContext) {
 	for _, src := range sources {
 		detail, hasDetail := b.getSourceSnapshot(src.Id)
 		if !hasDetail {
-			snap, ok := progress.Snapshot(src.Id)
+			var snap model.CollectProgress
+			var ok bool
+			if epoch, hasEpoch := b.progressEpoch(src.Id); !hasEpoch || progress.Epoch(src.Id) == epoch {
+				snap, ok = progress.Snapshot(src.Id)
+			}
 			status := snap.Status
 			errMsg := strings.TrimSpace(errBySource[src.Id])
 			if !ok {

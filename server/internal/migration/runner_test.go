@@ -57,3 +57,20 @@ func TestRunAutoMigrations_NilDB(t *testing.T) {
 		t.Fatalf("nil db should be a no-op, got %v", err)
 	}
 }
+
+func TestRunAutoMigrations_AllTablesCreatedAndCollectRecordResetWorks(t *testing.T) {
+	testDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := RunAutoMigrations(testDB); err != nil {
+		t.Fatalf("RunAutoMigrations failed: %v", err)
+	}
+	for _, tbl := range []any{&model.MappingRule{}, &model.CollectRecord{}, &model.CollectRecordFilmItem{}} {
+		if !testDB.Migrator().HasTable(tbl) {
+			t.Fatalf("expected table for %T to be created", tbl)
+		}
+	}
+}

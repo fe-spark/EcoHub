@@ -1,6 +1,10 @@
 package shared
 
-import "server/internal/model/dto"
+import (
+	"math"
+
+	"server/internal/model/dto"
+)
 
 // EnsurePage 归一化分页参数：nil 或非法值回落到第 1 页、每页 20 条。
 func EnsurePage(page *dto.Page) *dto.Page {
@@ -16,11 +20,14 @@ func EnsurePage(page *dto.Page) *dto.Page {
 	return page
 }
 
-// PageOffset 计算已归一化分页参数的 SQL 偏移量。
+// PageOffset 计算已归一化分页参数的 SQL 偏移量（防整数乘法溢出）。
 func PageOffset(page *dto.Page) int {
 	page = EnsurePage(page)
 	if page.Current <= 1 {
 		return 0
+	}
+	if page.Current-1 > math.MaxInt/page.PageSize {
+		return math.MaxInt
 	}
 	return (page.Current - 1) * page.PageSize
 }

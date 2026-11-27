@@ -81,8 +81,10 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			return nil, err
 		}
 
-		if raw, err := json.Marshal(item); err == nil {
-			writeListCache(cacheKey, raw, listCacheTTL(len(item.Snapshots), tagSearchCacheTTL), listGen)
+		if page.Current <= 20 {
+			if raw, err := json.Marshal(item); err == nil {
+				writeListCache(cacheKey, raw, listCacheTTL(len(item.Snapshots), tagSearchCacheTTL), listGen)
+			}
 		}
 		return item, nil
 	})

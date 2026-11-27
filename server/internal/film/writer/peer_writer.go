@@ -330,7 +330,10 @@ func saveSinglePeerDetailTxCtx(ctx context.Context, source *model.FilmSource, de
 		var filmIndex *model.FilmIndex
 		if hasMapping {
 			var fi model.FilmIndex
-			if err := tx.Select(ownedFilmSyncSelect).Where("mid = ?", mid).First(&fi).Error; err == nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Select(ownedFilmSyncSelect).
+				Where("mid = ?", mid).
+				First(&fi).Error; err == nil {
 				filmIndex = &fi
 			}
 		}

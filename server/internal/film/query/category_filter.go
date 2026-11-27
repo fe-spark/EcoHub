@@ -138,12 +138,8 @@ func ApplySourceTypeMatchIDs(query *gorm.DB, sourceID, field string, typeIDs []i
 
 // LiveCategoryMemberSQLIDs 从该站播放线路取出这一组 type_id 的 mid。
 func LiveCategoryMemberSQLIDs(dialectName, sourceID, field string, typeIDs []int64) (string, []any) {
-	hint := ""
-	if dialectName == "mysql" {
-		hint = " USE INDEX (`idx_playlist_source_mid`)"
-	}
 	cond, condArgs := sourceTypeMatchCond("i.", field, sourceTypeKeys(sourceID, typeIDs))
-	memberSQL := "SELECT DISTINCT p.mid FROM " + model.TableFilmSourcePlaylist + " AS p" + hint +
+	memberSQL := "SELECT DISTINCT p.mid FROM " + model.TableFilmSourcePlaylist + " AS p" +
 		" INNER JOIN " + model.TableFilmIndex + " AS i ON i.mid = p.mid AND i.deleted_at IS NULL" +
 		" WHERE p.source_id = ? AND p.line_kind = ? AND " + cond
 	args := make([]any, 0, 2+len(condArgs))

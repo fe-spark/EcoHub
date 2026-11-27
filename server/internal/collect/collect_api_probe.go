@@ -42,6 +42,14 @@ func IsSiteResetRunning() bool {
 	return fn != nil && fn()
 }
 
+// BeginMaintenanceGate 占用采集维护闸门，阻止导入/升级期间新开采集或删站。
+func BeginMaintenanceGate() (func(), error) {
+	if err := collectLifecycle.beginMaintenance(); err != nil {
+		return nil, err
+	}
+	return collectLifecycle.endDrain, nil
+}
+
 const resetReadyWaitTimeout = 2 * time.Minute
 
 // PrepareAndRunReset 在全站数据重置前统一停采、清空排队并等待在途写入收敛，然后持独占锁执行清库回调。
@@ -70,6 +78,7 @@ func PrepareAndRunReset(report func(int, string), wipeFn func() error) error {
 		ClearAllCrons()
 		ClearAllLimiters()
 		ResetCollectStatsCoalescer()
+		streamBuf.reset(currentStreamNow())
 		if wipeFn != nil {
 			return wipeFn()
 		}
@@ -77,7 +86,7 @@ func PrepareAndRunReset(report func(int, string), wipeFn func() error) error {
 	})
 }
 
-// waitResetReady 等待在途写库与检索索引重建结束，避免清表与长查询争夺表元数据锁。
+// waitResetReady 等待在途写库、活跃批次收尾与检索索引重建结束，避免清表与长查询争夺表元数据锁。
 func waitResetReady(timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -86,8 +95,11 @@ func waitResetReady(timeout time.Duration) error {
 	}
 	for {
 		reason := SearchWorkBusyReason()
-		if reason == "" {
+		if reason == "" && activeBatchCount() == 0 {
 			return nil
+		}
+		if reason == "" {
+			reason = "等待采集批次结算结束"
 		}
 		select {
 		case <-ctx.Done():

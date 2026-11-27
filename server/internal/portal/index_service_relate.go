@@ -31,6 +31,14 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	var sourceID string
 	if len(sourceIdOpt) > 0 {
 		sourceID = strings.TrimSpace(sourceIdOpt[0])
+		if base, _, hasSep := strings.Cut(sourceID, "#"); hasSep {
+			sourceID = strings.TrimSpace(base)
+		}
+		if sourceID != "" {
+			if src := sourcecatalog.FindCollectSourceById(sourceID); src == nil || !src.State {
+				sourceID = ""
+			}
+		}
 	}
 	if sourceID == "" {
 		sourceID = sourcecatalog.CurrentPrimaryID()
@@ -42,7 +50,13 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	if snapErr != nil {
 		return nil, snapErr
 	}
-	if snapshot == nil || !taxonomy.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
+	visSource := sourceID
+	if visSource == "" && snapshot != nil {
+		visSource = snapshot.SourceId
+	}
+	categoryVisible := filmsnapshot.SourceCategoryVisibility(visSource)
+	if snapshot == nil || !taxonomy.IsCategoryVisible(snapshot.Cid, snapshot.Pid) ||
+		!categoryVisible(snapshot.CategoryKey, snapshot.RootCategoryKey, snapshot.Cid, snapshot.Pid) {
 		return []model.MovieBasicInfo{}, nil
 	}
 	exists, detailErr := filmsnapshot.HasMovieDetail(snapshot.Mid)
@@ -61,7 +75,8 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	}
 	visibleList := make([]model.FilmListSnapshot, 0, len(list))
 	for _, item := range list {
-		if taxonomy.IsCategoryVisible(item.Cid, item.Pid) {
+		if taxonomy.IsCategoryVisible(item.Cid, item.Pid) &&
+			categoryVisible(item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
 			visibleList = append(visibleList, item)
 		}
 	}

@@ -1,8 +1,6 @@
 package portal
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -248,6 +246,9 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		pg = 1
 	}
 	sort = utils.NormalizeSearchSortField(sort)
+	if t < 0 || (cid < 0 && cid != model.TagUncategorizedValue) {
+		return pg, 1, 0, []model.FilmList{}, nil
+	}
 	wd = strings.TrimSpace(wd)
 	sourceId := primaryProvideSourceID()
 	if sourceId == "" {
@@ -404,20 +405,6 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 		key = ""
 	}
 	siteName := displaySiteName(basic.SiteName)
-	cacheKey := config.TVBoxNetworkConfigCacheKey + ":site:" + url.QueryEscape(baseURL) + ":" + url.QueryEscape(siteName)
-	if key != "" {
-		sum := sha256.Sum256([]byte(key))
-		cacheKey += ":" + hex.EncodeToString(sum[:])
-	}
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var cached map[string]any
-			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached, nil
-			}
-		}
-	}
-
 	apiPath := baseURL + "/api/provide/vod"
 	sites := make([]map[string]any, 0, 1)
 	primary := sourcecatalog.CurrentPrimarySource()
@@ -440,19 +427,12 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 		})
 	}
 
-	configJson := map[string]any{
+	return map[string]any{
 		"spider":    "",
 		"wallpaper": "",
 		"logo":      "",
 		"sites":     sites,
-	}
-	if db.Rdb != nil {
-		if data, err := json.Marshal(configJson); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
-		}
-	}
-
-	return configJson, nil
+	}, nil
 }
 
 // GetAppSourceConfig 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置

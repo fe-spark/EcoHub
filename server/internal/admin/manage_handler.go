@@ -234,12 +234,14 @@ func (h *ManageHandler) TestSiteDanmaku(c *gin.Context) {
 		dto.Failed("弹幕接口地址无效或禁止访问内网地址", c)
 		return
 	}
-	if saved, err := ManageSvc.GetSiteDanmakuConfig(); err == nil {
-		if strings.TrimSpace(cfg.AppID) == "" {
-			cfg.AppID = saved.AppID
-		}
-		if strings.TrimSpace(cfg.AppSecret) == "" {
-			cfg.AppSecret = saved.AppSecret
+	if strings.TrimSpace(cfg.ApiURL) == "" {
+		if saved, err := ManageSvc.GetSiteDanmakuConfig(); err == nil {
+			if strings.TrimSpace(cfg.AppID) == "" {
+				cfg.AppID = saved.AppID
+			}
+			if strings.TrimSpace(cfg.AppSecret) == "" {
+				cfg.AppSecret = saved.AppSecret
+			}
 		}
 	}
 	res := danmaku.FetchSniffedDanmaku(cfg, title, req.Episode, false)

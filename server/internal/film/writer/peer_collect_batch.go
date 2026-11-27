@@ -343,7 +343,11 @@ func loadFilmsByMidsTx(tx *gorm.DB, mids []int64) (map[int64]*model.FilmIndex, e
 		return out, nil
 	}
 	var rows []model.FilmIndex
-	if err := tx.Select(ownedFilmSyncSelect).Where("mid IN ?", mids).Find(&rows).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select(ownedFilmSyncSelect).
+		Where("mid IN ?", mids).
+		Order("mid ASC").
+		Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	for i := range rows {

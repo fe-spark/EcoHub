@@ -23,6 +23,7 @@ var (
 	// resetSiteDataRunning 防止并发重复触发站点数据重置。
 	resetSiteDataRunning atomic.Bool
 	resetSiteLifecycle   atomic.Bool
+	siteMaintActive      atomic.Bool
 	// siteMaintMu 串行化站点数据重置与配置备份导入，消除并发交错与 TOCTOU。
 	siteMaintMu sync.Mutex
 
@@ -32,12 +33,16 @@ var (
 	OnResetReinitSite     func() error
 )
 
-// TryLockSiteMaintenance 非阻塞申请全局站点维护独占锁（供重置与配置导入互斥）。
+// TryLockSiteMaintenance 非阻塞申请全局站点维护独占锁（供重置、配置导入与在线升级互斥）。
 func TryLockSiteMaintenance() (func(), bool) {
 	if !siteMaintMu.TryLock() {
 		return nil, false
 	}
-	return siteMaintMu.Unlock, true
+	siteMaintActive.Store(true)
+	return func() {
+		siteMaintActive.Store(false)
+		siteMaintMu.Unlock()
+	}, true
 }
 
 func init() {
@@ -46,9 +51,9 @@ func init() {
 	})
 }
 
-// SiteMaintenanceActive 是否正处于全站清空重置生命周期（供 HTTP 中间件阻断并发读写）。
+// SiteMaintenanceActive 是否正处于全站清空重置或维护期（供 HTTP 中间件阻断并发读写）。
 func (s *ResetService) SiteMaintenanceActive() bool {
-	return resetSiteLifecycle.Load()
+	return resetSiteLifecycle.Load() || siteMaintActive.Load()
 }
 
 // triggerResetCategorySync 数据重置后异步回补默认站分类，测试可替换避免访问外网。

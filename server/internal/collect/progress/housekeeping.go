@@ -65,6 +65,7 @@ func pruneStale() {
 		state := value.(*progressState)
 		state.mu.Lock()
 		status := state.data.Status
+		epoch := state.epoch
 		_, live := tasks.Load(id)
 		state.mu.Unlock()
 		if !isActiveStatus(status) || live {
@@ -72,9 +73,8 @@ func pruneStale() {
 		}
 		occupied := abandonedOccupied(id, status, live)
 		state.mu.Lock()
-		status = state.data.Status
 		_, live = tasks.Load(id)
-		if isActiveStatus(status) && shouldMarkAbandoned(status, live, occupied) {
+		if state.epoch == epoch && state.data.Status == status && isActiveStatus(status) && shouldMarkAbandoned(status, live, occupied) {
 			state.data.Status = StatusFailed
 			state.updated = now
 			state.mu.Unlock()

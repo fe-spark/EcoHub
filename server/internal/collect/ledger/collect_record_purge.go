@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"server/internal/infra/db"
@@ -242,7 +243,7 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 	} else if status == model.CollectRecordStatusInterrupted && errMsg == "" {
 		errMsg = row.ErrorMsg
 	}
-	err = tx.Model(&model.CollectRecord{}).Where("id = ?", row.ID).Updates(map[string]any{
+	res := tx.Model(&model.CollectRecord{}).Where("id = ? AND status = ?", row.ID, row.Status).Updates(map[string]any{
 		"detail_json":     string(raw),
 		"status":          status,
 		"source_count":    len(kept),
@@ -254,9 +255,22 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 		"page_success":    pageSuccess,
 		"page_failed":     pageFailed,
 		"error_msg":       errMsg,
-	}).Error
-	if err != nil {
-		return "", err
+	})
+	if res.Error != nil {
+		return "", res.Error
+	}
+	if res.RowsAffected == 0 {
+		var fresh model.CollectRecord
+		if err := tx.Select("id", "batch_id", "status", "ledger", "error_msg", "detail_json").
+			Where("id = ?", row.ID).First(&fresh).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return "", nil
+			}
+			return "", err
+		}
+		if fresh.Status != row.Status {
+			return stripSourceFromCollectRecord(tx, fresh, sourceID, precomputedTotal, precomputedBySource)
+		}
 	}
 	return string(raw), nil
 }

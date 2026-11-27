@@ -287,11 +287,15 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	}
 	params.Pid, _ = strconv.ParseInt(pidStr, 10, 64)
 	params.Cid, _ = strconv.ParseInt(cidStr, 10, 64)
+	if params.Cid < 0 && params.Cid != model.TagUncategorizedValue {
+		dto.Failed("分类参数无效", c)
+		return
+	}
 	params.Plot = queryFirst(c, "plot", "Plot")
 	params.Area = queryFirst(c, "area", "Area")
 	params.Language = queryFirst(c, "language", "Language")
 	params.Year = yStr
-	params.Sort = queryFirst(c, "sort", "Sort")
+	params.Sort = utils.NormalizeSearchSortField(queryFirst(c, "sort", "Sort"))
 	params.SourceId = sourcecatalog.CurrentPrimaryID()
 
 	page := dto.GetPageParams(c)

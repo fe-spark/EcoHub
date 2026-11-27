@@ -51,8 +51,28 @@ func isAllowedCORSOrigin(c *gin.Context, origin string) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	trustedPeer := utils.IsTrustedForwardedPeer(c.Request.RemoteAddr)
+	reqScheme := "http"
+	if c.Request.TLS != nil {
+		reqScheme = "https"
+	} else if trustedPeer {
+		proto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto"))
+		if i := strings.IndexByte(proto, ','); i >= 0 {
+			proto = strings.TrimSpace(proto[:i])
+		}
+		if strings.EqualFold(proto, "https") {
+			reqScheme = "https"
+		}
+	}
+	if scheme != reqScheme {
+		return false
+	}
 	var reqHost string
-	if utils.IsTrustedForwardedPeer(c.Request.RemoteAddr) {
+	if trustedPeer {
 		reqHost = strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
 	}
 	if reqHost == "" {

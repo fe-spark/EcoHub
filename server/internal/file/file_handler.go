@@ -2,6 +2,8 @@ package file
 
 import (
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -24,6 +26,25 @@ func isAllowedImage(filename string) bool {
 	return utils.IsGalleryImage(filename)
 }
 
+func isAllowedImageContent(fh *multipart.FileHeader, filename string) bool {
+	f, err := fh.Open()
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var buf [512]byte
+	n, err := io.ReadFull(f, buf[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return false
+	}
+	head := buf[:n]
+	if strings.EqualFold(filepath.Ext(filename), ".ico") {
+		return len(head) >= 4 && head[0] == 0x00 && head[1] == 0x00 && head[2] == 0x01 && head[3] == 0x00
+	}
+	ct := http.DetectContentType(head)
+	return ct == "image/jpeg" || ct == "image/png" || ct == "image/webp"
+}
+
 const maxUploadImageBytes = 20 << 20 // 20MB
 
 // Upload 统一文件上传接口（支持图片上传）
@@ -43,7 +64,7 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		dto.Failed("图片大小须在 1 字节到 20MB 之间", c)
 		return
 	}
-	if !isAllowedImage(file.Filename) {
+	if !isAllowedImage(file.Filename) || !isAllowedImageContent(file, file.Filename) {
 		dto.Failed("仅支持上传 JPG/JPEG/PNG/WebP/ICO 格式的图片", c)
 		return
 	}

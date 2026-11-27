@@ -139,7 +139,7 @@ func (s *BannerService) Generate(ctx context.Context, req BannerGenerateReq) (Ba
 			if catName == "" {
 				catName = taxonomy.GetCategoryNameById(q.CategoryID)
 			}
-			rawCands, err := hotchart.HotChartsSvc.GetRawCandidatesByCategoryName(catName)
+			rawCands, err := hotchart.HotChartsSvc.GetRawCandidatesByCategoryNameCtx(ctx, catName)
 			if err != nil {
 				return BannerGenerateResult{}, bannerInputErr("获取豆瓣推荐榜单失败: %v", err)
 			}

@@ -79,6 +79,7 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 			return cur, nil
 		}
 		started := time.Now()
+		mutBefore := searchMetaMutationGen.Load()
 		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s primary=%s", version, primary)
 		items, plays, err := loadSearchIndexParts(version, primary)
 		if err != nil {
@@ -95,8 +96,12 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		idx := sealSearchMetaIndex(version, items)
 		idx.PrimaryID = primary
 		activeFilmSearchMetasMu.Lock()
+		mutatedDuringScan := searchMetaMutationGen.Load() != mutBefore
 		activeFilmSearchMetas.Store(idx)
 		activeFilmSearchMetasMu.Unlock()
+		if mutatedDuringScan {
+			RequestActiveFilmSearchIndexRebuild()
+		}
 		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s primary=%s count=%d cost=%s", version, primary, len(items), time.Since(started).Round(time.Millisecond))
 		notifySearchIndexIfCurrent(seen, int64(len(items)), int64(len(items)), "done")
 		return idx, nil

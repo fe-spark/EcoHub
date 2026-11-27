@@ -205,6 +205,9 @@ func loadPublicSourceTypes(sourceID string) (publicSourceView, error) {
 			publicSourceCacheMu.Lock()
 			// 仅当写回时全局规则与分类版本仍未变化才写入缓存，防止慢构建覆盖新版视图
 			if publicSourceCacheVersionKey(sourceID) == cacheKey {
+				if _, exists := publicSourceCache[sourceID]; !exists && len(publicSourceCache) >= 256 {
+					clear(publicSourceCache)
+				}
 				publicSourceCache[sourceID] = publicSourceCacheEntry{key: cacheKey, view: view}
 			}
 			publicSourceCacheMu.Unlock()

@@ -73,7 +73,6 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 	}
 	RemoveMidsFromActiveFilmSearchIndex(version, ids)
 	invalidateDeletedSnapshotCaches(version, ids)
-	RefreshAccessDataCaches()
 }
 
 // InvalidateCachesAfterSourceDelete 删站后的缓存与检索索引清理：

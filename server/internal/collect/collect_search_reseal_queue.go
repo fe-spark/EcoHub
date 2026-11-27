@@ -191,7 +191,16 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		filmsnapshot.WithSearchRebuildScheduled(func(scheduled bool) {
 			q.mu.Lock()
 			defer q.mu.Unlock()
-			if len(q.pending) > 0 || !(scheduled || filmsnapshot.IsSearchIndexBuilding()) {
+			if len(q.pending) > 0 {
+				return
+			}
+			if !(scheduled || filmsnapshot.IsSearchIndexBuilding()) {
+				if tok := filmsnapshot.SearchIndexProgressToken(); tok == nil || tok.Status != "done" {
+					q.running = false
+					q.sealRetries = 0
+					q.scheduleIdleRebuildRetryLocked()
+					parked = true
+				}
 				return
 			}
 			q.running = false
@@ -478,10 +487,7 @@ func (q *searchResealQueue) retryAfterIdleGen(gen uint64) {
 func (q *searchResealQueue) reconcileRetrySchedule(scheduled bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if !q.awaitDone {
-		return
-	}
-	if len(q.sealing) == 0 || q.running {
+	if !q.awaitDone || len(q.sealing) == 0 || q.running {
 		q.awaitDone = false
 		return
 	}

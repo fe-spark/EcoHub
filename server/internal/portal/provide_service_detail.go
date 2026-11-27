@@ -119,9 +119,13 @@ func (p *ProvideService) loadVodDetailMids(mids []int64, sourceId string) ([]mod
 		}
 	}
 
+	categoryVisible := filmsnapshot.SourceCategoryVisibility(sourceId)
+	isVisible := func(s model.FilmListSnapshot) bool {
+		return taxonomy.IsCategoryVisible(s.Cid, s.Pid) && categoryVisible(s.CategoryKey, s.RootCategoryKey, s.Cid, s.Pid)
+	}
 	var uncachedMids []int64
 	for _, s := range snapshots {
-		if !taxonomy.IsCategoryVisible(s.Cid, s.Pid) {
+		if !isVisible(s) {
 			continue
 		}
 		if _, ok := cachedVos[s.Mid]; !ok {
@@ -145,7 +149,7 @@ func (p *ProvideService) loadVodDetailMids(mids []int64, sourceId string) ([]mod
 		toCacheVo = make(map[int64]model.MovieDetailVo, len(uncachedMids))
 	}
 	for _, s := range snapshots {
-		if !taxonomy.IsCategoryVisible(s.Cid, s.Pid) {
+		if !isVisible(s) {
 			continue
 		}
 		if _, bad := broken[s.Mid]; bad {

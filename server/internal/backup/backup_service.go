@@ -129,6 +129,11 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) (retEr
 	}
 	var oldPrimaryBeforeImport *model.FilmSource
 	if req.Modules.FilmSources || req.Modules.MappingRules {
+		releaseGate, err := collect.BeginMaintenanceGate()
+		if err != nil {
+			return fmt.Errorf("进入采集维护态失败: %w", err)
+		}
+		defer releaseGate()
 		if err := collect.StopAllTasksAndWait(0, "导入配置，停止采集"); err != nil {
 			return fmt.Errorf("停止进行中的采集失败: %w", err)
 		}
@@ -143,9 +148,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) (retEr
 	filmSourcesCommitted := false
 	mappingRulesCommitted := false
 	defer func() {
-		if retErr != nil {
-			return
-		}
 		if needCategoryRefresh {
 			if err := catalog.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 				syslog.Errorf("[Backup] 刷新来源分类映射失败: %v", err)

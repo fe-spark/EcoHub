@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"server/internal/collect"
+	"server/internal/siteops"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -63,6 +65,9 @@ func (s *VersionService) CanOnlineUpgrade() bool {
 func (s *VersionService) StartUpgrade() error {
 	if !s.CanOnlineUpgrade() {
 		return fmt.Errorf("未挂载 Docker socket，或当前不是发布版容器")
+	}
+	if siteops.ResetSvc.SiteResetRunning() || siteops.ResetSvc.SiteMaintenanceActive() {
+		return fmt.Errorf("正在执行站点维护操作（重置或配置导入），请稍后再升级")
 	}
 	if !upgrading.CompareAndSwap(false, true) {
 		return fmt.Errorf("升级正在进行中")
@@ -139,6 +144,22 @@ func runContainerUpgrade(engine *dockerEngine, old containerInspect, image strin
 }
 
 func handoffContainer(ctx context.Context, engine *dockerEngine, old containerInspect, name, backup, image string) error {
+	if siteops.ResetSvc.SiteResetRunning() {
+		return fmt.Errorf("站点正在重置中，已中止升级切换")
+	}
+	unlockMaint, ok := siteops.TryLockSiteMaintenance()
+	if !ok {
+		return fmt.Errorf("正在执行站点维护操作（重置或配置导入），已中止升级切换")
+	}
+	defer unlockMaint()
+	if siteops.ResetSvc.SiteResetRunning() {
+		return fmt.Errorf("站点正在重置中，已中止升级切换")
+	}
+	if releaseGate, gateErr := collect.BeginMaintenanceGate(); gateErr == nil {
+		defer releaseGate()
+	}
+	_ = collect.StopAllTasksAndWait(10*time.Second, "在线升级，停止采集")
+
 	body, extraNets, err := buildReplacementBody(old, image)
 	if err != nil {
 		return err

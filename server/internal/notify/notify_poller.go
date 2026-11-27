@@ -17,6 +17,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/repobase"
+	"server/internal/utils"
 )
 
 const (
@@ -100,12 +101,21 @@ func ensurePollerStateLocked(token, proxyURL string) {
 	pollerMu.Unlock()
 
 	if old != nil {
-		// 等待旧 getUpdates 循环退出再启动新轮询；若超时仍未结束则放弃本轮启动，避免同 Token 双开引发 409 冲突。
+		// 等待旧 getUpdates 循环退出再启动新轮询；超时后挂接异步接力，防止同 Token 409 冲突且不永久失灵。
 		select {
 		case <-old.pollDone:
 		case <-old.done:
 		case <-time.After(5 * time.Second):
-			syslog.Warnf("[Notify] 旧 Telegram 轮询未在 5s 内退出，放弃并发拉起防 409 冲突")
+			syslog.Warnf("[Notify] 旧 Telegram 轮询未在 5s 内退出，延后至旧协程退出后重拉")
+			if token != "" {
+				utils.GoSafe("等待旧Telegram轮询退出后重载", func() {
+					select {
+					case <-old.pollDone:
+					case <-old.done:
+					}
+					NotifySvc.EnsureBotPoller()
+				})
+			}
 			return
 		}
 	}

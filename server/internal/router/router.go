@@ -37,6 +37,7 @@ func serveFilmPicture(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
+	c.Header("X-Content-Type-Options", "nosniff")
 	c.File(filepath.Join(config.FilmPictureUploadDir, name))
 }
 
@@ -302,6 +303,7 @@ const defaultRequestBodyMaxBytes = 2 << 20 // 2MB
 func isSSERoutePath(path string) bool {
 	return path == "/api/manage/system/logs/stream" ||
 		path == "/api/manage/collect/progress-stream" ||
+		path == "/api/manage/spider/clear" ||
 		path == "/api/manage/spider/clear/progress"
 }
 
@@ -315,7 +317,11 @@ func httpPolicyMiddleware() gin.HandlerFunc {
 		path := c.Request.URL.Path
 		if !isSSERoutePath(path) {
 			rc := http.NewResponseController(c.Writer)
-			_ = rc.SetReadDeadline(time.Now().Add(15 * time.Second))
+			readTimeout := 15 * time.Second
+			if hasDedicatedBodyLimitPath(path) {
+				readTimeout = 120 * time.Second
+			}
+			_ = rc.SetReadDeadline(time.Now().Add(readTimeout))
 			_ = rc.SetWriteDeadline(time.Now().Add(60 * time.Second))
 		}
 		if c.Request.Body != nil &&

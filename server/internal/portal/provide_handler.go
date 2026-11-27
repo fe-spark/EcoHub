@@ -46,6 +46,9 @@ func resolveProvideBaseURL(c *gin.Context) (string, error) {
 		host = strings.TrimSpace(c.Request.Host)
 	}
 	if host != "" {
+		if strings.ContainsAny(host, " \t\r\n/\\@?#") {
+			return "", errors.New("无法解析当前请求域名，请检查反向代理 Host/X-Forwarded-Host 配置")
+		}
 		return scheme + "://" + host, nil
 	}
 

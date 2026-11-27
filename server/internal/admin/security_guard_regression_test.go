@@ -161,3 +161,34 @@ func TestCors_UntrustedPeerIgnoresForwardedHost(t *testing.T) {
 		t.Fatalf("expected untrusted peer X-Forwarded-Host ignored, got Allow-Origin=%q", got)
 	}
 }
+
+func TestCors_RejectsCrossSchemeOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(middleware.Cors())
+	r.GET("/api/health", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	// 可信代理传回 https，跨协议 http 同域 Origin 必须拒绝
+	req1 := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req1.Host = "real.example.com"
+	req1.RemoteAddr = "127.0.0.1:12345"
+	req1.Header.Set("Origin", "http://real.example.com")
+	req1.Header.Set("X-Forwarded-Proto", "https")
+	w1 := httptest.NewRecorder()
+	r.ServeHTTP(w1, req1)
+	if got := w1.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected cross-scheme origin rejected, got Allow-Origin=%q", got)
+	}
+
+	// 同协议 https 同域 Origin 应允许
+	req2 := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req2.Host = "real.example.com"
+	req2.RemoteAddr = "127.0.0.1:12345"
+	req2.Header.Set("Origin", "https://real.example.com")
+	req2.Header.Set("X-Forwarded-Proto", "https")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	if got := w2.Header().Get("Access-Control-Allow-Origin"); got != "https://real.example.com" {
+		t.Fatalf("expected same-scheme origin allowed, got Allow-Origin=%q", got)
+	}
+}

@@ -55,6 +55,7 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		if isActiveStatus(progress.Status) {
 			_, live := tasks.Load(id)
 			status := progress.Status
+			epoch := state.epoch
 			state.mu.Unlock()
 			if live {
 				list = append(list, progress)
@@ -64,7 +65,7 @@ func GetActiveTaskProgress() []model.CollectProgress {
 			state.mu.Lock()
 			progress = cloneProgressData(state.data)
 			_, live = tasks.Load(id)
-			if isActiveStatus(progress.Status) && shouldMarkAbandoned(progress.Status, live, occupied) {
+			if state.epoch == epoch && progress.Status == status && isActiveStatus(progress.Status) && shouldMarkAbandoned(progress.Status, live, occupied) {
 				old := progress.Status
 				progress.Status = StatusFailed
 				state.data.Status = StatusFailed

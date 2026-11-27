@@ -313,10 +313,61 @@ func pageTagMids(idx *filmSearchMetaIndex, match func(*FilmSearchMeta) bool, sor
 		}
 		cands = append(cands, pos)
 	}
+	if need := offset + limit; need > 0 && need <= 500 && need*4 < len(cands) {
+		return topTagMidsHeap(idx, cands, sortField, offset, limit), len(cands)
+	}
 	sort.SliceStable(cands, func(i, j int) bool {
 		return tagRankBefore(sortField, idx.Items[cands[i]], idx.Items[cands[j]])
 	})
 	return midsFromPositions(idx, cands, offset, limit), len(cands)
+}
+
+func topTagMidsHeap(idx *filmSearchMetaIndex, cands []int, sortField string, offset, limit int) []int64 {
+	need := offset + limit
+	top := make([]int, 0, need)
+	siftUp := func(i int) {
+		for i > 0 {
+			p := (i - 1) / 2
+			// 最大堆（根为 top 中最差元素）：!tagRankBefore(p, i) 表示 top[i] 更差
+			if !tagRankBefore(sortField, idx.Items[top[i]], idx.Items[top[p]]) {
+				top[i], top[p] = top[p], top[i]
+				i = p
+				continue
+			}
+			break
+		}
+	}
+	siftDown := func(i int) {
+		n := len(top)
+		for {
+			worst := i
+			l, r := 2*i+1, 2*i+2
+			if l < n && !tagRankBefore(sortField, idx.Items[top[l]], idx.Items[top[worst]]) {
+				worst = l
+			}
+			if r < n && !tagRankBefore(sortField, idx.Items[top[r]], idx.Items[top[worst]]) {
+				worst = r
+			}
+			if worst == i {
+				break
+			}
+			top[i], top[worst] = top[worst], top[i]
+			i = worst
+		}
+	}
+	for _, pos := range cands {
+		if len(top) < need {
+			top = append(top, pos)
+			siftUp(len(top) - 1)
+		} else if tagRankBefore(sortField, idx.Items[pos], idx.Items[top[0]]) {
+			top[0] = pos
+			siftDown(0)
+		}
+	}
+	sort.SliceStable(top, func(i, j int) bool {
+		return tagRankBefore(sortField, idx.Items[top[i]], idx.Items[top[j]])
+	})
+	return midsFromPositions(idx, top, offset, limit)
 }
 
 func tagRankBefore(sortField string, a, b *FilmSearchMeta) bool {

@@ -2,7 +2,6 @@ package user
 
 import (
 	"errors"
-	"strings"
 
 	"server/internal/infra/syslog"
 	"server/internal/model"
@@ -141,12 +140,12 @@ func (s *UserService) UpdateProfile(userID uint, req model.UserUpdatePayload) er
 	if err != nil || oldUser.ID == 0 {
 		return errors.New("用户不存在")
 	}
-	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+	if req.Password != nil && *req.Password != "" {
 		if oldUser.Password != "" {
-			if req.OldPassword == nil || strings.TrimSpace(*req.OldPassword) == "" {
+			if req.OldPassword == nil || *req.OldPassword == "" {
 				return errors.New("修改密码必须提供原密码")
 			}
-			if matched, _ := utils.VerifyPassword(strings.TrimSpace(*req.OldPassword), oldUser.Salt, oldUser.Password); !matched {
+			if matched, _ := utils.VerifyPassword(*req.OldPassword, oldUser.Salt, oldUser.Password); !matched {
 				return errors.New("原密码校验失败，请核对后重试")
 			}
 		}

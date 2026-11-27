@@ -210,3 +210,58 @@ func TestUserService_BuiltinAdminPasswordProtection(t *testing.T) {
 		t.Fatalf("token should be cleared after password change, got %q err=%v", tok, err)
 	}
 }
+
+func TestUpdateProfile_WhitespacePasswordDoesNotBypassOldPassword(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	origRdb := db.Rdb
+	origMdb := db.Mdb
+	defer func() {
+		db.Rdb = origRdb
+		db.Mdb = origMdb
+	}()
+	db.Rdb = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	gdb, _ := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	_ = gdb.AutoMigrate(&model.User{})
+	db.Mdb = gdb
+
+	u := model.User{
+		Model:    gorm.Model{ID: 10002},
+		UserName: "alice",
+		Role:     model.UserRoleAdmin,
+		Status:   0,
+	}
+	if err := gdb.Create(&u).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	spacePwd := "  secret  "
+	if err := UserSvc.UpdateUser(config.UserIdInitialVal, model.UserRoleAdmin, model.UserUpdatePayload{
+		ID:       u.ID,
+		Password: &spacePwd,
+	}); err != nil {
+		t.Fatalf("seed space password: %v", err)
+	}
+
+	// 纯空白新密码未提供旧密码时不得跳过校验
+	onlySpaces := "   "
+	if err := UserSvc.UpdateProfile(u.ID, model.UserUpdatePayload{
+		Password: &onlySpaces,
+	}); err == nil {
+		t.Fatalf("expected whitespace password without oldPassword to be rejected")
+	}
+
+	// 带前后空格的旧密码不得被 TrimSpace 破坏
+	newPwd := "nextpass123"
+	if err := UserSvc.UpdateProfile(u.ID, model.UserUpdatePayload{
+		OldPassword: &spacePwd,
+		Password:    &newPwd,
+	}); err != nil {
+		t.Fatalf("expected UpdateProfile with exact space-padded old password to succeed, got: %v", err)
+	}
+	if !UserSvc.VerifyUserPassword(u.ID, newPwd) {
+		t.Fatalf("expected updated password to verify")
+	}
+}

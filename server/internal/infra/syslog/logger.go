@@ -16,15 +16,17 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	logFileName       = "ecohub.log"
-	maxLogFileSize    = 10 * 1024 * 1024
-	maxRecentLines    = 2000
+	logFileName        = "ecohub.log"
+	maxLogFileSize     = 10 * 1024 * 1024
+	maxRotatedLogFiles = 30
+	maxRecentLines     = 2000
 	readChunkSize     = 32 * 1024
 	entryBufferSize   = 10000
 	rotatedTimeFormat = "20060102-150405.000000000"
@@ -288,7 +290,40 @@ func (l *rollingLogger) rotateLocked() error {
 }
 
 func pruneExpiredLogsLocked(now time.Time) error {
-	// 不设强制过期删除天数限制，日志永久保留，由用户按需手动清理
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	type rotatedItem struct {
+		name    string
+		modTime time.Time
+	}
+	var rotated []rotatedItem
+	for _, entry := range entries {
+		if entry.IsDir() || !isRotatedLogFile(entry.Name()) {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		rotated = append(rotated, rotatedItem{name: entry.Name(), modTime: info.ModTime()})
+	}
+	if len(rotated) <= maxRotatedLogFiles {
+		return nil
+	}
+	sort.Slice(rotated, func(i, j int) bool {
+		if !rotated[i].modTime.Equal(rotated[j].modTime) {
+			return rotated[i].modTime.Before(rotated[j].modTime)
+		}
+		return rotated[i].name < rotated[j].name
+	})
+	for _, item := range rotated[:len(rotated)-maxRotatedLogFiles] {
+		_ = os.Remove(filepath.Join(logDir, item.name))
+	}
 	return nil
 }
 

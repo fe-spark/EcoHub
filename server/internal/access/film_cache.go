@@ -329,6 +329,8 @@ func enrichClassifyTopItems(items []TopItem) ([]TopItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	var dbCatByName map[string]int64
+	dbCatLoaded := false
 	validItems := make([]TopItem, 0, len(items))
 	for _, it := range items {
 		trimmedKey := strings.TrimSpace(it.Key)
@@ -353,18 +355,28 @@ func enrichClassifyTopItems(items []TopItem) ([]TopItem, error) {
 				}
 			}
 		} else {
-			// 非数字 member（例如分类名 "伦理片"、"电影"）
-			// 尝试反查其分类 ID（若在 Category 表中存在则标准化绑定）
-			catId, found, err := resolveCategoryIDByName(trimmedKey)
-			if err != nil {
-				return nil, err
+			catId, found := resolveCategoryIDByNameMemoryOnly(trimmedKey)
+			if !found && !dbCatLoaded && db.Mdb != nil {
+				dbCatLoaded = true
+				var cats []model.Category
+				if err := db.Mdb.Model(&model.Category{}).Select("id, name").Find(&cats).Error; err != nil {
+					return nil, err
+				}
+				dbCatByName = make(map[string]int64, len(cats))
+				for _, c := range cats {
+					if c.Id > 0 && strings.TrimSpace(c.Name) != "" {
+						dbCatByName[strings.TrimSpace(c.Name)] = c.Id
+					}
+				}
+			}
+			if !found && dbCatByName != nil {
+				catId, found = dbCatByName[trimmedKey]
 			}
 			if found {
 				it.Key = strconv.FormatInt(catId, 10)
 				it.Category = trimmedKey
 				it.Title = trimmedKey
 			} else {
-				// 若不是已知 ID，但为非噪声分类名，予以保留并正常展示
 				it.Key = trimmedKey
 				if it.Category == "" {
 					it.Category = trimmedKey

@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
@@ -146,19 +147,15 @@ func SetPrimarySourceID(id string) error {
 		return errors.New("数据库未连接")
 	}
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		var rows int64
-		if err := tx.Model(&model.PrimaryState{}).Count(&rows).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"primary_source_id", "updated_at"}),
+		}).Create(&model.PrimaryState{
+			Id:              1,
+			PrimarySourceId: id,
+			UpdatedAt:       time.Now(),
+		}).Error; err != nil {
 			return err
-		}
-		if rows == 0 {
-			if err := tx.Create(&model.PrimaryState{Id: 1, PrimarySourceId: id, UpdatedAt: time.Now()}).Error; err != nil {
-				return err
-			}
-		} else {
-			if err := tx.Model(&model.PrimaryState{}).Where("id = ?", 1).
-				Updates(map[string]any{"primary_source_id": id, "updated_at": time.Now()}).Error; err != nil {
-				return err
-			}
 		}
 		return moveCollectSourceToFirstTx(tx, id)
 	})

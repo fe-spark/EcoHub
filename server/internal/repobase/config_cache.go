@@ -76,6 +76,9 @@ func LoadCachedConfig[T any](
 		}
 		if shouldCache && payload != "" && getConfigCacheGen(key).Load() == gen {
 			_ = FillConfigCache(key, payload)
+			if getConfigCacheGen(key).Load() != gen && db.Rdb != nil {
+				_ = db.Rdb.Del(db.Cxt, key).Err()
+			}
 		}
 		return val, nil
 	})

@@ -330,6 +330,7 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	state := val.(*progressState)
 	state.mu.Lock()
 	status := state.data.Status
+	epoch := state.epoch
 	if !isActiveStatus(status) {
 		state.mu.Unlock()
 		return false
@@ -344,8 +345,8 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	occupied := abandonedOccupied(sourceID, status, live)
 
 	state.mu.Lock()
-	status = state.data.Status
-	if !isActiveStatus(status) {
+	curStatus := state.data.Status
+	if !isActiveStatus(curStatus) {
 		state.mu.Unlock()
 		return false
 	}
@@ -354,12 +355,12 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 		state.mu.Unlock()
 		return true
 	}
-	if shouldMarkAbandoned(status, live, occupied) {
+	if state.epoch == epoch && curStatus == status && shouldMarkAbandoned(curStatus, live, occupied) {
 		state.data.Status = StatusFailed
 		state.updated = time.Now()
 		state.mu.Unlock()
 		log.Printf("[Spider] 进度清理 source=%s status=%s live=%t occupied=%t -> failed",
-			sourceID, status, live, occupied)
+			sourceID, curStatus, live, occupied)
 		return false
 	}
 	state.mu.Unlock()

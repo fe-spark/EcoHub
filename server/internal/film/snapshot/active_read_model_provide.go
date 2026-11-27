@@ -181,12 +181,14 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			Snapshots: snapshots,
 		}
 
-		if raw, err := json.Marshal(item); err == nil {
-			ttl := 3 * time.Minute
-			if len(snapshots) == 0 {
-				ttl = emptyListCacheTTL
+		if page.Current <= 20 && keyword == "" {
+			if raw, err := json.Marshal(item); err == nil {
+				ttl := 3 * time.Minute
+				if len(snapshots) == 0 {
+					ttl = emptyListCacheTTL
+				}
+				writeListCache(cacheKey, raw, ttl, listGen)
 			}
-			writeListCache(cacheKey, raw, ttl, listGen)
 		}
 
 		log.Printf(

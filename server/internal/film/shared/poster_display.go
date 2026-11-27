@@ -2,9 +2,12 @@ package shared
 
 import (
 	"strings"
+	"sync"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/sourcecatalog"
 
 	"gorm.io/gorm"
 )
@@ -13,6 +16,27 @@ type posterPicture struct {
 	picture string
 	slide   string
 }
+
+type posterCacheKey struct {
+	dbPtr    *gorm.DB
+	posterID string
+	mid      int64
+}
+
+type posterCacheEntry struct {
+	pic      posterPicture
+	expireAt time.Time
+}
+
+var (
+	posterPicCacheMu sync.RWMutex
+	posterPicCache   = map[posterCacheKey]posterCacheEntry{}
+)
+
+const (
+	posterPicCacheTTL        = 30 * time.Second
+	posterPicCacheMaxEntries = 4096
+)
 
 // ApplyPosterSourcePictures 前台封面改用海报源那部影片的最终展示图。
 // 所属站就是海报源时，保持传入的图。对不上则不动。对方某一侧为空时，保留本片这一侧。
@@ -24,9 +48,18 @@ func ApplyPosterSourcePictures(snaps []model.FilmListSnapshot) []model.FilmListS
 	if posterID == "" {
 		return snaps
 	}
+	now := time.Now()
+	hits := make(map[int64]posterPicture, len(snaps))
 	films := make([]model.FilmIndex, 0, len(snaps))
+	posterPicCacheMu.RLock()
 	for _, snap := range snaps {
 		if snap.Mid <= 0 || strings.TrimSpace(snap.SourceId) == posterID {
+			continue
+		}
+		if entry, ok := posterPicCache[posterCacheKey{dbPtr: db.Mdb, posterID: posterID, mid: snap.Mid}]; ok && now.Before(entry.expireAt) {
+			if entry.pic.picture != "" {
+				hits[snap.Mid] = entry.pic
+			}
 			continue
 		}
 		films = append(films, model.FilmIndex{
@@ -35,7 +68,24 @@ func ApplyPosterSourcePictures(snaps []model.FilmListSnapshot) []model.FilmListS
 			FilmIndexCategory: model.FilmIndexCategory{Pid: snap.Pid},
 		})
 	}
-	hits := posterPicturesFor(db.Mdb, films, posterID)
+	posterPicCacheMu.RUnlock()
+
+	if len(films) > 0 {
+		fetched := posterPicturesFor(db.Mdb, films, posterID)
+		posterPicCacheMu.Lock()
+		if len(posterPicCache)+len(films) > posterPicCacheMaxEntries {
+			clear(posterPicCache)
+		}
+		exp := now.Add(posterPicCacheTTL)
+		for _, f := range films {
+			pic := fetched[f.Mid]
+			posterPicCache[posterCacheKey{dbPtr: db.Mdb, posterID: posterID, mid: f.Mid}] = posterCacheEntry{pic: pic, expireAt: exp}
+			if pic.picture != "" {
+				hits[f.Mid] = pic
+			}
+		}
+		posterPicCacheMu.Unlock()
+	}
 	if len(hits) == 0 {
 		return snaps
 	}
@@ -61,6 +111,23 @@ func ApplyPosterSourcePictures(snaps []model.FilmListSnapshot) []model.FilmListS
 func activePosterSourceID(tx *gorm.DB) string {
 	if tx == nil {
 		return ""
+	}
+	if tx == db.Mdb {
+		if list := sourcecatalog.GetCollectSourceList(); len(list) > 0 {
+			fallback := ""
+			for _, src := range list {
+				if !src.State {
+					continue
+				}
+				if src.IsPosterSource {
+					return strings.TrimSpace(src.Id)
+				}
+				if fallback == "" {
+					fallback = strings.TrimSpace(src.Id)
+				}
+			}
+			return fallback
+		}
 	}
 	var marked model.FilmSource
 	if err := tx.Where("is_poster_source = ? AND state = ?", true, true).

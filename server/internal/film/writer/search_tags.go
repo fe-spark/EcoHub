@@ -131,7 +131,7 @@ type searchTagKey struct {
 // upsertSearchTagsFromPidFilms 按已入库影片补齐该分类的剧情、地区、语言、年份。不删除已有标签。
 func upsertSearchTagsFromPidFilms(pid int64) (int, map[searchTagKey]struct{}, error) {
 	totalFilms := 0
-	seen := make(map[searchTagKey]struct{})
+	agg := make(map[searchTagKey]*model.SearchTagItem)
 	var lastMid int64
 	for {
 		var batch []model.FilmIndex
@@ -141,7 +141,7 @@ func upsertSearchTagsFromPidFilms(pid int64) (int, map[searchTagKey]struct{}, er
 			Order("mid ASC").
 			Limit(searchTagsRebuildFilmBatchSize).
 			Find(&batch).Error; err != nil {
-			return totalFilms, seen, err
+			return totalFilms, nil, err
 		}
 		if len(batch) == 0 {
 			break
@@ -149,18 +149,35 @@ func upsertSearchTagsFromPidFilms(pid int64) (int, map[searchTagKey]struct{}, er
 		totalFilms += len(batch)
 		lastMid = batch[len(batch)-1].Mid
 
-		items := aggregateSearchTagItems(collectDynamicSearchTagItemsBatch(batch))
-		for _, item := range items {
-			seen[searchTagKey{item.TagType, item.Value}] = struct{}{}
+		for _, item := range aggregateSearchTagItems(collectDynamicSearchTagItemsBatch(batch)) {
+			k := searchTagKey{item.TagType, item.Value}
+			if prev, ok := agg[k]; ok {
+				prev.Score += item.Score
+			} else {
+				cp := item
+				agg[k] = &cp
+			}
 		}
-		if len(items) == 0 {
-			continue
+	}
+	seen := make(map[searchTagKey]struct{}, len(agg))
+	if len(agg) == 0 {
+		return totalFilms, seen, nil
+	}
+	items := make([]model.SearchTagItem, 0, len(agg))
+	for k, item := range agg {
+		seen[k] = struct{}{}
+		items = append(items, *item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].TagType != items[j].TagType {
+			return items[i].TagType < items[j].TagType
 		}
-		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-			return bulkUpsertSearchTagItemsTx(tx, items)
-		}); err != nil {
-			return totalFilms, seen, err
-		}
+		return items[i].Value < items[j].Value
+	})
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return bulkUpsertSearchTagItemsTx(tx, items)
+	}); err != nil {
+		return totalFilms, seen, err
 	}
 	return totalFilms, seen, nil
 }

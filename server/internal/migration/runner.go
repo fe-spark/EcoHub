@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -96,6 +97,37 @@ func RunAutoMigrations(db *gorm.DB) error {
 	if db == nil {
 		return nil
 	}
+	if db.Dialector != nil && db.Dialector.Name() == "mysql" {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return fmt.Errorf("acquire migration db pool failed: %w", err)
+		}
+		ctx := context.Background()
+		if db.Statement != nil && db.Statement.Context != nil {
+			ctx = db.Statement.Context
+		}
+		// 单独用一条物理连接持有 MySQL 会话级咨询锁，避免将 *sql.Conn 传入迁移流程触发 DropTable 嵌套 Connection 报错 (invalid db)。
+		lockConn, err := sqlDB.Conn(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire migration lock connection failed: %w", err)
+		}
+		defer lockConn.Close()
+
+		var locked int
+		if err := lockConn.QueryRowContext(ctx, "SELECT GET_LOCK('ecohub_schema_migration', 60)").Scan(&locked); err != nil {
+			return fmt.Errorf("acquire migration lock failed: %w", err)
+		}
+		if locked != 1 {
+			return fmt.Errorf("acquire migration lock timeout (locked=%d)", locked)
+		}
+		defer func() {
+			_, _ = lockConn.ExecContext(ctx, "SELECT RELEASE_LOCK('ecohub_schema_migration')")
+		}()
+	}
+	return runAutoMigrationsLocked(db)
+}
+
+func runAutoMigrationsLocked(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&model.SchemaMigration{}) {
 		if err := db.AutoMigrate(&model.SchemaMigration{}); err != nil {
 			return fmt.Errorf("init schema_migrations table failed: %w", err)

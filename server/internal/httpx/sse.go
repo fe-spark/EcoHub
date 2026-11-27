@@ -27,6 +27,7 @@ type SSEWriter struct {
 
 // OpenSSE 开始一条 SSE 响应。当前 Writer 不能刷新或握手写出失败时返回 false。
 func OpenSSE(c *gin.Context) (*SSEWriter, bool) {
+	_ = http.NewResponseController(c.Writer).SetReadDeadline(time.Time{})
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache, no-transform")
 	c.Header("Connection", "keep-alive")

@@ -111,11 +111,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		reason := currentStopAllReason()
 		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
+		recordSourceStatusSnapshot(batchCtx, model.FilmSource{Id: id}, progress.StatusStopped, "", true)
 		return fmt.Errorf("停止采集：%s", reason)
 	}
 	if runVersion != nil && (progress.IsStopped(id) || progress.IsStopping(id)) {
 		reason := collectStopReason(id)
 		log.Printf("[Spider] 站点 %s 停止采集：%s", id, reason)
+		recordSourceStatusSnapshot(batchCtx, model.FilmSource{Id: id}, progress.StatusStopped, "", true)
 		return fmt.Errorf("停止采集：%s", reason)
 	}
 	if runVersion == nil && progress.IsStarting(id) {
@@ -124,9 +126,19 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 
 	s := sourcecatalog.FindCollectSourceById(id)
 	if s == nil {
-		return errors.New("采集站点不存在")
+		err := errors.New("采集站点不存在")
+		if batchCtx != nil {
+			batchCtx.RecordSourceError(id, err.Error())
+			recordSourceStatusSnapshot(batchCtx, model.FilmSource{Id: id}, progress.StatusFailed, err.Error(), true)
+		}
+		return err
 	} else if !s.State {
-		return errors.New("采集站点已停用")
+		err := errors.New("采集站点已停用")
+		if batchCtx != nil {
+			batchCtx.RecordSourceError(s.Id, err.Error())
+			recordSourceStatusSnapshot(batchCtx, *s, progress.StatusFailed, err.Error(), true)
+		}
+		return err
 	}
 	if err := collectLifecycle.beginSource(id); err != nil {
 		if errors.Is(err, errCollectDuringMaintenance) {
@@ -147,6 +159,10 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 			return nil
 		}
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
+		if batchCtx != nil {
+			batchCtx.RecordSourceError(s.Id, err.Error())
+			recordSourceStatusSnapshot(batchCtx, *s, progress.StatusFailed, err.Error(), true)
+		}
 		return err
 	}
 	if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron {

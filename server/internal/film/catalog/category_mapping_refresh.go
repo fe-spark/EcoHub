@@ -9,6 +9,8 @@ import (
 	"server/internal/model"
 	"server/internal/repobase"
 	"server/internal/taxonomy"
+
+	"gorm.io/gorm"
 )
 
 func loadSourceCategoryPlacementsBySourceIDs(sourceIDs []string) (map[string][]sourceCategoryPlacement, error) {
@@ -81,44 +83,46 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 }
 
 func deleteOrphanDisplayRootCategories() error {
-	var categories []model.Category
-	if err := db.Mdb.Order("pid ASC, id ASC").Find(&categories).Error; err != nil {
-		return err
-	}
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var categories []model.Category
+		if err := tx.Order("pid ASC, id ASC").Find(&categories).Error; err != nil {
+			return err
+		}
 
-	childCountByPid := make(map[int64]int)
-	for _, category := range categories {
-		if category.Pid > 0 {
-			childCountByPid[category.Pid]++
+		childCountByPid := make(map[int64]int)
+		for _, category := range categories {
+			if category.Pid > 0 {
+				childCountByPid[category.Pid]++
+			}
 		}
-	}
 
-	var mappedCategoryIDs []int64
-	if err := db.Mdb.Model(&model.CategoryMapping{}).Distinct("category_id").Pluck("category_id", &mappedCategoryIDs).Error; err != nil {
-		return err
-	}
-	mapped := make(map[int64]struct{}, len(mappedCategoryIDs))
-	for _, id := range mappedCategoryIDs {
-		mapped[id] = struct{}{}
-	}
+		var mappedCategoryIDs []int64
+		if err := tx.Model(&model.CategoryMapping{}).Distinct("category_id").Pluck("category_id", &mappedCategoryIDs).Error; err != nil {
+			return err
+		}
+		mapped := make(map[int64]struct{}, len(mappedCategoryIDs))
+		for _, id := range mappedCategoryIDs {
+			mapped[id] = struct{}{}
+		}
 
-	orphanIDs := make([]int64, 0)
-	for _, category := range categories {
-		if category.Pid != 0 {
-			continue
+		orphanIDs := make([]int64, 0)
+		for _, category := range categories {
+			if category.Pid != 0 || strings.HasPrefix(category.StableKey, "rule:root:") {
+				continue
+			}
+			if childCountByPid[category.Id] > 0 {
+				continue
+			}
+			if _, ok := mapped[category.Id]; ok {
+				continue
+			}
+			orphanIDs = append(orphanIDs, category.Id)
 		}
-		if childCountByPid[category.Id] > 0 {
-			continue
+		if len(orphanIDs) == 0 {
+			return nil
 		}
-		if _, ok := mapped[category.Id]; ok {
-			continue
-		}
-		orphanIDs = append(orphanIDs, category.Id)
-	}
-	if len(orphanIDs) == 0 {
-		return nil
-	}
-	return db.Mdb.Where("id IN ?", orphanIDs).Delete(&model.Category{}).Error
+		return tx.Where("id IN ?", orphanIDs).Delete(&model.Category{}).Error
+	})
 }
 
 func clearProvideListCache() {

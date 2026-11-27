@@ -157,11 +157,13 @@ func (s *ManageService) UpdateSiteDanmakuConfig(cfg model.DanmakuConfig) error {
 		}
 	}
 	next := cfg
-	if strings.TrimSpace(next.AppID) == "" {
-		next.AppID = curr.Danmaku.AppID
-	}
-	if strings.TrimSpace(next.AppSecret) == "" {
-		next.AppSecret = curr.Danmaku.AppSecret
+	if strings.TrimSpace(next.ApiURL) == "" {
+		if strings.TrimSpace(next.AppID) == "" {
+			next.AppID = curr.Danmaku.AppID
+		}
+		if strings.TrimSpace(next.AppSecret) == "" {
+			next.AppSecret = curr.Danmaku.AppSecret
+		}
 	}
 	curr.Danmaku = next
 	return repobase.SaveSiteBasic(curr)

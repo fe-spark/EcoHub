@@ -194,17 +194,18 @@ func DelCollectResource(id string) ([]int64, error) {
 	if err != nil {
 		return orphanMids, err
 	}
-	if purgeErr := ledger.PurgeSourceCollectHistoryBatched(id); purgeErr != nil {
-		return orphanMids, purgeErr
-	}
+	purgeErr := ledger.PurgeSourceCollectHistoryBatched(id)
 	taxonomy.TouchRuleVersion()
 	taxonomy.ReloadMappingRules()
 	catalog.InvalidatePublicSourceCache(id)
 	if err := sourcecatalog.RefreshCollectSourceCatalog(); err != nil {
 		sourcecatalog.ForgetCollectSource(id)
+		if purgeErr != nil {
+			return orphanMids, errors.Join(purgeErr, err)
+		}
 		return orphanMids, err
 	}
-	return orphanMids, nil
+	return orphanMids, purgeErr
 }
 
 // UpdateCollectSourceUpdatingState 更新站点配置；换地址时同步清理该站分类，重型影片清理已提前分批完成。

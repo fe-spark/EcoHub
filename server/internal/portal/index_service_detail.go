@@ -57,6 +57,19 @@ func cloneMovieDetailVo(v model.MovieDetailVo) model.MovieDetailVo {
 const filmDetailMissingSentinel = "__MISSING__"
 const filmDetailMissingTTL = 45 * time.Second
 
+func isDetailCategoryVisible(vo model.MovieDetailVo) bool {
+	if !taxonomy.IsCategoryVisible(vo.Cid, vo.Pid) {
+		return false
+	}
+	sid := strings.TrimSpace(vo.SourceId)
+	return filmsnapshot.SourceCategoryVisibility(sid)(
+		taxonomy.BuildSourceCategoryKey(sid, vo.RawCid),
+		taxonomy.BuildSourceCategoryKey(sid, vo.RawPid),
+		vo.Cid,
+		vo.Pid,
+	)
+}
+
 // GetFilmDetail 影片详情信息页面处理（基础聚合版，按采集站权重排序）。
 func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 	if id <= 0 {
@@ -71,7 +84,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			}
 			var cached model.MovieDetailVo
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				if !taxonomy.IsCategoryVisible(cached.Cid, cached.Pid) {
+				if !isDetailCategoryVisible(cached) {
 					return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
 				}
 				return cached, nil
@@ -87,7 +100,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 				}
 				var cached model.MovieDetailVo
 				if json.Unmarshal([]byte(data), &cached) == nil {
-					if !taxonomy.IsCategoryVisible(cached.Cid, cached.Pid) {
+					if !isDetailCategoryVisible(cached) {
 						return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
 					}
 					return cached, nil
@@ -108,7 +121,8 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			storeFilmPlayInfoCache(cacheKey, filmDetailMissingSentinel, filmDetailMissingTTL, playGen)
 			return model.MovieDetailVo{}, nil
 		}
-		if !taxonomy.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
+		if !taxonomy.IsCategoryVisible(snapshot.Cid, snapshot.Pid) ||
+			!filmsnapshot.SourceCategoryVisible(snapshot.SourceId, snapshot.CategoryKey, snapshot.RootCategoryKey, snapshot.Cid, snapshot.Pid) {
 			return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
 		}
 		detailStartedAt := time.Now()

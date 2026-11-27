@@ -1,10 +1,12 @@
 package shared
 
 import (
+	"math"
 	"testing"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/model/dto"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
@@ -181,5 +183,17 @@ func seedPosterPair(gdb *gorm.DB, mainMid, posterMid, dbID int64, name, mainPic,
 		for _, key := range BuildMovieMatchKeysWithCategory(dbID, name, 1) {
 			gdb.Create(&model.MovieMatchKey{Mid: mid, MatchKey: key})
 		}
+	}
+}
+
+func TestPageOffset_NoOverflow(t *testing.T) {
+	if got := PageOffset(nil); got != 0 {
+		t.Fatalf("nil page offset = %d, want 0", got)
+	}
+	if got := PageOffset(&dto.Page{Current: 2, PageSize: 20}); got != 20 {
+		t.Fatalf("page 2 offset = %d, want 20", got)
+	}
+	if got := PageOffset(&dto.Page{Current: math.MaxInt, PageSize: 20}); got < 0 {
+		t.Fatalf("large page offset overflowed negative: %d", got)
 	}
 }

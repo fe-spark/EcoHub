@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"server/internal/config"
 	"server/internal/film/catalog"
 	"server/internal/film/shared"
@@ -13,6 +15,8 @@ import (
 	"server/internal/model"
 	"server/internal/taxonomy"
 )
+
+var filterOptionsSf singleflight.Group
 
 // searchTagBackfill 从已入库影片补齐剧情、地区、语言、年份。由 writer 注册，避免 snapshot 反向依赖 writer。
 var searchTagBackfill func(pid int64) error
@@ -200,75 +204,89 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) (map[string
 	if db.Mdb == nil {
 		return nil, ErrSearchIndexMissing
 	}
-	listGen := GetSearchCacheVersion()
-
-	catItems := []map[string]string{{"Name": "全部", "Value": ""}}
-	for _, child := range catalog.PublicSourceChildNodes(sourceId, typeID) {
-		if child == nil || child.Id <= 0 || strings.TrimSpace(child.Name) == "" {
-			continue
+	val, err, _ := filterOptionsSf.Do(cacheKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, rErr := db.Rdb.Get(db.Cxt, cacheKey).Result(); rErr == nil && data != "" {
+				var cached map[string]any
+				if json.Unmarshal([]byte(data), &cached) == nil {
+					return cached, nil
+				}
+			}
 		}
-		catItems = append(catItems, map[string]string{
-			"Name":  child.Name,
-			"Value": fmt.Sprint(child.Id),
-		})
-	}
+		listGen := GetSearchCacheVersion()
 
-	filterKeys := sourceTypeFilterKeys(sourceId, typeID)
-	var counts map[string]map[string]int
-	var err error
-	if primary := currentPrimarySourceID(); primary != "" && strings.TrimSpace(sourceId) == primary {
-		counts, err = countSourceTypeTagsFromIndex(version, filterKeys)
-	} else {
-		counts, err = countSourceTypeTagsFromDB(sourceId, filterKeys)
-	}
+		catItems := []map[string]string{{"Name": "全部", "Value": ""}}
+		for _, child := range catalog.PublicSourceChildNodes(sourceId, typeID) {
+			if child == nil || child.Id <= 0 || strings.TrimSpace(child.Name) == "" {
+				continue
+			}
+			catItems = append(catItems, map[string]string{
+				"Name":  child.Name,
+				"Value": fmt.Sprint(child.Id),
+			})
+		}
+
+		filterKeys := sourceTypeFilterKeys(sourceId, typeID)
+		var counts map[string]map[string]int
+		var countErr error
+		if primary := currentPrimarySourceID(); primary != "" && strings.TrimSpace(sourceId) == primary {
+			counts, countErr = countSourceTypeTagsFromIndex(version, filterKeys)
+		} else {
+			counts, countErr = countSourceTypeTagsFromDB(sourceId, filterKeys)
+		}
+		if countErr != nil {
+			return nil, countErr
+		}
+
+		tags := make(map[string]any)
+		titles := make(map[string]string)
+		sortList := make([]string, 0)
+		titleNames := map[string]string{
+			"Category": "类型",
+			"Plot":     "剧情",
+			"Area":     "地区",
+			"Language": "语言",
+			"Year":     "年份",
+			"Sort":     "排序",
+		}
+		if len(catItems) > 1 {
+			tags["Category"] = catItems
+			titles["Category"] = titleNames["Category"]
+			sortList = append(sortList, "Category")
+		}
+		hasDynamic := false
+		for _, tagType := range filterOptionTagTypes {
+			items := shared.FormatSearchTagItems(tagType, sourceTypeTagItems(tagType, counts[tagType]), "", false)
+			if len(items) > 1 {
+				hasDynamic = true
+				tags[tagType] = items
+				titles[tagType] = titleNames[tagType]
+				sortList = append(sortList, tagType)
+			}
+		}
+		sortItems := shared.HandleTagStr("Sort", false, shared.DefaultSortTagStrings...)
+		tags["Sort"] = sortItems
+		titles["Sort"] = titleNames["Sort"]
+		sortList = append(sortList, "Sort")
+
+		res := map[string]any{
+			"titles":   titles,
+			"sortList": sortList,
+			"tags":     tags,
+		}
+		if raw, mErr := json.Marshal(res); mErr == nil {
+			ttl := 10 * time.Minute
+			if len(catItems) <= 1 && !hasDynamic {
+				ttl = emptyListCacheTTL
+			}
+			writeListCache(cacheKey, raw, ttl, listGen)
+		}
+		return res, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	tags := make(map[string]any)
-	titles := make(map[string]string)
-	sortList := make([]string, 0)
-	titleNames := map[string]string{
-		"Category": "类型",
-		"Plot":     "剧情",
-		"Area":     "地区",
-		"Language": "语言",
-		"Year":     "年份",
-		"Sort":     "排序",
-	}
-	if len(catItems) > 1 {
-		tags["Category"] = catItems
-		titles["Category"] = titleNames["Category"]
-		sortList = append(sortList, "Category")
-	}
-	hasDynamic := false
-	for _, tagType := range filterOptionTagTypes {
-		items := shared.FormatSearchTagItems(tagType, sourceTypeTagItems(tagType, counts[tagType]), "", false)
-		if len(items) > 1 {
-			hasDynamic = true
-			tags[tagType] = items
-			titles[tagType] = titleNames[tagType]
-			sortList = append(sortList, tagType)
-		}
-	}
-	sortItems := shared.HandleTagStr("Sort", false, shared.DefaultSortTagStrings...)
-	tags["Sort"] = sortItems
-	titles["Sort"] = titleNames["Sort"]
-	sortList = append(sortList, "Sort")
-
-	res := map[string]any{
-		"titles":   titles,
-		"sortList": sortList,
-		"tags":     tags,
-	}
-	if raw, err := json.Marshal(res); err == nil {
-		ttl := 10 * time.Minute
-		if len(catItems) <= 1 && !hasDynamic {
-			ttl = emptyListCacheTTL
-		}
-		writeListCache(cacheKey, raw, ttl, listGen)
-	}
-	return res, nil
+	return val.(map[string]any), nil
 }
 
 func addSourceTypeTagCount(counts map[string]int, value string) {
@@ -326,15 +344,20 @@ func countSourceTypeTagsFromDB(sourceID string, keys []string) (map[string]map[s
 		Language string
 		Year     int64
 	}
-	var rows []tagRow
-	if err := db.Mdb.Model(&model.FilmIndex{}).
+	sqlRows, err := db.Mdb.Model(&model.FilmIndex{}).
 		Select("class_tag, area, language, year").
 		Where(model.FilmHasPlaySourceSQL(), sourceID, model.LineKindPlay).
-		Where("root_category_key IN ? OR category_key IN ?", cleanKeys, cleanKeys).
-		Find(&rows).Error; err != nil {
+		Where("category_key IN ?", cleanKeys).
+		Rows()
+	if err != nil {
 		return nil, err
 	}
-	for _, r := range rows {
+	defer sqlRows.Close()
+	for sqlRows.Next() {
+		var r tagRow
+		if err := sqlRows.Scan(&r.ClassTag, &r.Area, &r.Language, &r.Year); err != nil {
+			return nil, err
+		}
 		for _, part := range shared.SplitRawSearchTags(r.ClassTag) {
 			addSourceTypeTagCount(counts["Plot"], shared.NormalizeSearchTagValue("Plot", part))
 		}
@@ -343,6 +366,9 @@ func countSourceTypeTagsFromDB(sourceID string, keys []string) (map[string]map[s
 		if r.Year > 0 {
 			addSourceTypeTagCount(counts["Year"], fmt.Sprint(r.Year))
 		}
+	}
+	if err := sqlRows.Err(); err != nil {
+		return nil, err
 	}
 	return counts, nil
 }

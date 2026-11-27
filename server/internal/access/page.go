@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/utils"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -196,6 +198,10 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 	resourcePoster := sanitizePosterURL(TruncateRunes(p.ResourcePoster, 512))
 	resourceCat := TruncateRunes(p.ResourceCat, 64)
 
+	ipKey := utils.NormalizeClientIPKey(ip)
+	if ipKey == "" {
+		ipKey = ip
+	}
 	return &AccessEvent{
 		Ts:              time.Now(),
 		Node:            CurrentNodeName(),
@@ -210,7 +216,7 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 		AppVersion:      TruncateRunes(p.AppVersion, 32),
 		DeviceModel:     TruncateRunes(p.DeviceModel, 64),
 		DeviceId:        TruncateRunes(did, 64),
-		IPHash:          HashIP(ip),
+		IPHash:          HashIP(ipKey),
 		IPPreview:       IPPreview(ip),
 		UAFamily:        uaFamily("", ua),
 		OS:              detectOS(ua),
@@ -220,12 +226,12 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 		ResourceCat:     resourceCat,
 		CollectSourceId: pageCollectSource(action, p.CollectSource, p.Resource),
 		playMember:      pagePlayRankMember(action, p.Resource),
-		uvMember:        HashIP(ip + "|" + ua),
+		uvMember:        HashIP(ipKey + "|" + ua),
 	}
 }
 
 func pageTooFast(ip, pageKey string) bool {
-	ip = strings.TrimSpace(ip)
+	ip = utils.NormalizeClientIPKey(ip)
 	if ip == "" || isLoopbackIP(ip) {
 		return false
 	}

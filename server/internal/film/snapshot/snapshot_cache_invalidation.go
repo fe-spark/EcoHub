@@ -83,7 +83,6 @@ func ClearSearchCache() {
 
 func invalidateDeletedSnapshotCaches(version string, mids []int64) {
 	invalidateSnapshotDataCaches(version, mids)
-	RefreshAccessDataCaches()
 }
 
 func scheduleSnapshotCacheInvalidation(version string, mids []int64) {
@@ -219,6 +218,10 @@ func deletePlayInfoCacheKeys(mids []int64) error {
 		return nil
 	}
 	BumpPlayInfoGeneration()
+	if len(mids) > 2000 {
+		cache.ClearPatterns(config.FilmPlayInfoKey + ":*")
+		return nil
+	}
 	allMids := expandPlayInfoPeerMids(mids)
 	const pipeBatchSize = 500
 	for i := 0; i < len(allMids); i += pipeBatchSize {

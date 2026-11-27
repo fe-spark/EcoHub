@@ -47,6 +47,7 @@ type filmSearchMetaIndex struct {
 
 var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
 var activeFilmSearchMetasMu sync.Mutex
+var searchMetaMutationGen atomic.Uint64
 var searchMetaBuildSf singleflight.Group
 var searchMetaBuildWg sync.WaitGroup
 var isSearchIndexBuilding atomic.Bool
@@ -261,6 +262,7 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 	}
 	idx := sealSearchMetaIndex(version, newItems)
 	idx.PrimaryID = cur.PrimaryID
+	searchMetaMutationGen.Add(1)
 	activeFilmSearchMetas.Store(idx)
 	log.Printf("[ActiveReadModel] 内存索引增量剔除 mids=%d removed=%d remaining=%d", len(mids), removed, len(newItems))
 }
@@ -367,6 +369,7 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 	if !needsRemoval && len(cur.Items) > 0 && len(upsertMap) > 0 {
 		idx := updateSearchMetaIndexIncremental(cur, version, upsertMap)
 		idx.PrimaryID = cur.PrimaryID
+		searchMetaMutationGen.Add(1)
 		activeFilmSearchMetas.Store(idx)
 		log.Printf("[ActiveReadModel] 内存索引快速增量更新 mids=%d snapshot_found=%d", len(cleanMids), len(upsertMap))
 		return
@@ -392,6 +395,7 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 
 	idx := sealSearchMetaIndex(version, newItems)
 	idx.PrimaryID = cur.PrimaryID
+	searchMetaMutationGen.Add(1)
 	activeFilmSearchMetas.Store(idx)
 	log.Printf("[ActiveReadModel] 内存索引增量更新/剔除 mids=%d snapshot_found=%d total=%d", len(cleanMids), len(upsertMap), len(newItems))
 }

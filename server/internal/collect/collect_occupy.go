@@ -162,7 +162,7 @@ func isOccupiedCollectSource(sourceID string) bool {
 		return false
 	}
 	collectingSourcesMu.Lock()
-	_, ok := collectingSources[sourceID]
+	tok, ok := collectingSources[sourceID]
 	collectingSourcesMu.Unlock()
 	if !ok {
 		return false
@@ -171,10 +171,15 @@ func isOccupiedCollectSource(sourceID string) bool {
 	snap, hasSnap := progress.Snapshot(sourceID)
 	if hasSnap && progress.IsTerminalStatus(snap.Status) && !progress.IsTaskRunning(sourceID) {
 		collectingSourcesMu.Lock()
-		delete(collectingSources, sourceID)
+		cur, exists := collectingSources[sourceID]
+		if exists && cur == tok {
+			delete(collectingSources, sourceID)
+			collectingSourcesMu.Unlock()
+			log.Printf("[Spider] 占用释放 source=%s status=%s 原因=已终态且无任务", sourceID, snap.Status)
+			return false
+		}
 		collectingSourcesMu.Unlock()
-		log.Printf("[Spider] 占用释放 source=%s status=%s 原因=已终态且无任务", sourceID, snap.Status)
-		return false
+		return exists
 	}
 	return true
 }
