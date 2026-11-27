@@ -1,30 +1,26 @@
-package fetcher
+package engine
 
 import (
 	"context"
 	"sync"
 )
 
-// fetchStreak 连续抓取失败。满 20 页后立刻停领新页并暂停一次。
-// 暂停期间在途请求会被取消。恢复后再连续失败就终止，不再暂停。
+// fetchStreak 连续抓取失败计数器：满 20 页先停领并暂停一次，恢复后再连续失败 20 页则彻底中断。
 type fetchStreak struct {
 	mu         sync.Mutex
 	cond       *sync.Cond
 	ctx        context.Context
-	name       string
 	ok         int
 	streak     int
 	inFlight   int
 	holdIntake bool
-	// pausing 正在停这 2 分钟。这段时间不能重新领页。
-	pausing bool
-	// paused 已经用过一次限流暂停。
-	paused   bool
-	stopping bool
+	pausing    bool
+	paused     bool
+	stopping   bool
 }
 
-func newFetchStreak(ctx context.Context, name string) (*fetchStreak, func() bool) {
-	s := &fetchStreak{ctx: ctx, name: name}
+func newFetchStreak(ctx context.Context) (*fetchStreak, func() bool) {
+	s := &fetchStreak{ctx: ctx}
 	s.cond = sync.NewCond(&s.mu)
 	stop := context.AfterFunc(ctx, func() {
 		s.mu.Lock()
@@ -34,7 +30,6 @@ func newFetchStreak(ctx context.Context, name string) (*fetchStreak, func() bool
 	return s, stop
 }
 
-// tryBegin 可以领新页时占一个在途名额。正在等在途结果，或已经决定中断时返回 false。
 func (s *fetchStreak) tryBegin() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -48,9 +43,6 @@ func (s *fetchStreak) tryBegin() bool {
 	return true
 }
 
-// finish 结束一次抓取。
-// 第一个返回值表示暂停后再次连续失败，应该中断。
-// 第二个返回值表示现在就暂停一次，调用方要取消在途请求。
 func (s *fetchStreak) finish(ok bool) (stop bool, pause bool) {
 	s.mu.Lock()
 	if s.inFlight > 0 {
@@ -93,8 +85,6 @@ func (s *fetchStreak) finish(ok bool) (stop bool, pause bool) {
 	return stop, false
 }
 
-// resumeIntake 限流暂停已经结束，允许继续领页。
-// 暂停前已经返回的失败留在失败列表里，但不占恢复后的 20 次额度。
 func (s *fetchStreak) resumeIntake() {
 	s.mu.Lock()
 	s.streak = 0
@@ -104,8 +94,6 @@ func (s *fetchStreak) resumeIntake() {
 	s.mu.Unlock()
 }
 
-// abandon 这次请求被取消，不计入连续失败。
-// 若处于暂停恢复后的中止态且在途已归零，置 stopping 并通知调用方取消上下文唤醒 tryBegin。
 func (s *fetchStreak) abandon() bool {
 	s.mu.Lock()
 	if s.inFlight > 0 {
@@ -121,7 +109,7 @@ func (s *fetchStreak) abandon() bool {
 	return shouldStop
 }
 
-// collectFetch 本站这一轮的请求上下文。限流时取消它，恢复后再换一个。
+// collectFetch 本轮抓取可取消上下文，暂停时取消在途请求，恢复后重建。
 type collectFetch struct {
 	mu     sync.Mutex
 	ctx    context.Context
@@ -148,17 +136,18 @@ func (f *collectFetch) stopRequests() {
 func (f *collectFetch) resume(parent context.Context) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.cancel()
 	f.ctx, f.cancel = context.WithCancel(parent)
 }
 
-// emptyPageStreak 按页码顺序推进连续空页水位线，避免慢页在途时被后续空页误截断。
+// emptyPageStreak 按页码有序水位线统计连续空页，避免慢页在途时被后续空页提前截断。
 type emptyPageStreak struct {
 	mu       sync.Mutex
 	limit    int
 	frontier int
 	streak   int
 	hadData  bool
-	done     map[int]bool // true=空页，false=非空或失败
+	done     map[int]bool
 }
 
 func newEmptyPageStreak(enabled bool, limit int) *emptyPageStreak {
@@ -171,7 +160,6 @@ func newEmptyPageStreak(enabled bool, limit int) *emptyPageStreak {
 	}
 }
 
-// record 上报单页抓取结果，返回是否达到连续空页阈值以及本轮是否已有非空数据。
 func (e *emptyPageStreak) record(page int, empty, hasData bool) (reached bool, hadData bool) {
 	if e == nil || page <= 0 {
 		return false, false

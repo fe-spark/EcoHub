@@ -7,7 +7,6 @@ import (
 	"log"
 	"runtime/debug"
 	"server/internal/collect/progress"
-	"server/internal/collect/scheduler"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/syslog"
 	"server/internal/model"
@@ -86,7 +85,6 @@ func StopAllCollect(reason string) {
 	}
 	progress.MarkAllRunningStopped()
 	releaseQueuedCollectOccupies()
-	scheduler.CancelPendingWrites()
 	log.Printf("[Spider] 停止全部采集：%s，活跃任务 %d 个", reason, len(ids))
 }
 
@@ -106,7 +104,6 @@ func StopCollectSource(sourceID, reason string) {
 	log.Printf("[Spider] 停止站点采集：id=%s，%s", sourceID, reason)
 	progress.RequestStop(sourceID)
 	releaseCollectSourceIDs(sourceID)
-	scheduler.CancelSource(sourceID)
 }
 
 // StopSourceForDelete 占住该站级删除锁。仅阻塞该站采集，不再计入全局 activeCount 冻结全站。

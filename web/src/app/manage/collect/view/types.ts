@@ -9,8 +9,6 @@ export interface FilmSource {
   cd?: number;
   format?: "json" | "xml";
   domainReplaceRules?: string;
-  /** 同一站相邻两次抓页的最小间隔，毫秒。0 为不等待。 */
-  collectIntervalMs?: number;
   lastRunTime?: string;
   lastRunPageCount?: number;
   sitePageTotal?: number;
@@ -162,11 +160,7 @@ export interface SourceFormValues {
   cd?: number;
   domainReplaceRules?: string;
   proxyCollect?: boolean;
-  collectIntervalMs?: number;
 }
-
-/** 新采集站的抓页间隔。0 仍表示不等待。 */
-export const COLLECT_INTERVAL_MS_DEFAULT = 200;
 
 export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   name: "",
@@ -177,7 +171,6 @@ export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   cd: 24,
   domainReplaceRules: "",
   proxyCollect: false,
-  collectIntervalMs: COLLECT_INTERVAL_MS_DEFAULT,
 };
 
 export const collectDuration = [
@@ -218,7 +211,6 @@ export function normalizeSource(item: CollectListItemResponse): FilmSource {
     sitePageTotal: item.sitePageTotal ? Number(item.sitePageTotal) : 0,
     progress: item.progress ?? null,
     proxyCollect: Boolean(item.proxyCollect),
-    collectIntervalMs: Math.max(0, Number(item.collectIntervalMs) || 0),
     categoryReady: item.categoryReady !== undefined ? Boolean(item.categoryReady) : true,
     categorySyncing: Boolean(item.categorySyncing),
     deleting: Boolean(item.deleting),

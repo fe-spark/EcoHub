@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"server/internal/collect/fetcher"
+	"server/internal/collect/engine"
 	"server/internal/collect/progress"
-	"server/internal/collect/scheduler"
 	"server/internal/film/writer"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
@@ -59,13 +58,13 @@ func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchCont
 	return written.Affected, nil
 }
 
-func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchCtx *collectBatchContext) (scheduler.Mids, error) {
+func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchCtx *collectBatchContext) (model.Mids, error) {
 	if s == nil {
-		return scheduler.Mids{}, errors.New("采集站信息不存在")
+		return model.Mids{}, errors.New("采集站信息不存在")
 	}
 	ids = strings.TrimSpace(ids)
 	if ids == "" {
-		return scheduler.Mids{}, nil
+		return model.Mids{}, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -73,23 +72,23 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 
 	r, err := requestForSource(s)
 	if err != nil {
-		return scheduler.Mids{}, err
+		return model.Mids{}, err
 	}
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
-	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
+	list, err := engine.GetFilmDetailWithRetry(ctx, s, r, nil, nil)
 	if err != nil {
-		return scheduler.Mids{}, fmt.Errorf("get movie detail failed: %w", err)
+		return model.Mids{}, fmt.Errorf("get movie detail failed: %w", err)
 	}
 	if len(list) <= 0 {
-		return scheduler.Mids{}, errors.New("get movie detail failed: film not found or unplayable")
+		return model.Mids{}, errors.New("get movie detail failed: film not found or unplayable")
 	}
 
 	writeCtx, cancelWrite := context.WithTimeout(ctx, 30*time.Second)
 	written, err := saveCollectedFilmForCollect(writeCtx, s, 1, list)
 	cancelWrite()
 	if err != nil {
-		return scheduler.Mids{}, err
+		return model.Mids{}, err
 	}
 	if batchCtx != nil {
 		batchCtx.markSourceFinished(*s)
@@ -237,6 +236,6 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 	return ""
 }
 
-func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (scheduler.Mids, error) {
+func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (model.Mids, error) {
 	return writer.SaveCollectedPeerDetails(ctx, s, page, list)
 }

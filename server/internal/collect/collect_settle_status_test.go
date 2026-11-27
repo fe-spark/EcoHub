@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/collect/fetcher"
+	"server/internal/collect/engine"
 	"server/internal/collect/progress"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -140,7 +140,7 @@ func TestStoppedSourceSkipsPublishMuBeforeSealing(t *testing.T) {
 	beginCollectQueue()
 	defer endCollectQueue()
 
-	collectPagesFn = func(ctx context.Context, _ int, _ []int, source *model.FilmSource, hours int, batch fetcher.Batch) (bool, int, int, []int, error) {
+	collectPagesFn = func(ctx context.Context, _ int, _ []int, source *model.FilmSource, hours int, batch engine.Batch) (bool, int, int, []int, error) {
 		batch.AddAffectedMIDs(source, hours, []int64{42})
 		StopCollectSource(source.Id, "测试停止跳过publishMu")
 		<-ctx.Done()

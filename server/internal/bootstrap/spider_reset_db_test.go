@@ -71,7 +71,7 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 	t.Cleanup(func() {
 		waitResetSearchWorkIdle(t)
 		collect.ClearAllCrons()
-		collect.ClearAllLimiters()
+		collect.ResetAllThrottles()
 		db.Mdb = prevDB
 		db.Rdb = prevRdb
 		config.FilmPictureUploadDir = prevUploadDir

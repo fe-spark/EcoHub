@@ -6,7 +6,7 @@ const (
 	// MysqlForegroundConns 留给前台搜索和管理接口的连接。
 	// 写槽上限 = MysqlMaxOpenConns - MysqlForegroundConns（默认 16 路）。
 	MysqlForegroundConns = 32
-	// CollectWriteSlotMin 写并发下限。锁错误时减到这里。
+	// CollectWriteSlotMin 写并发下限。
 	CollectWriteSlotMin = 2
 )
 
@@ -19,18 +19,7 @@ func WriteSlotMax() int {
 	return n
 }
 
-// ApplyWriteSlots 只设置当前写槽。页并发、取数在途和队列不跟着变。
-func ApplyWriteSlots(n int) {
-	if n < CollectWriteSlotMin {
-		n = CollectWriteSlotMin
-	}
-	if max := WriteSlotMax(); n > max {
-		n = max
-	}
-	CollectWriteMaxInflight = n
-}
-
-// PageWorkerLimit 当前页并发。与写槽无关。
+// PageWorkerLimit 当前单站页并发上限。
 func PageWorkerLimit() int {
 	if CollectPageWorkers > 0 {
 		return CollectPageWorkers
@@ -38,7 +27,7 @@ func PageWorkerLimit() int {
 	return 1
 }
 
-// FetchInFlightLimit 当前全局取数在途。与写槽无关。
+// FetchInFlightLimit 当前全局取数在途上限。
 func FetchInFlightLimit() int {
 	if CollectFetchInFlight > 0 {
 		return CollectFetchInFlight

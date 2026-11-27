@@ -295,7 +295,7 @@ func (s *CollectService) delFilmSource(id string) (int, error) {
 		if len(orphanMids) > 0 {
 			syslog.Infof("[Collect] 删除采集源 %s(%s)，已删除该站档案 %d 部", src.Name, id, len(orphanMids))
 		}
-		collect.ClearLimiter(id)
+		collect.ResetSourceThrottle(id)
 		repobase.ClearProvideNetworkConfigCache()
 		catalog.MarkCategoryChanged()
 		progress.BroadcastCategoryStatus(id, "idle")

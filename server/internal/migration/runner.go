@@ -41,11 +41,6 @@ var migrations = []Migration{
 		Run:     migrateBannerSlot,
 	},
 	{
-		Version: "20261113_collect_interval",
-		Name:    "采集站增加抓页间隔",
-		Run:     migrateCollectInterval,
-	},
-	{
 		Version: "20261114_collect_record_reset",
 		Name:    "采集记录改为账单，清空后按新表重建",
 		Run:     migrateCollectRecordReset,

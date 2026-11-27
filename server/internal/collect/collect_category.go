@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"server/internal/collect/engine"
 	"server/internal/collect/progress"
 	"server/internal/film/catalog"
 	filmsnapshot "server/internal/film/snapshot"
@@ -82,7 +83,7 @@ func FetchCategoryTree(ctx context.Context, s *model.FilmSource) (*model.Categor
 		return nil, 0, err
 	}
 	req.Ctx = ctx
-	categoryTree, pageCount, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
+	categoryTree, pageCount, err := engine.ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
 	if err != nil {
 		if abortErr := checkCategorySyncActive(ctx); abortErr != nil {
 			return nil, 0, abortErr
@@ -117,6 +118,30 @@ func ApplySourceCategory(s *model.FilmSource, tree *model.CategoryTree, clearDat
 
 // sourceExclusive 保证同一采集站的分类写入和删除不会交错。
 var sourceExclusive sync.Map
+
+// ResetSourceThrottle 清除指定采集站的自适应节流窗口状态。
+func ResetSourceThrottle(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	engine.ResetSourceThrottle(sourceID)
+}
+
+// ResetAllThrottles 清除全部采集站的自适应节流窗口状态。
+func ResetAllThrottles() {
+	engine.ResetAllThrottles()
+}
+
+// DropSourceRuntime 采集站删除后清理运行态节流与站级互斥锁条目。
+func DropSourceRuntime(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	engine.ResetSourceThrottle(sourceID)
+	sourceExclusive.Delete(sourceID)
+}
 
 func sourceExclusiveMu(id string) *sync.Mutex {
 	if id == "" {

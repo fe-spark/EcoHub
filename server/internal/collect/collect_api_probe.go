@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"server/internal/collect/scheduler"
+	"server/internal/collect/engine"
 	"server/internal/model"
 	"server/internal/utils"
 )
@@ -76,7 +76,7 @@ func PrepareAndRunReset(report func(int, string), wipeFn func() error) error {
 	}
 	return collectLifecycle.runExclusive(func() error {
 		ClearAllCrons()
-		ClearAllLimiters()
+		engine.ResetAllThrottles()
 		ResetCollectStatsCoalescer()
 		streamBuf.reset(currentStreamNow())
 		if wipeFn != nil {
@@ -90,7 +90,7 @@ func PrepareAndRunReset(report func(int, string), wipeFn func() error) error {
 func waitResetReady(timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := scheduler.WaitPendingWrites(ctx); err != nil {
+	if err := engine.WaitPendingWrites(ctx); err != nil {
 		return fmt.Errorf("等待在途写入结束失败: %w", err)
 	}
 	for {
@@ -181,8 +181,8 @@ func collectApiTest(ctx context.Context, s model.FilmSource, useProxy bool, prox
 	if !isXML {
 		return errors.New("接口返回数据格式异常，无法解析为 XML 数据")
 	}
-	rss := XMLRSS{}
-	if err = unmarshalXMLWithCharset(resp, &rss); err != nil {
+	rss := engine.XMLRSS{}
+	if err = engine.UnmarshalXMLWithCharset(resp, &rss); err != nil {
 		return errors.New(fmt.Sprint("接口返回 XML 结构异常，解析失败: ", err.Error()))
 	}
 	return nil

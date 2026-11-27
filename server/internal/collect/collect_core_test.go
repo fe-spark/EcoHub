@@ -49,16 +49,6 @@ func TestNormalizeAffectedMIDs(t *testing.T) {
 	}
 }
 
-func TestShouldSkipCollectPublishOnError(t *testing.T) {
-	src := model.FilmSource{Sort: 0}
-	if shouldSkipCollectPublishOnError(src, -1) {
-		t.Error("流式可见下全量失败页不再跳过已刷快照")
-	}
-	if shouldSkipCollectPublishOnError(src, 3) {
-		t.Error("expected false for h > 0")
-	}
-}
-
 func TestCollectLifecycleState_BeginAndEndSource(t *testing.T) {
 	lc := newCollectLifecycle()
 	const sourceID = "lc-test-source-1"

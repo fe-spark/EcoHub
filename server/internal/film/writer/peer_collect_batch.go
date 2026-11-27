@@ -10,7 +10,6 @@ import (
 	"server/internal/film/snapshot"
 	"server/internal/model"
 	"server/internal/taxonomy"
-	"server/internal/utils"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -64,7 +63,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 		sourceMids[i] = detail.Id
 	}
 
-	mapped, err := loadPageMappingsTx(tx, source.Id, sourceMids)
+	mapped, vodUnixBySourceMid, err := loadPageMappingsTx(tx, source.Id, sourceMids)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -79,7 +78,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 		return nil, nil, 0, err
 	}
 	markUnmappedCreates(items)
-	if err = claimCreateItemsTx(tx, source.Id, items); err != nil {
+	if err = claimCreateItemsTx(tx, source.Id, items, vodUnixBySourceMid); err != nil {
 		return nil, nil, 0, err
 	}
 	stage := time.Now()
@@ -89,12 +88,12 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err = insertPageMatchKeysTx(tx, items); err != nil {
 		return nil, nil, 0, err
 	}
-	if err = upsertSourceMappingsTx(tx, source.Id, items, mapped, false); err != nil {
+	if err = upsertSourceMappingsTx(tx, source.Id, items, mapped, true, vodUnixBySourceMid); err != nil {
 		return nil, nil, 0, err
 	}
 	mapCost := time.Since(stage)
 	stage = time.Now()
-	if err = savePagePlaylistsTx(tx, source.Id, items); err != nil {
+	if err = savePagePlaylistsTx(tx, source.Id, items, vodUnixBySourceMid); err != nil {
 		return nil, nil, 0, err
 	}
 	playlistCost := time.Since(stage)
@@ -143,7 +142,7 @@ func writePeerPageCreateTx(tx *gorm.DB, source *model.FilmSource, details []mode
 		items[i] = peerPageItem{detail: detail, create: true}
 	}
 	stage := time.Now()
-	if err := claimCreateItemsTx(tx, source.Id, items); err != nil {
+	if err := claimCreateItemsTx(tx, source.Id, items, nil); err != nil {
 		return nil, nil, 0, err
 	}
 	if err := createPageFilmsTx(tx, source, items, sources); err != nil {
@@ -152,7 +151,7 @@ func writePeerPageCreateTx(tx *gorm.DB, source *model.FilmSource, details []mode
 	if err := insertPageMatchKeysTx(tx, items); err != nil {
 		return nil, nil, 0, err
 	}
-	if err := upsertSourceMappingsTx(tx, source.Id, items, nil, true); err != nil {
+	if err := upsertSourceMappingsTx(tx, source.Id, items, nil, true, nil); err != nil {
 		return nil, nil, 0, err
 	}
 	mapCost := time.Since(stage)
@@ -192,7 +191,7 @@ func lastPeerDetails(details []model.MovieDetail) []model.MovieDetail {
 	return out
 }
 
-func claimCreateItemsTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
+func claimCreateItemsTx(tx *gorm.DB, sourceID string, items []peerPageItem, storedUnix map[int64]int64) error {
 	claims := make([]vodTimeClaim, 0, len(items))
 	idxs := make([]int, 0, len(items))
 	for i := range items {
@@ -202,7 +201,7 @@ func claimCreateItemsTx(tx *gorm.DB, sourceID string, items []peerPageItem) erro
 		idxs = append(idxs, i)
 		claims = append(claims, vodTimeClaim{sourceMid: items[i].detail.Id, updateTime: items[i].detail.UpdateTime})
 	}
-	won, err := claimPageVodTimesTx(tx, sourceID, claims)
+	won, err := claimPageVodTimesTx(tx, sourceID, claims, storedUnix)
 	if err != nil {
 		return err
 	}
@@ -239,40 +238,6 @@ func isPrimaryCollectSourceTx(tx *gorm.DB, source *model.FilmSource) bool {
 	return primary.Id == source.Id
 }
 
-func upsertSourceMappingsTx(tx *gorm.DB, sourceID string, items []peerPageItem, mapped map[int64]int64, withVodUnix bool) error {
-	mappings := make([]model.MovieSourceMapping, 0, len(items))
-	for i := range items {
-		if items[i].mid <= 0 {
-			continue
-		}
-		if mapped != nil {
-			if existing, ok := mapped[items[i].detail.Id]; ok && existing == items[i].mid {
-				continue
-			}
-		}
-		row := model.MovieSourceMapping{
-			SourceId:  sourceID,
-			SourceMid: items[i].detail.Id,
-			GlobalMid: items[i].mid,
-		}
-		if withVodUnix {
-			if unix, err := utils.ParseCollectUpdateTime(items[i].detail.UpdateTime); err == nil {
-				row.SourceVodUnix = unix
-			}
-		}
-		mappings = append(mappings, row)
-	}
-	if len(mappings) == 0 {
-		return nil
-	}
-	sort.Slice(mappings, func(i, j int) bool { return mappings[i].SourceMid < mappings[j].SourceMid })
-	// 冲突只更新映射归属，source_vod_unix 由 claim 阶段维护。
-	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "source_id"}, {Name: "source_mid"}},
-		DoUpdates: clause.AssignmentColumns([]string{"global_mid", "updated_at"}),
-	}).Create(&mappings).Error
-}
-
 func insertNewPagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
 	lines := make([]model.FilmSourcePlaylist, 0, len(items))
 	for i := range items {
@@ -296,22 +261,6 @@ func countCategorySkips(items []peerPageItem) int {
 		}
 	}
 	return unmapped
-}
-
-func loadPageMappingsTx(tx *gorm.DB, sourceID string, sourceMids []int64) (map[int64]int64, error) {
-	out := make(map[int64]int64, len(sourceMids))
-	var rows []model.MovieSourceMapping
-	if err := tx.Select("source_mid", "global_mid").
-		Where("source_id = ? AND source_mid IN ?", sourceID, sourceMids).
-		Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		if row.SourceMid > 0 && row.GlobalMid > 0 {
-			out[row.SourceMid] = row.GlobalMid
-		}
-	}
-	return out, nil
 }
 
 func bindMappedFilmsTx(tx *gorm.DB, items []peerPageItem, mapped map[int64]int64) error {

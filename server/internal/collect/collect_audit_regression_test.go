@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/collect/fetcher"
+	"server/internal/collect/engine"
 	"server/internal/collect/progress"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
@@ -91,7 +91,7 @@ func TestZeroPageProbeStillCompletesAndUpdatesCronAnchor(t *testing.T) {
 		probedHours = append(probedHours, hours)
 		return 0, nil
 	}
-	collectPagesFn = func(context.Context, int, []int, *model.FilmSource, int, fetcher.Batch) (bool, int, int, []int, error) {
+	collectPagesFn = func(context.Context, int, []int, *model.FilmSource, int, engine.Batch) (bool, int, int, []int, error) {
 		collectCalled.Store(true)
 		return false, 0, 0, nil, nil
 	}

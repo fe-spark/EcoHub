@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"server/internal/collect/fetcher"
+	"server/internal/collect/engine"
 	"server/internal/collect/progress"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/model"
@@ -23,8 +23,20 @@ import (
 	采集逻辑 v3
 */
 
-// collectPagesFn 分页拉取实现；默认注入 fetcher.CollectPages，测试可替换以验证停止收尾路径。
-var collectPagesFn = fetcher.CollectPages
+var defaultEngineRunner = engine.NewRunner(engine.Runner{
+	ResolveProxy:   repobase.ResolveSpiderProxy,
+	SavePage:       saveCollectedFilmForCollect,
+	OnSourceFailed: emitSourceFailedNotify,
+})
+
+// collectPagesFn 分页拉取实现；默认调用 engine.Runner.CollectPages（支持复用探页第 1 页），测试可替换。
+var collectPagesFn = func(ctx context.Context, pageCount int, targetPages []int, s *model.FilmSource, h int, batch engine.Batch) (bool, int, int, []int, error) {
+	var seed *engine.Page1Result
+	if bc, ok := batch.(*collectBatchContext); ok {
+		seed = bc.takePage1Seed(s.Id)
+	}
+	return defaultEngineRunner.CollectPages(ctx, pageCount, targetPages, seed, s, h, batch)
+}
 
 func init() {
 	filmsnapshot.AddSearchIndexProgressListener(func(p filmsnapshot.SearchIndexProgress) {
@@ -62,24 +74,10 @@ func requestForSource(s *model.FilmSource) (utils.RequestInfo, error) {
 // 每次执行一键终止都会递增版本号，旧版本调度器检测到版本变化后不再继续启动新站点任务。
 var stopAllVersion atomic.Uint64
 
-// init 把采集编排层的取数能力注入子包（子包不反向依赖本包）。
+// init 注册进度包所需的状态回调。
 func init() {
 	progress.SetOccupyChecker(isOccupiedCollectSource)
 	progress.SetStatsFlusher(FlushCollectSourceStats)
-	fetcher.Configure(fetcher.Deps{
-		GetPageCount: func(s *model.FilmSource, r utils.RequestInfo) (int, error) {
-			return ResolveCollector(s.ResolveFormat()).GetPageCount(r)
-		},
-		GetFilmDetail: func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
-			return ResolveCollector(s.ResolveFormat()).GetFilmDetail(r)
-		},
-		WaitTurn:           waitSourceRequestTurn,
-		ClaimTurn:          claimSourceRequestTurn,
-		SavePage:           saveCollectedFilmForCollect,
-		SkipPublishOnError: shouldSkipCollectPublishOnError,
-		ResolveSpiderProxy: repobase.ResolveSpiderProxy,
-		OnSourceFailed:     emitSourceFailedNotify,
-	})
 }
 
 func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx *collectBatchContext) (retErr error) {

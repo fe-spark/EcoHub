@@ -262,7 +262,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource, clearCate
 		progress.BroadcastCategoryReady(source.Id, false)
 	}
 
-	collect.ClearLimiter(source.Id)
+	collect.ResetSourceThrottle(source.Id)
 	if old.State && !source.State {
 		collect.StopCollectSource(source.Id, "采集站已停用")
 	}
@@ -316,7 +316,7 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 			return err
 		}
 		for _, id := range idsToUpdate {
-			collect.ClearLimiter(id)
+			collect.ResetSourceThrottle(id)
 			if !state {
 				collect.StopCollectSource(id, "采集站已停用")
 			}
@@ -344,7 +344,7 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 		if err := collect.AddCollectSource(source); err != nil {
 			return err
 		}
-		collect.ClearLimiter(source.Id)
+		collect.ResetSourceThrottle(source.Id)
 		repobase.ClearProvideNetworkConfigCache()
 		filmsnapshot.ClearDynamicPlayCaches()
 		if primaryWasEmpty && source.State {

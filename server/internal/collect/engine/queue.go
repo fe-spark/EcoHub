@@ -1,14 +1,11 @@
-package fetcher
+package engine
 
 import (
 	"context"
 	"sync"
 )
 
-// MaxCollectPageCount 采集站允许的合理最大分页数，防止恶意超大 pagecount 触发 OOM 与无限抓取。
-const MaxCollectPageCount = 50000
-
-// pageFetchQueue 惰性分页队列。普通全量抓取使用游标推进，避免一次性预分配超大页码切片与通道。
+// pageFetchQueue 惰性分页队列。支持从指定起始页推进游标，避免预分配超大页码切片与通道。
 type pageFetchQueue struct {
 	mu       sync.Mutex
 	nextPage int
@@ -22,7 +19,7 @@ type pageFetchQueue struct {
 	left     int
 }
 
-func newPageFetchQueue(pageCount int, targetPages []int) *pageFetchQueue {
+func newPageFetchQueue(startPage, pageCount int, targetPages []int) *pageFetchQueue {
 	queue := &pageFetchQueue{
 		wake:    make(chan struct{}, 1),
 		drained: make(chan struct{}),
@@ -30,11 +27,19 @@ func newPageFetchQueue(pageCount int, targetPages []int) *pageFetchQueue {
 	if len(targetPages) > 0 {
 		queue.targets = append([]int(nil), targetPages...)
 		queue.left = len(queue.targets)
-	} else {
-		queue.nextPage = 1
-		queue.endPage = pageCount
-		queue.left = pageCount
+		return queue
 	}
+	if startPage < 1 {
+		startPage = 1
+	}
+	if pageCount < startPage {
+		queue.left = 0
+		queue.closeLocked()
+		return queue
+	}
+	queue.nextPage = startPage
+	queue.endPage = pageCount
+	queue.left = pageCount - startPage + 1
 	return queue
 }
 
@@ -96,7 +101,7 @@ func (q *pageFetchQueue) next(ctx context.Context) (int, bool) {
 	}
 }
 
-// putBack 把被限流取消的页放回队列。这一页还没完成，left 不变。
+// putBack 将限流暂停取消的页放回队列，该页尚未完成因此 left 不递减。
 func (q *pageFetchQueue) putBack(page int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

@@ -2,6 +2,7 @@ package collect
 
 import (
 	"log"
+	"server/internal/collect/engine"
 	"server/internal/model"
 	"strings"
 	"sync"
@@ -66,6 +67,7 @@ type collectBatchContext struct {
 	isStandalone      bool
 	primaryWarmedUp   bool
 	pendingSealMIDs   map[string][]int64
+	page1Seeds        map[string]*engine.Page1Result
 	ledgerPending     []pendingLedgerFilm
 	ledgerFlushAt     time.Time
 	ledgerWritten     bool
@@ -101,6 +103,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		startedAt:       startedAt,
 		isStandalone:    standalone,
 		pendingSealMIDs: make(map[string][]int64, len(sources)),
+		page1Seeds:      make(map[string]*engine.Page1Result, len(sources)),
 		ledgerFlushAt:   time.Now(),
 		sourceHours:     make(map[string]int),
 		sourceErrors:    make(map[string]string),
@@ -148,6 +151,29 @@ func (b *collectBatchContext) takeAffectedMIDs() []int64 {
 	}
 	b.pendingSealMIDs = make(map[string][]int64)
 	return out
+}
+
+func (b *collectBatchContext) setPage1Seed(sourceID string, seed *engine.Page1Result) {
+	if b == nil || sourceID == "" || seed == nil {
+		return
+	}
+	b.mu.Lock()
+	if b.page1Seeds == nil {
+		b.page1Seeds = make(map[string]*engine.Page1Result)
+	}
+	b.page1Seeds[sourceID] = seed
+	b.mu.Unlock()
+}
+
+func (b *collectBatchContext) takePage1Seed(sourceID string) *engine.Page1Result {
+	if b == nil || sourceID == "" {
+		return nil
+	}
+	b.mu.Lock()
+	seed := b.page1Seeds[sourceID]
+	delete(b.page1Seeds, sourceID)
+	b.mu.Unlock()
+	return seed
 }
 
 func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, _ int, mids []int64) {

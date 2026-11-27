@@ -186,13 +186,13 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) (retEr
 				return err
 			}
 			for _, src := range oldSources {
-				collect.ClearLimiter(src.Id)
+				collect.ResetSourceThrottle(src.Id)
 			}
 			if err := collect.ReplaceCollectSources(list); err != nil {
 				return fmt.Errorf("导入采集站失败: %w", err)
 			}
 			for _, src := range list {
-				collect.ClearLimiter(src.Id)
+				collect.ResetSourceThrottle(src.Id)
 			}
 			return nil
 		}); err != nil {

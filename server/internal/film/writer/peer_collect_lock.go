@@ -1,6 +1,7 @@
 package writer
 
 import (
+	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +18,16 @@ const matchKeyLockStripes = 65536
 var (
 	filmMidLocks      [2048]sync.Mutex
 	filmMatchKeyLocks [matchKeyLockStripes]sync.Mutex
+	sourceVodLocks    [2048]sync.Mutex
 )
+
+func sourceVodLockIndex(sourceID string, sourceMid int64) int {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(strings.TrimSpace(sourceID)))
+	_, _ = h.Write([]byte{':'})
+	_, _ = h.Write([]byte(strconv.FormatInt(sourceMid, 10)))
+	return int(h.Sum64() % uint64(len(sourceVodLocks)))
+}
 
 func getFilmMidLock(mid int64) *sync.Mutex {
 	if mid <= 0 {
@@ -139,24 +149,60 @@ func peerMatchKeys(source *model.FilmSource, detail model.MovieDetail) []string 
 	return keys
 }
 
-func lockPeerCollect(source *model.FilmSource, _ model.MovieDetail) func() {
-	// 全站平权模式下各采集站仅写入自身归属的档案、映射与播放线路，按 source.Id 串行即可，避免跨站同名片虚锁阻塞并发写槽。
+func lockPeerCollect(source *model.FilmSource, detail model.MovieDetail) func() {
 	if source == nil || strings.TrimSpace(source.Id) == "" {
 		return func() {}
 	}
-	mu := getSourceWriteLock(source.Id)
-	mu.Lock()
-	return mu.Unlock
+	if detail.Id <= 0 {
+		mu := getSourceWriteLock(source.Id)
+		mu.Lock()
+		return mu.Unlock
+	}
+	idx := sourceVodLockIndex(source.Id, detail.Id)
+	sourceVodLocks[idx].Lock()
+	return sourceVodLocks[idx].Unlock
 }
 
-// lockPeerCollectPage 仅锁当前采集站，避免不同站点因同名片在 Go 内存 matchKey 锁上跨站串行阻塞。
-func lockPeerCollectPage(source *model.FilmSource, _ []model.MovieDetail) func() {
+// lockPeerCollectPage 按 (source_id, source_mid) 分片哈希升序加锁，同站不同分片页可完全并发落库，避免同站整站串行阻塞。
+func lockPeerCollectPage(source *model.FilmSource, details []model.MovieDetail) func() {
 	if source == nil || strings.TrimSpace(source.Id) == "" {
 		return func() {}
 	}
-	mu := getSourceWriteLock(source.Id)
-	mu.Lock()
-	return mu.Unlock
+	if len(details) == 0 {
+		return func() {}
+	}
+	seen := make(map[int]struct{}, len(details))
+	buckets := make([]int, 0, len(details))
+	hasFallback := false
+	for _, d := range details {
+		if d.Id <= 0 {
+			hasFallback = true
+			continue
+		}
+		idx := sourceVodLockIndex(source.Id, d.Id)
+		if _, ok := seen[idx]; ok {
+			continue
+		}
+		seen[idx] = struct{}{}
+		buckets = append(buckets, idx)
+	}
+	var srcMu *sync.Mutex
+	if hasFallback {
+		srcMu = getSourceWriteLock(source.Id)
+		srcMu.Lock()
+	}
+	sort.Ints(buckets)
+	for _, idx := range buckets {
+		sourceVodLocks[idx].Lock()
+	}
+	return func() {
+		for i := len(buckets) - 1; i >= 0; i-- {
+			sourceVodLocks[buckets[i]].Unlock()
+		}
+		if srcMu != nil {
+			srcMu.Unlock()
+		}
+	}
 }
 
 func saveSinglePeerDetailSynced(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, error) {

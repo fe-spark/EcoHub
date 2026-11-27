@@ -227,7 +227,6 @@ func defaultFilmSources() []model.FilmSource {
 	}
 	for i := range list {
 		list[i].Sort = i
-		list[i].CollectIntervalMs = model.CollectIntervalMsDefault
 		list[i].CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
 	}
 	return list

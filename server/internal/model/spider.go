@@ -1,7 +1,6 @@
 package model
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -71,39 +70,11 @@ type FilmSource struct {
 	Cd                 int       `json:"cd"`                                   // 采集时长 单位/小时
 	Format             string    `json:"format" gorm:"size:16;default:'json'"` // 采集数据格式: json | xml (默认 json)
 	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"`  // 播放链接域名替换规则 (每行一条: old.com => new.com)
-	ProxyCollect       bool      `json:"proxyCollect" gorm:"default:false"`    // 采集接口是否走代理
+	ProxyCollect        bool      `json:"proxyCollect" gorm:"default:false"`    // 采集接口是否走代理
 	SkipTLSVerify       bool      `json:"skipTlsVerify" gorm:"default:false"`   // 仅自签名源站跳过证书校验
-	CollectIntervalMs   int       `json:"collectIntervalMs" gorm:"default:200"` // 同一站相邻两次取页的最小间隔，毫秒。0 为不等待
 	HomeRecommendInited bool      `json:"-" gorm:"not null;default:false"`      // 该采集站是否已完成首页推荐默认站点分类一次性初始化
 	CreatedAt           time.Time `json:"createdAt" gorm:"autoCreateTime;<-:create;index"`
 }
-
-// UnmarshalJSON 把缺省的采集间隔和显式 0 分开。
-// 请求或旧备份没带 collectIntervalMs 时用默认 200；只有明确写成 0 才是不等待。
-func (s *FilmSource) UnmarshalJSON(data []byte) error {
-	type filmSource FilmSource
-	aux := struct {
-		filmSource
-		CollectIntervalMs *int `json:"collectIntervalMs"`
-	}{}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	*s = FilmSource(aux.filmSource)
-	if aux.CollectIntervalMs == nil {
-		s.CollectIntervalMs = CollectIntervalMsDefault
-	} else {
-		s.CollectIntervalMs = *aux.CollectIntervalMs
-	}
-	return nil
-}
-
-const (
-	// CollectIntervalMsDefault 新站和尚未改过的旧站使用的抓页间隔。
-	CollectIntervalMsDefault = 200
-	// CollectIntervalMsMax 采集间隔上限，毫秒。
-	CollectIntervalMsMax = 60000
-)
 
 func (f *FilmSource) ResolveFormat() string {
 	if f != nil && f.Format == SourceFormatXML {

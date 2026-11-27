@@ -430,18 +430,15 @@ func ApiGet(r *RequestInfo) {
 	} else {
 		r.Resp = nil
 		if resp.StatusCode == http.StatusTooManyRequests {
-			r.Err = fmt.Sprintf("Too Many Requests, status=%d, url=%s", resp.StatusCode, targetUrl)
+			if retryAfter := parseRetryAfterHeader(resp.Header.Get("Retry-After"), time.Now()); retryAfter > 0 {
+				r.Err = fmt.Sprintf("Too Many Requests, status=%d, retry_after=%ds, url=%s", resp.StatusCode, int(retryAfter/time.Second), targetUrl)
+			} else {
+				r.Err = fmt.Sprintf("Too Many Requests, status=%d, url=%s", resp.StatusCode, targetUrl)
+			}
 		} else {
 			r.Err = fmt.Sprintf("unexpected response status=%d, url=%s", resp.StatusCode, targetUrl)
 		}
 	}
-}
-
-func IsRateLimitedErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "Too Many Requests") || strings.Contains(err.Error(), "status=429")
 }
 
 // ApiTest 处理 API 测试请求

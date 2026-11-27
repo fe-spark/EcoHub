@@ -9,8 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/collect/scheduler"
-	"server/internal/model"
+	"server/internal/collect/engine"
 )
 
 var collectLifecycle = newCollectLifecycle()
@@ -258,7 +257,7 @@ func (s *collectLifecycleState) waitStoppedCollect(deadline time.Time) error {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if err := scheduler.WaitPendingWrites(ctx); err != nil {
+		if err := engine.WaitPendingWrites(ctx); err != nil {
 			return fmt.Errorf("等待在途写入结束失败: %w", err)
 		}
 		s.mu.Lock()
@@ -381,8 +380,4 @@ func (s *collectLifecycleState) waitNotBusy(timeout time.Duration) error {
 		s.cond.Wait()
 	}
 	return nil
-}
-
-func shouldSkipCollectPublishOnError(source model.FilmSource, h int) bool {
-	return false
 }
