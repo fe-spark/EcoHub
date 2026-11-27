@@ -1,18 +1,18 @@
-Release **v3.2.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+Pre-release **v3.2.0-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
 ### Upgrade notes
 
-- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.0-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.2.0 changes
+### v3.2.0-beta.0 changes
 
-- **Collect scheduling, ledger & write stability**: overhaul collect concurrency boundaries, epoch validation on displaced exits, and streaming clustered ledger cleanup; restore 16 concurrent write slots without cross-source `matchKey` lock contention; claim `vod_time` before creating `film_index` with unified `mid` lock ordering, and add the `partial_stopped` batch status.
-- **Home management & hot-chart sync**: add the random quick-banner strategy, import default source category groups once into homepage recommendations on first setup, auto-sync ranking charts after collection, align fallback `cid` composite index ordering, and keep public category reads strictly read-only.
-- **Security hardening, SSRF & private mode**: upgrade password hashing to `bcrypt` with seamless MD5 migration on login, replace global username login locks with IP / IP+account limiters, harden SSRF/same-origin checks and credential redaction, and enforce private-mode guards plus subscription QR code support.
-- **HTTP policy, TG resilience & server refactor (#117)**: reorganize internal server packages by domain with explicit hook wiring, isolate per-source Telegram ledger stats and process callbacks concurrently, and enforce HTTP body/timeout policies, graceful shutdown, web UX fixes, and full concurrency/security regression coverage.
+- **Collect scheduling, ledger & write stability**: overhaul collect concurrency boundaries, epoch validation on displaced exits, and streaming clustered ledger cleanup; restore 16 concurrent write slots without cross-source `matchKey` lock contention; enforce ordered row locking during film writes and orphan cleanup, fix out-of-order empty-page truncation, reseal retry convergence, progress/lock token races, and config-import sync locking, and add the `partial_stopped` batch status.
+- **Home management & hot-chart sync**: unify homepage banner/recommend management with random & Douban strategies, import default source category groups once on first setup, auto-sync ranking charts after collection, align fallback `cid` composite index ordering, keep public category reads strictly read-only, and protect rule-root categories and related-movie source filtering.
+- **Security hardening, SSRF & private mode**: upgrade passwords to `bcrypt` with transparent MD5 migration and reject whitespace password-change bypasses, replace global username login lockouts with IP / IP+account limiters, tighten SSRF/cross-scheme CORS checks, upload magic-byte/`nosniff` guards, and credential redaction, and enforce private-mode and `/provide` visibility/bounds checks plus subscription QR code support.
+- **HTTP policy, MySQL migration lock & server refactor**: reorganize internal server packages by domain with explicit hook wiring, isolate per-source Telegram ledger stats and process callbacks concurrently, isolate MySQL advisory migration lock connections cleanly, and enforce SSE/upload timeouts, maintenance shutdown gates, web UX fixes, and full regression tests.
 
 ---
 
