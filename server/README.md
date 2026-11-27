@@ -85,7 +85,7 @@ docker compose up -d --build server
 ## 启动流程
 
 1. 依次连接 Redis 和 MySQL。各重试 30 次，间隔 2 秒；仍无法连接时 panic 退出。
-2. 建表并补齐表结构（`AutoMigrate`），然后按顺序执行 `internal/migration/` 中尚未执行的迁移。
+2. 按顺序执行 `internal/migration/` 中尚未执行的迁移，再建表并补齐表结构（`AutoMigrate`）。
 3. 新库或不存在管理员时，写入 12 个预设采集站。
 4. 初始化分类、管理员 `admin`、上传目录、网站配置、默认海报源、数据分析配置。
 5. 注册计划任务，加载快照和内存中的列表数据，等待搜索索引构建完成。

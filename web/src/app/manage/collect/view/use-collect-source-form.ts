@@ -33,8 +33,8 @@ export function useCollectSourceForm({
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
 
-  const openAddForm = () => {
-    void fetchProxyStatus();
+  const openAddForm = async () => {
+    await fetchProxyStatus();
     setSourceModalMode("add");
     setEditingId(null);
     setSourceInitialValues(SOURCE_FORM_DEFAULTS);
@@ -49,18 +49,20 @@ export function useCollectSourceForm({
         content: `已有 ${siteList.length} 个，继续添加？`,
         okText: "继续",
         cancelText: "取消",
-        onOk: openAddForm,
+        onOk: () => void openAddForm(),
       });
       return;
     }
-    openAddForm();
+    void openAddForm();
   };
 
   const openEditDialog = async (id: string) => {
-    void fetchProxyStatus();
     setSourceModalMode("edit");
     setEditingId(id);
-    const resp = await ApiGet("/manage/collect/find", { id });
+    const [resp] = await Promise.all([
+      ApiGet("/manage/collect/find", { id }),
+      fetchProxyStatus(),
+    ]);
     if (resp.code === 0 && resp.data) {
       setSourceInitialValues({
         name: String(resp.data.name ?? ""),

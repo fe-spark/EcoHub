@@ -1,14 +1,33 @@
 import React from "react";
 import type { PlayLine } from "./types";
-export function formatCategoryNodes(nodes: any[]): any[] {
+export const SYNTHETIC_CATEGORY_ID_OFFSET = 100_000_000;
+
+export function isSourcePlayLine(line: PlayLine | null | undefined, sourceId: string): boolean {
+  if (!line || !sourceId) return false;
+  return (
+    line.sourceId === sourceId ||
+    line.id === sourceId ||
+    Boolean(line.id?.startsWith(`${sourceId}#`))
+  );
+}
+
+export function formatCategoryNodes(nodes: any[], disableSyntheticParents = false): any[] {
   if (!nodes || nodes.length === 0) return [];
-  return nodes.map((node) => ({
-    title: node.name,
-    label: node.name,
-    value: Number(node.id),
-    key: String(node.id),
-    ...(node.children?.length ? { children: formatCategoryNodes(node.children) } : {}),
-  }));
+  return nodes.map((node) => {
+    const children = node.children?.length
+      ? formatCategoryNodes(node.children, disableSyntheticParents)
+      : undefined;
+    const isSyntheticParent =
+      disableSyntheticParents && Number(node.id) >= SYNTHETIC_CATEGORY_ID_OFFSET && Boolean(children?.length);
+    return {
+      title: node.name,
+      label: node.name,
+      value: Number(node.id),
+      key: String(node.id),
+      ...(isSyntheticParent ? { selectable: false } : {}),
+      ...(children ? { children } : {}),
+    };
+  });
 }
 
 export function flattenCategoryNodes(nodes: any[]): any[] {
@@ -90,6 +109,7 @@ export function mergePlayLinesForSave(
   lineLinksMap: Record<string, string>,
   singlePlayLink?: string,
   singlePlayForm?: string,
+  lineNamesMap?: Record<string, string>,
 ): { playLink?: string; playFrom?: string[]; playForm?: string } {
   if (ownerLines.length > 1) {
     const playFromList: string[] = [];
@@ -100,8 +120,9 @@ export function mergePlayLinesForSave(
         lineLinksMap[k] !== undefined
           ? lineLinksMap[k]
           : formatEpisodesToPlayLink(l.linkList || []);
+      const lineName = (lineNamesMap?.[k] ?? l.name ?? l.id ?? "").trim();
       if (link && link.trim()) {
-        playFromList.push(l.name || l.id);
+        playFromList.push(lineName || l.name || l.id);
         playLinkList.push(link.trim());
       }
     }
@@ -113,7 +134,9 @@ export function mergePlayLinesForSave(
       };
     }
   } else if (singlePlayLink && singlePlayLink.trim()) {
-    const singleForm = (singlePlayForm || ownerLines[0]?.name || "默认播放").trim();
+    const firstKey = ownerLines[0] ? ownerLines[0].id || ownerLines[0].name : "";
+    const mappedName = firstKey ? lineNamesMap?.[firstKey] : undefined;
+    const singleForm = (mappedName ?? singlePlayForm ?? ownerLines[0]?.name ?? "默认播放").trim() || "默认播放";
     return {
       playLink: singlePlayLink.trim(),
       playFrom: [singleForm],

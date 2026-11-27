@@ -24,6 +24,7 @@ import {
 
 import { ApiPatch, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ImagePicker from "@/app/manage/components/image-picker";
 import FilmPicker from "@/app/manage/components/film-picker";
@@ -72,6 +73,7 @@ export default function BannerDrawer({
   onSuccess,
 }: BannerDrawerProps) {
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
   const [form] = Form.useForm<BannerFormValues>();
 
   const [selectedFilm, setSelectedFilm] = useState<FilmOption | null>(null);
@@ -104,6 +106,9 @@ export default function BannerDrawer({
       picture: "",
       pictureSlide: "",
       isCustomPic: false,
+      blurb: "",
+      score: undefined,
+      year: undefined,
     });
     setFilmPickerOpen(false);
   };
@@ -179,9 +184,12 @@ export default function BannerDrawer({
       isCustomPic: false,
       picture: "",
       pictureSlide: "",
+      blurb: "",
+      score: undefined,
+      year: undefined,
     });
     setScrapedData({});
-    message.success("已恢复片库默认图片");
+    message.success("已恢复片库默认");
   };
 
   const currentMid = preview.currentMid || form.getFieldValue("mid");
@@ -215,9 +223,14 @@ export default function BannerDrawer({
   };
 
   const handleSubmit = async () => {
+    if (!canWrite) return;
     try {
       await form.validateFields();
       const values = form.getFieldsValue(true) as BannerFormValues;
+      if (values.isCustomPic && !values.picture?.trim() && !values.pictureSlide?.trim()) {
+        message.error("请至少填写竖版封面或横屏大图之一");
+        return;
+      }
       const editing = mode === "edit" && currentRow ? currentRow : null;
       const fields = buildBannerFields({ values, currentRow: editing, scrapedData });
       if (!editing && !fields.mid) {
@@ -279,7 +292,7 @@ export default function BannerDrawer({
             <Button onClick={onClose} disabled={submitting}>
               取消
             </Button>
-            <Button type="primary" loading={submitting} onClick={handleSubmit}>
+            <Button type="primary" loading={submitting} disabled={!canWrite} onClick={handleSubmit}>
               {mode === "create" ? "创建" : "保存"}
             </Button>
           </Space>

@@ -226,13 +226,3 @@ export function normalizeSource(item: CollectListItemResponse): FilmSource {
   };
 }
 
-export interface SourceIncident {
-  sourceId: string;
-  sourceName: string;
-  consecutiveFailures: number;
-  latestFailedAt: string;
-  latestError?: string;
-  latestBatchId: string;
-  tripped: boolean;
-}
-

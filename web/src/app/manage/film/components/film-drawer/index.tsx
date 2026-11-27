@@ -26,6 +26,7 @@ import FilmPlaySection from "./film-play-section";
 import {
   formatCategoryNodes,
   flattenCategoryNodes,
+  isSourcePlayLine,
   resolveCategoryFields,
   renderDrawerRequiredMark,
   formatEpisodesToPlayLink,
@@ -56,6 +57,7 @@ export default function FilmDrawer({
   const [submitting, setSubmitting] = useState(false);
   const [playLines, setPlayLines] = useState<PlayLine[]>([]);
   const [lineLinksMap, setLineLinksMap] = useState<Record<string, string>>({});
+  const [lineNamesMap, setLineNamesMap] = useState<Record<string, string>>({});
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
@@ -63,14 +65,32 @@ export default function FilmDrawer({
 
   const loadedDetailRef = useRef<any>(null);
   const [loadedDetail, setLoadedDetail] = useState<any>(null);
+  const [isManualFilm, setIsManualFilm] = useState(false);
+  const [playOwnerSourceId, setPlayOwnerSourceId] = useState("");
   const allCategoryListRef = useRef<any[]>([]);
 
   const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
   const watchedPicture = Form.useWatch("picture", form);
 
-  const categoryTreeData = useMemo(() => formatCategoryNodes(categoryTreeNodes), [categoryTreeNodes]);
   const allCategoryList = useMemo(() => flattenCategoryNodes(categoryTreeNodes), [categoryTreeNodes]);
   allCategoryListRef.current = allCategoryList;
+  const categoryTreeData = useMemo(() => {
+    const base = formatCategoryNodes(categoryTreeNodes, true);
+    if (!loadedDetail) return base;
+    const cat = resolveCategoryFields(loadedDetail, allCategoryList);
+    if (cat.cid && !allCategoryList.some((c) => Number(c.id) === Number(cat.cid))) {
+      return [
+        ...base,
+        {
+          title: `${cat.cName || `分类 #${cat.cid}`}（已隐藏）`,
+          label: `${cat.cName || `分类 #${cat.cid}`}（已隐藏）`,
+          value: Number(cat.cid),
+          key: String(cat.cid),
+        },
+      ];
+    }
+    return base;
+  }, [allCategoryList, categoryTreeNodes, loadedDetail]);
 
   const loadCategoryTree = useCallback(
     async () => {
@@ -109,9 +129,8 @@ export default function FilmDrawer({
   );
 
   const populateForm = useCallback(
-    (filmData: any, categoryList: any[]) => {
+    (filmData: any, categoryList: any[], isManual = false) => {
       if (!filmData) return;
-      const desc = filmData.descriptor || {};
       const isCustom = filmData.isCustomPicture === true;
       const displayPic = String(filmData.picture || "").trim();
       const savedCustom = String(filmData.customPicture || "").trim();
@@ -119,27 +138,40 @@ export default function FilmDrawer({
       const slidePic = filmData.customPictureSlide || filmData.pictureSlide || "";
       const cat = resolveCategoryFields(filmData, categoryList || allCategoryListRef.current);
       const allLines = Array.isArray(filmData.list) ? (filmData.list as PlayLine[]) : [];
-      const lines = allLines.filter(
-        (line) =>
-          primaryId &&
-          (line.sourceId === primaryId ||
-            line.id === primaryId ||
-            Boolean(line.id?.startsWith(primaryId))),
-      );
+      const fallbackSourceId = String(
+        filmData.firstSourceId || filmData.sourceId || (isManual ? "manual" : ""),
+      ).trim();
+      const primaryLines = allLines.filter((line) => isSourcePlayLine(line, primaryId));
+      let resolvedOwnerSourceId = primaryId;
+      let lines = primaryLines;
+      if (primaryLines.length === 0 && isManual) {
+        if (fallbackSourceId) {
+          const fallbackLines = allLines.filter((line) => isSourcePlayLine(line, fallbackSourceId));
+          if (fallbackLines.length > 0) {
+            lines = fallbackLines;
+            resolvedOwnerSourceId = fallbackSourceId;
+          }
+        }
+        if (lines.length === 0) {
+          const manualLines = allLines.filter((line) => isSourcePlayLine(line, "manual"));
+          if (manualLines.length > 0) {
+            lines = manualLines;
+            resolvedOwnerSourceId = "manual";
+          }
+        }
+      }
+      setPlayOwnerSourceId(resolvedOwnerSourceId);
       setPlayLines(lines);
       const initialLinks: Record<string, string> = {};
+      const initialNames: Record<string, string> = {};
       lines.forEach((l) => {
         const k = l.id || l.name;
         initialLinks[k] = formatEpisodesToPlayLink(l.linkList || []);
+        initialNames[k] = l.name || l.id || "";
       });
       setLineLinksMap(initialLinks);
-      const targetSourceId = primaryId;
-      const ownerLine =
-        lines.find(
-          (l) =>
-            targetSourceId &&
-            (l.sourceId === targetSourceId || l.id?.startsWith(targetSourceId)),
-        ) || lines[0];
+      setLineNamesMap(initialNames);
+      const ownerLine = lines.find((l) => isSourcePlayLine(l, resolvedOwnerSourceId)) || lines[0];
 
       const formattedPlayLink =
         ownerLine && ownerLine.linkList && ownerLine.linkList.length > 0
@@ -180,11 +212,13 @@ export default function FilmDrawer({
     setTmdbSnapshot(null);
 
     if (filmId) {
-      ApiGet("/films/play-info", { id: filmId, stored: 1 })
+      ApiGet("/manage/film/detail", { id: filmId })
         .then(async (resp) => {
           if (cancelled) return;
           if (resp.code === 0 && resp.data) {
             const filmData = resp.data.detail || resp.data;
+            const manual = Boolean(resp.data.isManualFilm);
+            setIsManualFilm(manual);
             loadedDetailRef.current = filmData;
             setLoadedDetail(filmData);
 
@@ -192,7 +226,7 @@ export default function FilmDrawer({
             if (cancelled) return;
             const categoryList =
               optionsData?.allCategories || allCategoryListRef.current || [];
-            populateForm(filmData, categoryList);
+            populateForm(filmData, categoryList, manual);
           } else {
             message.error(resp.msg || "获取失败");
           }
@@ -206,6 +240,8 @@ export default function FilmDrawer({
     } else {
       loadedDetailRef.current = null;
       setLoadedDetail(null);
+      setIsManualFilm(true);
+      setPlayOwnerSourceId(primaryId);
       setPlayLines([]);
       loadCategoryTree()
         .then((data) => {
@@ -342,23 +378,32 @@ export default function FilmDrawer({
         customPictureSlide: customSlide,
       };
 
-      if (!filmId && (!values.playLink || !values.playLink.trim())) {
-        message.error("请至少输入一条有效播放地址");
-        setSubmitting(false);
-        return;
+      if (!filmId || isManualFilm) {
+        const primarySourceId = String(payload.sourceId || "").trim();
+        const effectiveOwnerSourceId = String(playOwnerSourceId || primarySourceId).trim();
+        const fallbackSourceId = String(
+          loadedDetailRef.current?.firstSourceId ||
+            loadedDetailRef.current?.sourceId ||
+            (isManualFilm ? "manual" : ""),
+        ).trim();
+        const directOwnerLines = playLines.filter(
+          (l) => !effectiveOwnerSourceId || isSourcePlayLine(l, effectiveOwnerSourceId),
+        );
+        const ownerLines =
+          directOwnerLines.length > 0 || !isManualFilm || !fallbackSourceId
+            ? directOwnerLines
+            : playLines.filter((l) => isSourcePlayLine(l, fallbackSourceId));
+        const mergedPlay = mergePlayLinesForSave(ownerLines, lineLinksMap, values.playLink, playForm, lineNamesMap);
+        if (!String(mergedPlay.playLink || "").trim()) {
+          message.error("请至少输入一条有效播放地址");
+          setSubmitting(false);
+          return;
+        }
+        Object.assign(payload, mergedPlay);
+        if (filmId) {
+          payload.manualLinesUpdate = true;
+        }
       }
-      const targetSourceId = String(payload.sourceId || loadedDetailRef.current?.firstSourceId || "");
-      const ownerLines = playLines.filter(
-        (l) =>
-          !targetSourceId ||
-          l.sourceId === targetSourceId ||
-          l.id?.startsWith(targetSourceId) ||
-          l.id === targetSourceId,
-      );
-      Object.assign(
-        payload,
-        mergePlayLinesForSave(ownerLines, lineLinksMap, values.playLink, playForm),
-      );
       const resp = await ApiPost("/manage/film/save", payload);
       if (resp.code === 0) {
         message.success(filmId ? "更新成功" : "添加成功");
@@ -378,8 +423,11 @@ export default function FilmDrawer({
     form.resetFields();
     setTmdbSnapshot(null);
     setLoadedDetail(null);
+    setIsManualFilm(false);
+    setPlayOwnerSourceId("");
     setPlayLines([]);
     setLineLinksMap({});
+    setLineNamesMap({});
     loadedDetailRef.current = null;
     setPickerOpen(false);
     setTmdbModalOpen(false);
@@ -473,10 +521,15 @@ export default function FilmDrawer({
               <FilmPlaySection
                 lines={playLines}
                 filmId={filmId}
-                ownerSourceId={primaryId}
+                editable={!filmId || isManualFilm}
+                ownerSourceId={playOwnerSourceId || primaryId}
                 lineLinks={lineLinksMap}
+                lineNames={lineNamesMap}
                 onLineLinkChange={(lineKey, newLink) => {
                   setLineLinksMap((prev) => ({ ...prev, [lineKey]: newLink }));
+                }}
+                onLineNameChange={(lineKey, newName) => {
+                  setLineNamesMap((prev) => ({ ...prev, [lineKey]: newName }));
                 }}
               />
             </div>

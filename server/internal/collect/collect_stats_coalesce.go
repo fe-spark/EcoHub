@@ -1,0 +1,255 @@
+package collect
+
+import (
+	"log"
+	"strings"
+	"sync"
+	"time"
+
+	"server/internal/config"
+	"server/internal/infra/db"
+	"server/internal/model"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+// collectStatsCoalescer 合并采集热路径中的 last_collect_time 写库。
+// 有真实写库时 Note；定时采集整次成功结束（含 0 变更）再 Note。
+// suppressed 源的 Note 被忽略，避免中途写入把「上次成功」提前到熔断/停止时刻。
+type collectStatsCoalescer struct {
+	mu          sync.Mutex
+	pending     map[string]time.Time // sourceID -> 最近活动时间
+	lastFlushed map[string]time.Time
+	suppressed  map[string]struct{}
+	minInterval time.Duration
+}
+
+var collectStats = &collectStatsCoalescer{
+	pending:     make(map[string]time.Time),
+	lastFlushed: make(map[string]time.Time),
+	suppressed:  make(map[string]struct{}),
+	minInterval: collectStatsMinInterval(),
+}
+
+func collectStatsMinInterval() time.Duration {
+	sec := config.CollectStatsFlushIntervalSec
+	if sec <= 0 {
+		sec = config.DefaultCollectStatsFlushIntervalSec
+	}
+	return time.Duration(sec) * time.Second
+}
+
+// ResetCollectStatsCoalescer 清空采集统计合并缓冲。
+// 数据重置（清空 collect_source_stats 表）时必须调用，避免内存 pending 的旧统计随后被回写复活。
+func ResetCollectStatsCoalescer() {
+	collectStats.mu.Lock()
+	collectStats.pending = make(map[string]time.Time)
+	collectStats.lastFlushed = make(map[string]time.Time)
+	collectStats.suppressed = make(map[string]struct{})
+	collectStats.mu.Unlock()
+}
+
+// SuppressCollectSourceStats 忽略该源后续 Note，直到 Unsuppress 或 DropPending。
+// 定时采集开始后调用，避免热路径写库把 last_collect_time 提前到任务中途。
+func SuppressCollectSourceStats(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	collectStats.mu.Lock()
+	if collectStats.suppressed == nil {
+		collectStats.suppressed = make(map[string]struct{})
+	}
+	collectStats.suppressed[sourceID] = struct{}{}
+	collectStats.mu.Unlock()
+}
+
+// UnsuppressCollectSourceStats 恢复该源 Note（不自动写入）。
+func UnsuppressCollectSourceStats(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	collectStats.mu.Lock()
+	delete(collectStats.suppressed, sourceID)
+	collectStats.mu.Unlock()
+}
+
+// DropCollectSourceStatsPending 丢弃该源未落盘的 pending，并解除 suppress。
+func DropCollectSourceStatsPending(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	collectStats.mu.Lock()
+	delete(collectStats.pending, sourceID)
+	delete(collectStats.suppressed, sourceID)
+	collectStats.mu.Unlock()
+}
+
+// NoteCollectSourceStats 把 last_collect_time 记成当前时间。
+func NoteCollectSourceStats(sourceID string) {
+	NoteCollectSourceStatsAt(sourceID, time.Now())
+}
+
+// NoteCollectSourceStatsAt 把 last_collect_time 记成 at。定时成功时 at 用本次开始时间，让下一轮窗口盖住整次采集。
+// at 为零不写。采集中被 Suppress 的调用直接丢掉。
+func NoteCollectSourceStatsAt(sourceID string, at time.Time) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || at.IsZero() {
+		return
+	}
+	collectStats.mu.Lock()
+	if _, held := collectStats.suppressed[sourceID]; held {
+		collectStats.mu.Unlock()
+		return
+	}
+	collectStats.pending[sourceID] = at
+	last := collectStats.lastFlushed[sourceID]
+	shouldFlush := last.IsZero() || time.Since(last) >= collectStats.minInterval
+	collectStats.mu.Unlock()
+	if shouldFlush {
+		FlushCollectSourceStats(sourceID)
+	}
+}
+
+// FlushCollectSourceStats 仅 flush 已有 pending 的站点。
+// 传入 sourceIDs 时只处理这些 id 中仍 pending 的；传入空则 flush 全部 pending。
+// 不会为「无 pending」的站点凭空写 last_collect_time。
+func FlushCollectSourceStats(sourceIDs ...string) {
+	collectStats.mu.Lock()
+	toFlush := make(map[string]time.Time)
+	if len(sourceIDs) == 0 {
+		for id, at := range collectStats.pending {
+			toFlush[id] = at
+		}
+	} else {
+		for _, id := range sourceIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if at, ok := collectStats.pending[id]; ok {
+				toFlush[id] = at
+			}
+		}
+	}
+	for id := range toFlush {
+		delete(collectStats.pending, id)
+	}
+	collectStats.mu.Unlock()
+
+	if len(toFlush) == 0 {
+		return
+	}
+
+	nowFlush := time.Now()
+	for id, at := range toFlush {
+		if err := TouchCollectSourceStatsTx(db.Mdb, id, at); err != nil {
+			log.Printf("FlushCollectSourceStats source=%s err=%v", id, err)
+			collectStats.mu.Lock()
+			if _, exists := collectStats.pending[id]; !exists {
+				collectStats.pending[id] = at
+			}
+			collectStats.mu.Unlock()
+			continue
+		}
+		collectStats.mu.Lock()
+		collectStats.lastFlushed[id] = nowFlush
+		collectStats.mu.Unlock()
+		log.Printf("[CollectStats] 刷盘 last_collect_time: source=%s at=%s", id, at.Format("2006-01-02 15:04:05"))
+	}
+}
+
+// CollectSourceRunStat 保存各采集源最近一次采集的时间、上次总页与采集站全站总页。
+type CollectSourceRunStat struct {
+	LastRunTime      *time.Time
+	LastRunPageCount int
+	SitePageTotal    int
+}
+
+// NoteCollectSourceRun 记下一次采集跑完的时间与总页数，供卡片「上次采集」与「上次总页」。
+// 不写 last_collect_time，定时补窗锚点仍只在整次定时成功时更新。
+func NoteCollectSourceRun(sourceID string, pageCount int) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || db.Mdb == nil {
+		return
+	}
+	if err := touchCollectSourceRunTime(db.Mdb, sourceID, time.Now(), pageCount); err != nil {
+		log.Printf("NoteCollectSourceRun source=%s err=%v", sourceID, err)
+	}
+}
+
+func touchCollectSourceRunTime(tx *gorm.DB, sourceID string, at time.Time, pageCount int) error {
+	if tx == nil || sourceID == "" {
+		return nil
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	now := time.Now()
+	stat := model.CollectSourceStats{
+		SourceId:         sourceID,
+		LastRunTime:      &at,
+		LastRunPageCount: pageCount,
+	}
+	assignments := map[string]any{
+		"last_run_time": at,
+		"updated_at":    now,
+		"deleted_at":    nil,
+	}
+	if pageCount > 0 {
+		assignments["last_run_page_count"] = pageCount
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "source_id"}},
+		DoUpdates: clause.Assignments(assignments),
+	}).Create(&stat).Error
+}
+
+// GetCollectSourceRunStats 返回各站最近一次采集跑完时间与总页数。
+func GetCollectSourceRunStats(sourceIDs []string) map[string]CollectSourceRunStat {
+	result := make(map[string]CollectSourceRunStat, len(sourceIDs))
+	if len(sourceIDs) == 0 || db.Mdb == nil {
+		return result
+	}
+	var rows []model.CollectSourceStats
+	if err := db.Mdb.Where("source_id IN ?", sourceIDs).Find(&rows).Error; err != nil {
+		log.Println("GetCollectSourceRunStats Error:", err)
+		return result
+	}
+	for _, row := range rows {
+		item := CollectSourceRunStat{
+			LastRunPageCount: row.LastRunPageCount,
+			SitePageTotal:    row.SitePageTotal,
+		}
+		if row.LastRunTime != nil && !row.LastRunTime.IsZero() {
+			value := *row.LastRunTime
+			item.LastRunTime = &value
+		}
+		result[row.SourceId] = item
+	}
+	return result
+}
+
+// UpdateSitePageTotal 更新采集站全站总页数。
+func UpdateSitePageTotal(sourceID string, total int) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || db.Mdb == nil || total <= 0 {
+		return nil
+	}
+	now := time.Now()
+	stat := model.CollectSourceStats{
+		SourceId:      sourceID,
+		SitePageTotal: total,
+	}
+	return db.Mdb.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "source_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"site_page_total": total,
+			"updated_at":      now,
+			"deleted_at":      nil,
+		}),
+	}).Create(&stat).Error
+}

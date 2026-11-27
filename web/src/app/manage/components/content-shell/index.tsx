@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import { Select, Tag } from "antd";
 import { DatabaseOutlined } from "@ant-design/icons";
 import ManagePageHeader from "@/app/manage/components/page-header";
@@ -28,6 +28,16 @@ export function ContentPageShell({
   dirty = false,
   children,
 }: ContentPageShellProps) {
+  useEffect(() => {
+    if (!dirty) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirty]);
+
   return (
     <div className={`${styles.pageShell} ${dirty ? styles.pageShellDirty : ""}`}>
       <ManagePageHeader
@@ -147,6 +157,8 @@ interface ContentSectionCardProps {
   actions?: React.ReactNode;
   footer?: React.ReactNode;
   bodyPadding?: boolean;
+  className?: string;
+  bodyClassName?: string;
   children: React.ReactNode;
 }
 
@@ -159,10 +171,17 @@ export function ContentSectionCard({
   actions,
   footer,
   bodyPadding = false,
+  className,
+  bodyClassName,
   children,
 }: ContentSectionCardProps) {
+  const cardClassName = [styles.sectionCard, className].filter(Boolean).join(" ");
+  const resolvedBodyClass =
+    [bodyPadding ? styles.sectionCardBody : "", bodyClassName].filter(Boolean).join(" ") ||
+    undefined;
+
   return (
-    <div className={styles.sectionCard}>
+    <div className={cardClassName}>
       <div className={styles.sectionCardHeader}>
         <ContentSectionHeader
           icon={icon}
@@ -172,7 +191,7 @@ export function ContentSectionCard({
           actions={actions}
         />
       </div>
-      <div className={bodyPadding ? styles.sectionCardBody : undefined}>{children}</div>
+      <div className={resolvedBodyClass}>{children}</div>
       {footer ? <div className={styles.sectionCardFooter}>{footer}</div> : null}
     </div>
   );

@@ -1,0 +1,99 @@
+package bootstrap
+
+import (
+	"testing"
+
+	"server/internal/admin/upgrade"
+	"server/internal/collect"
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/testutil"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+func setupInitTestDB(t *testing.T) {
+	t.Helper()
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.CrontabRecord{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+}
+
+func TestDefaultFilmTasks_SpecValid(t *testing.T) {
+	for _, task := range defaultFilmTasks() {
+		if err := collect.ValidSpec(task.Spec); err != nil {
+			t.Fatalf("task [%s, model=%d] invalid spec %q: %v", task.Id, task.Model, task.Spec, err)
+		}
+	}
+}
+
+func TestDefaultFilmTasks_ContainsLogClean(t *testing.T) {
+	tasks := defaultFilmTasks()
+	var found bool
+	for _, task := range tasks {
+		if task.Model == model.TaskModelLogClean {
+			found = true
+			if task.Id != "sys_cron_log_clean" {
+				t.Errorf("expected Id 'sys_cron_log_clean', got %s", task.Id)
+			}
+			if task.Spec != "0 0 3 * * *" {
+				t.Errorf("expected Spec '0 0 3 * * *', got %s", task.Spec)
+			}
+			if !task.State {
+				t.Errorf("expected State to be true, got false")
+			}
+			if task.Remark != "清理过期运行日志" {
+				t.Errorf("expected Remark '清理过期运行日志', got %s", task.Remark)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Model TaskModelLogClean task not found in defaultFilmTasks()")
+	}
+}
+
+func TestService_RedisNilSafety(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	defer func() {
+		db.Rdb = origRdb
+	}()
+
+	// 2. GetAppVersion with nil Rdb (network failure / cache miss returns without panic on Redis)
+	_ = upgrade.VersionSvc.GetAppVersion(true)
+}
+
+func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
+	setupInitTestDB(t)
+	svc := &InitService{}
+	tasks, err := svc.ensureDefaultTasks()
+	if err != nil {
+		t.Fatalf("ensureDefaultTasks: %v", err)
+	}
+	if len(tasks) != 4 {
+		t.Fatalf("expected 4 default tasks, got %d", len(tasks))
+	}
+	collectClean, err := collect.GetFilmTaskById(model.TaskIDCollectClean)
+	if err != nil {
+		t.Fatalf("collect record clean cron: %v", err)
+	}
+	if collectClean.Model != model.TaskModelCollectClean || collectClean.Spec != "0 30 3 * * *" || !collectClean.State {
+		t.Fatalf("unexpected collect clean task: %+v", collectClean)
+	}
+	task, err := collect.GetFilmTaskById("sys_cron_log_clean")
+	if err != nil {
+		t.Fatalf("failed to get sys_cron_log_clean: %v", err)
+	}
+	if task.Model != model.TaskModelLogClean || task.Spec != "0 0 3 * * *" || !task.State {
+		t.Fatalf("unexpected task fields: %+v", task)
+	}
+}

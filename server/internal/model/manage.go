@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -103,6 +104,28 @@ type BasicConfig struct {
 	MediaProxy    MediaProxyConfig `json:"mediaProxy"`    // 媒体图片边缘反代配置
 }
 
+const (
+	MinProvideKeyLen = 8
+	MaxProvideKeyLen = 64
+)
+
+// ValidateProvideKey 校验私有化订阅密钥长度规范，返回去除首尾空白后的密钥。
+func ValidateProvideKey(privateAccess bool, rawKey string) (string, error) {
+	key := strings.TrimSpace(rawKey)
+	if len(key) > MaxProvideKeyLen {
+		return "", errors.New("订阅密钥长度不能超过 64 位")
+	}
+	if privateAccess {
+		if len(key) == 0 {
+			return "", errors.New("开启私有化访问时，必须配置订阅密钥")
+		}
+		if len(key) < MinProvideKeyLen {
+			return "", errors.New("开启私有化访问时，订阅密钥长度不能少于 8 位")
+		}
+	}
+	return key, nil
+}
+
 // AccessConfig 网站访问控制配置（运行状态/维护提示/私有化/订阅密钥）
 type AccessConfig struct {
 	State         bool   `json:"state"`         // 网站状态 开启 || 关闭
@@ -116,15 +139,15 @@ type AccessConfig struct {
 // SiteConfigRecord 网站基础配置持久化 (MySQL单行表)
 type SiteConfigRecord struct {
 	gorm.Model
-	SiteName      string `gorm:"size:128"`
-	SiteURL       string `gorm:"size:512;column:site_url"` // 网站访问地址
-	Logo          string `gorm:"size:512"`
-	Keyword       string `gorm:"size:256"`
-	Describe      string `gorm:"size:512"`
-	State         bool
-	Hint          string `gorm:"size:512"`
-	PrivateAccess bool   `gorm:"default:false;column:private_access"`
-	ProvideKey    string `gorm:"size:64;column:provide_key"`
+	SiteName       string `gorm:"size:128"`
+	SiteURL        string `gorm:"size:512;column:site_url"` // 网站访问地址
+	Logo           string `gorm:"size:512"`
+	Keyword        string `gorm:"size:256"`
+	Describe       string `gorm:"size:512"`
+	State          bool
+	Hint           string `gorm:"size:512"`
+	PrivateAccess  bool   `gorm:"default:false;column:private_access"`
+	ProvideKey     string `gorm:"size:64;column:provide_key"`
 	DanmakuJSON    string `gorm:"type:text;column:danmaku_json"`     // DanmakuConfig JSON
 	TipJSON        string `gorm:"type:text;column:tip_json"`         // TipConfig JSON
 	NoticeJSON     string `gorm:"type:text;column:notice_json"`      // NoticeConfig JSON
@@ -152,4 +175,3 @@ type MappingRule struct {
 func (MappingRule) TableName() string {
 	return TableMappingRule
 }
-

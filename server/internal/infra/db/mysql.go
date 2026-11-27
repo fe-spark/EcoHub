@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"log"
 	"server/internal/config"
+	"strings"
 	"sync"
 	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -147,6 +149,31 @@ func openSQLConn(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = pingSQL(conn); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+// OpenLongReadConn 建立带 30 分钟读/写超时的直连 MySQL 连接，供在线建索引与大表统计使用。
+func OpenLongReadConn(dsn string) (*sql.DB, error) {
+	if parsed, err := mysqldriver.ParseDSN(dsn); err == nil {
+		parsed.ReadTimeout = 30 * time.Minute
+		parsed.WriteTimeout = 30 * time.Minute
+		dsn = parsed.FormatDSN()
+	} else if strings.Contains(dsn, "readTimeout=") {
+		dsn = strings.Replace(dsn, "readTimeout=30s", "readTimeout=30m", 1)
+	} else if strings.Contains(dsn, "?") {
+		dsn += "&readTimeout=30m"
+	} else {
+		dsn += "?readTimeout=30m"
+	}
+	conn, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, err
+	}
+	conn.SetMaxOpenConns(1)
 	if err = pingSQL(conn); err != nil {
 		conn.Close()
 		return nil, err

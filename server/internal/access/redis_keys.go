@@ -29,7 +29,6 @@ func topSearchKey(day string) string {
 }
 func topPlayKey(day string) string     { return config.AccessKeyPrefix + "top:play:" + day }
 func topClassifyKey(day string) string { return config.AccessKeyPrefix + "top:classify:" + day }
-func recentDayKey(day string) string   { return config.AccessKeyPrefix + "recent:" + day }
 func droppedKey() string               { return config.AccessKeyPrefix + "meta:dropped" }
 func droppedDayKey(day string) string  { return config.AccessKeyPrefix + "meta:dropped:" + day }
 

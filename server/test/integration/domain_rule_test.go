@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"server/internal/model"
-	"server/internal/service"
+	"server/internal/portal"
 )
 
 // seedDetailFilm 写入主站源、快照与原始详情，并激活该快照版本。
@@ -81,7 +81,7 @@ func TestGetFilmDetail_DomainReplaceRules(t *testing.T) {
 		},
 	})
 
-	res, err := service.IndexSvc.GetFilmDetail(int(mid))
+	res, err := portal.IndexSvc.GetFilmDetail(int(mid))
 	if err != nil {
 		t.Fatalf("GetFilmDetail 失败: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestGetFilmDetail_ChainedRules_NoDoubleSubstitution(t *testing.T) {
 		},
 	})
 
-	res, err := service.IndexSvc.GetFilmDetail(int(mid))
+	res, err := portal.IndexSvc.GetFilmDetail(int(mid))
 	if err != nil {
 		t.Fatalf("GetFilmDetail 失败: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestGetFilmDetail_EmptyFirstGroup_NoIndexMisalignment(t *testing.T) {
 		},
 	})
 
-	res, err := service.IndexSvc.GetFilmDetail(int(mid))
+	res, err := portal.IndexSvc.GetFilmDetail(int(mid))
 	if err != nil {
 		t.Fatalf("GetFilmDetail 失败: %v", err)
 	}

@@ -12,6 +12,7 @@ const STRATEGY_LABEL: Record<QuickStrategy, string> = {
   latest: "最近更新",
   hot: "最热排片",
   score: "评分优先",
+  random: "随机排片",
   douban: "豆瓣推荐",
 };
 
@@ -149,25 +150,25 @@ export default function RecommendQuickDrawer({
                             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                           />
                         ) : null}
-                        <Tag style={{ position: "absolute", top: 4, left: 4, margin: 0 }}>
-                          {idx + 1}
+                        <Tag color={idx < 3 ? "red" : "default"} style={{ position: "absolute", top: 6, left: 6, margin: 0 }}>
+                          #{idx + 1}
                         </Tag>
                         {it.doubanScore ? (
-                          <Tag color="gold" style={{ position: "absolute", top: 4, right: 4, margin: 0 }}>
-                            ★{it.doubanScore}
+                          <Tag color="gold" style={{ position: "absolute", top: 6, right: 6, margin: 0 }}>
+                            ★ {it.doubanScore}
                           </Tag>
                         ) : null}
                       </div>
                       <div style={{ padding: "6px 8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
                         <span
-                          title={it.name}
                           style={{
                             fontSize: 12,
                             fontWeight: 500,
-                            whiteSpace: "nowrap",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
                           }}
+                          title={it.name}
                         >
                           {it.name}
                         </span>
@@ -190,4 +191,3 @@ export default function RecommendQuickDrawer({
     </Drawer>
   );
 }
-

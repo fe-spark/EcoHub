@@ -2,10 +2,16 @@
 
 import React, { useMemo, useRef } from "react";
 import { Button, InputNumber } from "antd";
-import { FieldTimeOutlined, FireOutlined, StarOutlined, TrophyOutlined } from "@ant-design/icons";
+import {
+  CompassOutlined,
+  FieldTimeOutlined,
+  FireOutlined,
+  RetweetOutlined,
+  StarOutlined,
+} from "@ant-design/icons";
 import styles from "./banner-quick.module.less";
 
-export type QuickStrategy = "latest" | "hot" | "score" | "douban";
+export type QuickStrategy = "latest" | "hot" | "score" | "random" | "douban";
 
 // 一键排片单个分类最多排几部，和后端 bannerQuotaMax 一致。
 export const QUOTA_MAX = 5;
@@ -43,7 +49,8 @@ const STRATEGY_OPTIONS: {
   { value: "latest", title: "最近更新", desc: "刚更新的影片优先", icon: <FieldTimeOutlined /> },
   { value: "hot", title: "最热排片", desc: "播放热度高的优先", icon: <FireOutlined /> },
   { value: "score", title: "评分优先", desc: "评分高的影片优先", icon: <StarOutlined /> },
-  { value: "douban", title: "豆瓣推荐", desc: "按豆瓣热映/热播榜单排片", icon: <TrophyOutlined /> },
+  { value: "random", title: "随机排片", desc: "按分类随机抽取影片", icon: <RetweetOutlined /> },
+  { value: "douban", title: "豆瓣推荐", desc: "按豆瓣热映/热门榜单反查本地可播影片", icon: <CompassOutlined /> },
 ];
 
 const FILL_PRESETS = [
@@ -157,9 +164,10 @@ export default function BannerQuickConfig({
         <div className={styles.quotaGrid}>
           {categories.map((cat) => {
             const active = (cat.count || 0) > 0;
+            const itemKey = cat.key ?? cat.id;
             return (
               <div
-                key={cat.id}
+                key={itemKey}
                 className={`${styles.quotaItem} ${active ? styles.quotaItemActive : ""}`}
               >
                 <span className={`${styles.quotaName} ${active ? styles.quotaNameActive : ""}`}>
@@ -176,7 +184,7 @@ export default function BannerQuickConfig({
                     const nextCount = Math.max(0, Number(val) || 0);
                     onCategoriesChange(
                       categories.map((item) =>
-                        item.id === cat.id ? { ...item, count: nextCount } : item,
+                        (item.key ?? item.id) === itemKey ? { ...item, count: nextCount } : item,
                       ),
                     );
                   }}

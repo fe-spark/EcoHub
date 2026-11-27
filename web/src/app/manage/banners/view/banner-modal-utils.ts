@@ -31,9 +31,12 @@ export function initBannerFormValues(
       isCustomPic: isCustom,
       picture: isCustom ? currentRow.overrides?.poster || "" : "",
       pictureSlide: isCustom ? currentRow.overrides?.backdrop || "" : "",
+      blurb: currentRow.overrides?.blurb || "",
+      score: currentRow.overrides?.score || undefined,
+      year: currentRow.overrides?.year || undefined,
     };
   }
-  return { isCustomPic: false };
+  return { isCustomPic: false, blurb: "", score: undefined, year: undefined };
 }
 
 export type BannerScrapedData = {
@@ -50,29 +53,34 @@ interface BuildFieldsParams {
 
 /**
  * 编辑抽屉提交的字段。新增给全量；编辑只给改过的字段。
- * scrapedData 只放 TMDB 填入的值；恢复片库默认时清空为 {}，编辑时据此清除覆盖。
+ * blurb / score / year 支持手动编辑或清空；tmdbId 由 scrapedData 追踪。
  */
 export function buildBannerFields({ values, currentRow, scrapedData }: BuildFieldsParams): BannerFields {
   const isCustom = Boolean(values.isCustomPic);
   const poster = isCustom ? (values.picture || "").trim() : "";
   const backdrop = isCustom ? (values.pictureSlide || "").trim() : "";
-  const target: Required<Omit<BannerFields, "year">> = {
+  const blurb = (values.blurb ?? "").trim();
+  const score = Number(values.score ?? 0) || 0;
+  const year = Number(values.year ?? 0) || 0;
+  const target: Required<BannerFields> = {
     mid: Number(values.mid || 0),
-    imageMode: isCustom ? "custom" : "follow",
+    imageMode: isCustom && (poster !== "" || backdrop !== "") ? "custom" : "follow",
     poster,
     backdrop,
-    blurb: scrapedData.blurb || "",
-    score: scrapedData.score || 0,
+    blurb,
+    score,
+    year,
     tmdbId: scrapedData.tmdbId || 0,
   };
   if (!currentRow) {
     const fields: BannerFields = { mid: target.mid, imageMode: target.imageMode };
-    if (isCustom) {
+    if (target.imageMode === "custom") {
       fields.poster = poster;
       fields.backdrop = backdrop;
     }
     if (target.blurb) fields.blurb = target.blurb;
     if (target.score) fields.score = target.score;
+    if (target.year) fields.year = target.year;
     if (target.tmdbId) fields.tmdbId = target.tmdbId;
     return fields;
   }
@@ -83,20 +91,22 @@ export function buildBannerFields({ values, currentRow, scrapedData }: BuildFiel
     // 换片后服务端会清掉 TMDB 和文字覆盖，这里按新片重新给。
     fields.mid = target.mid;
     fields.imageMode = target.imageMode;
-    if (isCustom) {
+    if (target.imageMode === "custom") {
       fields.poster = poster;
       fields.backdrop = backdrop;
     }
     if (target.blurb) fields.blurb = target.blurb;
     if (target.score) fields.score = target.score;
+    if (target.year) fields.year = target.year;
     if (target.tmdbId) fields.tmdbId = target.tmdbId;
     return fields;
   }
   if (target.imageMode !== (currentRow.imageMode || "follow")) fields.imageMode = target.imageMode;
-  if (isCustom && poster !== (prev?.poster || "")) fields.poster = poster;
-  if (isCustom && backdrop !== (prev?.backdrop || "")) fields.backdrop = backdrop;
+  if (target.imageMode === "custom" && poster !== (prev?.poster || "")) fields.poster = poster;
+  if (target.imageMode === "custom" && backdrop !== (prev?.backdrop || "")) fields.backdrop = backdrop;
   if (target.blurb !== (prev?.blurb || "")) fields.blurb = target.blurb;
   if (target.score !== (prev?.score || 0)) fields.score = target.score;
+  if (target.year !== (prev?.year || 0)) fields.year = target.year;
   if (target.tmdbId !== (currentRow.tmdbId || 0)) fields.tmdbId = target.tmdbId;
   return fields;
 }
@@ -145,6 +155,17 @@ export function computeTmdbPrefillUpdates(
     } else {
       updates.pictureSlide = currentValues.pictureSlide || selectedFilm?.pictureSlide || "";
     }
+  }
+  if (shouldFill("overview", "content", "blurb") && (data.content || data.blurb)) {
+    updates.blurb = data.content || data.blurb;
+  }
+  if (shouldFill("score", "dbScore") && (data.dbScore || data.score)) {
+    const s = parseFloat(String(data.dbScore || data.score));
+    if (!isNaN(s) && s > 0) updates.score = s;
+  }
+  if (shouldFill("year", "releaseDate") && (data.year || data.releaseDate)) {
+    const y = parseInt(String(data.year || data.releaseDate || "0"), 10);
+    if (y > 0) updates.year = y;
   }
 
   return updates;

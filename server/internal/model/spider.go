@@ -72,9 +72,10 @@ type FilmSource struct {
 	Format             string    `json:"format" gorm:"size:16;default:'json'"` // 采集数据格式: json | xml (默认 json)
 	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"`  // 播放链接域名替换规则 (每行一条: old.com => new.com)
 	ProxyCollect       bool      `json:"proxyCollect" gorm:"default:false"`    // 采集接口是否走代理
-	SkipTLSVerify      bool      `json:"skipTlsVerify" gorm:"default:false"`   // 仅自签名源站跳过证书校验
-	CollectIntervalMs  int       `json:"collectIntervalMs" gorm:"default:200"` // 同一站相邻两次取页的最小间隔，毫秒。0 为不等待
-	CreatedAt          time.Time `json:"createdAt" gorm:"autoCreateTime;<-:create;index"`
+	SkipTLSVerify       bool      `json:"skipTlsVerify" gorm:"default:false"`   // 仅自签名源站跳过证书校验
+	CollectIntervalMs   int       `json:"collectIntervalMs" gorm:"default:200"` // 同一站相邻两次取页的最小间隔，毫秒。0 为不等待
+	HomeRecommendInited bool      `json:"-" gorm:"not null;default:false"`      // 该采集站是否已完成首页推荐默认站点分类一次性初始化
+	CreatedAt           time.Time `json:"createdAt" gorm:"autoCreateTime;<-:create;index"`
 }
 
 // UnmarshalJSON 把缺省的采集间隔和显式 0 分开。
@@ -193,13 +194,6 @@ type FilmSourceListItem struct {
 	CategorySyncing  bool             `json:"categorySyncing"` // 该站是否正在采集分类
 	Deleting         bool             `json:"deleting"`        // 该站是否正在执行后台异步级联删除
 }
-
-type Option struct {
-	Name  string `json:"name"`
-	Value any    `json:"value"`
-}
-
-type OptionGroup map[string][]Option
 
 // CollectParams 数据采集所需要的参数（统一批量结构，单站即单个元素）
 type CollectParams struct {

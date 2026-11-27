@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -18,7 +19,6 @@ type Migration struct {
 }
 
 // migrations 按版本号递增执行。已发布版本不要改 Run，后续升级在末尾追加。
-// 当前大版本没有历史补丁，只留一条空基线。
 var migrations = []Migration{
 	{
 		Version: "20261009_baseline",
@@ -69,6 +69,23 @@ var migrations = []Migration{
 			return gdb.AutoMigrate(&model.HomeRecommendGroup{})
 		},
 	},
+	{
+		Version: "20261126_film_index_optimize",
+		Name:    "清理 film_index 废弃索引并重建分类排片复合索引列序",
+		Run:     migrateFilmIndexOptimize,
+	},
+	{
+		Version: "20261126_schema_cleanup",
+		Name:    "重建 collect_record_films 聚簇主键表并清理 home_recommend_group 废弃列",
+		Run:     migrateSchemaCleanup,
+	},
+	{
+		Version: "20261127_home_recommend_inited",
+		Name:    "采集站增加首页推荐初始化标记",
+		Run: func(gdb *gorm.DB) error {
+			return gdb.AutoMigrate(&model.FilmSource{})
+		},
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {
@@ -80,7 +97,37 @@ func RunAutoMigrations(db *gorm.DB) error {
 	if db == nil {
 		return nil
 	}
+	if db.Dialector != nil && db.Dialector.Name() == "mysql" {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return fmt.Errorf("acquire migration db pool failed: %w", err)
+		}
+		ctx := context.Background()
+		if db.Statement != nil && db.Statement.Context != nil {
+			ctx = db.Statement.Context
+		}
+		// 单独用一条物理连接持有 MySQL 会话级咨询锁，避免将 *sql.Conn 传入迁移流程触发 DropTable 嵌套 Connection 报错 (invalid db)。
+		lockConn, err := sqlDB.Conn(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire migration lock connection failed: %w", err)
+		}
+		defer lockConn.Close()
 
+		var locked int
+		if err := lockConn.QueryRowContext(ctx, "SELECT GET_LOCK('ecohub_schema_migration', 60)").Scan(&locked); err != nil {
+			return fmt.Errorf("acquire migration lock failed: %w", err)
+		}
+		if locked != 1 {
+			return fmt.Errorf("acquire migration lock timeout (locked=%d)", locked)
+		}
+		defer func() {
+			_, _ = lockConn.ExecContext(ctx, "SELECT RELEASE_LOCK('ecohub_schema_migration')")
+		}()
+	}
+	return runAutoMigrationsLocked(db)
+}
+
+func runAutoMigrationsLocked(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&model.SchemaMigration{}) {
 		if err := db.AutoMigrate(&model.SchemaMigration{}); err != nil {
 			return fmt.Errorf("init schema_migrations table failed: %w", err)

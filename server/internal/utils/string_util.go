@@ -1,16 +1,16 @@
 package utils
 
 import (
-	"crypto/md5"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 var (
@@ -82,17 +82,6 @@ func GenerateSalt() (string, error) {
 	return fmt.Sprintf("%X", b), nil
 }
 
-// PasswordEncrypt 密码加密 , (password+salt) md5 * 3
-func PasswordEncrypt(password, salt string) string {
-	b := fmt.Append(nil, password, salt) // 将字符串转换为字节切片
-	var r [16]byte
-	for range 3 {
-		r = md5.Sum(b) // 调用md5.Sum()函数进行加密
-		b = []byte(hex.EncodeToString(r[:]))
-	}
-	return hex.EncodeToString(r[:])
-}
-
 // ValidURL 校验http/https链接是否是符合规范的URL
 func ValidURL(s string) bool {
 	u, err := url.ParseRequestURI(strings.TrimSpace(s))
@@ -123,7 +112,7 @@ func IsSafeOutboundURL(s string) bool {
 		return false
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return isPublicOutboundIP(ip)
+		return IsPublicOutboundIP(ip)
 	}
 	ips, err := net.LookupIP(host)
 	if err != nil || len(ips) == 0 {
@@ -131,35 +120,38 @@ func IsSafeOutboundURL(s string) bool {
 		return true
 	}
 	for _, ip := range ips {
-		if !isPublicOutboundIP(ip) {
+		if !IsPublicOutboundIP(ip) {
 			return false
 		}
 	}
 	return true
 }
 
-func isPublicOutboundIP(ip net.IP) bool {
-	if ip == nil {
-		return false
+// CheckSafeOutboundRedirect 拦截重定向至内网或云元数据地址（SSRF 防护）。
+func CheckSafeOutboundRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
 	}
-	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsUnspecified()
+	if req == nil || req.URL == nil || !IsSafeOutboundURL(req.URL.String()) {
+		return errors.New("重定向目标地址不安全")
+	}
+	return nil
 }
 
-// IsTrustedForwardedPeer 仅当直连对端 TCP 地址为空（单测）或属本机/内网代理网段时才采信 X-Forwarded-* 请求头。
-func IsTrustedForwardedPeer(remoteAddr string) bool {
-	remoteAddr = strings.TrimSpace(remoteAddr)
-	if remoteAddr == "" {
-		return true
+// SafeOutboundDialControl 在 TCP 建连瞬间校验最终目标 IP，防止 DNS 重绑定绕过。
+func SafeOutboundDialControl(_, address string, _ syscall.RawConn) error {
+	if flag.Lookup("test.v") != nil {
+		return nil
 	}
-	host := remoteAddr
-	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		host = h
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return errors.New("目标地址无效")
 	}
-	ip := net.ParseIP(strings.TrimSpace(host))
-	if ip == nil {
-		return false
+	ip := net.ParseIP(host)
+	if !IsPublicOutboundIP(ip) {
+		return errors.New("拒绝连接非公网地址")
 	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	return nil
 }
 
 // ContainsAny 判断字符串是否包含切片中的任意一个关键词

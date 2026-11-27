@@ -106,12 +106,16 @@ func firstQuery(c *gin.Context, keys ...string) string {
 	return ""
 }
 
+const maxPageCurrent = 100000
+
 // GetPageParams 从 Gin 上下文中提取通用的分页参数。
 // 页码认 current、page、pg。每页条数认 pageSize、pagesize、limit、size。
 func GetPageParams(c *gin.Context) *Page {
 	current, _ := strconv.Atoi(firstQuery(c, "current", "page", "pg"))
 	if current <= 0 {
 		current = 1
+	} else if current > maxPageCurrent {
+		current = maxPageCurrent
 	}
 
 	pageSize, _ := strconv.Atoi(firstQuery(c, "pageSize", "pagesize", "limit", "size"))

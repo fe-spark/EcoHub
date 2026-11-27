@@ -11,6 +11,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -177,6 +178,25 @@ var (
 	catNameCacheAt   time.Time
 )
 
+const maxCatIdByNameCacheEntries = 2048
+
+// resolveCategoryIDByNameMemoryOnly 仅查进程内分类缓存（优先 access 本地缓存，其次 taxonomy 内存快照），绝不查库。
+func resolveCategoryIDByNameMemoryOnly(name string) (int64, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, false
+	}
+	catNameCacheMu.RLock()
+	if time.Since(catNameCacheAt) < 5*time.Minute {
+		if id, ok := catIdByNameCache[name]; ok {
+			catNameCacheMu.RUnlock()
+			return id, id > 0
+		}
+	}
+	catNameCacheMu.RUnlock()
+	return taxonomy.LookupCategoryIDByNameMemoryOnly(name)
+}
+
 func resolveCategoryIDByName(name string) (int64, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -184,12 +204,16 @@ func resolveCategoryIDByName(name string) (int64, bool, error) {
 	}
 	catNameCacheMu.RLock()
 	if time.Since(catNameCacheAt) < 5*time.Minute {
-		if id, ok := catIdByNameCache[name]; ok && id > 0 {
+		if id, ok := catIdByNameCache[name]; ok {
 			catNameCacheMu.RUnlock()
-			return id, true, nil
+			return id, id > 0, nil
 		}
 	}
 	catNameCacheMu.RUnlock()
+
+	if id, ok := taxonomy.LookupCategoryIDByNameMemoryOnly(name); ok {
+		return id, true, nil
+	}
 
 	if db.Mdb == nil {
 		return 0, false, nil
@@ -201,14 +225,32 @@ func resolveCategoryIDByName(name string) (int64, bool, error) {
 		Where("name = ?", name).
 		First(&cat).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && cat.Id <= 0) {
+		catNameCacheMu.Lock()
+		if catNameCacheAt.IsZero() || time.Since(catNameCacheAt) >= 5*time.Minute {
+			catNameCache = map[int64]string{}
+			catIdByNameCache = map[string]int64{}
+			catNameCacheAt = time.Now()
+		}
+		if len(catIdByNameCache) < maxCatIdByNameCacheEntries {
+			// 写入负缓存占位（<= 0），避免无索引 categories.name 遭无效名称穿透扫描。
+			catIdByNameCache[name] = 0
+		}
+		catNameCacheMu.Unlock()
 		return 0, false, nil
 	}
 	if err != nil {
 		return 0, false, err
 	}
 	catNameCacheMu.Lock()
+	if catNameCacheAt.IsZero() || time.Since(catNameCacheAt) >= 5*time.Minute {
+		catNameCache = map[int64]string{}
+		catIdByNameCache = map[string]int64{}
+		catNameCacheAt = time.Now()
+	}
 	catNameCache[cat.Id] = cat.Name
-	catIdByNameCache[cat.Name] = cat.Id
+	if len(catIdByNameCache) < maxCatIdByNameCacheEntries {
+		catIdByNameCache[cat.Name] = cat.Id
+	}
 	catNameCacheMu.Unlock()
 	return cat.Id, true, nil
 }
@@ -287,6 +329,8 @@ func enrichClassifyTopItems(items []TopItem) ([]TopItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	var dbCatByName map[string]int64
+	dbCatLoaded := false
 	validItems := make([]TopItem, 0, len(items))
 	for _, it := range items {
 		trimmedKey := strings.TrimSpace(it.Key)
@@ -311,18 +355,28 @@ func enrichClassifyTopItems(items []TopItem) ([]TopItem, error) {
 				}
 			}
 		} else {
-			// 非数字 member（例如分类名 "伦理片"、"电影"）
-			// 尝试反查其分类 ID（若在 Category 表中存在则标准化绑定）
-			catId, found, err := resolveCategoryIDByName(trimmedKey)
-			if err != nil {
-				return nil, err
+			catId, found := resolveCategoryIDByNameMemoryOnly(trimmedKey)
+			if !found && !dbCatLoaded && db.Mdb != nil {
+				dbCatLoaded = true
+				var cats []model.Category
+				if err := db.Mdb.Model(&model.Category{}).Select("id, name").Find(&cats).Error; err != nil {
+					return nil, err
+				}
+				dbCatByName = make(map[string]int64, len(cats))
+				for _, c := range cats {
+					if c.Id > 0 && strings.TrimSpace(c.Name) != "" {
+						dbCatByName[strings.TrimSpace(c.Name)] = c.Id
+					}
+				}
+			}
+			if !found && dbCatByName != nil {
+				catId, found = dbCatByName[trimmedKey]
 			}
 			if found {
 				it.Key = strconv.FormatInt(catId, 10)
 				it.Category = trimmedKey
 				it.Title = trimmedKey
 			} else {
-				// 若不是已知 ID，但为非噪声分类名，予以保留并正常展示
 				it.Key = trimmedKey
 				if it.Category == "" {
 					it.Category = trimmedKey

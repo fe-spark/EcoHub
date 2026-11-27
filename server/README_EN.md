@@ -85,7 +85,7 @@ The process panics when a required value is missing: any of `MYSQL_HOST`, `MYSQL
 ## Startup sequence
 
 1. Connect to Redis, then MySQL, with 30 attempts each at 2-second intervals. If the connection still fails, the process panics and exits.
-2. Create and update table schemas (`AutoMigrate`), then run the migrations in `internal/migration/` that have not run yet, in order.
+2. Run the migrations in `internal/migration/` that have not run yet in order, then create and update table schemas (`AutoMigrate`).
 3. On a new database, or when there is no admin, write the 12 preset collect sources.
 4. Initialize categories, the admin account `admin`, the upload directory, site config, default poster sources, and analytics config.
 5. Register scheduled tasks, load snapshots and in-memory list data, and wait for the search index to be built.

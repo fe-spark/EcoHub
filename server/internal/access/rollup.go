@@ -15,7 +15,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const accessTopKeep = 10
+const (
+	accessTopKeep             = 10
+	maxPersistedVersionsPerOS = 50
+	maxPersistedModels        = 80
+	maxDailyTextJSONBytes     = 32768
+	maxRollupLookbackDays     = 14
+)
 
 func rolledDayKey() string {
 	return config.AccessKeyPrefix + "meta:rolled_day"
@@ -30,9 +36,13 @@ func isLocalToday(target, now time.Time) bool {
 	return startOfLocalDay(target).Equal(startOfLocalDay(now))
 }
 
-// daysToRoll 返回 lastRolled 之后、yesterday 为止的所有闭合自然日（不设任何天数截断）。
+// daysToRoll 返回 lastRolled 之后、yesterday 为止的所有闭合自然日（最多回溯最近 maxRollupLookbackDays 天）。
 func daysToRoll(lastRolled, yesterday time.Time) []time.Time {
 	start := lastRolled.AddDate(0, 0, 1)
+	minStart := yesterday.AddDate(0, 0, -(maxRollupLookbackDays - 1))
+	if start.Before(minStart) {
+		start = minStart
+	}
 	if start.After(yesterday) {
 		return nil
 	}
@@ -309,11 +319,12 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	}
 
 	versionByPlatform := map[string]map[string]int64{
-		"android": parseIntMap(androidVerCmd.Val()),
-		"harmony": parseIntMap(harmonyVerCmd.Val()),
-		"ios":     parseIntMap(iosVerCmd.Val()),
+		"android": compactTopIntMap(parseIntMap(androidVerCmd.Val()), maxPersistedVersionsPerOS, maxDailyTextJSONBytes/4),
+		"harmony": compactTopIntMap(parseIntMap(harmonyVerCmd.Val()), maxPersistedVersionsPerOS, maxDailyTextJSONBytes/4),
+		"ios":     compactTopIntMap(parseIntMap(iosVerCmd.Val()), maxPersistedVersionsPerOS, maxDailyTextJSONBytes/4),
 	}
 	allVersions := mergeNestedIntMap(versionByPlatform)
+	compactModels := compactTopIntMap(parseIntMap(appModelsCmd.Val()), maxPersistedModels, maxDailyTextJSONBytes)
 
 	platformUV := map[string]int64{
 		"android": androidUVCmd.Val(),
@@ -346,7 +357,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 		VersionJSON:    marshalNestedIntMap(versionByPlatform),
 		BrowserJSON:    marshalIntMap(parseIntMap(webBrowserCmd.Val())),
 		OSJSON:         marshalIntMap(parseIntMap(webOSCmd.Val())),
-		ModelsJSON:     marshalIntMap(parseIntMap(appModelsCmd.Val())),
+		ModelsJSON:     marshalIntMap(compactModels),
 		RolledAt:       time.Now(),
 	}
 
@@ -415,7 +426,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 
 	has := stats.PV > 0 || stats.UV > 0 || stats.WebPV > 0 || stats.AppPV > 0 ||
 		stats.ProvidePV > 0 || stats.Err4 > 0 || stats.Err5 > 0 || stats.Dropped > 0 ||
-		len(clientVals) > 0 || len(actionVals) > 0 || len(tops) > 0 || len(allVersions) > 0
+		len(clientVals) > 0 || len(actionVals) > 0 || len(tops) > 0 || len(allVersions) > 0 || len(compactModels) > 0
 	return stats, tops, has, nil
 }
 

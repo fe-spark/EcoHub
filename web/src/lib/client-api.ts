@@ -37,7 +37,12 @@ instance.interceptors.response.use(
       message.error(error.response.data?.msg || "请先登录");
       redirectToClientLogin();
     } else if (error.response?.status === 403) {
-      message.error(error.response.data?.msg || "无访问权限");
+      if (error.response.data?.data?.private_access) {
+        message.error(error.response.data?.msg || "私有化访问验证失败");
+        redirectToClientLogin();
+      } else {
+        message.error(error.response.data?.msg || "无访问权限");
+      }
     } else {
       message.error("服务器繁忙，请稍后再试");
     }

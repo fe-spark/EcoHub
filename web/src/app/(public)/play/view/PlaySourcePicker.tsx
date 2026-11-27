@@ -101,7 +101,6 @@ export default function PlaySourcePicker({
         >
           <span className={styles.sourcePickerValue}>
             {viewingSource?.name || "选择播放源"}
-            {viewingSource?.proxy && <span className={styles.proxyBadge}>代理</span>}
           </span>
           <span className={styles.sourcePickerAside}>
             {viewingProbe ? (
@@ -130,7 +129,6 @@ export default function PlaySourcePicker({
                   <span className={styles.sourcePickerOptionBody}>
                     <span className={styles.sourcePickerOptionMain}>
                       {item.name}
-                      {item.proxy && <span className={styles.proxyBadge}>代理</span>}
                     </span>
                     <span className={styles.sourcePickerOptionSub}>
                       <span>{episodeCount} 集</span>
@@ -162,7 +160,6 @@ export default function PlaySourcePicker({
             >
               <span className={styles.tabName}>
                 {item.name}
-                {item.proxy && <span className={styles.proxyBadge}>代理</span>}
               </span>
               {tabProbe ? (
                 <span className={`${styles.tabSpeed} ${tabProbe.toneClass}`}>{tabProbe.label}</span>

@@ -1,0 +1,253 @@
+package collect
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"runtime/debug"
+	"server/internal/collect/progress"
+	"server/internal/collect/scheduler"
+	filmsnapshot "server/internal/film/snapshot"
+	"server/internal/infra/syslog"
+	"server/internal/model"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// deleteStopTimeout 删除前等待本次抓页退出的上限。
+const deleteStopTimeout = 3 * time.Minute
+
+// importStopTimeout 导入停采集的等待上限。只覆盖正在执行的写事务。
+const importStopTimeout = 20 * time.Second
+
+var (
+	stopAllReason     atomic.Value
+	sourceStopReasons sync.Map
+)
+
+func normalizeStopReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return "未说明原因"
+	}
+	return reason
+}
+
+func currentStopAllReason() string {
+	reason, _ := stopAllReason.Load().(string)
+	if reason == "" {
+		return "未说明原因"
+	}
+	return reason
+}
+
+func sourceStopReason(sourceID string) string {
+	if v, ok := sourceStopReasons.Load(strings.TrimSpace(sourceID)); ok {
+		if reason, ok := v.(string); ok {
+			return reason
+		}
+	}
+	return ""
+}
+
+func rememberSourceStop(sourceID, reason string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	sourceStopReasons.Store(sourceID, reason)
+}
+
+// collectStopReason 站点这次被停掉的原因。单站原因优先于最近一次全部停止。
+func collectStopReason(sourceID string) string {
+	if reason := sourceStopReason(sourceID); reason != "" {
+		return reason
+	}
+	return currentStopAllReason()
+}
+
+// StopAllCollect 停止全部采集，并记下原因供后续派发日志使用。
+func StopAllCollect(reason string) {
+	reason = normalizeStopReason(reason)
+	stopAllReason.Store(reason)
+	stopAllVersion.Add(1)
+	ids := make([]string, 0)
+	progress.RangeTasks(func(id, _ string) bool {
+		ids = append(ids, id)
+		return true
+	})
+	for _, id := range ids {
+		rememberSourceStop(id, reason)
+		log.Printf("[Spider] 停止站点采集：id=%s，%s", id, reason)
+		progress.RequestStop(id)
+	}
+	progress.MarkAllRunningStopped()
+	releaseQueuedCollectOccupies()
+	scheduler.CancelPendingWrites()
+	log.Printf("[Spider] 停止全部采集：%s，活跃任务 %d 个", reason, len(ids))
+}
+
+// StopTask 用户停止单个采集站。
+func StopTask(sourceID string) {
+	StopCollectSource(sourceID, "用户停止该站")
+}
+
+// StopCollectSource 停止单个采集站，日志写明原因。
+func StopCollectSource(sourceID, reason string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	reason = normalizeStopReason(reason)
+	rememberSourceStop(sourceID, reason)
+	log.Printf("[Spider] 停止站点采集：id=%s，%s", sourceID, reason)
+	progress.RequestStop(sourceID)
+	releaseCollectSourceIDs(sourceID)
+	scheduler.CancelSource(sourceID)
+}
+
+// StopSourceForDelete 占住该站级删除锁。仅阻塞该站采集，不再计入全局 activeCount 冻结全站。
+func StopSourceForDelete(sourceID string) (release func(), err error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return func() {}, nil
+	}
+	if err := collectLifecycle.beginSourceDelete(sourceID); err != nil {
+		log.Printf("[Spider] 删除站点占位失败 id=%s err=%v", sourceID, err)
+		return nil, err
+	}
+	log.Printf("[Spider] 删除站点已占位，开始清数据 id=%s", sourceID)
+	return func() { collectLifecycle.endSourceDelete(sourceID) }, nil
+}
+
+// SearchWorkBusyReason 检索索引或封口还在进行时返回原因。空字符串表示空闲。
+func SearchWorkBusyReason() string {
+	parts := make([]string, 0, 4)
+	if filmsnapshot.IsSearchIndexBuilding() {
+		parts = append(parts, "索引构建中")
+	}
+	if filmsnapshot.SearchRebuildScheduled() {
+		parts = append(parts, "重建已排队")
+	}
+	if searchSealRunning.Load() {
+		parts = append(parts, "封口执行中")
+	}
+	searchReseal.mu.Lock()
+	running := searchReseal.running
+	awaitDone := searchReseal.awaitDone
+	retryPending := searchReseal.retryTimer != nil
+	pending := len(searchReseal.pending)
+	sealing := len(searchReseal.sealing)
+	searchReseal.mu.Unlock()
+	if running || awaitDone || retryPending {
+		parts = append(parts, fmt.Sprintf("封口队列运行中 pending=%d sealing=%d", pending, sealing))
+	}
+	return strings.Join(parts, "，")
+}
+
+// StopAllTasksAndWait 按给定原因停止全部采集，并等待正在写的事务结束。
+func StopAllTasksAndWait(timeout time.Duration, reason string) error {
+	if timeout <= 0 {
+		timeout = importStopTimeout
+	}
+	StopAllCollect(reason)
+	return collectLifecycle.waitNotBusy(timeout)
+}
+
+// GetActiveTaskProgress 查询全部采集进度快照（含超时判定与终态清理）。
+func GetActiveTaskProgress() []model.CollectProgress {
+	return progress.GetActiveTaskProgress()
+}
+
+// IsTaskRunning 指定站点是否有活跃任务。
+func IsTaskRunning(id string) bool {
+	return progress.IsTaskRunning(id)
+}
+
+// IsCollecting 是否仍有采集任务、运行队列或待检索封口尚未收尾。
+func IsCollecting() bool {
+	return progress.IsAnyTaskRunning() || collectQueueActive() || collectLifecycle.collecting()
+}
+
+// backgroundCollects 跟踪异步启动的采集批次（例如失败重试），便于测试和退出时等待它们结束。
+var backgroundCollects sync.WaitGroup
+
+// goBackgroundCollect 异步启动一批采集并登记到 backgroundCollects。编排代码 panic 时只记日志，不带崩进程。
+func goBackgroundCollect(fn func()) {
+	backgroundCollects.Add(1)
+	go func() {
+		defer backgroundCollects.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				syslog.Errorf("[Spider] 后台采集批次 panic: %v\n%s", r, debug.Stack())
+			}
+		}()
+		fn()
+	}()
+}
+
+// WaitBackgroundCollects 等待异步启动的采集批次全部结束。超时返回 false。
+func WaitBackgroundCollects(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		backgroundCollects.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+func BatchOutcomeMessage(result model.CollectBatchResult, startedVerb, emptyLabel string) string {
+	if len(result.Started) == 0 {
+		if len(result.Skipped) == 0 {
+			return emptyLabel
+		}
+		parts := make([]string, 0, len(result.Skipped))
+		for _, item := range result.Skipped {
+			name := item.Name
+			if name == "" {
+				name = item.Id
+			}
+			parts = append(parts, name+"（"+item.Reason+"）")
+		}
+		return emptyLabel + "：" + strings.Join(parts, "；")
+	}
+	msg := fmt.Sprintf("%s %d 个", startedVerb, len(result.Started))
+	if len(result.Skipped) > 0 {
+		msg += fmt.Sprintf("，跳过 %d 个", len(result.Skipped))
+	}
+	return msg
+}
+
+// skipSourceFailedNotify 用户停止、派发终止、同站已在跑都不是采集源故障，不发异常告警。
+func skipSourceFailedNotify(err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, progress.ErrDispatchStopped) ||
+		errors.Is(err, progress.ErrStopRequested) ||
+		errors.Is(err, progress.ErrTaskExists)
+}
+
+// canRegisterCollectRun 登记运行前（任务表锁内）复核本次运行仍可开跑：
+// 一键终止过则不开；有批次时占用令牌和进度代次都必须还是本批次的。
+func canRegisterCollectRun(id string, runVersion *uint64, batchCtx *collectBatchContext) error {
+	if runVersion != nil && isDispatchStopped(*runVersion) {
+		return progress.ErrDispatchStopped
+	}
+	if batchCtx == nil {
+		return nil
+	}
+	if !batchCtx.ownsOccupy(id) {
+		return progress.ErrStopRequested
+	}
+	if epoch, ok := batchCtx.progressEpoch(id); ok && progress.Epoch(id) != epoch {
+		return progress.ErrStopRequested
+	}
+	return nil
+}

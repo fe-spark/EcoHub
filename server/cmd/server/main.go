@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -11,15 +12,17 @@ import (
 	"time"
 
 	"server/internal/access"
+	"server/internal/admin/upgrade"
+	"server/internal/bootstrap"
+	"server/internal/collect"
 	"server/internal/config"
+	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
-	"server/internal/repository"
-	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/notify"
+	"server/internal/portal"
 	"server/internal/router"
-	"server/internal/service"
-	"server/internal/service/upgrade"
-	"server/internal/spider"
+	"server/internal/sourcecatalog"
 
 	"github.com/gin-gonic/gin"
 )
@@ -84,7 +87,7 @@ func waitForMySQL(maxRetries int, interval time.Duration) error {
 
 func main() {
 	if config.IsUpgradeHelper() {
-		if err := service.RunUpgradeHelper(os.Args[1:]); err != nil {
+		if err := upgrade.RunUpgradeHelper(os.Args[1:]); err != nil {
 			log.SetOutput(os.Stderr)
 			log.Fatal(err)
 		}
@@ -95,14 +98,15 @@ func main() {
 
 func start() {
 	log.Printf("[Init] EcoHub server version=%s", config.Version)
+	bootstrap.Wire()
 
 	db.StartRedisHealthCheck()
 	db.StartMysqlHealthCheck()
 
-	if err := service.InitSvc.DefaultDataInit(); err != nil {
+	if err := bootstrap.InitSvc.DefaultDataInit(); err != nil {
 		log.Fatalf("[Init] 初始化失败: %v", err)
 	}
-	if err := repository.RefreshCollectSourceCatalog(); err != nil {
+	if err := sourcecatalog.RefreshCollectSourceCatalog(); err != nil {
 		log.Fatalf("[Init] 采集站目录加载失败: %v", err)
 	}
 	upgrade.StartReleasePoller()
@@ -114,6 +118,7 @@ func start() {
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 	go func() {
@@ -122,13 +127,12 @@ func start() {
 				log.Printf("[Init] 启动预热首页缓存发生异常: %v", r)
 			}
 		}()
-		if primary := repository.CurrentPrimarySource(); primary != nil {
-			if _, err := service.IndexSvc.IndexPage(primary.Id); err == nil {
+		if primary := sourcecatalog.CurrentPrimarySource(); primary != nil {
+			if _, err := portal.IndexSvc.IndexPage(primary.Id); err == nil {
 				log.Printf("[Init] 首页数据缓存预热完成 primary=%s", primary.Name)
 			}
 		}
 	}()
-	service.HotChartsSvc.StartPoller()
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		log.Fatalf("[Init] HTTP 监听失败: %v", err)
@@ -146,12 +150,26 @@ func start() {
 	<-stopCh
 	log.Printf("[Shutdown] 收到退出信号，开始快速退出")
 
-	// 1. 立即关闭 HTTP 端口监听（断开连接，避免新请求进入与端口占用）
-	_ = srv.Close()
+	// 1. 先以短超时优雅排空常规请求，超时后强制关闭长连接
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[Shutdown] HTTP 平滑关闭超时，强制断开残留连接: %v", err)
+		_ = srv.Close()
+	}
+	shutdownCancel()
 
-	// 2. 快速停止采集任务与通知轮询（非阻塞通知协程退出）
-	spider.StopAllCollect("进程退出，停止采集")
-	service.NotifySvc.StopBotPoller()
+	// 2. 停止采集任务与通知轮询，再排空 access 内存统计队列并关闭底层连接
+	collect.StopAllCollect("进程退出，停止采集")
+	notify.NotifySvc.StopBotPoller()
+	access.Shutdown(1500 * time.Millisecond)
+	if db.Rdb != nil {
+		_ = db.Rdb.Close()
+	}
+	if db.Mdb != nil {
+		if sqlDB, sqlErr := db.Mdb.DB(); sqlErr == nil && sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	}
 
 	log.Printf("[Shutdown] 退出完成")
 }

@@ -27,7 +27,9 @@ export class ServerApiError extends Error {
 }
 
 export function isServerUnauthorizedError(error: unknown): boolean {
-  return error instanceof ServerApiError && error.status === 401;
+  if (!(error instanceof ServerApiError)) return false;
+  if (error.status === 401) return true;
+  return error.status === 403 && Boolean(error.payload?.private_access);
 }
 
 export function buildHttpServerApiError(
@@ -68,13 +70,21 @@ export function getPublicServerErrorMessage(
   return fallback;
 }
 
+// 校验站内相对跳转路径，拦截 //host、/\host、控制字符与外域 URL，防止开放重定向。
+export function isSafeInternalRedirect(raw?: string | null): raw is string {
+  if (!raw) return false;
+  if (!raw.startsWith("/") || raw.startsWith("//")) return false;
+  if (raw.includes("\\") || /[\u0000-\u001f\u007f]/.test(raw)) return false;
+  try {
+    const parsed = new URL(raw, "http://localhost");
+    return parsed.origin === "http://localhost";
+  } catch {
+    return false;
+  }
+}
+
 export function buildLoginRedirectTarget(currentPath?: string | null): string {
-  if (
-    currentPath &&
-    currentPath.startsWith("/") &&
-    !currentPath.startsWith("//") &&
-    !currentPath.startsWith("/login")
-  ) {
+  if (isSafeInternalRedirect(currentPath) && !currentPath.startsWith("/login")) {
     return `/login?redirect=${encodeURIComponent(currentPath)}`;
   }
   return "/login";

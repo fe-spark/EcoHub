@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Modal, Space } from "antd";
 import { CompassOutlined } from "@ant-design/icons";
 import { ApiPost } from "@/lib/client-api";
@@ -40,7 +40,11 @@ interface RecommendQuickModalProps {
   sourceId: string;
   groups: RecommendQuickGroupItem[];
   onClose: () => void;
-  onGenerated: (previewGroups: RecommendPreviewGroup[], strategy: QuickStrategy) => void;
+  onGenerated: (
+    previewGroups: RecommendPreviewGroup[],
+    strategy: QuickStrategy,
+    targetSourceId: string,
+  ) => void;
 }
 
 const RECOMMEND_FILL_PRESETS = [
@@ -61,6 +65,10 @@ export default function RecommendQuickModal({
   const [strategy, setStrategy] = useState<QuickStrategy>("douban");
   const [items, setItems] = useState<CategoryQuotaItem[]>([]);
   const [running, setRunning] = useState(false);
+  const sourceIdRef = useRef(sourceId);
+  const openRef = useRef(open);
+  sourceIdRef.current = sourceId;
+  openRef.current = open;
 
   useEffect(() => {
     if (!open) return;
@@ -87,20 +95,29 @@ export default function RecommendQuickModal({
       message.warning("请至少为一个分组设置排片数量");
       return;
     }
+    const reqSourceId = sourceId;
     setRunning(true);
     try {
-      const res = await ApiPost<{ groups: RecommendPreviewGroup[] }>("/manage/recommends/generate", {
-        sourceId,
-        strategy,
-        quotas,
-      });
+      const res = await ApiPost<{ sourceId?: string; groups: RecommendPreviewGroup[] }>(
+        "/manage/recommends/generate",
+        {
+          sourceId: reqSourceId,
+          strategy,
+          quotas,
+        },
+      );
+      if (sourceIdRef.current !== reqSourceId || !openRef.current) {
+        return;
+      }
       if (res.code === 0 && res.data) {
-        onGenerated(res.data.groups || [], strategy);
+        onGenerated(res.data.groups || [], strategy, res.data.sourceId || reqSourceId);
       } else {
         message.error(res.msg || "生成排片失败");
       }
     } catch {
-      message.error("生成排片失败");
+      if (sourceIdRef.current === reqSourceId && openRef.current) {
+        message.error("生成排片失败");
+      }
     } finally {
       setRunning(false);
     }

@@ -18,12 +18,37 @@ export interface RecommendPublicItem {
   rank: number;
 }
 
+export interface RecommendSectionNavChild {
+  id: string;
+  pid: string;
+  name: string;
+}
+
+export interface RecommendSectionNav {
+  id: string;
+  name: string;
+  show: boolean;
+  children?: RecommendSectionNavChild[];
+}
+
 export interface RecommendSection {
   id: string;
+  kind?: "recommend" | "category";
   title: string;
   autoSync?: boolean;
   syncChartKey?: string;
+  categoryId?: number;
+  nav?: RecommendSectionNav;
   items: RecommendPublicItem[];
+  hot?: Array<{
+    id: string | number;
+    name: string;
+    picture?: string;
+    year?: string;
+    cName?: string;
+    area?: string;
+    remarks?: string;
+  }>;
 }
 
 function RecommendPoster({ src, alt }: { src?: string; alt: string }) {
@@ -55,88 +80,75 @@ function RecommendPoster({ src, alt }: { src?: string; alt: string }) {
   );
 }
 
-export default function HomeRecommends({
-  sections,
-}: {
-  sections: RecommendSection[];
-}) {
+export function RecommendSectionRow({ section }: { section: RecommendSection }) {
   const { navigate } = useContentNavigate();
 
-  if (!Array.isArray(sections) || sections.length === 0) {
+  if (!section.items || section.items.length === 0) {
     return null;
   }
 
   return (
-    <>
-      {sections.map((section) => {
-        if (!section.items || section.items.length === 0) {
-          return null;
-        }
-        return (
-          <section
-            key={section.id}
-            className={styles.section}
-            aria-label={section.title}
-          >
-            <div className={styles.header}>
-              <div className={styles.titleGroup}>
-                <FireOutlined className={styles.icon} />
-                <h2 className={styles.title}>{section.title}</h2>
-                {section.autoSync ? (
-                  <span className={styles.subTag}>豆瓣榜单同步</span>
-                ) : (
-                  <span className={styles.subTag}>精选推荐</span>
-                )}
+    <section
+      key={section.id}
+      className={styles.section}
+      aria-label={section.title}
+    >
+      <div className={styles.header}>
+        <div className={styles.titleGroup}>
+          <FireOutlined className={styles.icon} />
+          <h2 className={styles.title}>{section.title}</h2>
+          {section.syncChartKey ? (
+            <span className={styles.subTag}>热门榜单</span>
+          ) : (
+            <span className={styles.subTag}>精选推荐</span>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.grid}>
+        {section.items.slice(0, 24).map((item) => {
+          const metaParts = [item.year, item.area, item.cName]
+            .map((v) => String(v || "").trim())
+            .filter(Boolean);
+          return (
+            <div
+              key={`${section.id}-${item.id}`}
+              className={styles.card}
+              onClick={() =>
+                navigate(
+                  resolvePlayEntryPath(String(item.id)),
+                  "进入播放页...",
+                )
+              }
+            >
+              <div className={styles.posterWrap}>
+                <RecommendPoster src={item.picture} alt={item.name} />
+                <span
+                  className={`${styles.rankBadge} ${
+                    item.rank <= 3 ? styles.rankTop : ""
+                  }`}
+                >
+                  {item.rank}
+                </span>
+                {item.doubanScore ? (
+                  <span className={styles.scoreBadge}>
+                    ★ {item.doubanScore}
+                  </span>
+                ) : null}
+                {item.remarks ? (
+                  <div className={styles.remarksBar}>{item.remarks}</div>
+                ) : null}
+              </div>
+              <div className={styles.cardTitle} title={item.name}>
+                {item.name}
+              </div>
+              <div className={styles.cardMeta}>
+                {metaParts.slice(0, 2).join(" · ") || "精选资源"}
               </div>
             </div>
-
-            <div className={styles.grid}>
-              {section.items.slice(0, 12).map((item) => {
-                const metaParts = [item.year, item.area, item.cName]
-                  .map((v) => String(v || "").trim())
-                  .filter(Boolean);
-                return (
-                  <div
-                    key={`${section.id}-${item.id}`}
-                    className={styles.card}
-                    onClick={() =>
-                      navigate(
-                        resolvePlayEntryPath(String(item.id)),
-                        "进入播放页...",
-                      )
-                    }
-                  >
-                    <div className={styles.posterWrap}>
-                      <RecommendPoster src={item.picture} alt={item.name} />
-                      <span
-                        className={`${styles.rankBadge} ${
-                          item.rank <= 3 ? styles.rankTop : ""
-                        }`}
-                      >
-                        {item.rank}
-                      </span>
-                      {item.doubanScore ? (
-                        <span className={styles.scoreBadge}>
-                          ★ {item.doubanScore}
-                        </span>
-                      ) : null}
-                      {item.remarks ? (
-                        <div className={styles.remarksBar}>{item.remarks}</div>
-                      ) : null}
-                    </div>
-                    <div className={styles.cardTitle} title={item.name}>
-                      {item.name}
-                    </div>
-                    <div className={styles.cardMeta}>
-                      {metaParts.slice(0, 2).join(" · ") || "精选资源"}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
-    </>
+          );
+        })}
+      </div>
+    </section>
   );
 }

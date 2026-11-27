@@ -4,7 +4,7 @@ const (
 	// MysqlMaxOpenConns 本进程业务连接池大小。
 	MysqlMaxOpenConns = 48
 	// MysqlForegroundConns 留给前台搜索和管理接口的连接。
-	// 写槽上限 = MysqlMaxOpenConns - MysqlForegroundConns。
+	// 写槽上限 = MysqlMaxOpenConns - MysqlForegroundConns（默认 16 路）。
 	MysqlForegroundConns = 32
 	// CollectWriteSlotMin 写并发下限。锁错误时减到这里。
 	CollectWriteSlotMin = 2

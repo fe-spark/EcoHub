@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildFinalCategoryPreview, findLocalRuleConflicts } from "./rule-preview-engine";
-import { ROOT_GROUP, SUB_GROUP, type MappingRuleRecord, type RawSourceCategory } from "./types";
+import { ROOT_GROUP, SUB_GROUP, parseRuleList, type MappingRuleRecord, type RawSourceCategory } from "./types";
 
 const sampleRaw: RawSourceCategory[] = [
   { id: 1, parentId: 0, name: "福利视频", sort: 2, show: true },
@@ -143,4 +143,47 @@ test("findLocalRuleConflicts 同分组+原始值+匹配方式检出冲突并排�
     matchType: "regex",
   });
   assert.equal(editingSelf.length, 0);
+});
+
+test("parseRuleList 从嵌套 data.paging 正确解析总条数与页码", () => {
+  const parsed = parseRuleList(
+    {
+      data: {
+        list: [{ id: 1, sourceId: "s1", group: ROOT_GROUP, raw: "A", target: "B", matchType: "exact", remarks: "" }],
+        paging: { current: 2, pageSize: 10, total: 35 },
+        totals: { [ROOT_GROUP]: 20, [SUB_GROUP]: 15 },
+      },
+    },
+    1,
+    10,
+  );
+  assert.equal(parsed.paging.current, 2);
+  assert.equal(parsed.paging.pageSize, 10);
+  assert.equal(parsed.paging.total, 35);
+});
+
+test("支持 (?i:...) 内联标志与 syntheticStates 同步隐藏/排序状态", () => {
+  const preview = buildFinalCategoryPreview({
+    rawCategories: [{ id: 1, parentId: 0, name: "HDMovie", sort: 2, show: true }],
+    savedRules: [
+      { id: 1, sourceId: "s1", group: ROOT_GROUP, raw: "(?i:movie)", target: "高清专区", matchType: "regex", remarks: "" },
+    ],
+    draft: { group: ROOT_GROUP, matchType: "exact", raw: "", target: "" },
+    syntheticStates: { 高清专区: { show: false, sort: 9 } },
+  });
+  assert.equal(preview.valid, true);
+  assert.equal(preview.tree[0]?.name, "高清专区");
+  assert.equal(preview.tree[0]?.show, false);
+  assert.equal(preview.tree[0]?.sort, 9);
+
+  // 转义后的 \(\?i:movie\) 应按字面量匹配，不被误当作内联标志组替换
+  const escapedPreview = buildFinalCategoryPreview({
+    rawCategories: [{ id: 1, parentId: 0, name: "(?i:movie)", sort: 1, show: true }],
+    savedRules: [
+      { id: 1, sourceId: "s1", group: ROOT_GROUP, raw: "\\(\\?i:movie\\)", target: "字面匹配", matchType: "regex", remarks: "" },
+    ],
+    draft: { group: ROOT_GROUP, matchType: "exact", raw: "", target: "" },
+  });
+  assert.equal(escapedPreview.valid, true);
+  assert.equal(escapedPreview.tree[0]?.name, "字面匹配");
 });

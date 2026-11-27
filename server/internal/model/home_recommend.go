@@ -9,10 +9,9 @@ type HomeRecommendGroup struct {
 	Title        string     `gorm:"size:64;not null" json:"title"`
 	Sort         int64      `gorm:"not null;default:0;index:idx_rec_group_src_sort,priority:2" json:"sort"`
 	Enabled      bool       `gorm:"not null;default:true" json:"enabled"`
-	Builtin      bool       `gorm:"not null;default:false" json:"builtin"`
-	BuiltinKey   string     `gorm:"size:64;not null;default:''" json:"builtinKey"`
 	AutoSync     bool       `gorm:"not null;default:false" json:"autoSync"`
 	SyncChartKey string     `gorm:"size:32;not null;default:''" json:"syncChartKey"`
+	CategoryId   int64      `gorm:"not null;default:0" json:"categoryId"`
 	SyncLimit    int64      `gorm:"not null;default:12" json:"syncLimit"`
 	LastSyncedAt *time.Time `json:"lastSyncedAt,omitempty"`
 	CreatedAt    time.Time  `json:"createdAt"`
@@ -46,35 +45,42 @@ type HomeRecommendPublicItem struct {
 	Rank        int    `json:"rank"`
 }
 
-// HomeRecommendSection 前台首页推荐分组（每个启用的分组独立成行）。
+// HomeRecommendSection 前台首页统一展示楼层（推荐分组与站点分类按后台顺序输出）。
 type HomeRecommendSection struct {
 	Id           string                    `json:"id"`
+	Kind         string                    `json:"kind"` // recommend | category
 	Title        string                    `json:"title"`
 	AutoSync     bool                      `json:"autoSync"`
 	SyncChartKey string                    `json:"syncChartKey,omitempty"`
+	CategoryId   int64                     `json:"categoryId,omitempty"`
+	Nav          *CategoryTree             `json:"nav,omitempty"`
 	Items        []HomeRecommendPublicItem `json:"items"`
+	Hot          []MovieBasicInfo          `json:"hot,omitempty"`
 }
 
 // HomeRecommendAdminItem 后台管理的推荐条目。
 type HomeRecommendAdminItem struct {
-	ItemId      string `json:"itemId"`
-	GroupId     string `json:"groupId"`
-	SourceId    string `json:"sourceId"`
-	Mid         int64  `json:"mid"`
-	Sort        int64  `json:"sort"`
-	DoubanScore string `json:"doubanScore,omitempty"`
-	Name        string `json:"name"`
-	Picture     string `json:"picture"`
-	Year        string `json:"year"`
-	CName       string `json:"cName"`
-	Area        string `json:"area"`
-	Remarks     string `json:"remarks"`
-	Score       float64 `json:"score,omitempty"`
-	Unavailable bool   `json:"unavailable,omitempty"`
+	ItemId         string  `json:"itemId"`
+	GroupId        string  `json:"groupId"`
+	SourceId       string  `json:"sourceId"`
+	Mid            int64   `json:"mid"`
+	Sort           int64   `json:"sort"`
+	DoubanScore    string  `json:"doubanScore,omitempty"`
+	Name           string  `json:"name"`
+	Picture        string  `json:"picture"`
+	Year           string  `json:"year"`
+	CName          string  `json:"cName"`
+	Area           string  `json:"area"`
+	Remarks        string  `json:"remarks"`
+	Score          float64 `json:"score,omitempty"`
+	Unavailable    bool    `json:"unavailable,omitempty"`
+	CategoryHidden bool    `json:"categoryHidden,omitempty"`
 }
 
 // HomeRecommendAdminGroup 后台管理的推荐分组详情。
 type HomeRecommendAdminGroup struct {
 	HomeRecommendGroup
-	Items []HomeRecommendAdminItem `json:"items"`
+	CategoryName   string                   `json:"categoryName,omitempty"`
+	CategoryHidden bool                     `json:"categoryHidden,omitempty"`
+	Items          []HomeRecommendAdminItem `json:"items"`
 }

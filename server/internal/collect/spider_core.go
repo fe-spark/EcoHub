@@ -1,0 +1,144 @@
+package collect
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"server/internal/collect/fetcher"
+	"server/internal/film/converter"
+	"server/internal/model"
+	"server/internal/utils"
+)
+
+/*
+	Spider 数据 爬取 & 处理 & 转换
+*/
+
+// Collector 采集引擎统一接口，支持 JSON 与 XML 等多协议接入。
+type Collector interface {
+	GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, int, error)
+	GetPageCount(r utils.RequestInfo) (int, error)
+	GetFilmDetail(r utils.RequestInfo) ([]model.MovieDetail, error)
+}
+
+var (
+	jsonCollector = &JsonCollect{}
+	xmlCollector  = &XmlCollect{}
+)
+
+// ResolveCollector 根据源站配置的格式返回对应采集器实例，默认返回 JSON 采集器。
+func ResolveCollector(format string) Collector {
+	if format == model.SourceFormatXML {
+		return xmlCollector
+	}
+	return jsonCollector
+}
+
+// ------------------------------------------------- JSON Collect -------------------------------------------------
+
+// JsonCollect 处理返回值为JSON格式的采集数据
+type JsonCollect struct{}
+
+// GetCategoryTree 获取分类树形数据
+func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, int, error) {
+	// 设置请求参数信息
+	r.Params.Set(`ac`, "list")
+	r.Params.Set(`pg`, "1")
+	// 执行请求, 获取一次list数据
+	utils.ApiGet(&r)
+	// 解析resp数据
+	filmListPage := model.FilmListPage{}
+	if len(r.Resp) <= 0 {
+		errMsg := r.Err
+		if errMsg == "" {
+			errMsg = "response is empty"
+		}
+		log.Printf("filmListPage 数据获取异常: %s", errMsg)
+		return nil, 0, fmt.Errorf("filmListPage 数据获取异常: %s", errMsg)
+	}
+	if err := json.Unmarshal(r.Resp, &filmListPage); err != nil {
+		return nil, 0, fmt.Errorf("filmListPage JSON unmarshal error: %w", err)
+	}
+	// 获取分类列表信息
+	cl := filmListPage.Class
+	if len(cl) == 0 {
+		return &model.CategoryTree{}, filmListPage.PageCount, nil
+	}
+	// 组装分类数据信息树形结构
+	tree := converter.GenCategoryTreeWithParentHints(cl, nil)
+
+	return tree, filmListPage.PageCount, nil
+}
+
+// GetPageCount 获取分页总页数。ac 与抓页一致（detail），避免 list 与 detail 每页条数不同导致总页偏小。
+func (jc *JsonCollect) GetPageCount(r utils.RequestInfo) (count int, err error) {
+	if len(r.Params.Get("ac")) <= 0 {
+		r.Params.Set("ac", "detail")
+	}
+	r.Params.Set("pg", "1")
+	ac := r.Params.Get("ac")
+	h := r.Params.Get("h")
+	utils.ApiGet(&r)
+	// 判断请求结果是否为空, 如果为空直接输出错误并终止
+	if len(r.Resp) <= 0 {
+		errMsg := r.Err
+		if errMsg == "" {
+			errMsg = "response is empty"
+		}
+		err = errors.New(errMsg)
+		return
+	}
+	// 获取pageCount
+	res := model.CommonPage{}
+	err = json.Unmarshal(r.Resp, &res)
+	if err != nil {
+		return
+	}
+	count = int(res.PageCount)
+	if count < 0 || count > fetcher.MaxCollectPageCount {
+		return 0, fmt.Errorf("采集站返回异常总页数: %d", count)
+	}
+	log.Printf("[Spider] JSON 源探页完成 ac=%s h=%s pagecount=%d total=%d", ac, h, count, res.Total)
+	return
+}
+
+// GetFilmDetail 通过 RequestInfo 获取并解析出对应的 MovieDetail list
+func (jc *JsonCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDetail, err error) {
+	// 设置分页请求参数
+	r.Params.Set(`ac`, `detail`)
+	utils.ApiGet(&r)
+	// 影视详情信息
+	detailPage := model.FilmDetailLPage{}
+	// details := DetailListInfo{}
+	// 如果返回数据为空则直接结束本次循环
+	if len(r.Resp) <= 0 {
+		errMsg := r.Err
+		if errMsg == "" {
+			errMsg = "response is empty"
+		}
+		err = errors.New(errMsg)
+		return
+	}
+	// 序列化详情数据
+	if err = json.Unmarshal(r.Resp, &detailPage); err != nil {
+		return
+	}
+
+	// 处理details信息
+	list = converter.ConvertFilmDetails(detailPage.List)
+	return
+}
+
+func normalizeCollectSourceDefaults(source *model.FilmSource) {
+	normalizeCollectCd(source)
+	if source.Format == "" {
+		source.Format = model.SourceFormatJSON
+	}
+}
+
+func normalizeCollectCd(source *model.FilmSource) {
+	if source.Cd <= 0 {
+		source.Cd = 24
+	}
+}

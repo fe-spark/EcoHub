@@ -1,6 +1,7 @@
 package access
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -8,9 +9,23 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
+
+	"github.com/redis/go-redis/v9"
 )
 
+// resolveClassifyMemberMemoryOnly 在统计写入路径仅查内存缓存，绝不查 MySQL 防止阻塞单写入协程。
+func resolveClassifyMemberMemoryOnly(evt *AccessEvent) string {
+	return resolveClassifyMemberWith(evt, func(name string) (int64, bool, error) {
+		id, ok := resolveCategoryIDByNameMemoryOnly(name)
+		return id, ok, nil
+	})
+}
+
 func resolveClassifyMember(evt *AccessEvent) string {
+	return resolveClassifyMemberWith(evt, resolveCategoryIDByName)
+}
+
+func resolveClassifyMemberWith(evt *AccessEvent, lookup func(string) (int64, bool, error)) string {
 	if evt == nil {
 		return ""
 	}
@@ -21,7 +36,7 @@ func resolveClassifyMember(evt *AccessEvent) string {
 			if _, ok := parseFilmID(res); ok {
 				return res
 			}
-			catId, found, err := resolveCategoryIDByName(res)
+			catId, found, err := lookup(res)
 			if err != nil {
 				syslog.Errorf("[Access] 分类查询失败: %v", err)
 				return res
@@ -33,7 +48,7 @@ func resolveClassifyMember(evt *AccessEvent) string {
 		}
 		if evt.ResourceCat != "" {
 			trimmedCat := strings.TrimSpace(evt.ResourceCat)
-			catId, found, err := resolveCategoryIDByName(trimmedCat)
+			catId, found, err := lookup(trimmedCat)
 			if err != nil {
 				syslog.Errorf("[Access] 分类查询失败: %v", err)
 				return trimmedCat
@@ -57,7 +72,7 @@ func resolveClassifyMember(evt *AccessEvent) string {
 			}
 		}
 		if cat != "" {
-			catId, found, err := resolveCategoryIDByName(cat)
+			catId, found, err := lookup(cat)
 			if err != nil {
 				syslog.Errorf("[Access] 分类查询失败: %v", err)
 				return cat
@@ -75,22 +90,70 @@ func writeEvent(evt *AccessEvent) {
 	if evt == nil || db.Rdb == nil {
 		return
 	}
-	snapshotAccessEvent(evt)
-	if evt.Method == "PAGE" {
-		writePageView(evt)
-		return
-	}
-	if !IsProvide(evt) {
+	writeEventsBatch([]*AccessEvent{evt})
+}
+
+func writeEventsBatch(batch []*AccessEvent) {
+	if db.Rdb == nil || len(batch) == 0 {
 		return
 	}
 	ctx := db.Cxt
-	ts := evt.Ts
-	if ts.IsZero() {
-		ts = time.Now()
-	}
-	ts = ts.In(time.Local)
-	day := ts.Format("20060102")
 	pipe := db.Rdb.Pipeline()
+	var queued int
+	var hasPageView bool
+	var latestDay string
+
+	for _, evt := range batch {
+		if evt == nil {
+			continue
+		}
+		snapshotAccessEvent(evt)
+		ts := evt.Ts
+		if ts.IsZero() {
+			ts = time.Now()
+		}
+		ts = ts.In(time.Local)
+		day := ts.Format("20060102")
+		if evt.Method == "PAGE" {
+			appendPageViewToPipe(pipe, ctx, ts, day, evt)
+			queued++
+			hasPageView = true
+			latestDay = day
+			continue
+		}
+		if !IsProvide(evt) {
+			continue
+		}
+		appendProvideEventToPipe(pipe, ctx, ts, day, evt)
+		queued++
+		latestDay = day
+	}
+	if queued == 0 {
+		return
+	}
+	dropped := takeUnsyncedDropped()
+	if dropped > 0 {
+		dk := droppedKey()
+		pipe.IncrBy(ctx, dk, dropped)
+		pipe.ExpireNX(ctx, dk, ttlDay)
+
+		if latestDay != "" {
+			dkDay := droppedDayKey(latestDay)
+			pipe.IncrBy(ctx, dkDay, dropped)
+			pipe.ExpireNX(ctx, dkDay, ttlDay)
+		}
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		restoreUnsyncedDropped(dropped)
+		if hasPageView {
+			syslog.Errorf("[Access] 统计埋点批量写入失败(n=%d): %v", queued, err)
+		} else {
+			syslog.Errorf("[Access] Redis 批量写入失败(n=%d): %v", queued, err)
+		}
+	}
+}
+
+func appendProvideEventToPipe(pipe redis.Pipeliner, ctx context.Context, ts time.Time, day string, evt *AccessEvent) {
 	countCollectSource(pipe, ctx, day, evt.CollectSourceId)
 
 	mk := minKey(ts)
@@ -167,7 +230,7 @@ func writeEvent(evt *AccessEvent) {
 			pipe.ZRemRangeByRank(ctx, tvplk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, tvplk, ttlDay)
 		}
-		tvboxClassifyMember := resolveClassifyMember(evt)
+		tvboxClassifyMember := resolveClassifyMemberMemoryOnly(evt)
 		if tvboxClassifyMember != "" {
 			tck := topClassifyKey(day)
 			pipe.ZIncrBy(ctx, tck, 1, tvboxClassifyMember)
@@ -182,33 +245,9 @@ func writeEvent(evt *AccessEvent) {
 	}
 	pipe.ExpireNX(ctx, mk, ttlMinute)
 	pipe.ExpireNX(ctx, dk, ttlDay)
-
-	dropped := takeUnsyncedDropped()
-	if dropped > 0 {
-		dk := droppedKey()
-		pipe.IncrBy(ctx, dk, dropped)
-		pipe.ExpireNX(ctx, dk, ttlDay)
-
-		dkDay := droppedDayKey(day)
-		pipe.IncrBy(ctx, dkDay, dropped)
-		pipe.ExpireNX(ctx, dkDay, ttlDay)
-	}
-
-	if _, err := pipe.Exec(ctx); err != nil {
-		restoreUnsyncedDropped(dropped)
-		syslog.Errorf("[Access] Redis 写入失败: %v", err)
-	}
 }
 
-func writePageView(evt *AccessEvent) {
-	ctx := db.Cxt
-	ts := evt.Ts
-	if ts.IsZero() {
-		ts = time.Now()
-	}
-	ts = ts.In(time.Local)
-	day := ts.Format("20060102")
-	pipe := db.Rdb.Pipeline()
+func appendPageViewToPipe(pipe redis.Pipeliner, ctx context.Context, ts time.Time, day string, evt *AccessEvent) {
 	countCollectSource(pipe, ctx, day, evt.CollectSourceId)
 	mk := minKey(ts)
 	dk := dayAggKey(day)
@@ -246,6 +285,7 @@ func writePageView(evt *AccessEvent) {
 	pipe.ExpireNX(ctx, pk, ttlDay)
 
 	// 分端统计 (Web vs App)
+	classifyMember := resolveClassifyMemberMemoryOnly(evt)
 	isWeb := client == "web"
 	if isWeb {
 		pipe.HIncrBy(ctx, mk, "web_pv", 1)
@@ -294,7 +334,6 @@ func writePageView(evt *AccessEvent) {
 			pipe.ZRemRangeByRank(ctx, wplk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, wplk, ttlDay)
 		}
-		classifyMember := resolveClassifyMember(evt)
 		if classifyMember != "" {
 			wck := webTopClassifyKey(day)
 			pipe.ZIncrBy(ctx, wck, 1, classifyMember)
@@ -335,14 +374,18 @@ func writePageView(evt *AccessEvent) {
 
 		if evt.AppVersion != "" {
 			appVerKey := appVersionKey(platform, day)
-			pipe.HIncrBy(ctx, appVerKey, evt.AppVersion, 1)
-			pipe.ExpireNX(ctx, appVerKey, ttlDay)
+			if ver := admitBoundedHashField(appVerKey, evt.AppVersion); ver != "" {
+				pipe.HIncrBy(ctx, appVerKey, ver, 1)
+				pipe.ExpireNX(ctx, appVerKey, ttlDay)
+			}
 		}
 
 		if evt.DeviceModel != "" {
 			amk := appModelsKey(day)
-			pipe.HIncrBy(ctx, amk, evt.DeviceModel, 1)
-			pipe.ExpireNX(ctx, amk, ttlDay)
+			if modelName := admitBoundedHashField(amk, evt.DeviceModel); modelName != "" {
+				pipe.HIncrBy(ctx, amk, modelName, 1)
+				pipe.ExpireNX(ctx, amk, ttlDay)
+			}
 		}
 
 		// App 全端聚合 (All)
@@ -387,7 +430,6 @@ func writePageView(evt *AccessEvent) {
 			pipe.ZRemRangeByRank(ctx, applk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, applk, ttlDay)
 		}
-		classifyMember := resolveClassifyMember(evt)
 		if classifyMember != "" {
 			ack := appAllTopClassifyKey(day)
 			pipe.ZIncrBy(ctx, ack, 1, classifyMember)
@@ -413,10 +455,9 @@ func writePageView(evt *AccessEvent) {
 		pipe.ZRemRangeByRank(ctx, plk, 0, int64(-zsetKeep-1))
 		pipe.ExpireNX(ctx, plk, ttlDay)
 	}
-	globalClassifyMember := resolveClassifyMember(evt)
-	if globalClassifyMember != "" {
+	if classifyMember != "" {
 		tck := topClassifyKey(day)
-		pipe.ZIncrBy(ctx, tck, 1, globalClassifyMember)
+		pipe.ZIncrBy(ctx, tck, 1, classifyMember)
 		pipe.ZRemRangeByRank(ctx, tck, 0, int64(-zsetKeep-1))
 		pipe.ExpireNX(ctx, tck, ttlDay)
 	}
@@ -441,19 +482,5 @@ func writePageView(evt *AccessEvent) {
 		uk := uvKey(day)
 		pipe.PFAdd(ctx, uk, uvIdentity)
 		pipe.ExpireNX(ctx, uk, ttlDay)
-	}
-	dropped := takeUnsyncedDropped()
-	if dropped > 0 {
-		dk := droppedKey()
-		pipe.IncrBy(ctx, dk, dropped)
-		pipe.ExpireNX(ctx, dk, ttlDay)
-
-		dkDay := droppedDayKey(day)
-		pipe.IncrBy(ctx, dkDay, dropped)
-		pipe.ExpireNX(ctx, dkDay, ttlDay)
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		restoreUnsyncedDropped(dropped)
-		syslog.Errorf("[Access] 页面埋点写入失败: %v", err)
 	}
 }

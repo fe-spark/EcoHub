@@ -1,0 +1,18 @@
+package snapshot
+
+import (
+	"server/internal/model"
+	"server/internal/model/dto"
+)
+
+func SearchSnapshotsByKeywordSourceAndSortFast(version string, sourceID string, keyword string, sortField string, page *dto.Page) ([]model.FilmListSnapshot, error) {
+	return SearchSnapshotsByKeywordSourceAndSortReadModel(version, sourceID, keyword, sortField, page)
+}
+
+func ListProvideSnapshotsFast(version string, st model.SearchTagsVO, keyword string, recentHours int, page *dto.Page) ([]model.FilmListSnapshot, error) {
+	return ListProvideSnapshotsReadModel(version, st, keyword, recentHours, page)
+}
+
+func ListFilmSnapshotsByTagsFast(version string, st model.SearchTagsVO, page *dto.Page) ([]model.FilmListSnapshot, error) {
+	return ListFilmSnapshotsByTagsReadModel(version, st, page)
+}

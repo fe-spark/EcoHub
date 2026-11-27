@@ -5,6 +5,7 @@ import { Alert, Button, Modal, Space, Typography } from "antd";
 import { CloudUploadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ProxyOutletBanner from "@/app/manage/components/proxy-outlet-banner";
 import styles from "./index.module.less";
 
 interface AppVersionInfo {
@@ -203,6 +204,7 @@ export default function SiderVersion({
         }
       >
         <div className={styles.modalBody}>
+          {open && isAdmin ? <ProxyOutletBanner module="upgrade" /> : null}
           <Typography.Text type="secondary">
             当前 {label}
             {isAdmin && info?.latest ? `  ·  最新 ${info.latest}` : ""}

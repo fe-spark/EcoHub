@@ -1,26 +1,21 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Card,
   Form,
   Input,
   Switch,
-  Radio,
-  Select,
   Button,
   Space,
   Spin,
   Tag,
   Divider,
   Flex,
-  Row,
-  Col,
   Tooltip,
 } from "antd";
 import {
   SaveOutlined,
-  EditOutlined,
   ApiOutlined,
   GlobalOutlined,
   SendOutlined,
@@ -32,9 +27,32 @@ import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import { useFormDirtyTracker } from "@/lib/use-form-dirty";
-import type { ProxyConfigValues } from "./types";
+import type { ProxyConfigResponse, ProxyConfigValues } from "./types";
 import ProxyModulesScope from "./ProxyModulesScope";
 import styles from "./index.module.less";
+
+function hasProxyUserInfo(raw?: string): boolean {
+  const val = String(raw || "").trim();
+  if (!val) return false;
+  const normalized = val.includes("://") ? val : `http://${val}`;
+  try {
+    const u = new URL(normalized);
+    return Boolean(u.username || u.password);
+  } catch {
+    return false;
+  }
+}
+
+function isValidProxyInput(trimmed: string): boolean {
+  const lower = trimmed.toLowerCase();
+  return (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("socks5://") ||
+    lower.startsWith("socks5h://") ||
+    /^[a-zA-Z0-9.-]+:\d+$/.test(trimmed)
+  );
+}
 
 const DEFAULT_CONFIG: ProxyConfigValues = {
   enabled: false,
@@ -60,8 +78,9 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [serverData, setServerData] = useState<ProxyConfigValues>(DEFAULT_CONFIG);
+  const [hasAuth, setHasAuth] = useState(false);
+  const [authCleared, setAuthCleared] = useState(false);
   const isGlobalEnabled = Form.useWatch("enabled", form);
-  const proxyUrlTouched = useRef(false);
 
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
@@ -73,7 +92,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
   const fetchConfig = useCallback(async () => {
     setFetching(true);
     try {
-      const resp = await ApiGet("/manage/proxy/config");
+      const resp = await ApiGet<ProxyConfigResponse>("/manage/proxy/config");
       if (resp.code === 0 && resp.data) {
         const normalized: ProxyConfigValues = {
           enabled: Boolean(resp.data.enabled),
@@ -86,7 +105,8 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
             danmaku: resp.data.modules?.danmaku ?? false,
           },
         };
-        proxyUrlTouched.current = false;
+        setHasAuth(Boolean(resp.data.hasAuth));
+        setAuthCleared(false);
         setServerData(normalized);
         form.setFieldsValue(normalized);
         setBaseline(normalized);
@@ -100,9 +120,20 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
     void fetchConfig();
   }, [fetchConfig]);
 
+  const shouldPreserveAuth = (proxyUrl?: string) => {
+    const trimmed = String(proxyUrl || "").trim();
+    return (
+      hasAuth &&
+      !authCleared &&
+      Boolean(serverData.proxyUrl) &&
+      trimmed === serverData.proxyUrl &&
+      !hasProxyUserInfo(trimmed)
+    );
+  };
+
   const handleCancel = () => {
     resetToBaseline();
-    proxyUrlTouched.current = false;
+    setAuthCleared(false);
     setTestResult(null);
   };
 
@@ -113,13 +144,13 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
       setSaving(true);
       const resp = await ApiPost("/manage/proxy/config", {
         ...values,
-        preserveAuth: !proxyUrlTouched.current,
+        preserveAuth: shouldPreserveAuth(values.proxyUrl),
       });
       if (resp.code === 0) {
         message.success(resp.msg || "代理配置保存成功");
         setServerData(values);
         setBaseline(values);
-        proxyUrlTouched.current = false;
+        setAuthCleared(false);
         void fetchConfig();
         return;
       }
@@ -149,7 +180,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
       setTestResult(null);
       const resp = await ApiPost("/manage/proxy/config/test", {
         proxyUrl: values.proxyUrl,
-        preserveAuth: !proxyUrlTouched.current,
+        preserveAuth: shouldPreserveAuth(values.proxyUrl),
       });
       if (resp.code === 0) {
         const latency = resp.data?.latency ?? 0;
@@ -206,7 +237,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
             onValuesChange={(changed, allValues) => {
               trackFormChange(changed, allValues);
               if (Object.prototype.hasOwnProperty.call(changed, "proxyUrl")) {
-                proxyUrlTouched.current = true;
+                setAuthCleared(false);
               }
               if (changed.enabled === false) {
                 setTestResult(null);
@@ -240,40 +271,61 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
 
                 <Form.Item
                   noStyle
-                  shouldUpdate={(prev, cur) => prev.enabled !== cur.enabled}
+                  shouldUpdate={(prev, cur) =>
+                    prev.enabled !== cur.enabled || prev.proxyUrl !== cur.proxyUrl
+                  }
                 >
                   {({ getFieldValue }) => {
                     const isEnabled = Boolean(getFieldValue("enabled"));
+                    const currentProxyUrl = String(getFieldValue("proxyUrl") || "").trim();
+                    const canManageSavedAuth =
+                      hasAuth &&
+                      Boolean(serverData.proxyUrl) &&
+                      currentProxyUrl === serverData.proxyUrl &&
+                      !hasProxyUserInfo(currentProxyUrl);
                     return (
                       <Form.Item
-                        label="代理服务器地址 (Proxy URL)"
-                        name="proxyUrl"
-                        rules={
-                          isEnabled
-                            ? [
-                                {
-                                  validator: async (_, value: string) => {
-                                    const trimmed = String(value || "").trim();
-                                    if (!trimmed) {
-                                      return Promise.reject(new Error("开启代理时请输入代理服务器地址"));
-                                    }
-                                    const lower = trimmed.toLowerCase();
-                                    const ok =
-                                      lower.startsWith("http://") ||
-                                      lower.startsWith("https://") ||
-                                      lower.startsWith("socks5://") ||
-                                      lower.startsWith("socks5h://") ||
-                                      /^[a-zA-Z0-9.-]+:\d+$/.test(trimmed);
-                                    if (!ok) {
-                                      return Promise.reject(
-                                        new Error("需以 http://、https://、socks5:// 或 socks5h:// 开头"),
-                                      );
-                                    }
-                                  },
-                                },
-                              ]
-                            : []
+                        label={
+                          <Space size={8}>
+                            <span>代理服务器地址 (Proxy URL)</span>
+                            {canManageSavedAuth && !authCleared ? (
+                              <>
+                                <Tag color="blue">已保存认证凭据</Tag>
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  danger
+                                  disabled={!canOperate}
+                                  onClick={() => setAuthCleared(true)}
+                                  style={{ padding: 0, height: "auto" }}
+                                >
+                                  清除认证
+                                </Button>
+                              </>
+                            ) : canManageSavedAuth && authCleared ? (
+                              <Tag color="warning">保存后清除认证凭据</Tag>
+                            ) : null}
+                          </Space>
                         }
+                        name="proxyUrl"
+                        rules={[
+                          {
+                            validator: async (_, value: string) => {
+                              const trimmed = String(value || "").trim();
+                              if (!trimmed) {
+                                if (isEnabled) {
+                                  return Promise.reject(new Error("开启代理时请输入代理服务器地址"));
+                                }
+                                return;
+                              }
+                              if (!isValidProxyInput(trimmed)) {
+                                return Promise.reject(
+                                  new Error("需以 http://、https://、socks5:// 或 socks5h:// 开头"),
+                                );
+                              }
+                            },
+                          },
+                        ]}
                         tooltip="支持 HTTP、HTTPS 与 SOCKS5/SOCKS5H 协议，例如：http://127.0.0.1:7890 或 socks5h://127.0.0.1:1080"
                       >
                         <Input
@@ -345,7 +397,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
       </Card>
 
       <UnsavedChangesBar
-        visible={isDirty}
+        visible={isDirty || authCleared}
         saving={saving}
         onDiscard={handleCancel}
         onSave={() => void handleSave()}

@@ -92,6 +92,9 @@ export type BannerFormValues = {
   pictureSlide?: string;
   customPicture?: string;
   isCustomPic?: boolean;
+  blurb?: string;
+  score?: number | null;
+  year?: number | null;
 };
 
 export type FilmOption = {

@@ -190,6 +190,7 @@ export default function AccessPageView() {
                   </Space>
                 </Button>
                 <Dropdown
+                  placement="bottomRight"
                   menu={{
                     items: refreshMenuItems,
                     selectable: true,

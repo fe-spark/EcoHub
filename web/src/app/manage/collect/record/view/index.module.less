@@ -1,66 +1,9 @@
-.pageBody {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-
-
-.filterBar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.tableHeader {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.tableTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 32px;
-  color: var(--ant-color-text);
-}
-
-.refreshGroup {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.autoRefresh {
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--ant-color-text-secondary);
-  white-space: nowrap;
-}
-
 .runningRow > td {
-  background: var(--ant-color-fill-quaternary);
+  background: var(--ant-color-primary-bg);
 }
 
-.filmHint {
-  display: block;
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.4;
-  color: var(--ant-color-text-secondary);
-}
-
-.selectionCount {
-  font-size: 13px;
-  font-weight: normal;
-  color: var(--ant-color-primary);
+.clickableRow {
+  cursor: pointer;
 }
 
 .tableActions {
@@ -68,284 +11,156 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+}
+
+.refreshSecLabel {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ant-color-text-tertiary);
+}
+
+.refreshMenuToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 128px;
+  gap: 12px;
+  padding: 2px 0;
 }
 
 .filterSelect {
-  width: 160px;
-}
-
-.statusSelect {
-  width: 120px;
+  width: 136px;
 }
 
 .dateRange {
-  width: 320px;
+  width: 260px;
   max-width: 100%;
 }
 
-.searchButton {
-  flex: none;
-}
-
-.pagination {
+.cellStack {
   display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
 }
 
-@media (max-width: 1200px) {
-  .tableActions {
-    width: 100%;
-  }
-}
-
-@media (max-width: 768px) {
-  .filterSelect,
-  .statusSelect,
-  .dateRange,
-  .searchButton {
-    width: 100%;
-  }
-
-  .pagination {
-    justify-content: flex-start;
-  }
-}
-
-.withIcon,
-.collectCell {
+.triggerRow {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
-  min-width: 0;
 }
 
-.columnTitle {
+.scopePill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.recordTable {
-  :global(.ant-table-thead > tr > th) {
-    white-space: nowrap;
-  }
-}
-
-.billRow {
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) 148px minmax(148px, 220px) auto;
-  column-gap: 28px;
-  align-items: center;
-}
-
-.roundCell,
-.resultCell,
-.outcomeRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.roundCell {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-
-.roundMeta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  background: var(--ant-color-fill-tertiary);
   color: var(--ant-color-text-secondary);
   font-size: 12px;
-  font-weight: 400;
-}
-
-.metaDot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--ant-color-text-quaternary);
-}
-
-.filmFigure {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding-top: 1px;
-}
-
-.filmNumber,
-.filmNumberMuted {
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
+  line-height: 20px;
   white-space: nowrap;
 }
 
-.filmNumber {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0;
-  color: var(--ant-color-text);
-}
-
-.filmNumberMuted {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--ant-color-text-secondary);
-}
-
-.filmUnit {
-  margin-left: 4px;
-  font-size: 13px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--ant-color-text-secondary);
-}
-
-.detailActions {
-  justify-content: flex-end;
-}
-
-.timeCell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  line-height: 1.3;
-  width: max-content;
-}
-
-.timePrimary {
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-  color: var(--ant-color-text);
-  white-space: nowrap;
-}
-
-.timeMeta,
-.modeText {
-  color: var(--ant-color-text-secondary);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.statCell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  font-size: 13px;
-  line-height: 1.35;
-  width: max-content;
-}
-
-.statRow {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.statOk {
-  color: var(--ant-color-success);
-}
-
-.statWarn {
-  color: var(--ant-color-warning);
-  font-weight: 500;
-}
-
-.statFail {
-  color: var(--ant-color-error);
-  font-weight: 500;
-}
-
-.statTotal {
-  color: var(--ant-color-text-secondary);
-  font-size: 12px;
-}
-
-.collectStack {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  width: max-content;
-}
-
-.collectMain {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: max-content;
-}
-
-.filmTags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.filmTagLink {
-  display: inline-flex;
-  max-width: 100%;
-  min-width: 0;
-  color: inherit;
-  text-decoration: none;
-}
-
-.filmTag {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.filmChip {
   cursor: pointer;
 }
 
 .timePrimary {
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--ant-color-text);
   white-space: nowrap;
 }
 
-.timeMeta,
-.modeText {
+.subText {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
   color: var(--ant-color-text-secondary);
-  font-size: 13px;
   white-space: nowrap;
 }
 
-.metric {
+.subTextAccent {
+  color: var(--ant-color-primary);
+}
+
+.subTextWarn {
+  color: var(--ant-color-warning);
+}
+
+.subTextDanger {
+  color: var(--ant-color-error);
+}
+
+.filmActionPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--ant-color-primary-border);
+  border-radius: 999px;
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+  font-size: 13px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--ant-color-primary-bg-hover);
+    border-color: var(--ant-color-primary);
+  }
+}
+
+.filmPillArrow {
+  font-size: 10px;
+}
+
+.filmNumber {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ant-color-text);
   white-space: nowrap;
+}
+
+.filmNumberMuted {
+  font-size: 13px;
+  color: var(--ant-color-text-tertiary);
+  white-space: nowrap;
+}
+
+.withIcon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .errorModalBody {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
-.errorReason {
+.errorReasonBox {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-error-border);
+  border-radius: 8px;
+  background: var(--ant-color-error-bg);
 }
 
 .errorReasonMain {
   color: var(--ant-color-error);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -361,21 +176,25 @@
 }
 
 .errorDetailPlain {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary);
   max-height: 160px;
   overflow: auto;
   color: var(--ant-color-text);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .errorSection {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .errorSectionLabel {
   color: var(--ant-color-text-secondary);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .errorUrl {
@@ -383,6 +202,7 @@
   align-items: flex-start;
   gap: 8px;
   padding: 8px 10px;
+  border: 1px solid var(--ant-color-border-secondary);
   border-radius: 6px;
   background: var(--ant-color-fill-quaternary);
   color: var(--ant-color-text);
@@ -405,103 +225,27 @@
 }
 
 .errorPageList {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
   gap: 6px;
   max-height: 168px;
   overflow: auto;
 }
 
 .errorPageChip {
-  min-width: 48px;
-  padding: 2px 8px;
+  padding: 3px 6px;
+  border: 1px solid var(--ant-color-border-secondary);
   border-radius: 4px;
-  background: var(--ant-color-fill-tertiary);
+  background: var(--ant-color-fill-quaternary);
   color: var(--ant-color-text);
-  font-size: 13px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  line-height: 22px;
   text-align: center;
 }
 
-.filmCount,
-.filmCountEmpty {
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+@media (max-width: 768px) {
+  .filterSelect,
+  .dateRange {
+    width: 100%;
+  }
 }
-
-.filmCount {
-  font-weight: 600;
-  color: var(--ant-color-primary);
-}
-
-.filmCountEmpty {
-  font-weight: 400;
-  color: var(--ant-color-text-secondary);
-}
-
-.statusOk {
-  color: var(--ant-color-success);
-}
-
-.detailMuted {
-  color: var(--ant-color-text-secondary);
-}
-
-.detailFail {
-  color: var(--ant-color-error);
-}
-
-.detailWarn {
-  color: var(--ant-color-warning);
-}
-
-.detailRun {
-  color: var(--ant-color-primary);
-}
-
-.detailActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.actionButton {
-  height: 28px;
-  padding-inline: 6px;
-}
-
-.detailEmpty {
-  padding: 8px 16px;
-  color: var(--ant-color-text-secondary);
-}
-
-.incidentTable {
-  width: 100%;
-}
-
-.incidentSourceId {
-  margin-left: 6px;
-  font-size: 11px;
-}
-
-.filterBarWrapper {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.filterBarLeft {
-  display: flex;
-  align-items: center;
-}
-
-.filterBarRight {
-  display: flex;
-  align-items: center;
-}
-

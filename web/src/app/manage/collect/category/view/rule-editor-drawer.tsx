@@ -9,6 +9,7 @@ interface RuleEditorDrawerProps {
   open: boolean;
   loading: boolean;
   contextLoading: boolean;
+  canWrite: boolean;
   sourceName: string;
   editingRule: MappingRuleRecord | null;
   form: FormInstance<RuleFormValues>;
@@ -26,6 +27,7 @@ export default function RuleEditorDrawer(props: RuleEditorDrawerProps) {
     open,
     loading,
     contextLoading,
+    canWrite,
     sourceName,
     editingRule,
     form,
@@ -69,7 +71,7 @@ export default function RuleEditorDrawer(props: RuleEditorDrawerProps) {
           <Button onClick={onCancel} disabled={loading}>
             取消
           </Button>
-          <Button type="primary" onClick={onSubmit} loading={loading}>
+          <Button type="primary" onClick={onSubmit} loading={loading} disabled={!canWrite}>
             保存
           </Button>
         </Space>
