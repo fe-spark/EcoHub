@@ -1,3 +1,21 @@
+Pre-release **v3.1.7-beta.4**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.4`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.1.7-beta.4` in your install directory, then run `docker compose pull && docker compose up -d`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.1.7-beta.4 changes
+
+- **Home management & hot-chart sync**: unify homepage banner/recommend management with Douban & Bangumi ranking strategies, import default category groups once on first setup, auto-sync charts after collection, and wrap portal media proxy URLs.
+- **Collect ledger, writes & concurrency**: adopt streaming clustered ledger cleanup with bounded retention, claim `vod_time` before creating `film_index` with unified `mid` lock ordering, fix progress data races, source delete isolation, source swap order, and keep public category reads strictly read-only.
+- **Security hardening & HTTP policy**: upgrade passwords to `bcrypt` with transparent MD5 migration, replace global username login lockouts with IP / IP+account limiters, tighten SSRF/origin validation and credential redaction, and enforce HTTP body/timeout limits and graceful shutdown.
+- **UI & maintainability fixes**: fix private empty-category login redirect loops, recommend/banner editing guards, batch pagination state, and modularize oversized server files.
+
+---
+
 Pre-release **v3.1.7-beta.3**, image `ghcr.io/fe-spark/ecohub:v3.1.7-beta.3`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
