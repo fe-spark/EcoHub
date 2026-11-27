@@ -109,18 +109,11 @@ func (s *HomeRecommendService) GenerateQuickPreview(ctx context.Context, req Rec
 }
 
 func generateDoubanGroupPreview(ctx context.Context, readVersion, sourceID string, g model.HomeRecommendGroup, count int) ([]model.HomeRecommendAdminItem, error) {
-	var cands []filmsnapshot.HotChartCandidate
-	var rates map[int]string
-	var err error
-	if isValidChartKey(g.SyncChartKey) {
-		cands, rates, err = hotchart.HotChartsSvc.GetRawCandidatesByKey(g.SyncChartKey, false)
-	} else {
-		cands, err = hotchart.HotChartsSvc.GetRawCandidatesByCategoryName(g.Title)
-	}
+	cands, err := hotchart.HotChartsSvc.GetRawCandidatesByCategoryName(g.Title)
 	if err != nil {
 		return nil, err
 	}
-	mids, midToIdx, err := filmsnapshot.MatchHotChartCandidates(readVersion, sourceID, cands, count)
+	mids, _, err := filmsnapshot.MatchHotChartCandidates(readVersion, sourceID, cands, count)
 	if err != nil {
 		return nil, err
 	}
@@ -128,15 +121,7 @@ func generateDoubanGroupPreview(ctx context.Context, readVersion, sourceID strin
 	if err != nil {
 		return nil, err
 	}
-	rateByMid := make(map[int64]string, len(mids))
-	if rates != nil {
-		for _, mid := range mids {
-			if idx, ok := midToIdx[mid]; ok {
-				rateByMid[mid] = rates[idx]
-			}
-		}
-	}
-	return snapshotsToAdminItems(g.Id, sourceID, snaps, rateByMid), nil
+	return snapshotsToAdminItems(g.Id, sourceID, snaps, nil), nil
 }
 
 func snapshotsToAdminItems(groupID, sourceID string, snaps []model.FilmListSnapshot, rateByMid map[int64]string) []model.HomeRecommendAdminItem {

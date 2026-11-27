@@ -40,19 +40,59 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	}
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var existingSources []model.FilmSource
+		if tx.Migrator().HasColumn(&model.FilmSource{}, "home_recommend_inited") {
+			if err := tx.Select("id", "uri", "home_recommend_inited").Find(&existingSources).Error; err != nil {
+				return err
+			}
+		}
+		initedURIByID := make(map[string]string, len(existingSources))
+		for _, src := range existingSources {
+			if src.HomeRecommendInited {
+				initedURIByID[src.Id] = src.Uri
+			}
+		}
+		for i := range next {
+			if oldURI, ok := initedURIByID[next[i].Id]; ok && oldURI == next[i].Uri {
+				next[i].HomeRecommendInited = true
+			}
+		}
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}
 		if len(next) == 0 {
-			return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerSlot{}).Error
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerSlot{}).Error; err != nil {
+				return err
+			}
+			if tx.Migrator().HasTable(&model.HomeRecommendItem{}) {
+				if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.HomeRecommendItem{}).Error; err != nil {
+					return err
+				}
+			}
+			if tx.Migrator().HasTable(&model.HomeRecommendGroup{}) {
+				if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.HomeRecommendGroup{}).Error; err != nil {
+					return err
+				}
+			}
+			return nil
 		}
-		// 不在新列表里的站点，它们的轮播一并删除。
+		// 不在新列表里的站点，它们的轮播与首页推荐一并删除。
 		ids := make([]string, 0, len(next))
 		for _, s := range next {
 			ids = append(ids, s.Id)
 		}
 		if err := tx.Where("source_id NOT IN ?", ids).Delete(&model.BannerSlot{}).Error; err != nil {
 			return err
+		}
+		if tx.Migrator().HasTable(&model.HomeRecommendItem{}) {
+			if err := tx.Where("source_id NOT IN ?", ids).Delete(&model.HomeRecommendItem{}).Error; err != nil {
+				return err
+			}
+		}
+		if tx.Migrator().HasTable(&model.HomeRecommendGroup{}) {
+			if err := tx.Where("source_id NOT IN ?", ids).Delete(&model.HomeRecommendGroup{}).Error; err != nil {
+				return err
+			}
 		}
 		return insertFilmSources(tx, next)
 	})
@@ -175,7 +215,17 @@ func UpdateCollectSourceReplacingData(source model.FilmSource, clearCategories b
 				return err
 			}
 		}
-		return UpdateCollectSourceTx(tx, source)
+		if err := UpdateCollectSourceTx(tx, source); err != nil {
+			return err
+		}
+		if clearCategories && tx.Migrator().HasColumn(&model.FilmSource{}, "home_recommend_inited") {
+			if err := tx.Model(&model.FilmSource{}).
+				Where("id = ?", source.Id).
+				Update("home_recommend_inited", false).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -353,7 +403,7 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 			return err
 		}
 	}
-	if err := tx.Save(&s).Error; err != nil {
+	if err := tx.Omit("home_recommend_inited").Save(&s).Error; err != nil {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)

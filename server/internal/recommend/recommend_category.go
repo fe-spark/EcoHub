@@ -251,6 +251,7 @@ func (s *HomeRecommendService) ImportCategoryGroups(ctx context.Context, sourceI
 		}
 		createdCount++
 	}
+	_ = MarkSourceHomeRecommendInited(ctx, src.Id)
 	invalidateHomeCacheForSource(src.Id)
 	groups, err := ListHomeRecommendGroups(ctx, src.Id)
 	if err != nil {

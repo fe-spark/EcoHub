@@ -20,7 +20,7 @@ func CascadeCleanSourceData(id string) ([]int64, error) {
 	return CleanSourceDataBatched(id)
 }
 
-// deleteHomeRecommendsBySource 清理指定采集站的首页推荐分组与条目。
+// deleteHomeRecommendsBySource 清理指定采集站的首页推荐分组与条目，并复位该站初始化标记。
 func deleteHomeRecommendsBySource(conn *gorm.DB, sourceID string) error {
 	if conn.Migrator().HasTable(&model.HomeRecommendItem{}) {
 		if err := conn.Where("source_id = ?", sourceID).Delete(&model.HomeRecommendItem{}).Error; err != nil {
@@ -29,6 +29,13 @@ func deleteHomeRecommendsBySource(conn *gorm.DB, sourceID string) error {
 	}
 	if conn.Migrator().HasTable(&model.HomeRecommendGroup{}) {
 		if err := conn.Where("source_id = ?", sourceID).Delete(&model.HomeRecommendGroup{}).Error; err != nil {
+			return err
+		}
+	}
+	if conn.Migrator().HasTable(&model.FilmSource{}) && conn.Migrator().HasColumn(&model.FilmSource{}, "home_recommend_inited") {
+		if err := conn.Model(&model.FilmSource{}).
+			Where("id = ?", sourceID).
+			Update("home_recommend_inited", false).Error; err != nil {
 			return err
 		}
 	}

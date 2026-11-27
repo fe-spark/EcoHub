@@ -235,7 +235,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		q.mu.Unlock()
 		if exhausted {
 			log.Printf("[Spider] 封口重试达到上限(%d)，标记检索失败并释放准入 mids=%d", maxRebuildSealingRetries, len(mids))
-			q.finishSealingCycle(true)
+			q.finishSealingCycle(true, false)
 			return true
 		}
 		q.restorePending(mids, verifiedPrimary)
@@ -250,7 +250,7 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 	searchSealRunning.Store(false)
 	q.resetSealRetryWait()
 	// 按编号封口成功时 ResealSearchIndex 已发过 done；这里只收口 sealing，不再依赖全局监听。
-	q.complete()
+	q.finishSealingCycle(false, len(mids) > 0)
 	if len(mids) == 0 {
 		// 没有编号也要发一次终态，让前端把待检索收成完成。
 		filmsnapshot.NotifySearchIndexProgress(0, 0, "done")
@@ -338,10 +338,10 @@ func (q *searchResealQueue) takePendingLocked() ([]int64, string) {
 
 // complete 把当前等检索的站点收成完成。已经重开的站点保持原状。
 func (q *searchResealQueue) complete() {
-	q.finishSealingCycle(false)
+	q.finishSealingCycle(false, false)
 }
 
-func (q *searchResealQueue) finishSealingCycle(failed bool) {
+func (q *searchResealQueue) finishSealingCycle(failed, sealedMIDs bool) {
 	q.mu.Lock()
 	ids := make([]string, 0, len(q.sealing))
 	for id := range q.sealing {
@@ -356,7 +356,7 @@ func (q *searchResealQueue) finishSealingCycle(failed bool) {
 	} else {
 		progress.MarkSealed(ids)
 	}
-	if len(ids) > 0 && !IsCollecting() {
+	if (len(ids) > 0 || sealedMIDs) && !IsCollecting() {
 		triggerCollectDoneHooks()
 	}
 }
@@ -404,7 +404,7 @@ func (q *searchResealQueue) scheduleIdleRebuildRetryLocked() {
 		q.rebuildRetries = 0
 		q.stopRetryTimerLocked()
 		syslog.Errorf("[Spider] 检索索引重建连续 %d 次失败，释放待检索站点状态，请手动触发索引重建", maxRebuildSealingRetries)
-		go q.finishSealingCycle(true)
+		go q.finishSealingCycle(true, false)
 		return
 	}
 	wait := q.advanceRetryWaitLocked(2 * time.Second)

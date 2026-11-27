@@ -212,8 +212,6 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 		finalizeCategorySync()
 		_ = filmsnapshot.RefreshActiveProjectedReadModel()
 		if primarySynced {
-			_ = filmsnapshot.RefreshActiveProjectedReadModel()
-			repobase.ClearIndexPageCache()
 			log.Printf("[SpiderService] 主站分类补拉完成，已刷新前台投影读模型")
 		}
 	}

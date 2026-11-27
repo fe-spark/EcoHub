@@ -25,22 +25,6 @@ func TestParseDoubanRexxarShowing(t *testing.T) {
 	}
 }
 
-func TestParseDoubanSearchSubjects(t *testing.T) {
-	raw := []byte(`{
-		"subjects": [
-			{"id": "36847425", "title": "可能的爱", "rate": "8.6"},
-			{"id": "37215318", "title": "黑球", "rate": "8.7"}
-		]
-	}`)
-	got, err := parseDoubanSearchSubjects(raw)
-	if err != nil {
-		t.Fatalf("parseDoubanSearchSubjects failed: %v", err)
-	}
-	if len(got) != 2 || got[0].DoubanID != 36847425 || got[1].Title != "黑球" {
-		t.Fatalf("unexpected subjects: %+v", got)
-	}
-}
-
 func TestParseBangumiCalendar(t *testing.T) {
 	raw := []byte(`[
 		{

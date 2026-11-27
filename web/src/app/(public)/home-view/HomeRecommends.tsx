@@ -106,7 +106,7 @@ export function RecommendSectionRow({ section }: { section: RecommendSection }) 
       </div>
 
       <div className={styles.grid}>
-        {section.items.slice(0, 12).map((item) => {
+        {section.items.slice(0, 24).map((item) => {
           const metaParts = [item.year, item.area, item.cName]
             .map((v) => String(v || "").trim())
             .filter(Boolean);

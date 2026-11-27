@@ -189,7 +189,7 @@ func clampPageRange(total, pageSize, page int) (curPage, totalPages, start, end 
 func formatFilmItemsPageHTML(siteName, title string, page, totalPages, start, total int, items []model.NotifyFilmItem) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<b>%s 更新片单 · %s</b>\n", formatTitlePrefix(siteName), html.EscapeString(title))
-	if total == 0 {
+	if total == 0 || len(items) == 0 {
 		b.WriteString("<i>暂无更新影片</i>\n")
 		return b.String(), nil
 	}

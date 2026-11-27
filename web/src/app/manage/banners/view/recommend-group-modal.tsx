@@ -78,7 +78,7 @@ export default function RecommendGroupModal({
                   </Form.Item>
                   <Form.Item
                     name="autoSync"
-                    label="自动定时刷新（每 6 小时自动跟随榜单更新）"
+                    label="采集完成后自动同步"
                     valuePropName="checked"
                   >
                     <Switch checkedChildren="自动" unCheckedChildren="仅手动" />
@@ -128,7 +128,7 @@ export default function RecommendGroupModal({
               <Alert
                 type="info"
                 showIcon
-                title="自选专题不绑定外部榜单或分类楼层，可通过「添加影片」或「一键排片」维护片单，不会被定时同步覆盖。"
+                title="自选专题不绑定外部榜单或分类楼层，可通过「添加影片」或「一键排片」维护片单，不会被自动同步覆盖。"
               />
             );
           }}

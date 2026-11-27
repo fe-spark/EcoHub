@@ -25,7 +25,12 @@ func RunSchemaMigrations() error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
 	}
-	return migration.RunAutoMigrations(db.Mdb)
+	if err := migration.RunAutoMigrations(db.Mdb); err != nil {
+		return err
+	}
+	// 版本升级启动时主动清理旧结构首页缓存，避免命中升级前的 Redis 首页数据。
+	ClearIndexPageCache()
+	return nil
 }
 
 // AlignUserAutoIncrement 把用户表自增起点对齐到内置管理员 ID。

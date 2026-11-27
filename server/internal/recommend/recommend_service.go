@@ -55,7 +55,7 @@ func invalidateHomeCacheForSource(sourceID string) {
 		return
 	}
 	version := filmsnapshot.GetActiveReadModelVersion()
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:home", config.IndexPageCacheKey, version, strings.TrimSpace(sourceID))
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:home:v2", config.IndexPageCacheKey, version, strings.TrimSpace(sourceID))
 	_ = db.Rdb.Del(db.Cxt, cacheKey).Err()
 }
 
@@ -73,6 +73,9 @@ type HomeRecommendListResult struct {
 func (s *HomeRecommendService) ListAdmin(ctx context.Context, sourceID string) (HomeRecommendListResult, error) {
 	src, sources, primaryID, err := banner.ResolveBannerSource(sourceID, true)
 	if err != nil {
+		return HomeRecommendListResult{}, err
+	}
+	if err := s.ensureDefaultCategoryGroups(ctx, src.Id); err != nil {
 		return HomeRecommendListResult{}, err
 	}
 	groups, err := ListHomeRecommendGroups(ctx, src.Id)
@@ -209,6 +212,7 @@ func (s *HomeRecommendService) InitPresetGroups(ctx context.Context, sourceID st
 		createdGroups = append(createdGroups, created)
 	}
 	summary := s.syncGroupList(ctx, createdGroups)
+	_ = MarkSourceHomeRecommendInited(ctx, src.Id)
 	invalidateHomeCacheForSource(src.Id)
 	groups, err := ListHomeRecommendGroups(ctx, src.Id)
 	if err != nil {
@@ -294,6 +298,7 @@ func (s *HomeRecommendService) CreateGroup(ctx context.Context, req RecommendGro
 	if created.SyncChartKey != "" {
 		_, _ = s.SyncGroupNow(ctx, created.Id)
 	}
+	_ = MarkSourceHomeRecommendInited(ctx, src.Id)
 	invalidateHomeCacheForSource(src.Id)
 	return created, nil
 }
@@ -314,6 +319,7 @@ func (s *HomeRecommendService) UpdateGroup(ctx context.Context, id string, req R
 		return err
 	}
 	prevCatID := existing.CategoryId
+	prevChartKey := existing.SyncChartKey
 	if strings.TrimSpace(req.Title) != "" {
 		existing.Title = strings.TrimSpace(req.Title)
 	}
@@ -365,6 +371,10 @@ func (s *HomeRecommendService) UpdateGroup(ctx context.Context, id string, req R
 	}
 	if existing.CategoryId > 0 && existing.CategoryId != prevCatID {
 		_ = ClearHomeRecommendGroupItems(ctx, existing.Id)
+	}
+	if existing.SyncChartKey != "" && existing.SyncChartKey != prevChartKey {
+		_ = ClearHomeRecommendGroupItems(ctx, existing.Id)
+		_, _ = s.SyncGroupNow(ctx, existing.Id)
 	}
 	invalidateHomeCacheForSource(existing.SourceId)
 	return nil

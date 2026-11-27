@@ -22,14 +22,8 @@ const (
 	hotChartsLastGoodTTL     = 7 * 24 * time.Hour
 	hotChartsFetchCandidateN = 36
 	hotChartsHTTPTimeout     = 8 * time.Second
-	hotChartsRefreshCooldown = 2 * time.Minute
 	hotChartsFailCooldown    = 60 * time.Second
-	hotChartsPollInterval    = 6 * time.Hour
-	hotChartsInitialDelay    = 15 * time.Second
 )
-
-// OnRefreshed 在榜单预热或定时刷新完成后由外部域（如首页推荐自动同步）挂载回调。
-var OnRefreshed func()
 
 type rawHotChartEntry struct {
 	DoubanID int64  `json:"doubanId"`
@@ -50,45 +44,14 @@ type rawHotChartsBundle struct {
 	UpdatedAt int64               `json:"updatedAt"`
 }
 
-// HotChartsService 管理豆瓣/Bangumi 原始榜单的定时拉取与缓存读取。
+// HotChartsService 管理豆瓣/Bangumi 原始榜单的按需拉取与缓存读取。
 type HotChartsService struct {
-	sf          singleflight.Group
-	pollerOnce  sync.Once
-	refreshMu   sync.Mutex
-	lastRefresh time.Time
-	lastFailAt  time.Time
+	sf         singleflight.Group
+	refreshMu  sync.Mutex
+	lastFailAt time.Time
 }
 
 var HotChartsSvc = new(HotChartsService)
-
-// StartPoller 启动后台定时预热与刷新（启动 15 秒后首次执行，之后每 6 小时刷新）。
-func (s *HotChartsService) StartPoller() {
-	s.pollerOnce.Do(func() {
-		go func() {
-			timer := time.NewTimer(hotChartsInitialDelay)
-			defer timer.Stop()
-			<-timer.C
-
-			if err := s.warmRawBundle(false); err != nil {
-				log.Printf("[HotCharts] 启动预热失败: %v", err)
-			}
-			if OnRefreshed != nil {
-				OnRefreshed()
-			}
-
-			ticker := time.NewTicker(hotChartsPollInterval)
-			defer ticker.Stop()
-			for range ticker.C {
-				if err := s.warmRawBundle(true); err != nil {
-					log.Printf("[HotCharts] 定时刷新失败: %v", err)
-				}
-				if OnRefreshed != nil {
-					OnRefreshed()
-				}
-			}
-		}()
-	})
-}
 
 // GetRawCandidatesByKey 按榜单 key 返回外部候选条目及评分映射（供推荐自动同步与一键排片复用）。
 func (s *HotChartsService) GetRawCandidatesByKey(key string, forceRefresh bool) ([]filmsnapshot.HotChartCandidate, map[int]string, error) {
@@ -172,22 +135,6 @@ func (s *HotChartsService) GetRawCandidatesByCategoryName(catName string) ([]fil
 		}
 	}
 	return out, nil
-}
-
-func (s *HotChartsService) warmRawBundle(forceRefresh bool) error {
-	if forceRefresh {
-		s.refreshMu.Lock()
-		allowRefresh := time.Since(s.lastRefresh) >= hotChartsRefreshCooldown
-		if allowRefresh {
-			s.lastRefresh = time.Now()
-		}
-		s.refreshMu.Unlock()
-		if !allowRefresh {
-			forceRefresh = false
-		}
-	}
-	_, err := s.loadOrFetchRawBundle(forceRefresh)
-	return err
 }
 
 func (s *HotChartsService) loadOrFetchRawBundle(forceRefresh bool) (*rawHotChartsBundle, error) {

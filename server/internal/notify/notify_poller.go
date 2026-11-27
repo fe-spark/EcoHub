@@ -402,10 +402,6 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 		return
 	}
 
-	if cb.Message == nil || cb.Message.Chat == nil {
-		answerCallback("无法定位原消息", true)
-		return
-	}
 	chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
 
 	switch cmd.action {

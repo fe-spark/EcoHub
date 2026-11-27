@@ -74,13 +74,14 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 				Id: 0, Pid: -1, Name: "分类信息", Show: true,
 				Children: make([]*model.CategoryTree, 0),
 			},
+			"content":       make([]map[string]any, 0),
 			"banners":       make(model.Banners, 0),
 			"recommends":    []model.HomeRecommendSection{},
 			"currentSource": "",
 		}, nil
 	}
 	version := filmsnapshot.GetActiveReadModelVersion()
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:home", config.IndexPageCacheKey, version, sourceId)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:home:v2", config.IndexPageCacheKey, version, sourceId)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
@@ -127,6 +128,7 @@ func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[s
 	}
 	res := map[string]any{
 		"category":      tree,
+		"content":       buildLegacyHomeContent(recommends),
 		"banners":       banners,
 		"recommends":    recommends,
 		"currentSource": sourceId,
@@ -140,4 +142,28 @@ func (i *IndexService) buildIndexPage(sourceId, version, cacheKey string) (map[s
 		}
 	}
 	return res, nil
+}
+
+// buildLegacyHomeContent 从统一楼层中提取站点分类分组，兼容旧版 Android/鸿蒙客户端对 content 的读取。
+func buildLegacyHomeContent(recommends []model.HomeRecommendSection) []map[string]any {
+	content := make([]map[string]any, 0, len(recommends))
+	for _, sec := range recommends {
+		if sec.Kind != "category" || sec.Nav == nil {
+			continue
+		}
+		movies := make([]model.MovieBasicInfo, 0, len(sec.Items))
+		for _, it := range sec.Items {
+			movies = append(movies, it.MovieBasicInfo)
+		}
+		hot := sec.Hot
+		if hot == nil {
+			hot = make([]model.MovieBasicInfo, 0)
+		}
+		content = append(content, map[string]any{
+			"nav":    sec.Nav,
+			"movies": movies,
+			"hot":    hot,
+		})
+	}
+	return content
 }

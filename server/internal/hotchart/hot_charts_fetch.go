@@ -183,33 +183,6 @@ func parseDoubanRexxarShowing(body []byte) ([]rawHotChartEntry, error) {
 	return out, nil
 }
 
-func parseDoubanSearchSubjects(body []byte) ([]rawHotChartEntry, error) {
-	var payload struct {
-		Subjects []struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
-			Rate  string `json:"rate"`
-		} `json:"subjects"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, err
-	}
-	out := make([]rawHotChartEntry, 0, len(payload.Subjects))
-	for _, it := range payload.Subjects {
-		title := strings.TrimSpace(it.Title)
-		if title == "" {
-			continue
-		}
-		dbID, _ := strconv.ParseInt(strings.TrimSpace(it.ID), 10, 64)
-		out = append(out, rawHotChartEntry{
-			DoubanID: dbID,
-			Title:    title,
-			Rate:     strings.TrimSpace(it.Rate),
-		})
-	}
-	return out, nil
-}
-
 func fetchBangumiCalendar(client *http.Client) ([]rawHotChartEntry, error) {
 	body, err := fetchJSONBytes(client, "https://api.bgm.tv/calendar", "https://bgm.tv/")
 	if err != nil {

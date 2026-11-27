@@ -5,12 +5,19 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/banner"
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/hotchart"
 	"server/internal/model"
+)
+
+var (
+	autoSyncMu      sync.Mutex
+	autoSyncRunning bool
+	autoSyncPending bool
 )
 
 // RecommendSyncResult 单个推荐分组同步外部榜单后的命中统计。
@@ -132,14 +139,34 @@ func (s *HomeRecommendService) SyncSourceChartGroups(ctx context.Context, source
 	return s.syncGroupList(ctx, groups), nil
 }
 
-// SyncAllAutoGroups 定时同步所有开启 AutoSync 的推荐分组（每组独立 15s 超时，避免多站共享超时被截断）。
+// SyncAllAutoGroups 在采集及检索封口完成后同步所有开启自动同步的榜单分组（串行防重入，连续触发自动合并）。
 func (s *HomeRecommendService) SyncAllAutoGroups() {
-	listCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	groups, err := ListAutoSyncRecommendGroups(listCtx)
-	cancel()
-	if err != nil {
-		log.Printf("[HomeRecommend] 查询自动同步分组失败: %v", err)
+	autoSyncMu.Lock()
+	if autoSyncRunning {
+		autoSyncPending = true
+		autoSyncMu.Unlock()
 		return
 	}
-	_ = s.syncGroupList(nil, groups)
+	autoSyncRunning = true
+	autoSyncMu.Unlock()
+
+	for {
+		listCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		groups, err := ListAutoSyncRecommendGroups(listCtx)
+		cancel()
+		if err != nil {
+			log.Printf("[HomeRecommend] 查询自动同步分组失败: %v", err)
+		} else if len(groups) > 0 {
+			_ = s.syncGroupList(nil, groups)
+		}
+
+		autoSyncMu.Lock()
+		if !autoSyncPending {
+			autoSyncRunning = false
+			autoSyncMu.Unlock()
+			return
+		}
+		autoSyncPending = false
+		autoSyncMu.Unlock()
+	}
 }

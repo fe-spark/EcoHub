@@ -78,6 +78,13 @@ var migrations = []Migration{
 		Name:    "重建 collect_record_films 聚簇主键表并清理 home_recommend_group 废弃列",
 		Run:     migrateSchemaCleanup,
 	},
+	{
+		Version: "20261127_home_recommend_inited",
+		Name:    "采集站增加首页推荐初始化标记",
+		Run: func(gdb *gorm.DB) error {
+			return gdb.AutoMigrate(&model.FilmSource{})
+		},
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

@@ -105,3 +105,72 @@ func TestWrapHomeData_Recommends(t *testing.T) {
 		t.Fatalf("expected recommends hot picture wrapped, got %q", recs[0].Hot[0].Picture)
 	}
 }
+
+func TestBuildLegacyHomeContent_AndWrap(t *testing.T) {
+	mediaproxy.UpdateMediaProxyMemoryCache(model.MediaProxyConfig{Enabled: true})
+	defer mediaproxy.InvalidateMediaProxyMemoryCache()
+
+	catNav := &model.CategoryTree{Id: 1, Name: "电影", Show: true}
+	sections := []model.HomeRecommendSection{
+		{
+			Id:    "g_rec",
+			Kind:  "recommend",
+			Title: "院线热映",
+			Items: []model.HomeRecommendPublicItem{
+				{MovieBasicInfo: model.MovieBasicInfo{Id: 10, Name: "推荐片", Picture: "https://ddmf.net/r.jpg"}, Rank: 1},
+			},
+		},
+		{
+			Id:         "g_cat",
+			Kind:       "category",
+			Title:      "电影",
+			CategoryId: 1,
+			Nav:        catNav,
+			Items: []model.HomeRecommendPublicItem{
+				{MovieBasicInfo: model.MovieBasicInfo{Id: 11, Name: "分类片", Picture: "https://ddmf.net/c.jpg"}, Rank: 1},
+			},
+			Hot: []model.MovieBasicInfo{
+				{Id: 12, Name: "热播片", Picture: "https://ddmf.net/h.jpg"},
+			},
+		},
+	}
+
+	content := buildLegacyHomeContent(sections)
+	if len(content) != 1 {
+		t.Fatalf("expected 1 legacy content section, got %d", len(content))
+	}
+	wrapped := WrapHomeData(map[string]any{"content": content})
+	wrappedList := wrapped["content"].([]map[string]any)
+	movies := wrappedList[0]["movies"].([]model.MovieBasicInfo)
+	hot := wrappedList[0]["hot"].([]model.MovieBasicInfo)
+	if !strings.Contains(movies[0].Picture, ".wp.com/ddmf.net/c.jpg") {
+		t.Fatalf("expected legacy content movie picture wrapped, got %q", movies[0].Picture)
+	}
+	if !strings.Contains(hot[0].Picture, ".wp.com/ddmf.net/h.jpg") {
+		t.Fatalf("expected legacy content hot picture wrapped, got %q", hot[0].Picture)
+	}
+
+	// 同时验证 Redis 缓存反序列化后的弱类型 []any 路径
+	rawBytes, err := json.Marshal(map[string]any{"content": content})
+	if err != nil {
+		t.Fatalf("marshal legacy content: %v", err)
+	}
+	var cached map[string]any
+	if err := json.Unmarshal(rawBytes, &cached); err != nil {
+		t.Fatalf("unmarshal legacy content: %v", err)
+	}
+	wrappedCached := WrapHomeData(cached)
+	cachedList, ok := wrappedCached["content"].([]any)
+	if !ok || len(cachedList) != 1 {
+		t.Fatalf("expected wrapped cached content []any, got %T", wrappedCached["content"])
+	}
+	secMap := cachedList[0].(map[string]any)
+	cachedMovies := secMap["movies"].([]any)
+	cachedHot := secMap["hot"].([]any)
+	if !strings.Contains(cachedMovies[0].(map[string]any)["picture"].(string), ".wp.com/ddmf.net/c.jpg") {
+		t.Fatalf("expected cached legacy content movie picture wrapped, got %v", cachedMovies[0])
+	}
+	if !strings.Contains(cachedHot[0].(map[string]any)["picture"].(string), ".wp.com/ddmf.net/h.jpg") {
+		t.Fatalf("expected cached legacy content hot picture wrapped, got %v", cachedHot[0])
+	}
+}

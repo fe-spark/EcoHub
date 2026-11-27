@@ -112,10 +112,18 @@ func CollectFilms(mids []int64) {
 		log.Printf("[Spider] 批量单片采集跳过：%s", err.Error())
 		return
 	}
-	defer endCollectQueue()
+	queueReleased := false
+	defer func() {
+		if !queueReleased {
+			endCollectQueue()
+		}
+	}()
 	for _, id := range valid {
 		collectSingleFilm(id)
 	}
+	endCollectQueue()
+	queueReleased = true
+	triggerCollectDoneHooks()
 }
 
 func collectSingleFilm(ids string) {

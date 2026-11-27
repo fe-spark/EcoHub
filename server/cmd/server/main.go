@@ -16,7 +16,6 @@ import (
 	"server/internal/collect"
 	"server/internal/config"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/hotchart"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/notify"
@@ -132,7 +131,6 @@ func start() {
 			}
 		}
 	}()
-	hotchart.HotChartsSvc.StartPoller()
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		log.Fatalf("[Init] HTTP 监听失败: %v", err)

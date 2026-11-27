@@ -20,16 +20,20 @@ func (s *HomeRecommendService) HomeSections(sourceID string) ([]model.HomeRecomm
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	cacheable := true
+	if err := s.ensureDefaultCategoryGroups(ctx, sourceID); err != nil {
+		log.Printf("[HomeRecommend] 初始化默认站点分类分组失败 source=%s: %v", sourceID, err)
+		cacheable = false
+	}
+
 	groups, err := ListEnabledHomeRecommendGroups(ctx, sourceID)
 	if err != nil {
 		log.Printf("[HomeRecommend] 读取首页推荐分组失败 source=%s: %v", sourceID, err)
 		return []model.HomeRecommendSection{}, false
 	}
 	if len(groups) == 0 {
-		return []model.HomeRecommendSection{}, true
+		return []model.HomeRecommendSection{}, cacheable
 	}
-
-	cacheable := true
 	hasRecommendGroup := false
 	hasCategoryGroup := false
 	for _, g := range groups {

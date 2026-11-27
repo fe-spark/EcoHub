@@ -6,7 +6,6 @@ import (
 	"server/internal/collect"
 	"server/internal/collectctl"
 	"server/internal/film"
-	"server/internal/hotchart"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/portal"
@@ -35,6 +34,10 @@ func Wire() {
 		film.SetInventoryStatsCollectingChecker(collect.IsCollecting)
 		collect.RegisterCollectDoneHook(func() {
 			film.RefreshInventoryStatsAsync()
+			// 等采集批次与检索索引封口全部结束后再同步自动榜单分组，确保刚入库的新片可立即命中。
+			if !collect.IsCollecting() {
+				recommend.HomeRecommendSvc.SyncAllAutoGroups()
+			}
 		})
 		collectctl.OnPrimarySwitched = func(targetSourceID string) error {
 			_, err := portal.IndexSvc.IndexPage(targetSourceID)
@@ -43,7 +46,6 @@ func Wire() {
 		siteops.OnResetRecoverAccess = func() { _ = InitSvc.AnalyticsConfigInit() }
 		siteops.OnResetRecoverCrontab = func() { _ = InitSvc.CollectCrontabInit() }
 		siteops.OnResetReinitSite = InitSvc.ReinitAfterReset
-		hotchart.OnRefreshed = recommend.HomeRecommendSvc.SyncAllAutoGroups
 	})
 }
 

@@ -44,8 +44,10 @@ func setupRecommendTestDB(t *testing.T) *gorm.DB {
 	}
 	origMdb, origRdb := db.Mdb, db.Rdb
 	db.Mdb, db.Rdb = gdb, nil
+	filmsnapshot.ClearActiveFilmReadModel()
 	t.Cleanup(func() {
 		db.Mdb, db.Rdb = origMdb, origRdb
+		filmsnapshot.ClearActiveFilmReadModel()
 		catalog.InvalidatePublicSourceCache()
 		taxonomy.RefreshCategoryCache()
 		sourcecatalog.InvalidateCollectSourceCatalog()
@@ -99,13 +101,20 @@ func TestHomeRecommendService_Lifecycle(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. 初始列表为空（不自动创建内置分类占位）
+	// 1. 首次读取自动一次性导入当前站点可见一级分类；手动删除后不应复生
 	listRes, err := HomeRecommendSvc.ListAdmin(ctx, "src1")
 	if err != nil {
 		t.Fatalf("ListAdmin failed: %v", err)
 	}
-	if len(listRes.Groups) != 0 {
-		t.Fatalf("expected empty groups initially, got %d", len(listRes.Groups))
+	if len(listRes.Groups) != 1 || listRes.Groups[0].CategoryId != 1 {
+		t.Fatalf("expected default category group auto-imported initially, got %+v", listRes.Groups)
+	}
+	if err := HomeRecommendSvc.DeleteGroup(ctx, listRes.Groups[0].Id); err != nil {
+		t.Fatalf("DeleteGroup default category failed: %v", err)
+	}
+	afterDelRes, err := HomeRecommendSvc.ListAdmin(ctx, "src1")
+	if err != nil || len(afterDelRes.Groups) != 0 {
+		t.Fatalf("expected deleted default group not re-imported, got err=%v groups=%+v", err, afterDelRes.Groups)
 	}
 
 	// 2. 创建两个自定义分组并加片（跨站影片应被拦截）
@@ -225,6 +234,23 @@ func TestHomeRecommendService_Lifecycle(t *testing.T) {
 	gotG3, _ = GetHomeRecommendGroup(ctx, g3.Id)
 	if gotG3.SyncChartKey != "" || gotG3.AutoSync {
 		t.Fatalf("expected SyncChartKey cleared when switching to manual mode, got %+v", gotG3)
+	}
+	// 7. 自选分组内已有手工影片，切换到榜单模式时应清理旧手工影片，避免不同榜单/自选混搭残留
+	if _, err := HomeRecommendSvc.AddItem(ctx, g3.Id, 1001, ""); err != nil {
+		t.Fatalf("AddItem to g3 failed: %v", err)
+	}
+	newChartKey := "tv_hot"
+	if err := HomeRecommendSvc.UpdateGroup(ctx, g3.Id, RecommendGroupInput{
+		SyncChartKey: &newChartKey,
+		AutoSync:     &autoOff,
+	}); err != nil {
+		t.Fatalf("UpdateGroup switch chart failed: %v", err)
+	}
+	allItemsAfterSwitch, _ := ListHomeRecommendItemsBySource(ctx, "src1")
+	for _, it := range allItemsAfterSwitch {
+		if it.GroupId == g3.Id && it.Mid == 1001 {
+			t.Fatalf("expected stale manual item 1001 cleared after switching g3 to chart mode")
+		}
 	}
 }
 

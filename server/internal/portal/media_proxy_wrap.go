@@ -133,6 +133,46 @@ func wrapHomeRecommendsList(raw any) any {
 	}
 }
 
+func wrapLegacyContentMap(sec map[string]any) map[string]any {
+	if sec == nil {
+		return nil
+	}
+	clone := make(map[string]any, len(sec))
+	for k, v := range sec {
+		clone[k] = v
+	}
+	if movies, ok := clone["movies"]; ok {
+		clone["movies"] = wrapAnyList(movies)
+	}
+	if hot, ok := clone["hot"]; ok {
+		clone["hot"] = wrapAnyList(hot)
+	}
+	return clone
+}
+
+func wrapLegacyContentList(raw any) any {
+	switch v := raw.(type) {
+	case []map[string]any:
+		out := make([]map[string]any, len(v))
+		for i := range v {
+			out[i] = wrapLegacyContentMap(v[i])
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			if m, ok := item.(map[string]any); ok {
+				out[i] = wrapLegacyContentMap(m)
+			} else {
+				out[i] = item
+			}
+		}
+		return out
+	default:
+		return raw
+	}
+}
+
 // WrapHomeData 包装首页聚合数据中的图片字段（深度兼容结构体切片及 Redis JSON 弱类型切片）
 func WrapHomeData(data map[string]any) map[string]any {
 	if data == nil {
@@ -144,6 +184,9 @@ func WrapHomeData(data map[string]any) map[string]any {
 	}
 	if b, ok := out["banners"]; ok {
 		out["banners"] = wrapAnyList(b)
+	}
+	if c, ok := out["content"]; ok {
+		out["content"] = wrapLegacyContentList(c)
 	}
 	if r, ok := out["recommends"]; ok {
 		out["recommends"] = wrapHomeRecommendsList(r)
