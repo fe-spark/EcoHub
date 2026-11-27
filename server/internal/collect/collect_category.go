@@ -1,6 +1,7 @@
 package collect
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -28,21 +29,38 @@ func ensureMasterCategoriesReady(s *model.FilmSource) error {
 	return nil
 }
 
+func checkCategorySyncActive(ctx context.Context) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if IsSiteResetRunning() {
+		return errors.New("站点数据正在重置中")
+	}
+	return nil
+}
+
 // CollectCategory 影视分类采集
-func CollectCategory(s *model.FilmSource) (int, error) {
+func CollectCategory(ctx context.Context, s *model.FilmSource) (int, error) {
 	if s == nil {
 		return 0, errors.New("采集站信息不存在")
 	}
-	pageCount := 0
-	err := WithSourceExclusive(s.Id, func() error {
-		if s.Id != "" && sourcecatalog.FindCollectSourceById(s.Id) == nil {
-			return errors.New("采集站信息不存在")
-		}
-		tree, count, err := FetchCategoryTree(s)
-		if err != nil {
+	if s.Id != "" && sourcecatalog.FindCollectSourceById(s.Id) == nil {
+		return 0, errors.New("采集站信息不存在")
+	}
+	tree, pageCount, err := FetchCategoryTree(ctx, s)
+	if err != nil {
+		return 0, err
+	}
+	err = WithSourceExclusive(s.Id, func() error {
+		if err := checkCategorySyncActive(ctx); err != nil {
 			return err
 		}
-		pageCount = count
+		if s.Id != "" {
+			latest := sourcecatalog.FindCollectSourceById(s.Id)
+			if latest == nil || strings.TrimSpace(latest.Uri) != strings.TrimSpace(s.Uri) {
+				return errors.New("采集站已变更或不存在")
+			}
+		}
 		if err := catalog.SaveCategoryTree(s.Id, tree); err != nil {
 			return fmt.Errorf("保存采集站分类失败: %w", err)
 		}
@@ -52,19 +70,26 @@ func CollectCategory(s *model.FilmSource) (int, error) {
 }
 
 // FetchCategoryTree 发起网络请求获取采集源分类树与全站总页，并同步更新采集站全站总页
-func FetchCategoryTree(s *model.FilmSource) (*model.CategoryTree, int, error) {
+func FetchCategoryTree(ctx context.Context, s *model.FilmSource) (*model.CategoryTree, int, error) {
 	if s == nil {
 		return nil, 0, errors.New("采集站信息不存在")
+	}
+	if err := checkCategorySyncActive(ctx); err != nil {
+		return nil, 0, err
 	}
 	req, err := requestForSource(s)
 	if err != nil {
 		return nil, 0, err
 	}
+	req.Ctx = ctx
 	categoryTree, pageCount, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
 	if err != nil {
+		if abortErr := checkCategorySyncActive(ctx); abortErr != nil {
+			return nil, 0, abortErr
+		}
 		return nil, 0, fmt.Errorf("获取采集站分类树失败: %w", err)
 	}
-	if s.Id != "" && pageCount > 0 {
+	if checkCategorySyncActive(ctx) == nil && s.Id != "" && pageCount > 0 {
 		_ = UpdateSitePageTotal(s.Id, pageCount)
 	}
 	return categoryTree, pageCount, nil
@@ -146,7 +171,7 @@ func (s *SpiderService) syncSourceCategoriesClaimed(id, confirm string) (model.C
 
 	log.Printf("[SpiderService] 拉取采集站分类: name=%s id=%s uri=%s confirm=%s", source.Name, source.Id, source.Uri, confirm)
 
-	categoryTree, pageCount, err := FetchCategoryTree(source)
+	categoryTree, pageCount, err := FetchCategoryTree(context.Background(), source)
 	if err != nil {
 		log.Printf("[SpiderService] 采集站分类拉取失败: name=%s id=%s err=%v", source.Name, source.Id, err)
 		settled = true

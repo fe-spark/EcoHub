@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"server/internal/access"
@@ -32,17 +33,14 @@ type BackupService struct{}
 var (
 	BackupSvc                      = new(BackupService)
 	syncImportedSourceCategoriesFn = func() {
-		done := make(chan struct{})
-		utils.GoSafe("导入采集站后自动同步分类树", func() {
-			defer close(done)
-			if err := collect.SpiderSvc.SyncAllSourceCategories(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := collect.SpiderSvc.SyncAllSourceCategories(ctx); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				syslog.Warnf("[Backup] 导入后自动同步分类树超时，已取消剩余同步")
+			} else {
 				syslog.Errorf("[Backup] 导入采集站后自动同步分类树失败: %v", err)
 			}
-		})
-		select {
-		case <-done:
-		case <-time.After(15 * time.Second):
-			syslog.Warnf("[Backup] 导入后自动同步分类树超时，已提前释放维护锁")
 		}
 	}
 )
@@ -136,6 +134,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) (retEr
 		}
 		collectctl.CollectSvc.CancelDelFilmSources(nil)
 		collectctl.WaitDeleteSourceJobs()
+		collect.WaitCategorySyncs()
 		oldPrimaryBeforeImport = sourcecatalog.CurrentPrimarySource()
 	}
 

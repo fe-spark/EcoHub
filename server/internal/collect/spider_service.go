@@ -95,7 +95,13 @@ func (s *SpiderService) SyncSourceCategoriesAsync(id string) {
 }
 
 // SyncAllSourceCategories 按现有采集站逐个拉取分类。某一站失败不影响其他站，最后返回首个错误。
-func (s *SpiderService) SyncAllSourceCategories() error {
+func (s *SpiderService) SyncAllSourceCategories(ctx context.Context) error {
+	categorySyncs.Add(1)
+	defer categorySyncs.Done()
+
+	if err := checkCategorySyncActive(ctx); err != nil {
+		return err
+	}
 	sources, err := GetCollectSourceList()
 	if err != nil {
 		return err
@@ -103,9 +109,13 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 	if len(sources) == 0 {
 		return errors.New("没有采集站，不能同步分类")
 	}
-	var first error
-	failed := 0
+	var first, abortErr error
+	failed, synced := 0, 0
 	for i := range sources {
+		if err := checkCategorySyncActive(ctx); err != nil {
+			abortErr = err
+			break
+		}
 		source := sources[i]
 		if ok, reason := progress.TryBeginCategorySync(source.Id); !ok {
 			if first == nil && reason != "" {
@@ -113,10 +123,14 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 			}
 			continue
 		}
-		progress.BroadcastCategoryStatus(source.Id, "syncing")
-		pageCount, syncErr := CollectCategory(&source)
+		pageCount, syncErr := CollectCategory(ctx, &source)
 		progress.SetCategorySyncing(source.Id, false)
 		if syncErr != nil {
+			if err := checkCategorySyncActive(ctx); err != nil {
+				progress.BroadcastCategoryStatus(source.Id, "idle")
+				abortErr = err
+				break
+			}
 			log.Printf("[SpiderService] 采集站分类同步失败: name=%s id=%s err=%v", source.Name, source.Id, syncErr)
 			progress.BroadcastCategoryStatus(source.Id, "failed")
 			failed++
@@ -125,11 +139,17 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 			}
 			continue
 		}
+		synced++
 		log.Printf("[SpiderService] 采集站分类已保存: name=%s id=%s", source.Name, source.Id)
 		progress.BroadcastCategoryReadyMessage(source.Id, "分类获取成功", false, pageCount)
 	}
-	finalizeCategorySync()
-	_ = filmsnapshot.RefreshActiveProjectedReadModel()
+	if synced > 0 && !IsSiteResetRunning() {
+		finalizeCategorySync()
+		_ = filmsnapshot.RefreshActiveProjectedReadModel()
+	}
+	if abortErr != nil {
+		return abortErr
+	}
 	if failed == 0 {
 		return nil
 	}
@@ -200,7 +220,7 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 		progress.BroadcastCategoryStatus(source.Id, "syncing")
 		log.Printf("[SpiderService] 采集站还没有分类副本，开始补拉: name=%s id=%s", source.Name, source.Id)
 
-		pageCount, err := CollectCategory(&source)
+		pageCount, err := CollectCategory(context.Background(), &source)
 		progress.SetCategorySyncing(source.Id, false)
 		if err != nil {
 			log.Printf("[SpiderService] 补拉采集站分类失败: name=%s id=%s err=%v", source.Name, source.Id, err)

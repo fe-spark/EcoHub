@@ -97,7 +97,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	var writeWG sync.WaitGroup
 	streak, stopStreakWait := newFetchStreak(ctx, s.Name)
 	defer stopStreakWait()
-	var emptyPageStreak atomic.Int64
+	emptyStreak := newEmptyPageStreak(!useTargetPages && pageCount > consecutiveEmptyPageLimit, consecutiveEmptyPageLimit)
 	var emptyStopOnce sync.Once
 	var stopErr error
 	var stoppedByStreak atomic.Bool
@@ -308,6 +308,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 							continue
 						}
 						recordPageFailure(pg, "fetch", err)
+						emptyStreak.record(pg, false, false)
 						stop, pause := streak.finish(false)
 						if stop {
 							stopForStreak()
@@ -346,14 +347,14 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 						markStopped()
 						return
 					}
-					if !useTargetPages && pageCount > consecutiveEmptyPageLimit {
-						if len(list) > 0 {
-							emptyPageStreak.Store(0)
-						} else if emptyPageStreak.Add(1) >= consecutiveEmptyPageLimit {
+					if reached, hadData := emptyStreak.record(pg, len(list) == 0, len(list) > 0); reached {
+						if hadData {
 							emptyStopOnce.Do(func() {
 								log.Printf("[Spider] 站点 %s 连续 %d 页返回空列表，提前结束后续分页抓取 (totalWork=%d)", s.Name, consecutiveEmptyPageLimit, totalWork)
 								pages.close()
 							})
+						} else {
+							giveUp(fmt.Sprintf("连续 %d 页返回空列表，已中断采集", consecutiveEmptyPageLimit))
 						}
 					}
 					page := pg

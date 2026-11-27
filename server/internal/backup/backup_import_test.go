@@ -11,6 +11,7 @@ import (
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/siteops"
 	"server/internal/sourcecatalog"
 )
 
@@ -66,8 +67,14 @@ func TestImportConfig_FilmSources_TriggersCategorySync(t *testing.T) {
 	setupBackupTestDB(t)
 
 	var synced atomic.Bool
+	var lockHeldDuringSync atomic.Bool
 	prevFn := syncImportedSourceCategoriesFn
 	syncImportedSourceCategoriesFn = func() {
+		if unlock, ok := siteops.TryLockSiteMaintenance(); ok {
+			unlock()
+		} else {
+			lockHeldDuringSync.Store(true)
+		}
 		synced.Store(true)
 	}
 	t.Cleanup(func() {
@@ -91,6 +98,14 @@ func TestImportConfig_FilmSources_TriggersCategorySync(t *testing.T) {
 
 	if !synced.Load() {
 		t.Fatal("expected syncImportedSourceCategoriesFn to be called when importing FilmSources")
+	}
+	if !lockHeldDuringSync.Load() {
+		t.Fatal("expected site maintenance lock to remain held during category sync")
+	}
+	if unlock, ok := siteops.TryLockSiteMaintenance(); !ok {
+		t.Fatal("expected site maintenance lock to be released after ImportConfig returns")
+	} else {
+		unlock()
 	}
 
 	sources, err := collect.GetCollectSourceList()

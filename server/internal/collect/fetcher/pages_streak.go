@@ -150,3 +150,52 @@ func (f *collectFetch) resume(parent context.Context) {
 	defer f.mu.Unlock()
 	f.ctx, f.cancel = context.WithCancel(parent)
 }
+
+// emptyPageStreak 按页码顺序推进连续空页水位线，避免慢页在途时被后续空页误截断。
+type emptyPageStreak struct {
+	mu       sync.Mutex
+	limit    int
+	frontier int
+	streak   int
+	hadData  bool
+	done     map[int]bool // true=空页，false=非空或失败
+}
+
+func newEmptyPageStreak(enabled bool, limit int) *emptyPageStreak {
+	if !enabled || limit <= 0 {
+		return nil
+	}
+	return &emptyPageStreak{
+		limit: limit,
+		done:  make(map[int]bool),
+	}
+}
+
+// record 上报单页抓取结果，返回是否达到连续空页阈值以及本轮是否已有非空数据。
+func (e *emptyPageStreak) record(page int, empty, hasData bool) (reached bool, hadData bool) {
+	if e == nil || page <= 0 {
+		return false, false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if hasData {
+		e.hadData = true
+	}
+	if page > e.frontier {
+		e.done[page] = empty
+		for {
+			isEmpty, ok := e.done[e.frontier+1]
+			if !ok {
+				break
+			}
+			delete(e.done, e.frontier+1)
+			e.frontier++
+			if isEmpty {
+				e.streak++
+			} else {
+				e.streak = 0
+			}
+		}
+	}
+	return e.streak >= e.limit, e.hadData
+}
