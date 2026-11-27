@@ -1,22 +1,4 @@
-Pre-release **v3.2.0-beta.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0-beta.0`. Hyphenated pre-release tags never move `:latest`; the latest formal release remains v3.1.6 below.
-
-[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
-
-### Upgrade notes
-
-- Testing install: set `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.0-beta.0` in your install directory, then run `docker compose pull && docker compose up -d`.
-- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
-
-### v3.2.0-beta.0 changes
-
-- **Collect scheduling, ledger & write stability**: overhaul collect concurrency boundaries, epoch validation on displaced exits, and streaming clustered ledger cleanup; restore 16 concurrent write slots without cross-source `matchKey` lock contention; enforce ordered row locking during film writes and orphan cleanup, fix out-of-order empty-page truncation, reseal retry convergence, progress/lock token races, and config-import sync locking, and add the `partial_stopped` batch status.
-- **Home management & hot-chart sync**: unify homepage banner/recommend management with random & Douban strategies, import default source category groups once on first setup, auto-sync ranking charts after collection, align fallback `cid` composite index ordering, keep public category reads strictly read-only, and protect rule-root categories and related-movie source filtering.
-- **Security hardening, SSRF & private mode**: upgrade passwords to `bcrypt` with transparent MD5 migration and reject whitespace password-change bypasses, replace global username login lockouts with IP / IP+account limiters, tighten SSRF/cross-scheme CORS checks, upload magic-byte/`nosniff` guards, and credential redaction, and enforce private-mode and `/provide` visibility/bounds checks plus subscription QR code support.
-- **HTTP policy, MySQL migration lock & server refactor**: reorganize internal server packages by domain with explicit hook wiring, isolate per-source Telegram ledger stats and process callbacks concurrently, isolate MySQL advisory migration lock connections cleanly, and enforce SSE/upload timeouts, maintenance shutdown gates, web UX fixes, and full regression tests.
-
----
-
-Release **v3.1.7**, image `ghcr.io/fe-spark/ecohub:v3.1.7` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+Release **v3.2.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -25,11 +7,12 @@ Release **v3.1.7**, image `ghcr.io/fe-spark/ecohub:v3.1.7` (`:latest` also point
 - v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
 - v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
 
-### v3.1.7 changes
+### v3.2.0 changes
 
-- **Home management (#119)**: upgrade the banner admin menu into a two-tab "Home Management" view ("Banners" and "Recommendations") to reorder and toggle built-in sections and custom recommendation groups.
-- **Douban & Bangumi charts (#119)**: add a "Douban" quick-banner strategy and support manual picks, two-step quick generation, and 6-hour automatic chart syncing against the local library.
-- **Public homepage layout (#119)**: render built-in and custom recommendation sections according to the admin layout order and visibility, with rank and Douban rating badges.
+- **Home management & hot-chart sync**: upgrade the banner admin menu into a unified "Home Management" view ("Banners" and "Recommendations") to reorder and toggle built-in sections and custom groups; add Douban & Bangumi ranking charts with random/Douban quick-banner strategies, 6-hour and post-collect chart syncing, first-setup category-group import, fallback `cid` index alignment, and strictly read-only public category reads (protecting rule-root categories and related-movie source filtering).
+- **Collect scheduling, ledger & write stability**: overhaul collect concurrency boundaries, epoch validation on displaced exits, and streaming clustered ledger cleanup; restore 16 concurrent write slots without cross-source `matchKey` lock contention; enforce ordered row locking during film writes and orphan cleanup, fix out-of-order empty-page truncation, reseal retry convergence, progress/lock token races, and config-import sync locking, and add the `partial_stopped` batch status.
+- **Security hardening, SSRF & private mode**: upgrade passwords to `bcrypt` with transparent MD5 migration and reject whitespace password-change bypasses, replace global username login lockouts with IP / IP+account limiters, tighten SSRF/cross-scheme CORS checks, upload magic-byte/`nosniff` guards, and credential redaction, and enforce private-mode and `/provide` visibility/bounds checks plus subscription QR code support.
+- **HTTP policy, MySQL migration lock & server refactor**: reorganize internal server packages by domain with explicit hook wiring, isolate per-source Telegram ledger stats and process callbacks concurrently, isolate MySQL advisory migration lock connections cleanly, and enforce SSE/upload timeouts, maintenance shutdown gates, web UX fixes, and full concurrency/security regression coverage.
 
 ---
 
