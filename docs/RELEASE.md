@@ -1,3 +1,21 @@
+正式版 **v3.2.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.2.1 更新内容
+
+- **独立采集引擎**：抽离独立 `engine` 采集核心，移除固定 `200ms` 间隔、旧版调度队列与配置项并复用探页第 1 页明细。
+- **自适应防 429**：支持按 `Retry-After`、同波次 Epoch 去重降并发与二级动态请求间隔自适应限流，限流解除后逐步恢复并发。
+- **并发写库优化**：按 `(source_id, source_mid)` 分片加锁支持同站多页并行写入，配合无锁只读预检与批量 `CASE WHEN` 更新减少无效事务与 SQL 往返。
+- **编排与并发修复**：解耦采集完成页副作用异步投递，修复预取消分支协程泄露并保留 `FOR UPDATE` 行锁拦截删写穿插。
+
+---
+
 正式版 **v3.2.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

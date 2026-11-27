@@ -1,3 +1,21 @@
+Release **v3.2.1**, image `ghcr.io/fe-spark/ecohub:v3.2.1` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x / v3.1.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.2.1 changes
+
+- **Standalone collect engine**: extract the `engine` core package, remove the fixed `200ms` interval, legacy write scheduler, and related config fields, and reuse probed page-1 items.
+- **Adaptive 429 throttling**: honor `Retry-After` headers, deduplicate per-burst window halving by epoch, and apply two-stage dynamic request pacing with gradual recovery.
+- **Concurrent write path**: shard page write locks by `(source_id, source_mid)` for same-source parallel writes, skip unchanged pages via lock-free preflight reads, and batch `CASE WHEN` / tuple updates.
+- **Orchestration & concurrency fixes**: offload post-write affected-MID fan-out, prevent pre-canceled seed goroutine leaks, and retain `FOR UPDATE` row locks against concurrent film deletion.
+
+---
+
 Release **v3.2.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
