@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/utils"
@@ -24,11 +25,23 @@ func (s *UserService) UserLogin(account, password string) (token string, err err
 		return "", errors.New("用户名或密码错误")
 	}
 	// 校验用户信息, 执行账号密码校验逻辑
-	if utils.PasswordEncrypt(password, u.Salt) != u.Password {
+	matched, needsUpgrade := utils.VerifyPassword(password, u.Salt, u.Password)
+	if !matched {
 		return "", errors.New("用户名或密码错误")
 	}
 	if u.Status != 0 {
 		return "", errors.New("账号已被禁用")
+	}
+	if needsUpgrade {
+		if newSalt, saltErr := utils.GenerateSalt(); saltErr == nil {
+			if newHash := utils.PasswordEncrypt(password, newSalt); newHash != "" {
+				u.Salt = newSalt
+				u.Password = newHash
+				if upErr := UpdateUserInfo(*u); upErr != nil {
+					syslog.Warnf("[User] 密码哈希无感升级失败 user=%d: %v", u.ID, upErr)
+				}
+			}
+		}
 	}
 	// 密码校验成功后下发token
 	token, err = utils.GenToken(u.ID, u.UserName, u.Role)
@@ -77,7 +90,8 @@ func (s *UserService) VerifyUserPassword(id uint, password string) bool {
 		return false
 	}
 	// 校验密码是否正确
-	return utils.PasswordEncrypt(password, u.Salt) == u.Password
+	matched, _ := utils.VerifyPassword(password, u.Salt, u.Password)
+	return matched
 }
 
 // GetUserPage 用户分页
@@ -132,7 +146,7 @@ func (s *UserService) UpdateProfile(userID uint, req model.UserUpdatePayload) er
 			if req.OldPassword == nil || strings.TrimSpace(*req.OldPassword) == "" {
 				return errors.New("修改密码必须提供原密码")
 			}
-			if utils.PasswordEncrypt(strings.TrimSpace(*req.OldPassword), oldUser.Salt) != oldUser.Password {
+			if matched, _ := utils.VerifyPassword(strings.TrimSpace(*req.OldPassword), oldUser.Salt, oldUser.Password); !matched {
 				return errors.New("原密码校验失败，请核对后重试")
 			}
 		}

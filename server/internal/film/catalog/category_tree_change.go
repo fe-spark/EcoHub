@@ -7,8 +7,6 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-
-	"gorm.io/gorm"
 )
 
 // CategoryApplyResult 存储分类树应用与数据清理的结果
@@ -140,23 +138,29 @@ func PreviewSourceCategoryChanges(sourceId string, tree *model.CategoryTree) ([]
 	return DiffSourceCategoryTree(oldList, plans), nil
 }
 
-// clearChangedSourceDataTx 清空该站自己的档案和挂载数据。其他站的档案不动。
-func clearChangedSourceDataTx(tx *gorm.DB, sourceId string, _ []model.CategoryTreeChange) (CategoryApplyResult, error) {
+// clearChangedSourceDataBatched 分短事务清空该站自己的档案和挂载数据，其他站的档案不动。
+func clearChangedSourceDataBatched(sourceId string) (CategoryApplyResult, error) {
 	var hasPlaylist int64
-	if err := tx.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", sourceId).Count(&hasPlaylist).Error; err != nil {
+	if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", sourceId).Count(&hasPlaylist).Error; err != nil {
 		return CategoryApplyResult{}, err
 	}
 	var hasMapping int64
-	if err := tx.Model(&model.MovieSourceMapping{}).Where("source_id = ?", sourceId).Count(&hasMapping).Error; err != nil {
+	if err := db.Mdb.Model(&model.MovieSourceMapping{}).Where("source_id = ?", sourceId).Count(&hasMapping).Error; err != nil {
 		return CategoryApplyResult{}, err
 	}
-	orphanMids, err := CascadeCleanSourceDataTx(tx, sourceId)
+	var hasCollectRecordFilm int64
+	if db.Mdb.Migrator().HasTable(&model.CollectRecordFilmItem{}) {
+		if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("source_id = ?", sourceId).Count(&hasCollectRecordFilm).Error; err != nil {
+			return CategoryApplyResult{}, err
+		}
+	}
+	orphanMids, err := CleanSourceDataBatched(sourceId)
 	if err != nil {
 		return CategoryApplyResult{}, err
 	}
 
 	return CategoryApplyResult{
-		DataCleared: hasPlaylist > 0 || hasMapping > 0 || len(orphanMids) > 0,
+		DataCleared: hasPlaylist > 0 || hasMapping > 0 || hasCollectRecordFilm > 0 || len(orphanMids) > 0,
 		OrphanMids:  orphanMids,
 	}, nil
 }

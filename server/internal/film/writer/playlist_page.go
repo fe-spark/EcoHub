@@ -147,10 +147,17 @@ func claimPageVodTimesTx(tx *gorm.DB, sourceID string, claims []vodTimeClaim) ([
 			won[i] = true
 			continue
 		}
-		current := stored[claim.sourceMid]
+		current, exists := stored[claim.sourceMid]
 		incoming, err := utils.ParseCollectUpdateTime(claim.updateTime)
 		if err != nil {
-			won[i] = current == 0
+			won[i] = !exists || current == 0
+			continue
+		}
+		if !exists {
+			if incoming > 0 {
+				stored[claim.sourceMid] = incoming
+			}
+			won[i] = true
 			continue
 		}
 		if incoming < current {

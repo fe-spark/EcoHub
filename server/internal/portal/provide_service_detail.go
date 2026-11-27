@@ -15,9 +15,12 @@ import (
 	"server/internal/taxonomy"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 const maxProvideVodDetailBatch = 100
+
+var provideVodDetailSfGroup singleflight.Group
 
 // GetVodDetail 获取视频详情（带播放列表）
 func (p *ProvideService) GetVodDetail(ids []string) ([]model.FilmDetail, error) {
@@ -60,6 +63,22 @@ func (p *ProvideService) GetVodDetail(ids []string) ([]model.FilmDetail, error) 
 }
 
 func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]model.FilmDetail, error) {
+	var sfKey strings.Builder
+	sfKey.WriteString(sourceId)
+	for _, mid := range mids {
+		sfKey.WriteByte(':')
+		sfKey.WriteString(strconv.FormatInt(mid, 10))
+	}
+	val, err, _ := provideVodDetailSfGroup.Do(sfKey.String(), func() (any, error) {
+		return p.loadVodDetailMids(mids, sourceId)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return val.([]model.FilmDetail), nil
+}
+
+func (p *ProvideService) loadVodDetailMids(mids []int64, sourceId string) ([]model.FilmDetail, error) {
 	playGen := filmsnapshot.PlayInfoGeneration()
 	version := filmsnapshot.GetActiveReadModelVersion()
 	snapshots, err := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
@@ -142,7 +161,7 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 				vo.MovieDetail = *movieDetail
 			}
 			vo.List = batchPlaylists[s.Mid]
-			if toCacheVo != nil {
+			if movieDetail != nil && toCacheVo != nil {
 				toCacheVo[s.Mid] = vo
 			}
 		}
@@ -159,11 +178,11 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 	}
 
 	if len(toCacheVo) > 0 && db.Rdb != nil {
+		batchCache := make(map[string]model.MovieDetailVo, len(toCacheVo))
 		for mid, v := range toCacheVo {
-			if b, err := json.Marshal(v); err == nil {
-				storeFilmPlayInfoCache(vodCacheKey(mid), string(b), 12*time.Hour, playGen)
-			}
+			batchCache[vodCacheKey(mid)] = v
 		}
+		storeFilmPlayInfoBatchCache(batchCache, 12*time.Hour, playGen)
 	}
 
 	return detailList, nil

@@ -96,7 +96,6 @@ func RunAutoMigrations(db *gorm.DB) error {
 	if db == nil {
 		return nil
 	}
-
 	if !db.Migrator().HasTable(&model.SchemaMigration{}) {
 		if err := db.AutoMigrate(&model.SchemaMigration{}); err != nil {
 			return fmt.Errorf("init schema_migrations table failed: %w", err)

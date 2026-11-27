@@ -16,17 +16,19 @@ import (
 var collectLifecycle = newCollectLifecycle()
 
 type collectLifecycleState struct {
-	mu            sync.Mutex
-	cond          *sync.Cond
-	activeSources map[string]struct{}
-	activeCount   int
-	publishing    int
-	draining      bool
+	mu              sync.Mutex
+	cond            *sync.Cond
+	activeSources   map[string]struct{}
+	deletingSources map[string]struct{}
+	activeCount     int
+	publishing      int
+	draining        bool
 }
 
 func newCollectLifecycle() *collectLifecycleState {
 	state := &collectLifecycleState{
-		activeSources: make(map[string]struct{}),
+		activeSources:   make(map[string]struct{}),
+		deletingSources: make(map[string]struct{}),
 	}
 	state.cond = sync.NewCond(&state.mu)
 	return state
@@ -46,12 +48,51 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	if err := collectPauseErr(); err != nil {
 		return err
 	}
+	if _, deleting := s.deletingSources[sourceID]; deleting {
+		return fmt.Errorf("站点 %s 正在删除或清理中", sourceID)
+	}
 	if _, ok := s.activeSources[sourceID]; ok {
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
 	}
 	s.activeSources[sourceID] = struct{}{}
 	s.activeCount++
 	return nil
+}
+
+// beginSourceDelete 占用单站删除锁，互斥该站新采集但绝不计入全局 activeCount（避免阻塞其他站封口与维护）。
+func (s *collectLifecycleState) beginSourceDelete(sourceID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return errors.New("采集站点不存在")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.draining {
+		return errCollectDuringMaintenance
+	}
+	if _, ok := s.activeSources[sourceID]; ok {
+		return fmt.Errorf("站点 %s 正在采集中", sourceID)
+	}
+	if _, ok := s.deletingSources[sourceID]; ok {
+		return fmt.Errorf("站点 %s 正在删除或清理中", sourceID)
+	}
+	if s.deletingSources == nil {
+		s.deletingSources = make(map[string]struct{})
+	}
+	s.deletingSources[sourceID] = struct{}{}
+	return nil
+}
+
+func (s *collectLifecycleState) endSourceDelete(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.deletingSources, sourceID)
+	s.cond.Broadcast()
+	s.mu.Unlock()
 }
 
 func (s *collectLifecycleState) endSource(sourceID string) {

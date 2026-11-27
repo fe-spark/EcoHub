@@ -2,6 +2,7 @@ package collect
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -18,6 +19,8 @@ var (
 	collectLedgerFlushBatch    = 2000
 	collectLedgerFlushInterval = 2 * time.Second
 )
+
+const maxLedgerPendingWithoutRecord = 20000
 
 func copyFailedPages(pages []int) []int {
 	if len(pages) == 0 {
@@ -209,7 +212,14 @@ func (b *collectBatchContext) enqueueLedgerLocked(sourceID string, mids []int64)
 			b.ledgerPending = append(b.ledgerPending, pendingLedgerFilm{sourceID: sourceID, mid: mid})
 		}
 	}
-	if b.recordID == 0 || len(b.ledgerPending) == 0 {
+	if b.recordID == 0 {
+		if len(b.ledgerPending) >= maxLedgerPendingWithoutRecord {
+			b.ledgerPending = nil
+			b.ledgerFlushErr = errors.New("采集记录未创建，放弃流式账本缓冲以防内存膨胀")
+		}
+		return false
+	}
+	if len(b.ledgerPending) == 0 {
 		return false
 	}
 	batch := collectLedgerFlushBatch

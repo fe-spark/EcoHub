@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"server/internal/access"
 	"server/internal/collect"
 	"server/internal/collectctl"
 	"server/internal/infra/syslog"
+	"server/internal/utils"
 )
 
 type ResetService struct{}
@@ -44,9 +46,16 @@ func init() {
 	})
 }
 
+// SiteMaintenanceActive 是否正处于全站清空重置生命周期（供 HTTP 中间件阻断并发读写）。
+func (s *ResetService) SiteMaintenanceActive() bool {
+	return resetSiteLifecycle.Load()
+}
+
 // triggerResetCategorySync 数据重置后异步回补默认站分类，测试可替换避免访问外网。
 var triggerResetCategorySync = func() {
-	go collect.SpiderSvc.SyncMissingSourceCategories()
+	utils.GoSafe("重置后补全缺失来源分类", func() {
+		collect.SpiderSvc.SyncMissingSourceCategories()
+	})
 }
 
 func GetTriggerResetCategorySync() func()   { return triggerResetCategorySync }
@@ -85,6 +94,7 @@ func (s *ResetService) ClearFilms() (retErr error) {
 
 	ReportResetProgress(2, "正在停止后台任务")
 	access.SetEnabled(false)
+	access.Shutdown(500 * time.Millisecond)
 	collect.StopAllCollect("数据重置，停止采集")
 	collectctl.CollectSvc.CancelDelFilmSources(nil)
 	collectctl.WaitAllAsyncWork()
@@ -102,6 +112,9 @@ func (s *ResetService) ClearFilms() (retErr error) {
 		if err := OnResetReinitSite(); err != nil {
 			return err
 		}
+	}
+	if OnResetRecoverAccess != nil {
+		OnResetRecoverAccess()
 	}
 
 	ReportResetProgress(95, "正在同步默认分类")
@@ -160,6 +173,7 @@ func (s *ResetService) StreamSiteReset(ctx context.Context, onEvent func(any) er
 		}()
 		if err := s.ClearFilms(); err != nil {
 			syslog.Errorf("[数据重置] 重置失败: %v", err)
+			pushProgress(ResetProgress{Running: false, Error: err.Error()})
 			return
 		}
 		syslog.Infof("[数据重置] 重置完成")

@@ -52,6 +52,24 @@ func TestProvideService_GetTVBoxConfig_PrimarySites(t *testing.T) {
 		}
 	}
 
+	// 公开模式下不回显或缓存外部伪造 key
+	ignoredKeyCfg, err := ProvideSvc.GetTVBoxConfig("https://movie.example.com/", "untrusted-public-key")
+	if err != nil {
+		t.Fatalf("GetTVBoxConfig 失败: %v", err)
+	}
+	ignoredSites, _ := ignoredKeyCfg["sites"].([]map[string]any)
+	if strings.Contains(ignoredSites[0]["api"].(string), "key=") {
+		t.Fatalf("公开模式下不应携带外部 key: %v", ignoredSites[0]["api"])
+	}
+
+	// 开启私有模式且密钥匹配时，输出携带合法 key
+	if err := repobase.SaveSiteBasic(model.BasicConfig{
+		SiteName:      "ECOHUB私人影库",
+		PrivateAccess: true,
+		ProvideKey:    "mysecretkey",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	withKey, err := ProvideSvc.GetTVBoxConfig("https://movie.example.com/", "mysecretkey")
 	if err != nil {
 		t.Fatalf("GetTVBoxConfig 失败: %v", err)

@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -165,6 +166,11 @@ func resolveHotListVersion(version string) string {
 
 // HomeCategoryMids 首页一个分类的推荐片和热播 mid。推荐从热度池抽样，热播取热度序。
 func HomeCategoryMids(version, sourceID, field string, categoryID int64, movieLimit, poolSize int) (movies []int64, hot []int64, err error) {
+	return HomeCategoryMidsCtx(context.Background(), version, sourceID, field, categoryID, movieLimit, poolSize)
+}
+
+// HomeCategoryMidsCtx 同 HomeCategoryMids，支持超时与取消控制。
+func HomeCategoryMidsCtx(ctx context.Context, version, sourceID, field string, categoryID int64, movieLimit, poolSize int) (movies []int64, hot []int64, err error) {
 	if poolSize <= 0 {
 		poolSize = searchHotPoolCap
 	}
@@ -174,7 +180,7 @@ func HomeCategoryMids(version, sourceID, field string, categoryID int64, movieLi
 	if movieLimit <= 0 {
 		movieLimit = 14
 	}
-	pool, err := categoryRankMids(version, sourceID, field, categoryID, 1, poolSize)
+	pool, err := categoryRankMidsCtx(ctx, version, sourceID, field, categoryID, 1, poolSize)
 	if err != nil {
 		return nil, nil, err
 	}

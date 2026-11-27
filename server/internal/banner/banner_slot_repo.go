@@ -185,6 +185,13 @@ func CreateBannerSlot(slot *model.BannerSlot) error {
 
 // UpdateBannerSlot 在事务里读出一行、交给 apply 合并字段，再整行保存。读-改-写在同一把站点锁里完成。
 func UpdateBannerSlot(id string, apply func(slot *model.BannerSlot) error) (model.BannerSlot, error) {
+	return UpdateBannerSlotWithTx(id, func(_ *gorm.DB, slot *model.BannerSlot) error {
+		return apply(slot)
+	})
+}
+
+// UpdateBannerSlotWithTx 同 UpdateBannerSlot，同时向回调提供当前事务句柄以便复用事务连接做校验。
+func UpdateBannerSlotWithTx(id string, apply func(tx *gorm.DB, slot *model.BannerSlot) error) (model.BannerSlot, error) {
 	bannerWriteMu.Lock()
 	defer bannerWriteMu.Unlock()
 	gdb, err := bannerDB()
@@ -197,7 +204,7 @@ func UpdateBannerSlot(id string, apply func(slot *model.BannerSlot) error) (mode
 		if err != nil {
 			return err
 		}
-		if err := apply(&slot); err != nil {
+		if err := apply(tx, &slot); err != nil {
 			return err
 		}
 		taken, err := bannerFilmTaken(tx, slot.SourceId, slot.Mid, slot.Id)
@@ -333,7 +340,7 @@ func ReplaceBannerSlots(sourceID, revision string, slots []model.BannerSlot) err
 		if len(slots) == 0 {
 			return nil
 		}
-		if err := tx.Create(&slots).Error; err != nil {
+		if err := tx.CreateInBatches(&slots, 200).Error; err != nil {
 			if isDuplicateKeyErr(err) {
 				return ErrBannerDuplicateFilm
 			}
@@ -349,6 +356,8 @@ func ReplaceBannerSlots(sourceID, revision string, slots []model.BannerSlot) err
 
 // ReplaceAllBannerSlots 用备份整体替换全部站点的轮播。
 func ReplaceAllBannerSlots(slots []model.BannerSlot) error {
+	bannerWriteMu.Lock()
+	defer bannerWriteMu.Unlock()
 	gdb, err := bannerDB()
 	if err != nil {
 		return err
@@ -360,7 +369,7 @@ func ReplaceAllBannerSlots(slots []model.BannerSlot) error {
 		if len(slots) == 0 {
 			return nil
 		}
-		return tx.Create(&slots).Error
+		return tx.CreateInBatches(&slots, 200).Error
 	})
 	if err == nil {
 		repobase.ClearIndexPageCache()
@@ -370,10 +379,6 @@ func ReplaceAllBannerSlots(slots []model.BannerSlot) error {
 
 // FilmsOnSource 批量判断：影片档案存在，且在该站有播放线路。返回命中的 mid 集合。
 func FilmsOnSource(ctx context.Context, sourceID string, mids []int64) (map[int64]bool, error) {
-	out := make(map[int64]bool, len(mids))
-	if len(mids) == 0 {
-		return out, nil
-	}
 	gdb, err := bannerDB()
 	if err != nil {
 		return nil, err
@@ -381,8 +386,20 @@ func FilmsOnSource(ctx context.Context, sourceID string, mids []int64) (map[int6
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	return FilmsOnSourceTx(gdb.WithContext(ctx), sourceID, mids)
+}
+
+// FilmsOnSourceTx 在指定连接/事务上批量判断影片是否存在且在该站有播放线路，避免事务内二次占用连接池。
+func FilmsOnSourceTx(tx *gorm.DB, sourceID string, mids []int64) (map[int64]bool, error) {
+	out := make(map[int64]bool, len(mids))
+	if len(mids) == 0 {
+		return out, nil
+	}
+	if tx == nil {
+		return nil, errors.New("数据库未连接")
+	}
 	var hit []int64
-	err = gdb.WithContext(ctx).Model(&model.FilmIndex{}).
+	err := tx.Model(&model.FilmIndex{}).
 		Where("mid IN ?", mids).
 		Where(model.FilmHasPlaySourceSQL(), strings.TrimSpace(sourceID), model.LineKindPlay).
 		Pluck("mid", &hit).Error

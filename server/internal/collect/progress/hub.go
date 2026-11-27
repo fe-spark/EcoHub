@@ -145,6 +145,22 @@ func SetCategorySyncing(sourceID string, syncing bool) {
 	syncingSourcesMu.Unlock()
 }
 
+// TryBeginCategorySync 原子抢占采集站分类同步运行态，拒绝正在删除或已同步中的站点并发进入。
+func TryBeginCategorySync(sourceID string) (bool, string) {
+	if IsSourceDeleting(sourceID) {
+		return false, "该采集站正在删除中，无法同步分类"
+	}
+	syncingSourcesMu.Lock()
+	if syncingSources[sourceID] {
+		syncingSourcesMu.Unlock()
+		return false, "该采集站正在同步分类中，请稍候"
+	}
+	syncingSources[sourceID] = true
+	syncingSourcesMu.Unlock()
+	BroadcastCategoryStatus(sourceID, "syncing")
+	return true, ""
+}
+
 // IsCategorySyncing 判断采集站是否正在采集分类
 func IsCategorySyncing(sourceID string) bool {
 	syncingSourcesMu.RLock()

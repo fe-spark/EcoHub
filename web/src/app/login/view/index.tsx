@@ -12,6 +12,7 @@ import {
 } from "@ant-design/icons";
 import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 import { ApiPost } from "@/lib/client-api";
+import { isSafeInternalRedirect } from "@/lib/server-api-error";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import styles from "./index.module.less";
@@ -39,7 +40,7 @@ export default function LoginPageView() {
         message.success("登录成功");
         const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
         const redirect = searchParams?.get("redirect");
-        const targetUrl = redirect && redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/manage";
+        const targetUrl = isSafeInternalRedirect(redirect) ? redirect : "/manage";
         window.location.href = targetUrl;
       } else {
         message.error(resp.msg || "登录失败");

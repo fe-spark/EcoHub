@@ -5,6 +5,7 @@ import {
   buildHttpServerApiError,
   buildLoginRedirectTarget,
   getPublicServerErrorMessage,
+  isSafeInternalRedirect,
   isServerUnauthorizedError,
 } from "./server-api-error";
 
@@ -47,6 +48,13 @@ test("登录跳转保留站内路径与参数并拦截非法跳转", () => {
     "/login?redirect=%2Fcategory%3Fpid%3D17%26sort%3Dhits",
   );
   assert.equal(buildLoginRedirectTarget("//evil.example/phish"), "/login");
+  assert.equal(buildLoginRedirectTarget("/\\evil.example/phish"), "/login");
   assert.equal(buildLoginRedirectTarget("/login?redirect=/"), "/login");
   assert.equal(buildLoginRedirectTarget(null), "/login");
+
+  assert.equal(isSafeInternalRedirect("/manage/film?tab=1"), true);
+  assert.equal(isSafeInternalRedirect("//evil.example"), false);
+  assert.equal(isSafeInternalRedirect("/\\evil.example"), false);
+  assert.equal(isSafeInternalRedirect("/manage\r\nLocation: https://evil.example"), false);
+  assert.equal(isSafeInternalRedirect("https://evil.example"), false);
 });

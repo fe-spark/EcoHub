@@ -159,7 +159,14 @@ func normalizeMovieDetailLists(detail *model.MovieDetail) {
 
 func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string {
 	page = shared.EnsurePage(page)
-	return fmt.Sprintf("%s:v%s:P%d:C%d:S%d", config.FilmClassifyCacheKey, version, pid, page.Current, page.PageSize)
+	limit := page.PageSize
+	if limit <= 0 {
+		limit = 24
+	}
+	if limit > 48 {
+		limit = 48
+	}
+	return fmt.Sprintf("%s:v%s:P%d:S%d", config.FilmClassifyCacheKey, version, pid, limit)
 }
 
 // GetSnapshotBannerCandidates 按排片策略取该分类的前 limit 部。sourceID 为空时不限站。

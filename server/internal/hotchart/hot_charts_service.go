@@ -1,6 +1,7 @@
 package hotchart
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ const (
 	hotChartsRawCacheKey     = "EcoHub:Home:HotCharts:Raw:v1"
 	hotChartsLastGoodKey     = "EcoHub:Home:HotCharts:LastGood:v1"
 	hotChartsRawTTL          = 6 * time.Hour
+	hotChartsPartialTTL      = 10 * time.Minute
 	hotChartsLastGoodTTL     = 7 * 24 * time.Hour
 	hotChartsFetchCandidateN = 36
 	hotChartsHTTPTimeout     = 8 * time.Second
@@ -46,16 +48,25 @@ type rawHotChartsBundle struct {
 
 // HotChartsService 管理豆瓣/Bangumi 原始榜单的按需拉取与缓存读取。
 type HotChartsService struct {
-	sf         singleflight.Group
-	refreshMu  sync.Mutex
-	lastFailAt time.Time
+	sf           singleflight.Group
+	refreshMu    sync.Mutex
+	lastFailAt   time.Time
+	memMu        sync.RWMutex
+	memBundle    *rawHotChartsBundle
+	memExpireAt  time.Time
+	lastGoodMem  *rawHotChartsBundle
 }
 
 var HotChartsSvc = new(HotChartsService)
 
 // GetRawCandidatesByKey 按榜单 key 返回外部候选条目及评分映射（供推荐自动同步与一键排片复用）。
 func (s *HotChartsService) GetRawCandidatesByKey(key string, forceRefresh bool) ([]filmsnapshot.HotChartCandidate, map[int]string, error) {
-	bundle, err := s.loadOrFetchRawBundle(forceRefresh)
+	return s.GetRawCandidatesByKeyCtx(context.Background(), key, forceRefresh)
+}
+
+// GetRawCandidatesByKeyCtx 同 GetRawCandidatesByKey，支持按调用方上下文超时取消等待。
+func (s *HotChartsService) GetRawCandidatesByKeyCtx(ctx context.Context, key string, forceRefresh bool) ([]filmsnapshot.HotChartCandidate, map[int]string, error) {
+	bundle, err := s.loadOrFetchRawBundleCtx(ctx, forceRefresh)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -81,7 +92,12 @@ func (s *HotChartsService) GetRawCandidatesByKey(key string, forceRefresh bool) 
 
 // GetRawCandidatesByCategoryName 根据一级分类名称挑选对应的豆瓣/Bangumi 榜单候选列表（供轮播一键排片豆瓣推荐策略使用）。
 func (s *HotChartsService) GetRawCandidatesByCategoryName(catName string) ([]filmsnapshot.HotChartCandidate, error) {
-	bundle, err := s.loadOrFetchRawBundle(false)
+	return s.GetRawCandidatesByCategoryNameCtx(context.Background(), catName)
+}
+
+// GetRawCandidatesByCategoryNameCtx 同 GetRawCandidatesByCategoryName，支持调用方上下文取消。
+func (s *HotChartsService) GetRawCandidatesByCategoryNameCtx(ctx context.Context, catName string) ([]filmsnapshot.HotChartCandidate, error) {
+	bundle, err := s.loadOrFetchRawBundleCtx(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -137,39 +153,112 @@ func (s *HotChartsService) GetRawCandidatesByCategoryName(catName string) ([]fil
 	return out, nil
 }
 
-func (s *HotChartsService) loadOrFetchRawBundle(forceRefresh bool) (*rawHotChartsBundle, error) {
-	if !forceRefresh && db.Rdb != nil {
-		if raw, err := db.Rdb.Get(db.Cxt, hotChartsRawCacheKey).Result(); err == nil && raw != "" {
-			var bundle rawHotChartsBundle
-			if json.Unmarshal([]byte(raw), &bundle) == nil && len(bundle.Buckets) > 0 {
-				return &bundle, nil
+func (s *HotChartsService) loadMemBundle() *rawHotChartsBundle {
+	s.memMu.RLock()
+	defer s.memMu.RUnlock()
+	if s.memBundle != nil && time.Now().Before(s.memExpireAt) && len(s.memBundle.Buckets) > 0 {
+		return s.memBundle
+	}
+	return nil
+}
+
+func (s *HotChartsService) storeMemBundle(bundle *rawHotChartsBundle, ttl time.Duration, saveLastGood bool) {
+	if bundle == nil || len(bundle.Buckets) == 0 {
+		return
+	}
+	s.memMu.Lock()
+	s.memBundle = bundle
+	s.memExpireAt = time.Now().Add(ttl)
+	if saveLastGood {
+		s.lastGoodMem = bundle
+	}
+	s.memMu.Unlock()
+}
+
+func (s *HotChartsService) loadLastGoodBundle() *rawHotChartsBundle {
+	if fb := loadLastGoodHotChartsBundle(); fb != nil {
+		return fb
+	}
+	s.memMu.RLock()
+	defer s.memMu.RUnlock()
+	if s.lastGoodMem != nil && len(s.lastGoodMem.Buckets) > 0 {
+		return s.lastGoodMem
+	}
+	return nil
+}
+
+func mergeMissingBuckets(fresh, fallback *rawHotChartsBundle) *rawHotChartsBundle {
+	if fresh == nil || fallback == nil || len(fallback.Buckets) == 0 {
+		return fresh
+	}
+	have := make(map[string]struct{}, len(fresh.Buckets))
+	for _, b := range fresh.Buckets {
+		have[b.Key] = struct{}{}
+	}
+	merged := make([]rawHotChartBucket, 0, len(fresh.Buckets)+len(fallback.Buckets))
+	merged = append(merged, fresh.Buckets...)
+	for _, fb := range fallback.Buckets {
+		if _, ok := have[fb.Key]; !ok && len(fb.Entries) > 0 {
+			merged = append(merged, fb)
+		}
+	}
+	return &rawHotChartsBundle{
+		Buckets:   merged,
+		UpdatedAt: fresh.UpdatedAt,
+	}
+}
+
+func (s *HotChartsService) loadOrFetchRawBundleCtx(ctx context.Context, forceRefresh bool) (*rawHotChartsBundle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !forceRefresh {
+		if db.Rdb != nil {
+			if raw, err := db.Rdb.Get(db.Cxt, hotChartsRawCacheKey).Result(); err == nil && raw != "" {
+				var bundle rawHotChartsBundle
+				if json.Unmarshal([]byte(raw), &bundle) == nil && len(bundle.Buckets) > 0 {
+					return &bundle, nil
+				}
 			}
+		}
+		if mem := s.loadMemBundle(); mem != nil {
+			return mem, nil
 		}
 	}
 
 	sfKey := fmt.Sprintf("%s:%t", hotChartsRawCacheKey, forceRefresh)
-	val, err, _ := s.sf.Do(sfKey, func() (any, error) {
+	ch := s.sf.DoChan(sfKey, func() (any, error) {
 		if !forceRefresh {
 			s.refreshMu.Lock()
 			inFailCooldown := !s.lastFailAt.IsZero() && time.Since(s.lastFailAt) < hotChartsFailCooldown
 			s.refreshMu.Unlock()
 			if inFailCooldown {
-				if fb := loadLastGoodHotChartsBundle(); fb != nil {
+				if fb := s.loadLastGoodBundle(); fb != nil {
 					return fb, nil
 				}
 				return nil, errors.New("外部榜单请求冷却中，请稍后重试")
 			}
 		}
 
-		bundle, err := fetchAllHotChartBuckets()
+		bundle, complete, err := fetchAllHotChartBuckets()
 		if err == nil && bundle != nil && len(bundle.Buckets) > 0 {
 			s.refreshMu.Lock()
 			s.lastFailAt = time.Time{}
 			s.refreshMu.Unlock()
+
+			ttl := hotChartsRawTTL
+			if !complete {
+				// 部分榜单失败时从历史兜底回填缺失桶，缩短主缓存 TTL 以便尽快重试，且不覆盖 7 天 LastGood 兜底。
+				bundle = mergeMissingBuckets(bundle, s.loadLastGoodBundle())
+				ttl = hotChartsPartialTTL
+			}
+			s.storeMemBundle(bundle, ttl, complete)
 			if db.Rdb != nil {
 				if data, mErr := json.Marshal(bundle); mErr == nil {
-					_ = db.Rdb.Set(db.Cxt, hotChartsRawCacheKey, string(data), hotChartsRawTTL).Err()
-					_ = db.Rdb.Set(db.Cxt, hotChartsLastGoodKey, string(data), hotChartsLastGoodTTL).Err()
+					_ = db.Rdb.Set(db.Cxt, hotChartsRawCacheKey, string(data), ttl).Err()
+					if complete {
+						_ = db.Rdb.Set(db.Cxt, hotChartsLastGoodKey, string(data), hotChartsLastGoodTTL).Err()
+					}
 				}
 			}
 			return bundle, nil
@@ -179,7 +268,7 @@ func (s *HotChartsService) loadOrFetchRawBundle(forceRefresh bool) (*rawHotChart
 		s.lastFailAt = time.Now()
 		s.refreshMu.Unlock()
 
-		if fallback := loadLastGoodHotChartsBundle(); fallback != nil {
+		if fallback := s.loadLastGoodBundle(); fallback != nil {
 			log.Printf("[HotCharts] 外部榜单拉取失败，已使用历史兜底缓存: %v", err)
 			return fallback, nil
 		}
@@ -188,10 +277,16 @@ func (s *HotChartsService) loadOrFetchRawBundle(forceRefresh bool) (*rawHotChart
 		}
 		return nil, errors.New("暂无可用热门榜单")
 	})
-	if err != nil {
-		return nil, err
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*rawHotChartsBundle), nil
 	}
-	return val.(*rawHotChartsBundle), nil
 }
 
 func loadLastGoodHotChartsBundle() *rawHotChartsBundle {

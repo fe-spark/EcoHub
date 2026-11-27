@@ -178,15 +178,7 @@ func SaveNotifyConfig(cfg model.NotifyConfig) error {
 	}); err != nil {
 		return err
 	}
-	return cacheNotifyConfig(cfg)
-}
-
-func cacheNotifyConfig(cfg model.NotifyConfig) error {
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return repobase.WriteConfigCache(config.NotifyConfigKey, string(data))
+	return repobase.DropConfigCache(config.NotifyConfigKey)
 }
 
 // SaveNotifyBatchSession 保存批次翻页会话（内存 + Redis 双写，TTL 24h）

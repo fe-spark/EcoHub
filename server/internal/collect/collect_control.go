@@ -1,6 +1,8 @@
 package collect
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -107,19 +109,18 @@ func StopCollectSource(sourceID, reason string) {
 	scheduler.CancelSource(sourceID)
 }
 
-// StopSourceForDelete 占住该站。采集中（含待检索）的删除已在入队前拒绝。
-// 调用方删除结束后必须调用 release，否则这个站无法再开采集。
+// StopSourceForDelete 占住该站级删除锁。仅阻塞该站采集，不再计入全局 activeCount 冻结全站。
 func StopSourceForDelete(sourceID string) (release func(), err error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return func() {}, nil
 	}
-	if err := collectLifecycle.beginSource(sourceID); err != nil {
+	if err := collectLifecycle.beginSourceDelete(sourceID); err != nil {
 		log.Printf("[Spider] 删除站点占位失败 id=%s err=%v", sourceID, err)
 		return nil, err
 	}
 	log.Printf("[Spider] 删除站点已占位，开始清数据 id=%s", sourceID)
-	return func() { collectLifecycle.endSource(sourceID) }, nil
+	return func() { collectLifecycle.endSourceDelete(sourceID) }, nil
 }
 
 // SearchWorkBusyReason 检索索引或封口还在进行时返回原因。空字符串表示空闲。
@@ -136,10 +137,12 @@ func SearchWorkBusyReason() string {
 	}
 	searchReseal.mu.Lock()
 	running := searchReseal.running
+	awaitDone := searchReseal.awaitDone
+	retryPending := searchReseal.retryTimer != nil
 	pending := len(searchReseal.pending)
 	sealing := len(searchReseal.sealing)
 	searchReseal.mu.Unlock()
-	if running {
+	if running || awaitDone || retryPending {
 		parts = append(parts, fmt.Sprintf("封口队列运行中 pending=%d sealing=%d", pending, sealing))
 	}
 	return strings.Join(parts, "，")
@@ -221,4 +224,30 @@ func BatchOutcomeMessage(result model.CollectBatchResult, startedVerb, emptyLabe
 		msg += fmt.Sprintf("，跳过 %d 个", len(result.Skipped))
 	}
 	return msg
+}
+
+// skipSourceFailedNotify 用户停止、派发终止、同站已在跑都不是采集源故障，不发异常告警。
+func skipSourceFailedNotify(err error) bool {
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, progress.ErrDispatchStopped) ||
+		errors.Is(err, progress.ErrStopRequested) ||
+		errors.Is(err, progress.ErrTaskExists)
+}
+
+// canRegisterCollectRun 登记运行前（任务表锁内）复核本次运行仍可开跑：
+// 一键终止过则不开；有批次时占用令牌和进度代次都必须还是本批次的。
+func canRegisterCollectRun(id string, runVersion *uint64, batchCtx *collectBatchContext) error {
+	if runVersion != nil && isDispatchStopped(*runVersion) {
+		return progress.ErrDispatchStopped
+	}
+	if batchCtx == nil {
+		return nil
+	}
+	if !batchCtx.ownsOccupy(id) {
+		return progress.ErrStopRequested
+	}
+	if epoch, ok := batchCtx.progressEpoch(id); ok && progress.Epoch(id) != epoch {
+		return progress.ErrStopRequested
+	}
+	return nil
 }

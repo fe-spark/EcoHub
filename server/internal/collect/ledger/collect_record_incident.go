@@ -71,10 +71,19 @@ func listOpenSourceIncidents(now time.Time, todayTripOnly bool) ([]model.SourceI
 
 	activeSourceSet := make(map[string]struct{})
 	if sources, err := sourcecatalog.GetCollectSourceListDB(db.Mdb); err == nil {
+		collectedSet, hasStats := loadCollectedSourceIDSet()
 		for _, s := range sources {
-			if s.State && strings.TrimSpace(s.Id) != "" {
-				activeSourceSet[strings.TrimSpace(s.Id)] = struct{}{}
+			id := strings.TrimSpace(s.Id)
+			if !s.State || id == "" {
+				continue
 			}
+			// 若运行库已有采集统计记录，未采过任何一轮的启用新站不可能有历史故障，排除出早停阻塞集合。
+			if hasStats {
+				if _, collected := collectedSet[id]; !collected {
+					continue
+				}
+			}
+			activeSourceSet[id] = struct{}{}
 		}
 	}
 
@@ -164,6 +173,25 @@ func listOpenSourceIncidents(now time.Time, todayTripOnly bool) ([]model.SourceI
 		})
 	}
 	return out, nil
+}
+
+func loadCollectedSourceIDSet() (map[string]struct{}, bool) {
+	var collected []string
+	if err := db.Mdb.Model(&model.CollectSourceStats{}).
+		Where("last_collect_time IS NOT NULL").
+		Pluck("source_id", &collected).Error; err != nil {
+		return nil, false
+	}
+	if len(collected) == 0 {
+		return nil, false
+	}
+	out := make(map[string]struct{}, len(collected))
+	for _, id := range collected {
+		if id = strings.TrimSpace(id); id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	return out, len(out) > 0
 }
 
 func incidentStateResolved(st *incidentAcc) bool {

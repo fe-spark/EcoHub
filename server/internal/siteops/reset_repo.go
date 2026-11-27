@@ -66,6 +66,14 @@ func truncateTableGroup(tables []string) error {
 
 // FilmZero 全量清空业务与配置数据表（保留账号表 user 与迁移版本表 schema_migrations），并同步清理图库与全部缓存。
 func FilmZero() error {
+	enteredTruncate := false
+	defer func() {
+		if enteredTruncate {
+			clearAllRuntimeAndRedisCaches()
+		}
+	}()
+
+	enteredTruncate = true
 	ReportResetProgress(20, "正在清空影视与映射数据")
 	if err := truncateTableGroup(resetFilmTables); err != nil {
 		return err
@@ -86,7 +94,6 @@ func FilmZero() error {
 	}
 
 	ReportResetProgress(75, "正在清理缓存")
-	clearAllRuntimeAndRedisCaches()
 	return nil
 }
 

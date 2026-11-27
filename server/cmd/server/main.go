@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -117,6 +118,7 @@ func start() {
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 	go func() {
@@ -148,12 +150,26 @@ func start() {
 	<-stopCh
 	log.Printf("[Shutdown] 收到退出信号，开始快速退出")
 
-	// 1. 立即关闭 HTTP 端口监听（断开连接，避免新请求进入与端口占用）
-	_ = srv.Close()
+	// 1. 先以短超时优雅排空常规请求，超时后强制关闭长连接
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[Shutdown] HTTP 平滑关闭超时，强制断开残留连接: %v", err)
+		_ = srv.Close()
+	}
+	shutdownCancel()
 
-	// 2. 快速停止采集任务与通知轮询（非阻塞通知协程退出）
+	// 2. 停止采集任务与通知轮询，再排空 access 内存统计队列并关闭底层连接
 	collect.StopAllCollect("进程退出，停止采集")
 	notify.NotifySvc.StopBotPoller()
+	access.Shutdown(1500 * time.Millisecond)
+	if db.Rdb != nil {
+		_ = db.Rdb.Close()
+	}
+	if db.Mdb != nil {
+		if sqlDB, sqlErr := db.Mdb.DB(); sqlErr == nil && sqlDB != nil {
+			_ = sqlDB.Close()
+		}
+	}
 
 	log.Printf("[Shutdown] 退出完成")
 }

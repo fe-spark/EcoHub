@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/netip"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"server/internal/utils"
 
 	"golang.org/x/sync/singleflight"
 )
@@ -16,15 +17,75 @@ import (
 const (
 	maxDanmakuResponseBytes = 4 << 20 // 4MB
 	maxDanmakuPostPerMin    = 20
+	maxDanmakuSniffPerMin   = 30
+	maxDanmakuSniffInFlight = 8
 	maxDanmakuRateLimitKeys = 4096
 )
 
 var (
-	danmakuSniffSF      singleflight.Group
-	danmakuHexColorRe   = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
-	danmakuPostLimitMu  sync.Mutex
-	danmakuPostLimitMap = map[string][]time.Time{}
+	danmakuSniffSF    singleflight.Group
+	danmakuHexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+	danmakuPostLimit  = newIPWindowLimiter(maxDanmakuPostPerMin, time.Minute)
+	danmakuSniffLimit = newIPWindowLimiter(maxDanmakuSniffPerMin, time.Minute)
+	danmakuSniffSem   = make(chan struct{}, maxDanmakuSniffInFlight)
 )
+
+type ipWindowLimiter struct {
+	mu     sync.Mutex
+	limit  int
+	window time.Duration
+	hits   map[string][]time.Time
+}
+
+func newIPWindowLimiter(limit int, window time.Duration) *ipWindowLimiter {
+	return &ipWindowLimiter{
+		limit:  limit,
+		window: window,
+		hits:   map[string][]time.Time{},
+	}
+}
+
+func (l *ipWindowLimiter) allow(ip string) bool {
+	key := utils.NormalizeClientIPKey(ip)
+	now := time.Now()
+	cutoff := now.Add(-l.window)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if len(l.hits) >= maxDanmakuRateLimitKeys {
+		for k, times := range l.hits {
+			if len(times) == 0 || times[len(times)-1].Before(cutoff) {
+				delete(l.hits, k)
+			}
+		}
+		// 活跃 IP 仍超硬上限时批量淘汰，防止高并发洪水下 map 无界增长。
+		if len(l.hits) >= maxDanmakuRateLimitKeys {
+			drop := len(l.hits) - maxDanmakuRateLimitKeys/2
+			for k := range l.hits {
+				delete(l.hits, k)
+				drop--
+				if drop <= 0 {
+					break
+				}
+			}
+		}
+	}
+
+	hist := l.hits[key]
+	kept := hist[:0]
+	for _, ts := range hist {
+		if ts.After(cutoff) {
+			kept = append(kept, ts)
+		}
+	}
+	if len(kept) >= l.limit {
+		l.hits[key] = kept
+		return false
+	}
+	l.hits[key] = append(kept, now)
+	return true
+}
 
 func readLimitedDanmakuBody(r io.Reader) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(r, maxDanmakuResponseBytes+1))
@@ -56,62 +117,10 @@ func validateDanmakuPostInput(mid int64, t float64, color string, mode int) (str
 	return color, ""
 }
 
-func normalizeDanmakuIPKey(ip string) string {
-	ip = strings.TrimSpace(ip)
-	if ip == "" {
-		return "unknown"
-	}
-	addr, err := netip.ParseAddr(ip)
-	if err != nil {
-		return ip
-	}
-	addr = addr.Unmap()
-	if addr.Is6() {
-		if prefix, pErr := addr.Prefix(64); pErr == nil {
-			return prefix.Masked().String()
-		}
-	}
-	return addr.String()
+func allowDanmakuPost(ip string) bool {
+	return danmakuPostLimit.allow(ip)
 }
 
-func allowDanmakuPost(ip string) bool {
-	key := normalizeDanmakuIPKey(ip)
-	now := time.Now()
-	cutoff := now.Add(-time.Minute)
-
-	danmakuPostLimitMu.Lock()
-	defer danmakuPostLimitMu.Unlock()
-
-	if len(danmakuPostLimitMap) >= maxDanmakuRateLimitKeys {
-		for k, times := range danmakuPostLimitMap {
-			if len(times) == 0 || times[len(times)-1].Before(cutoff) {
-				delete(danmakuPostLimitMap, k)
-			}
-		}
-		// 活跃 IP 仍超硬上限时批量淘汰，防止高并发洪水下 map 无界增长。
-		if len(danmakuPostLimitMap) >= maxDanmakuRateLimitKeys {
-			drop := len(danmakuPostLimitMap) - maxDanmakuRateLimitKeys/2
-			for k := range danmakuPostLimitMap {
-				delete(danmakuPostLimitMap, k)
-				drop--
-				if drop <= 0 {
-					break
-				}
-			}
-		}
-	}
-
-	hist := danmakuPostLimitMap[key]
-	kept := hist[:0]
-	for _, ts := range hist {
-		if ts.After(cutoff) {
-			kept = append(kept, ts)
-		}
-	}
-	if len(kept) >= maxDanmakuPostPerMin {
-		danmakuPostLimitMap[key] = kept
-		return false
-	}
-	danmakuPostLimitMap[key] = append(kept, now)
-	return true
+func allowDanmakuSniff(ip string) bool {
+	return danmakuSniffLimit.allow(ip)
 }

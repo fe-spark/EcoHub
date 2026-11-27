@@ -24,8 +24,9 @@ func newHotChartsHTTPClient() *http.Client {
 		transport = utils.GetOrCreateProxyTransport(proxyURL)
 	}
 	return &http.Client{
-		Transport: transport,
-		Timeout:   hotChartsHTTPTimeout,
+		Transport:     transport,
+		Timeout:       hotChartsHTTPTimeout,
+		CheckRedirect: utils.CheckSafeOutboundRedirect,
 	}
 }
 
@@ -53,7 +54,7 @@ func fetchJSONBytes(client *http.Client, targetURL, referer string) ([]byte, err
 	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 }
 
-func fetchAllHotChartBuckets() (*rawHotChartsBundle, error) {
+func fetchAllHotChartBuckets() (*rawHotChartsBundle, bool, error) {
 	client := newHotChartsHTTPClient()
 	type chartSpec struct {
 		key       string
@@ -123,12 +124,12 @@ func fetchAllHotChartBuckets() (*rawHotChartsBundle, error) {
 		}
 	}
 	if len(nonEmpty) == 0 {
-		return nil, errors.New("所有外部热门榜单拉取失败")
+		return nil, false, errors.New("所有外部热门榜单拉取失败")
 	}
 	return &rawHotChartsBundle{
 		Buckets:   nonEmpty,
 		UpdatedAt: time.Now().Unix(),
-	}, nil
+	}, len(nonEmpty) == len(specs), nil
 }
 
 func fetchDoubanRexxarCollection(client *http.Client, collection string) ([]rawHotChartEntry, error) {

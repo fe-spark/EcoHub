@@ -22,13 +22,22 @@ func BumpIndexPageGeneration() {
 // ClearIndexPageCache 清理首页相关缓存并递增世代，防止在途读回填旧数据。
 func ClearIndexPageCache() {
 	BumpIndexPageGeneration()
+	unlinkKeysByPattern(config.IndexPageCacheKey + "*")
+}
+
+// ClearProvideNetworkConfigCache 清理对外聚合网关网络配置缓存。
+func ClearProvideNetworkConfigCache() {
+	unlinkKeysByPattern(config.TVBoxNetworkConfigCacheKey + ":*")
+}
+
+func unlinkKeysByPattern(pattern string) {
 	rdb := db.Rdb
 	if rdb == nil {
 		return
 	}
 	const batchSize = 500
 	batch := make([]string, 0, batchSize)
-	iter := rdb.Scan(db.Cxt, 0, config.IndexPageCacheKey+"*", config.MaxScanCount).Iterator()
+	iter := rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
 	for iter.Next(db.Cxt) {
 		batch = append(batch, iter.Val())
 		if len(batch) >= batchSize {
@@ -38,17 +47,5 @@ func ClearIndexPageCache() {
 	}
 	if len(batch) > 0 {
 		_ = rdb.Unlink(db.Cxt, batch...).Err()
-	}
-}
-
-// ClearProvideNetworkConfigCache 清理对外聚合网关网络配置缓存。
-func ClearProvideNetworkConfigCache() {
-	if db.Rdb == nil {
-		return
-	}
-	pattern := config.TVBoxNetworkConfigCacheKey + ":*"
-	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
 	}
 }

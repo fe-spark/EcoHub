@@ -242,7 +242,9 @@ func (s *InitService) SpiderInit() error {
 			syslog.Warnf("[Init] 清理过期采集记录失败: %v", err)
 		}
 	})
-	go collect.SpiderSvc.SyncMissingSourceCategories()
+	utils.GoSafe("启动补全缺失来源分类", func() {
+		collect.SpiderSvc.SyncMissingSourceCategories()
+	})
 	return s.CollectCrontabInit()
 }
 

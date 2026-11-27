@@ -130,6 +130,7 @@ func FillConfigCache(key, payload string) error {
 }
 
 func DropConfigCache(key string) error {
+	bumpConfigCacheGen(key)
 	if db.Rdb == nil || key == "" {
 		return nil
 	}

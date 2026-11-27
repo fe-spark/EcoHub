@@ -104,11 +104,30 @@ func parseChatTarget(target string) (chatID string, threadID int64, err error) {
 	return target, 0, nil
 }
 
+func redactTelegramURLError(method, token string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		err = ue.Err
+	}
+	msg := err.Error()
+	if token != "" && strings.Contains(msg, token) {
+		msg = strings.ReplaceAll(msg, token, "[REDACTED]")
+		return fmt.Errorf("请求 Telegram %s 失败: %s", method, msg)
+	}
+	return fmt.Errorf("请求 Telegram %s 失败: %w", method, err)
+}
+
 func callTelegramJSON(ctx context.Context, token, method string, payload any, timeout time.Duration) (tgAPIResponse, error) {
 	var apiResp tgAPIResponse
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return apiResp, errors.New("Bot Token 不能为空")
+	}
+	if err := ValidateBotToken(token); err != nil {
+		return apiResp, err
 	}
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -117,7 +136,7 @@ func callTelegramJSON(ctx context.Context, token, method string, payload any, ti
 	endpoint := fmt.Sprintf("%s/bot%s/%s", strings.TrimRight(tgAPIBaseURL, "/"), token, method)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return apiResp, err
+		return apiResp, redactTelegramURLError(method, token, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -127,12 +146,7 @@ func callTelegramJSON(ctx context.Context, token, method string, payload any, ti
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		// 剥离 *url.Error 中的完整 URL，避免路径里的 Bot Token 泄露到响应或日志。
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			return apiResp, fmt.Errorf("请求 Telegram %s 失败: %w", method, ue.Err)
-		}
-		return apiResp, fmt.Errorf("请求 Telegram %s 失败: %w", method, err)
+		return apiResp, redactTelegramURLError(method, token, err)
 	}
 	defer resp.Body.Close()
 

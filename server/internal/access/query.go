@@ -10,6 +10,7 @@ import (
 	"server/internal/infra/db"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 const overviewCacheTTL = 5 * time.Second
@@ -19,7 +20,10 @@ type overviewCacheEntry struct {
 	ov *Overview
 }
 
-var overviewCache sync.Map
+var (
+	overviewCache sync.Map
+	overviewSF    singleflight.Group
+)
 
 func overviewCacheKey(day, module, platform string) string {
 	return strings.TrimSpace(day) + "|" + strings.ToLower(strings.TrimSpace(module)) + "|" + strings.ToLower(strings.TrimSpace(platform))
@@ -126,11 +130,23 @@ func QueryOverviewScope(day, module, platform string) (*Overview, error) {
 			return ov, nil
 		}
 	}
-	ov, err := queryOverviewScopeFresh(day, module, platform)
-	if cacheLive && err == nil && ov != nil {
-		storeOverviewCache(cacheKey, ov)
+	sfKey := overviewCacheKey(day, module, platform)
+	val, err, _ := overviewSF.Do(sfKey, func() (any, error) {
+		if cacheLive {
+			if ov, ok := loadOverviewCache(cacheKey); ok {
+				return ov, nil
+			}
+		}
+		ov, freshErr := queryOverviewScopeFresh(day, module, platform)
+		if cacheLive && freshErr == nil && ov != nil {
+			storeOverviewCache(cacheKey, ov)
+		}
+		return ov, freshErr
+	})
+	if err != nil {
+		return nil, err
 	}
-	return ov, err
+	return val.(*Overview), nil
 }
 
 func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {

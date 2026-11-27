@@ -53,6 +53,7 @@ func PrepareAndRunReset(report func(int, string), wipeFn func() error) error {
 	}
 	StopAllCollect("数据重置，停止采集")
 	clearPendingCronDispatch()
+	searchReseal.cancelRetryForReset()
 	if err := clearAndWaitMaintenanceQueue(resetReadyWaitTimeout); err != nil {
 		return err
 	}

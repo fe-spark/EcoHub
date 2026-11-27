@@ -5,17 +5,26 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/sourcecatalog"
 	"server/internal/utils"
+
+	"gorm.io/gorm"
 )
 
 // BannerService 按站点管理首页轮播。轮播行只存排序和覆盖项，展示字段读取时从片库组装。
 type BannerService struct{}
 
 var BannerSvc = new(BannerService)
+
+const (
+	maxBannerOverrideURLLen = 512
+	maxBannerOverrideYear   = 2100
+	maxPublishDeckItems     = 100
+)
 
 // BannerInputError 请求参数不合法，handler 原样返回给前端。
 type BannerInputError struct{ msg string }
@@ -118,11 +127,13 @@ func (s *BannerService) HomeBanners(sourceID string) (model.Banners, error) {
 	if strings.TrimSpace(sourceID) == "" {
 		return out, nil
 	}
-	slots, err := ListBannerSlots(sourceID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	slots, err := ListBannerSlotsCtx(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	items, err := AssembleBanners(context.Background(), slots, false)
+	items, err := AssembleBanners(ctx, slots, false)
 	if err != nil {
 		return nil, err
 	}
@@ -213,10 +224,18 @@ func applyBannerFields(slot *model.BannerSlot, f BannerFields) error {
 	}
 	if slot.ImageMode == model.BannerImageCustom {
 		if f.Poster != nil {
-			slot.PosterOverride = strings.TrimSpace(*f.Poster)
+			poster := strings.TrimSpace(*f.Poster)
+			if len(poster) > maxBannerOverrideURLLen {
+				return bannerInputErr("自定义竖版封面地址过长")
+			}
+			slot.PosterOverride = poster
 		}
 		if f.Backdrop != nil {
-			slot.BackdropOverride = strings.TrimSpace(*f.Backdrop)
+			backdrop := strings.TrimSpace(*f.Backdrop)
+			if len(backdrop) > maxBannerOverrideURLLen {
+				return bannerInputErr("自定义横版海报地址过长")
+			}
+			slot.BackdropOverride = backdrop
 		}
 		// 若自定义模式下两张图都为空，回退到跟随片库，避免出现无图的自定义状态。
 		if slot.PosterOverride == "" && slot.BackdropOverride == "" {
@@ -233,7 +252,7 @@ func applyBannerFields(slot *model.BannerSlot, f BannerFields) error {
 		slot.ScoreOverride = *f.Score
 	}
 	if f.Year != nil {
-		if *f.Year < 0 {
+		if *f.Year < 0 || *f.Year > maxBannerOverrideYear {
 			return bannerInputErr("年份不合法")
 		}
 		slot.YearOverride = *f.Year
@@ -276,7 +295,7 @@ func (s *BannerService) Create(sourceID string, f BannerFields) (model.BannerAdm
 // Update 只改提交了的字段，立即生效。传 expectedSourceID 时校对行归属防串站。
 func (s *BannerService) Update(id, expectedSourceID string, f BannerFields) (model.BannerAdminItem, error) {
 	expectedSourceID = strings.TrimSpace(expectedSourceID)
-	slot, err := UpdateBannerSlot(id, func(slot *model.BannerSlot) error {
+	slot, err := UpdateBannerSlotWithTx(id, func(tx *gorm.DB, slot *model.BannerSlot) error {
 		if expectedSourceID != "" && slot.SourceId != expectedSourceID {
 			return bannerInputErr("轮播不属于当前采集站")
 		}
@@ -288,7 +307,7 @@ func (s *BannerService) Update(id, expectedSourceID string, f BannerFields) (mod
 			return err
 		}
 		if slot.Mid != oldMid {
-			return checkFilmOnSource(slot.Mid, slot.SourceId)
+			return checkFilmOnSourceTx(tx, slot.Mid, slot.SourceId)
 		}
 		return nil
 	})
@@ -330,6 +349,9 @@ func (s *BannerService) Reorder(sourceID, revision string, ids []string) (Banner
 func (s *BannerService) PublishDeck(sourceID, revision string, items []BannerFields) (BannerListView, error) {
 	if len(items) == 0 {
 		return BannerListView{}, bannerInputErr("排片内容不能为空")
+	}
+	if len(items) > maxPublishDeckItems {
+		return BannerListView{}, bannerInputErr("单次排片不能超过 %d 条", maxPublishDeckItems)
 	}
 	src, _, _, err := resolveBannerSource(sourceID, true)
 	if err != nil {

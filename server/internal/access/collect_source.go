@@ -24,7 +24,7 @@ var (
 		return strings.TrimSpace(active.Id)
 	}
 	lookupCollectSourceExists = func(id string) bool {
-		return sourcecatalog.FindCollectSourceById(id) != nil
+		return sourcecatalog.HasCollectSource(id)
 	}
 	listCollectSources = func() ([]model.FilmSource, error) {
 		return sourcecatalog.GetCollectSourceListDB(db.Mdb)

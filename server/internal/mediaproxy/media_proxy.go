@@ -3,12 +3,15 @@ package mediaproxy
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
 
 	"server/internal/model"
 	"server/internal/repobase"
+	"server/internal/utils"
 
 	"golang.org/x/sync/singleflight"
 )
@@ -131,34 +134,22 @@ func WrapMediaURL(raw string) string {
 		return trimmed
 	}
 
-	host := clean
-	if slash := strings.Index(host, "/"); slash >= 0 {
-		host = host[:slash]
+	parseURL := trimmed
+	if strings.HasPrefix(parseURL, "//") {
+		parseURL = "https:" + parseURL
 	}
-	if colon := strings.Index(host, ":"); colon >= 0 {
-		host = host[:colon]
-	}
-	host = strings.ToLower(host)
-
-	if host == "localhost" ||
-		host == "0.0.0.0" ||
-		strings.HasPrefix(host, "127.") ||
-		strings.HasPrefix(host, "192.168.") ||
-		strings.HasPrefix(host, "10.") ||
-		strings.HasPrefix(host, "169.254.") {
+	u, parseErr := url.Parse(parseURL)
+	if parseErr != nil || u.Hostname() == "" {
 		return trimmed
 	}
-
-	if strings.HasPrefix(host, "172.") {
-		parts := strings.Split(host, ".")
-		if len(parts) >= 2 {
-			if sec, err := strconv.Atoi(parts[1]); err == nil && sec >= 16 && sec <= 31 {
-				return trimmed
-			}
-		}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host == "localhost" || host == "0.0.0.0" || strings.HasSuffix(host, ".local") {
+		return trimmed
 	}
-
-	if rt.siteURL != "" && strings.HasPrefix(strings.ToLower(trimmed), rt.siteURL) {
+	if ip := net.ParseIP(host); ip != nil && !utils.IsPublicOutboundIP(ip) {
+		return trimmed
+	}
+	if isSameSiteOrigin(u, rt.siteURL) {
 		return trimmed
 	}
 
@@ -175,6 +166,17 @@ func WrapMediaURL(raw string) string {
 	}
 
 	return fmt.Sprintf("https://i%d.wp.com/%s", sum, clean)
+}
+
+func isSameSiteOrigin(target *url.URL, rawSiteURL string) bool {
+	if target == nil || rawSiteURL == "" {
+		return false
+	}
+	site, err := url.Parse(rawSiteURL)
+	if err != nil || site.Host == "" {
+		return false
+	}
+	return strings.EqualFold(target.Scheme, site.Scheme) && strings.EqualFold(target.Host, site.Host)
 }
 
 // WrapMovieBasicInfo 包装单个影片简要信息的封面字段

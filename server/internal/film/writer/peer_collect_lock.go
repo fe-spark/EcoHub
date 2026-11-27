@@ -26,6 +26,38 @@ func getFilmMidLock(mid int64) *sync.Mutex {
 	return &filmMidLocks[uint64(mid)%2048]
 }
 
+// LockFilmMids 按分片锁下标升序加锁全部指定 mid 对应的分段互斥锁，防止删片与并发写入死锁。
+func LockFilmMids(mids []int64) func() {
+	if len(mids) == 0 {
+		return func() {}
+	}
+	buckets := make([]int, 0, len(mids))
+	seen := make(map[int]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		idx := int(uint64(mid) % 2048)
+		if _, ok := seen[idx]; ok {
+			continue
+		}
+		seen[idx] = struct{}{}
+		buckets = append(buckets, idx)
+	}
+	if len(buckets) == 0 {
+		return func() {}
+	}
+	sort.Ints(buckets)
+	for _, idx := range buckets {
+		filmMidLocks[idx].Lock()
+	}
+	return func() {
+		for i := len(buckets) - 1; i >= 0; i-- {
+			filmMidLocks[buckets[i]].Unlock()
+		}
+	}
+}
+
 func matchKeyLockIndex(key string) int {
 	key = strings.TrimSpace(key)
 	if key == "" {

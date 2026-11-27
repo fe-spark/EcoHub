@@ -180,8 +180,11 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 	}
 
 	sentinelKey := fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, nonExistentMid)
-	if mr.Exists(sentinelKey) {
-		t.Fatalf("missing film must not be cached")
+	if got, err := mr.Get(sentinelKey); err != nil || got != filmDetailMissingSentinel {
+		t.Fatalf("missing film should be cached with short missing sentinel, got=%q err=%v", got, err)
+	}
+	if ttl := mr.TTL(sentinelKey); ttl <= 0 || ttl > time.Minute {
+		t.Fatalf("missing sentinel ttl=%v, want (0, 1m]", ttl)
 	}
 
 	res2, _ := IndexSvc.GetFilmDetail(nonExistentMid)

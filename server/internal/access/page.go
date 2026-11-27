@@ -15,13 +15,24 @@ var pageActions = map[string]struct{}{
 	ActionClassify: {},
 }
 
-const pageMinInterval = 2 * time.Second
+const (
+	pageMinInterval          = 2 * time.Second
+	pageIPWindow             = 10 * time.Second
+	maxPageEventsPerIPWindow = 60
+	pageBucketMaxEntries     = 1024
+	pageBucketEvictBatch     = pageBucketMaxEntries / 8
+	pageHitShardCount        = 16
+)
 
-const pageHitShardCount = 16
+type pageIPWindowState struct {
+	windowStart time.Time
+	count       int
+}
 
 type pageHitShard struct {
-	mu   sync.Mutex
-	last map[string]time.Time
+	mu       sync.Mutex
+	last     map[string]time.Time
+	ipWindow map[string]pageIPWindowState
 }
 
 var pageHitBuckets [pageHitShardCount]pageHitShard
@@ -29,6 +40,7 @@ var pageHitBuckets [pageHitShardCount]pageHitShard
 func init() {
 	for i := range pageHitBuckets {
 		pageHitBuckets[i].last = map[string]time.Time{}
+		pageHitBuckets[i].ipWindow = map[string]pageIPWindowState{}
 	}
 }
 
@@ -45,6 +57,7 @@ func resetPageHits() {
 		bucket := &pageHitBuckets[i]
 		bucket.mu.Lock()
 		bucket.last = map[string]time.Time{}
+		bucket.ipWindow = map[string]pageIPWindowState{}
 		bucket.mu.Unlock()
 	}
 }
@@ -220,8 +233,42 @@ func pageTooFast(ip, pageKey string) bool {
 	if ipHash == "" {
 		return false
 	}
-	key := ipHash + ":" + strings.TrimSpace(pageKey)
 	now := time.Now()
+	// 先按单 IP 维度限流，防止靠变换 page 参数绕过 ipHash:pageKey 去重。
+	ipBucket := pageHitBucket(ipHash)
+	ipBucket.mu.Lock()
+	win := ipBucket.ipWindow[ipHash]
+	if win.windowStart.IsZero() || now.Sub(win.windowStart) >= pageIPWindow {
+		win = pageIPWindowState{windowStart: now, count: 0}
+	}
+	if win.count >= maxPageEventsPerIPWindow {
+		ipBucket.mu.Unlock()
+		return true
+	}
+	win.count++
+	ipBucket.ipWindow[ipHash] = win
+	if len(ipBucket.ipWindow) > pageBucketMaxEntries {
+		for k, st := range ipBucket.ipWindow {
+			if now.Sub(st.windowStart) >= pageIPWindow && k != ipHash {
+				delete(ipBucket.ipWindow, k)
+			}
+		}
+		if len(ipBucket.ipWindow) > pageBucketMaxEntries {
+			evict := pageBucketEvictBatch
+			for k := range ipBucket.ipWindow {
+				if evict <= 0 {
+					break
+				}
+				if k != ipHash {
+					delete(ipBucket.ipWindow, k)
+					evict--
+				}
+			}
+		}
+	}
+	ipBucket.mu.Unlock()
+
+	key := ipHash + ":" + strings.TrimSpace(pageKey)
 	bucket := pageHitBucket(key)
 	bucket.mu.Lock()
 	defer bucket.mu.Unlock()
@@ -229,15 +276,24 @@ func pageTooFast(ip, pageKey string) bool {
 		return true
 	}
 	bucket.last[key] = now
-	if len(bucket.last) > 1024 {
+	if len(bucket.last) > pageBucketMaxEntries {
 		cutoff := now.Add(-pageMinInterval)
 		for k, t := range bucket.last {
 			if t.Before(cutoff) && k != key {
 				delete(bucket.last, k)
 			}
 		}
-		if len(bucket.last) > 1024 {
-			bucket.last = map[string]time.Time{key: now}
+		if len(bucket.last) > pageBucketMaxEntries {
+			evict := pageBucketEvictBatch
+			for k := range bucket.last {
+				if evict <= 0 {
+					break
+				}
+				if k != key {
+					delete(bucket.last, k)
+					evict--
+				}
+			}
 		}
 	}
 	return false

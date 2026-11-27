@@ -4,13 +4,67 @@ import (
 	"encoding/json"
 	"strings"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/sourcecatalog"
 
 	"gorm.io/gorm"
 )
 
-// PurgeSourceCollectHistoryTx 删站时清掉该站的清单行和统计。只有这一站的批次整条删掉，多站批次保留。
+// PurgeSourceCollectHistoryBatched 按独立短事务分批清理指定站点的采集历史，避免单一长事务锁表与 OOM。
+func PurgeSourceCollectHistoryBatched(sourceID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if db.Mdb == nil || sourceID == "" {
+		return nil
+	}
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("source_id = ?", sourceID).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
+			return err
+		}
+		return sourcecatalog.DeleteCollectSourceStatsTx(tx, sourceID)
+	}); err != nil {
+		return err
+	}
+	var aliveIDs []string
+	if err := db.Mdb.Model(&model.FilmSource{}).Pluck("id", &aliveIDs).Error; err != nil {
+		return err
+	}
+	alive := buildAliveSourceSet(aliveIDs)
+
+	const scanChunk = 200
+	var cursor uint
+	for {
+		var done bool
+		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+			nextCursor, hasMore, err := purgeSourceCollectHistoryChunk(tx, sourceID, cursor, scanChunk, alive)
+			if err != nil {
+				return err
+			}
+			cursor = nextCursor
+			done = !hasMore
+			return nil
+		}); err != nil {
+			return err
+		}
+		if done {
+			break
+		}
+	}
+	return nil
+}
+
+func buildAliveSourceSet(aliveIDs []string) map[string]struct{} {
+	alive := make(map[string]struct{}, len(aliveIDs))
+	for _, id := range aliveIDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			alive[id] = struct{}{}
+		}
+	}
+	return alive
+}
+
+// PurgeSourceCollectHistoryTx 删站时在既有事务内清掉该站的清单行、统计与历史记录。
 func PurgeSourceCollectHistoryTx(tx *gorm.DB, sourceID string) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if tx == nil || sourceID == "" {
@@ -26,49 +80,99 @@ func PurgeSourceCollectHistoryTx(tx *gorm.DB, sourceID string) error {
 	if err := tx.Model(&model.FilmSource{}).Pluck("id", &aliveIDs).Error; err != nil {
 		return err
 	}
-	alive := make(map[string]struct{}, len(aliveIDs))
-	for _, id := range aliveIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			alive[id] = struct{}{}
-		}
-	}
-	drop := make([]model.CollectRecord, 0)
+	alive := buildAliveSourceSet(aliveIDs)
 	const scanChunk = 200
 	var cursor uint
 	for {
-		var rows []model.CollectRecord
-		if err := tx.Select("id", "batch_id", "status", "ledger", "error_msg", "detail_json").
-			Where("id > ? AND detail_json LIKE ?", cursor, "%"+sourceID+"%").
-			Order("id ASC").
-			Limit(scanChunk).
-			Find(&rows).Error; err != nil {
+		nextCursor, hasMore, err := purgeSourceCollectHistoryChunk(tx, sourceID, cursor, scanChunk, alive)
+		if err != nil {
 			return err
 		}
-		if len(rows) == 0 {
-			break
-		}
-		cursor = rows[len(rows)-1].ID
-		for _, row := range rows {
-			if !strings.Contains(row.DetailJson, sourceID) {
-				continue
-			}
-			if collectRecordOnlySource(row.DetailJson, sourceID, alive) {
-				drop = append(drop, row)
-				continue
-			}
-			if _, err := stripSourceFromCollectRecord(tx, row, sourceID); err != nil {
-				return err
-			}
-		}
-		if len(rows) < scanChunk {
+		cursor = nextCursor
+		if !hasMore {
 			break
 		}
 	}
-	return removeRecordsAndFilms(tx, drop)
+	return nil
 }
 
-func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID string) (string, error) {
+func purgeSourceCollectHistoryChunk(tx *gorm.DB, sourceID string, cursor uint, scanChunk int, alive map[string]struct{}) (uint, bool, error) {
+	var rows []model.CollectRecord
+	if err := tx.Select("id", "batch_id", "status", "ledger", "error_msg", "detail_json").
+		Where("id > ? AND detail_json LIKE ?", cursor, "%"+sourceID+"%").
+		Order("id ASC").
+		Limit(scanChunk).
+		Find(&rows).Error; err != nil {
+		return cursor, false, err
+	}
+	if len(rows) == 0 {
+		return cursor, false, nil
+	}
+	nextCursor := rows[len(rows)-1].ID
+	chunkDrop := make([]model.CollectRecord, 0)
+	chunkKeep := make([]model.CollectRecord, 0)
+	recountIDs := make([]uint, 0)
+	for _, row := range rows {
+		if !strings.Contains(row.DetailJson, sourceID) {
+			continue
+		}
+		if collectRecordOnlySource(row.DetailJson, sourceID, alive) {
+			chunkDrop = append(chunkDrop, row)
+			continue
+		}
+		chunkKeep = append(chunkKeep, row)
+		if row.Ledger || row.Status == model.CollectRecordStatusRunning {
+			recountIDs = append(recountIDs, row.ID)
+		}
+	}
+	if len(chunkDrop) > 0 {
+		if err := removeRecordsAndFilms(tx, chunkDrop); err != nil {
+			return nextCursor, false, err
+		}
+	}
+	if len(chunkKeep) > 0 {
+		totalsByRec, bySourceByRec, err := filmRowCountsBatch(tx, recountIDs)
+		if err != nil {
+			return nextCursor, false, err
+		}
+		for _, row := range chunkKeep {
+			if _, err := stripSourceFromCollectRecord(tx, row, sourceID, totalsByRec[row.ID], bySourceByRec[row.ID]); err != nil {
+				return nextCursor, false, err
+			}
+		}
+	}
+	return nextCursor, len(rows) >= scanChunk, nil
+}
+
+func filmRowCountsBatch(tx *gorm.DB, recordIDs []uint) (map[uint]int, map[uint]map[string]int, error) {
+	totals := make(map[uint]int, len(recordIDs))
+	byRec := make(map[uint]map[string]int, len(recordIDs))
+	if tx == nil || len(recordIDs) == 0 {
+		return totals, byRec, nil
+	}
+	var rows []struct {
+		RecordID uint   `gorm:"column:record_id"`
+		SourceID string `gorm:"column:source_id"`
+		N        int    `gorm:"column:n"`
+	}
+	if err := tx.Model(&model.CollectRecordFilmItem{}).
+		Select("record_id, source_id, COUNT(*) AS n").
+		Where("record_id IN ?", recordIDs).
+		Group("record_id, source_id").
+		Scan(&rows).Error; err != nil {
+		return nil, nil, err
+	}
+	for _, r := range rows {
+		totals[r.RecordID] += r.N
+		if byRec[r.RecordID] == nil {
+			byRec[r.RecordID] = map[string]int{}
+		}
+		byRec[r.RecordID][r.SourceID] = r.N
+	}
+	return totals, byRec, nil
+}
+
+func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID string, precomputedTotal int, precomputedBySource map[string]int) (string, error) {
 	var details []model.CollectRecordSourceDetail
 	if err := json.Unmarshal([]byte(row.DetailJson), &details); err != nil {
 		return "", err
@@ -85,14 +189,9 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 	}
 	filmCount := 0
 	if row.Ledger || row.Status == model.CollectRecordStatusRunning {
-		var bySource map[string]int
-		var err error
-		filmCount, bySource, err = FilmRowCounts(tx, row.ID)
-		if err != nil {
-			return "", err
-		}
+		filmCount = precomputedTotal
 		for i := range kept {
-			kept[i].FilmsTotal = bySource[kept[i].SourceID]
+			kept[i].FilmsTotal = precomputedBySource[kept[i].SourceID]
 		}
 	} else {
 		// 账本已淘汰的已结束批次沿用存活站点既有统计数，避免重算覆盖清零。

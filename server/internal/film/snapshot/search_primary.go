@@ -1,11 +1,13 @@
 package snapshot
 
 import (
+	"sort"
 	"strings"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/sourcecatalog"
+	"server/internal/utils"
 )
 
 // currentPrimarySourceID 当前主站。没有已启用采集站时为空。
@@ -100,4 +102,85 @@ func PrimarySearchMIDsWithSource(mids []int64) (string, []int64, error) {
 		kept = append(kept, mid)
 	}
 	return primary, kept, nil
+}
+
+// SearchPrimarySourceFilmMids 当主站内存索引就绪时，优先用倒排索引按片名检索并分页，避免百万表双次 LIKE 全表扫描。
+func SearchPrimarySourceFilmMids(sourceID, keyword, sortField string, offset, limit int) ([]int64, int, bool) {
+	sourceID = strings.TrimSpace(sourceID)
+	keyword = strings.TrimSpace(keyword)
+	if sourceID == "" || keyword == "" || limit <= 0 || offset < 0 {
+		return nil, 0, false
+	}
+	idx := activeFilmSearchMetas.Load()
+	if idx == nil || len(idx.Items) == 0 || idx.PrimaryID != sourceID || idx.PrimaryID != currentPrimarySourceID() || idx.SearchPosts == nil {
+		return nil, 0, false
+	}
+	q := utils.BuildQueryContext(keyword)
+	if q.CleanKey == "" {
+		return nil, 0, false
+	}
+	positions, narrowed := idx.SearchPosts.lookup(q)
+	if !narrowed {
+		return nil, 0, false
+	}
+	hits := make([]*FilmSearchMeta, 0, len(positions))
+	for _, pos := range positions {
+		p := int(pos)
+		if p < 0 || p >= len(idx.Items) {
+			continue
+		}
+		meta := idx.Items[p]
+		if meta == nil || meta.Mid <= 0 || !meta.HasPlaySource(sourceID) {
+			continue
+		}
+		if utils.ScoreFilmMatch(meta.Item, q) <= 0 {
+			continue
+		}
+		hits = append(hits, meta)
+	}
+	if len(hits) == 0 {
+		return nil, 0, true
+	}
+	sortKey := strings.TrimSpace(sortField)
+	sort.Slice(hits, func(i, j int) bool {
+		a, b := hits[i], hits[j]
+		switch sortKey {
+		case "update_stamp", "latest":
+			if a.Item.UpdateStamp != b.Item.UpdateStamp {
+				return a.Item.UpdateStamp > b.Item.UpdateStamp
+			}
+		case "score":
+			if a.Item.Score != b.Item.Score {
+				return a.Item.Score > b.Item.Score
+			}
+			if a.Item.Hits != b.Item.Hits {
+				return a.Item.Hits > b.Item.Hits
+			}
+		case "year":
+			if a.Item.Year != b.Item.Year {
+				return a.Item.Year > b.Item.Year
+			}
+			if a.Item.UpdateStamp != b.Item.UpdateStamp {
+				return a.Item.UpdateStamp > b.Item.UpdateStamp
+			}
+		default:
+			if a.Item.Hits != b.Item.Hits {
+				return a.Item.Hits > b.Item.Hits
+			}
+			if a.Item.UpdateStamp != b.Item.UpdateStamp {
+				return a.Item.UpdateStamp > b.Item.UpdateStamp
+			}
+		}
+		return a.Mid > b.Mid
+	})
+	total := len(hits)
+	if offset >= total {
+		return []int64{}, total, true
+	}
+	end := min(offset+limit, total)
+	mids := make([]int64, 0, end-offset)
+	for _, m := range hits[offset:end] {
+		mids = append(mids, m.Mid)
+	}
+	return mids, total, true
 }

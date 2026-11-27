@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"golang.org/x/net/html/charset"
+	"server/internal/collect/fetcher"
 	"server/internal/film/converter"
 	"server/internal/model"
 	"server/internal/utils"
@@ -158,6 +159,9 @@ func (xc *XmlCollect) GetPageCount(r utils.RequestInfo) (int, error) {
 	var rss XMLRSS
 	if err := unmarshalXMLWithCharset(r.Resp, &rss); err != nil {
 		return 0, fmt.Errorf("XML 反序列化失败: %w", err)
+	}
+	if rss.List.PageCount < 0 || rss.List.PageCount > fetcher.MaxCollectPageCount {
+		return 0, fmt.Errorf("采集站返回异常总页数: %d", rss.List.PageCount)
 	}
 	return rss.List.PageCount, nil
 }

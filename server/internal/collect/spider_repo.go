@@ -179,7 +179,7 @@ func DelCollectResource(id string) ([]int64, error) {
 			if err := catalog.ClearSourceCategoryDataTx(tx, id); err != nil {
 				return err
 			}
-			if err := ledger.PurgeSourceCollectHistoryTx(tx, id); err != nil {
+			if err := sourcecatalog.DeleteCollectSourceStatsTx(tx, id); err != nil {
 				return err
 			}
 			if err := catalog.AssertSourceDataCleanedTx(tx, id); err != nil {
@@ -193,6 +193,9 @@ func DelCollectResource(id string) ([]int64, error) {
 	})
 	if err != nil {
 		return orphanMids, err
+	}
+	if purgeErr := ledger.PurgeSourceCollectHistoryBatched(id); purgeErr != nil {
+		return orphanMids, purgeErr
 	}
 	taxonomy.TouchRuleVersion()
 	taxonomy.ReloadMappingRules()
@@ -240,7 +243,12 @@ func CleanCollectSourceData(id string) ([]int64, error) {
 
 // AddCollectSource 添加采集站信息
 func AddCollectSource(s model.FilmSource) error {
-	if err := AddCollectSourceTx(db.Mdb, s); err != nil {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return AddCollectSourceTx(tx, s)
+	}); err != nil {
 		return err
 	}
 	return sourcecatalog.RefreshCollectSourceCatalog()
@@ -454,19 +462,6 @@ func insertFilmSources(tx *gorm.DB, list []model.FilmSource) error {
 		return nil
 	}
 	return tx.Model(&model.FilmSource{}).Where("id IN ?", zeroIDs).Update("collect_interval_ms", 0).Error
-}
-
-func normalizeCollectSourceDefaults(source *model.FilmSource) {
-	normalizeCollectCd(source)
-	if source.Format == "" {
-		source.Format = model.SourceFormatJSON
-	}
-}
-
-func normalizeCollectCd(source *model.FilmSource) {
-	if source.Cd <= 0 {
-		source.Cd = 24
-	}
 }
 
 // EnsureDefaultPosterSource 保证存在海报源站。

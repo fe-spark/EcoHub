@@ -282,3 +282,22 @@ func TestApplyDetailWithOptions_SelectiveFields(t *testing.T) {
 		t.Errorf("snapshot scrape metadata mismatch")
 	}
 }
+
+func TestSaveFilmScrape_RejectsMissingFilm(t *testing.T) {
+	setupTMDBApplyTestDB(t)
+	_, err := SaveFilmScrape(999999, nil, model.FilmTMDBScrape{
+		Mid:       999999,
+		TmdbID:    12345,
+		MediaType: "movie",
+	})
+	if err == nil {
+		t.Fatal("expected SaveFilmScrape to reject non-existent film_index row")
+	}
+	var count int64
+	if err := db.Mdb.Model(&model.FilmTMDBScrape{}).Where("mid = ?", 999999).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 orphan film_tmdb_scrapes rows, got %d", count)
+	}
+}

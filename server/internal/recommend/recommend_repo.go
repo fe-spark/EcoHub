@@ -12,7 +12,27 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+func lockRecommendGroupTx(tx *gorm.DB, id string) (model.HomeRecommendGroup, error) {
+	var g model.HomeRecommendGroup
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", strings.TrimSpace(id)).
+		First(&g).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.HomeRecommendGroup{}, ErrRecommendGroupNotFound
+	}
+	return g, err
+}
+
+func lockRecommendSourceTx(tx *gorm.DB, sourceID string) error {
+	var src model.FilmSource
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").
+		Where("id = ?", strings.TrimSpace(sourceID)).
+		First(&src).Error
+}
 
 var (
 	ErrRecommendGroupNotFound = errors.New("推荐分组不存在")
@@ -95,7 +115,7 @@ func GetHomeRecommendGroup(ctx context.Context, id string) (model.HomeRecommendG
 	return g, err
 }
 
-// CreateHomeRecommendGroup 新建推荐分组（自动排在末尾）。
+// CreateHomeRecommendGroup 新建推荐分组（站行锁事务内计算排位，防并发序号冲突）。
 func CreateHomeRecommendGroup(ctx context.Context, g model.HomeRecommendGroup) (model.HomeRecommendGroup, error) {
 	gdb, err := recommendDB()
 	if err != nil {
@@ -110,51 +130,78 @@ func CreateHomeRecommendGroup(ctx context.Context, g model.HomeRecommendGroup) (
 	if g.SyncLimit <= 0 {
 		g.SyncLimit = 12
 	}
-	var maxSort int64
-	_ = gdb.WithContext(ctx).Model(&model.HomeRecommendGroup{}).
-		Where("source_id = ?", g.SourceId).
-		Select("COALESCE(MAX(sort), 0)").Scan(&maxSort).Error
-	if g.Sort <= 0 {
-		g.Sort = maxSort + 1
-	}
-	if err := gdb.WithContext(ctx).Create(&g).Error; err != nil {
+	if err := gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockRecommendSourceTx(tx, g.SourceId); err != nil {
+			return err
+		}
+		var maxSort int64
+		_ = tx.Model(&model.HomeRecommendGroup{}).
+			Where("source_id = ?", g.SourceId).
+			Select("COALESCE(MAX(sort), 0)").Scan(&maxSort).Error
+		if g.Sort <= 0 {
+			g.Sort = maxSort + 1
+		}
+		return tx.Create(&g).Error
+	}); err != nil {
 		return model.HomeRecommendGroup{}, err
 	}
 	repobase.BumpIndexPageGeneration()
 	return g, nil
 }
 
-// UpdateHomeRecommendGroup 更新推荐分组配置。
-func UpdateHomeRecommendGroup(ctx context.Context, g model.HomeRecommendGroup) error {
+// UpdateHomeRecommendGroupAtomic 在 FOR UPDATE 事务内校验、修改分组并在模式切换时同事务清理旧条目，防止丢失更新。
+func UpdateHomeRecommendGroupAtomic(
+	ctx context.Context,
+	id string,
+	mutate func(existing model.HomeRecommendGroup) (updated model.HomeRecommendGroup, clearItems bool, syncNow bool, err error),
+) (updatedGroup model.HomeRecommendGroup, needSync bool, err error) {
 	gdb, err := recommendDB()
 	if err != nil {
-		return err
+		return model.HomeRecommendGroup{}, false, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if g.SyncLimit <= 0 {
-		g.SyncLimit = 12
+	id = strings.TrimSpace(id)
+	err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		existing, lockErr := lockRecommendGroupTx(tx, id)
+		if lockErr != nil {
+			return lockErr
+		}
+		next, clearItems, syncNow, mErr := mutate(existing)
+		if mErr != nil {
+			return mErr
+		}
+		if next.SyncLimit <= 0 {
+			next.SyncLimit = 12
+		}
+		res := tx.Model(&model.HomeRecommendGroup{}).
+			Where("id = ?", id).
+			Updates(map[string]any{
+				"title":          strings.TrimSpace(next.Title),
+				"enabled":        next.Enabled,
+				"auto_sync":      next.AutoSync,
+				"sync_chart_key": strings.TrimSpace(next.SyncChartKey),
+				"category_id":    next.CategoryId,
+				"sync_limit":     next.SyncLimit,
+				"updated_at":     time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if clearItems {
+			if err := tx.Where("group_id = ?", id).Delete(&model.HomeRecommendItem{}).Error; err != nil {
+				return err
+			}
+		}
+		updatedGroup = next
+		needSync = syncNow
+		return nil
+	})
+	if err == nil {
+		repobase.BumpIndexPageGeneration()
 	}
-	res := gdb.WithContext(ctx).Model(&model.HomeRecommendGroup{}).
-		Where("id = ?", strings.TrimSpace(g.Id)).
-		Updates(map[string]any{
-			"title":          strings.TrimSpace(g.Title),
-			"enabled":        g.Enabled,
-			"auto_sync":      g.AutoSync,
-			"sync_chart_key": strings.TrimSpace(g.SyncChartKey),
-			"category_id":    g.CategoryId,
-			"sync_limit":     g.SyncLimit,
-			"updated_at":     time.Now(),
-		})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrRecommendGroupNotFound
-	}
-	repobase.BumpIndexPageGeneration()
-	return nil
+	return updatedGroup, needSync, err
 }
 
 // DeleteHomeRecommendGroup 删除分组及其下全部推荐影片。
@@ -168,6 +215,9 @@ func DeleteHomeRecommendGroup(ctx context.Context, id string) error {
 	}
 	id = strings.TrimSpace(id)
 	err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := lockRecommendGroupTx(tx, id); err != nil {
+			return err
+		}
 		if err := tx.Where("group_id = ?", id).Delete(&model.HomeRecommendItem{}).Error; err != nil {
 			return err
 		}
@@ -186,7 +236,7 @@ func DeleteHomeRecommendGroup(ctx context.Context, id string) error {
 	return err
 }
 
-// ReorderHomeRecommendGroups 批量更新指定站点下推荐分组顺序。
+// ReorderHomeRecommendGroups 批量更新指定站点下推荐分组顺序（站锁下校验完整 ID 集合）。
 func ReorderHomeRecommendGroups(ctx context.Context, sourceID string, orderedIDs []string) error {
 	gdb, err := recommendDB()
 	if err != nil {
@@ -197,9 +247,36 @@ func ReorderHomeRecommendGroups(ctx context.Context, sourceID string, orderedIDs
 	}
 	sourceID = strings.TrimSpace(sourceID)
 	err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for idx, id := range orderedIDs {
+		if err := lockRecommendSourceTx(tx, sourceID); err != nil {
+			return err
+		}
+		var currentIDs []string
+		if err := tx.Model(&model.HomeRecommendGroup{}).Where("source_id = ?", sourceID).Pluck("id", &currentIDs).Error; err != nil {
+			return err
+		}
+		allowed := make(map[string]struct{}, len(currentIDs))
+		for _, id := range currentIDs {
+			allowed[id] = struct{}{}
+		}
+		seen := make(map[string]struct{}, len(orderedIDs))
+		cleanOrdered := make([]string, 0, len(orderedIDs))
+		for _, raw := range orderedIDs {
+			id := strings.TrimSpace(raw)
+			if _, ok := allowed[id]; !ok {
+				return errors.New("分组列表包含不属于当前站点的分组")
+			}
+			if _, dup := seen[id]; dup {
+				return errors.New("分组排序列表存在重复分组")
+			}
+			seen[id] = struct{}{}
+			cleanOrdered = append(cleanOrdered, id)
+		}
+		if len(cleanOrdered) != len(allowed) {
+			return errors.New("分组排序列表不完整，请刷新后重试")
+		}
+		for idx, id := range cleanOrdered {
 			if err := tx.Model(&model.HomeRecommendGroup{}).
-				Where("id = ? AND source_id = ?", strings.TrimSpace(id), sourceID).
+				Where("id = ? AND source_id = ?", id, sourceID).
 				Update("sort", int64(idx+1)).Error; err != nil {
 				return err
 			}
@@ -229,7 +306,7 @@ func ListHomeRecommendItemsBySource(ctx context.Context, sourceID string) ([]mod
 	return list, err
 }
 
-// AddHomeRecommendItem 向指定分组追加影片。
+// AddHomeRecommendItem 向指定分组追加影片（先锁父分组防删除竞态与死锁）。
 func AddHomeRecommendItem(ctx context.Context, groupID, sourceID string, mid int64, doubanScore string) (model.HomeRecommendItem, error) {
 	gdb, err := recommendDB()
 	if err != nil {
@@ -241,32 +318,45 @@ func AddHomeRecommendItem(ctx context.Context, groupID, sourceID string, mid int
 	groupID = strings.TrimSpace(groupID)
 	sourceID = strings.TrimSpace(sourceID)
 
-	var count int64
-	if err := gdb.WithContext(ctx).Model(&model.HomeRecommendItem{}).
-		Where("group_id = ? AND mid = ?", groupID, mid).Count(&count).Error; err != nil {
-		return model.HomeRecommendItem{}, err
-	}
-	if count > 0 {
-		return model.HomeRecommendItem{}, ErrRecommendDuplicateFilm
-	}
-
-	var maxSort int64
-	_ = gdb.WithContext(ctx).Model(&model.HomeRecommendItem{}).
-		Where("group_id = ?", groupID).
-		Select("COALESCE(MAX(sort), 0)").Scan(&maxSort).Error
-
-	item := model.HomeRecommendItem{
-		Id:          uuid.NewString(),
-		GroupId:     groupID,
-		SourceId:    sourceID,
-		Mid:         mid,
-		Sort:        maxSort + 1,
-		DoubanScore: strings.TrimSpace(doubanScore),
-	}
-	if err := gdb.WithContext(ctx).Create(&item).Error; err != nil {
-		if db.IsDuplicateKeyError(err) {
-			return model.HomeRecommendItem{}, ErrRecommendDuplicateFilm
+	var item model.HomeRecommendItem
+	err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		lockedGroup, err := lockRecommendGroupTx(tx, groupID)
+		if err != nil {
+			return err
 		}
+		if lockedGroup.CategoryId > 0 {
+			return errors.New("站点分类分组由片库分类实时驱动，不支持手工添加影片")
+		}
+		var count int64
+		if err := tx.Model(&model.HomeRecommendItem{}).
+			Where("group_id = ? AND mid = ?", groupID, mid).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrRecommendDuplicateFilm
+		}
+		var maxSort int64
+		_ = tx.Model(&model.HomeRecommendItem{}).
+			Where("group_id = ?", groupID).
+			Select("COALESCE(MAX(sort), 0)").Scan(&maxSort).Error
+
+		item = model.HomeRecommendItem{
+			Id:          uuid.NewString(),
+			GroupId:     groupID,
+			SourceId:    sourceID,
+			Mid:         mid,
+			Sort:        maxSort + 1,
+			DoubanScore: strings.TrimSpace(doubanScore),
+		}
+		if err := tx.Create(&item).Error; err != nil {
+			if db.IsDuplicateKeyError(err) {
+				return ErrRecommendDuplicateFilm
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return model.HomeRecommendItem{}, err
 	}
 	repobase.BumpIndexPageGeneration()
@@ -284,6 +374,13 @@ func ReorderHomeRecommendItems(ctx context.Context, groupID string, orderedItemI
 	}
 	groupID = strings.TrimSpace(groupID)
 	err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		lockedGroup, err := lockRecommendGroupTx(tx, groupID)
+		if err != nil {
+			return err
+		}
+		if lockedGroup.CategoryId > 0 {
+			return errors.New("站点分类分组由片库分类实时驱动，不支持手工添加影片")
+		}
 		for idx, itemID := range orderedItemIDs {
 			if err := tx.Model(&model.HomeRecommendItem{}).
 				Where("id = ? AND group_id = ?", strings.TrimSpace(itemID), groupID).
@@ -335,52 +432,20 @@ func ClearHomeRecommendGroupItems(ctx context.Context, groupID string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := gdb.WithContext(ctx).Where("group_id = ?", strings.TrimSpace(groupID)).Delete(&model.HomeRecommendItem{}).Error; err != nil {
+	groupID = strings.TrimSpace(groupID)
+	err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		lockedGroup, err := lockRecommendGroupTx(tx, groupID)
+		if err != nil {
+			return err
+		}
+		if lockedGroup.CategoryId > 0 {
+			return errors.New("站点分类分组由片库分类实时驱动，不支持手工添加影片")
+		}
+		return tx.Where("group_id = ?", groupID).Delete(&model.HomeRecommendItem{}).Error
+	})
+	if err != nil {
 		return err
 	}
 	repobase.BumpIndexPageGeneration()
 	return nil
-}
-
-// ReplaceHomeRecommendGroupItems 原子替换某分组内的全部影片并可选更新同步时间。
-func ReplaceHomeRecommendGroupItems(ctx context.Context, groupID, sourceID string, items []model.HomeRecommendItem, syncedAt *time.Time) error {
-	gdb, err := recommendDB()
-	if err != nil {
-		return err
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	groupID = strings.TrimSpace(groupID)
-	sourceID = strings.TrimSpace(sourceID)
-
-	err = gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("group_id = ?", groupID).Delete(&model.HomeRecommendItem{}).Error; err != nil {
-			return err
-		}
-		if len(items) > 0 {
-			for i := range items {
-				if items[i].Id == "" {
-					items[i].Id = uuid.NewString()
-				}
-				items[i].GroupId = groupID
-				items[i].SourceId = sourceID
-				items[i].Sort = int64(i + 1)
-			}
-			if err := tx.Create(&items).Error; err != nil {
-				return err
-			}
-		}
-		if syncedAt != nil {
-			if err := tx.Model(&model.HomeRecommendGroup{}).Where("id = ?", groupID).
-				Updates(map[string]any{"last_synced_at": syncedAt, "updated_at": time.Now()}).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err == nil {
-		repobase.BumpIndexPageGeneration()
-	}
-	return err
 }

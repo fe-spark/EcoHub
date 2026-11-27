@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"sort"
 	"strings"
 
@@ -119,8 +120,15 @@ func rankPools(idx *filmSearchMetaIndex, sortType int) map[string][]int64 {
 
 // categoryRankMids 年份、热播、最新共用的取榜入口。
 func categoryRankMids(version, sourceID, field string, categoryID int64, sortType, limit int) ([]int64, error) {
+	return categoryRankMidsCtx(context.Background(), version, sourceID, field, categoryID, sortType, limit)
+}
+
+func categoryRankMidsCtx(ctx context.Context, version, sourceID, field string, categoryID int64, sortType, limit int) ([]int64, error) {
 	if limit <= 0 || categoryID <= 0 {
 		return nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -135,7 +143,7 @@ func categoryRankMids(version, sourceID, field string, categoryID int64, sortTyp
 		return nil, nil
 	}
 	if sourceID != "" && sourceID != currentPrimarySourceID() {
-		return queryNonPrimaryCategoryRankMids(sourceID, field, categoryID, sortType, limit)
+		return queryNonPrimaryCategoryRankMidsCtx(ctx, sourceID, field, categoryID, sortType, limit)
 	}
 	idx, err := loadFilmSearchMetaIndex(version)
 	if err != nil {
@@ -156,8 +164,8 @@ func categoryRankMids(version, sourceID, field string, categoryID int64, sortTyp
 	return scanSourceRanks(idx, sourceID, field, categoryID, sortType, limit), nil
 }
 
-// queryNonPrimaryCategoryRankMids 为非主站分类楼层直接走 DB 查询该站可见分类影片，避免受限于仅含主站的内存索引。
-func queryNonPrimaryCategoryRankMids(sourceID, field string, categoryID int64, sortType, limit int) ([]int64, error) {
+// queryNonPrimaryCategoryRankMidsCtx 为非主站分类楼层按单 category_key 拆支走索引合并取 Top-N，避免多值 IN + ORDER BY 触发大表 filesort。
+func queryNonPrimaryCategoryRankMidsCtx(ctx context.Context, sourceID, field string, categoryID int64, sortType, limit int) ([]int64, error) {
 	if db.Mdb == nil {
 		return nil, nil
 	}
@@ -166,21 +174,64 @@ func queryNonPrimaryCategoryRankMids(sourceID, field string, categoryID int64, s
 		return nil, nil
 	}
 	keys := make([]string, 0, len(typeIDs))
+	seenKey := make(map[string]struct{}, len(typeIDs))
 	for _, tid := range typeIDs {
-		keys = append(keys, taxonomy.BuildSourceCategoryKey(sourceID, tid))
+		k := taxonomy.BuildSourceCategoryKey(sourceID, tid)
+		if k == "" {
+			continue
+		}
+		if _, dup := seenKey[k]; dup {
+			continue
+		}
+		seenKey[k] = struct{}{}
+		keys = append(keys, k)
 	}
-	order := "update_stamp DESC, mid DESC"
-	switch sortType {
-	case 0:
-		order = "year DESC, update_stamp DESC, mid DESC"
-	case 1:
-		order = "hits DESC, mid DESC"
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	if sortType != 0 {
+		strategy := "latest"
+		if sortType == 1 {
+			strategy = "hits"
+		}
+		ranks, err := scanBannerBranches(ctx, strategy, sourceID, "category_key", keys, false, limit, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(ranks, func(i, j int) bool {
+			if sortType == 1 {
+				if ranks[i].Hits != ranks[j].Hits {
+					return ranks[i].Hits > ranks[j].Hits
+				}
+			} else {
+				if ranks[i].UpdateStamp != ranks[j].UpdateStamp {
+					return ranks[i].UpdateStamp > ranks[j].UpdateStamp
+				}
+			}
+			return ranks[i].Mid > ranks[j].Mid
+		})
+		mids := make([]int64, 0, min(limit, len(ranks)))
+		seenMid := make(map[int64]struct{}, len(ranks))
+		for _, r := range ranks {
+			if r.Mid <= 0 {
+				continue
+			}
+			if _, dup := seenMid[r.Mid]; dup {
+				continue
+			}
+			seenMid[r.Mid] = struct{}{}
+			mids = append(mids, r.Mid)
+			if len(mids) >= limit {
+				break
+			}
+		}
+		return mids, nil
 	}
 	var mids []int64
-	err := db.Mdb.Model(&model.FilmIndex{}).
+	err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
 		Select("mid").
 		Where("category_key IN ? AND "+model.FilmHasPlaySourceSQL(), keys, sourceID, model.LineKindPlay).
-		Order(order).
+		Order("year DESC, update_stamp DESC, mid DESC").
 		Limit(limit).
 		Pluck("mid", &mids).Error
 	return mids, err

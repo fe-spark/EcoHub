@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"gorm.io/gorm"
 )
 
 type sourceTypeRow struct {
@@ -215,16 +217,16 @@ func loadPublicSourceTypes(sourceID string) (publicSourceView, error) {
 	return res.(publicSourceView), nil
 }
 
-func buildPublicSourceView(sourceID string) (publicSourceView, error) {
+func buildPublicSourceRawRows(sourceID string) ([]sourceTypeRow, []publicTypeGroup, map[int64]sourceTypeRow, error) {
 	var rows []model.SourceCategory
 	if err := db.Mdb.Where("source_id = ?", sourceID).
 		Order("depth ASC, sort ASC, source_type_id ASC").
 		Find(&rows).Error; err != nil {
-		return publicSourceView{}, err
+		return nil, nil, nil, err
 	}
 	placements, err := SourceTypePlacements(sourceID)
 	if err != nil {
-		return publicSourceView{}, err
+		return nil, nil, nil, err
 	}
 	parsed := make([]sourceTypeRow, 0, len(rows))
 	hidden := map[int64]sourceTypeRow{}
@@ -250,7 +252,15 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 		parsed = append(parsed, item)
 	}
 	groups := groupPublicTypes(parsed, sourceID)
-	ensureSyntheticRootGroups(sourceID, parsed, groups)
+	return parsed, groups, hidden, nil
+}
+
+func buildPublicSourceView(sourceID string) (publicSourceView, error) {
+	parsed, groups, hidden, err := buildPublicSourceRawRows(sourceID)
+	if err != nil {
+		return publicSourceView{}, err
+	}
+	attachSyntheticRootGroupsReadOnly(sourceID, parsed, groups)
 	sortPublicGroups(groups)
 	view := publicSourceView{
 		Groups:  groups,
@@ -260,6 +270,65 @@ func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 	}
 	indexPublicGroups(view.Groups, view.members, view.roots)
 	return view, nil
+}
+
+// attachSyntheticRootGroupsReadOnly 仅从已落库的 film_category 回填合成一级分组状态，不在读链路做任何 DB 写操作。
+func attachSyntheticRootGroupsReadOnly(sourceID string, rows []sourceTypeRow, groups []publicTypeGroup) {
+	if db.Mdb == nil || strings.TrimSpace(sourceID) == "" {
+		return
+	}
+	hasSynthetic := false
+	for i := range groups {
+		if groups[i].Synthetic {
+			hasSynthetic = true
+			break
+		}
+	}
+	if !hasSynthetic {
+		return
+	}
+	var existing []model.Category
+	_ = db.Mdb.Where("stable_key LIKE ?", syntheticRootPrefix(sourceID)+"%").Find(&existing).Error
+	existingByKey := make(map[string]model.Category, len(existing))
+	for _, cat := range existing {
+		existingByKey[cat.StableKey] = cat
+	}
+	usedIDs := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		if row.ID > 0 {
+			usedIDs[row.ID] = struct{}{}
+		}
+	}
+	for i := range groups {
+		if !groups[i].Synthetic {
+			continue
+		}
+		key := syntheticRootStableKey(sourceID, groups[i].Name)
+		if cat, ok := existingByKey[key]; ok {
+			groups[i].CategoryID = cat.Id
+			groups[i].Show = cat.Show
+			groups[i].Sort = cat.Sort
+			groups[i].ID = allocateSyntheticTypeID(cat.Id, usedIDs)
+		} else {
+			groups[i].ID = allocateSyntheticTypeID(int64(i+1), usedIDs)
+		}
+		for j := range groups[i].Children {
+			groups[i].Children[j].Parent = groups[i].ID
+		}
+	}
+}
+
+// EnsureSyntheticRootGroupsForSource 在写锁或同步流程中维护规则合成一级分组对应的 film_category 行。
+func EnsureSyntheticRootGroupsForSource(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if db.Mdb == nil || sourceID == "" {
+		return
+	}
+	rows, groups, _, err := buildPublicSourceRawRows(sourceID)
+	if err != nil {
+		return
+	}
+	ensureSyntheticRootGroupsTx(sourceID, rows, groups)
 }
 
 // SyntheticRootTypeOffset 规则合成一级分类的起始虚拟 ID 偏移量，避免与采集站真实 type_id 冲突。
@@ -290,20 +359,18 @@ func allocateSyntheticTypeID(categoryID int64, used map[int64]struct{}) int64 {
 	}
 }
 
-// ensureSyntheticRootGroups 为规则新合成的一级分组维护独立的 film_category 行，
+// ensureSyntheticRootGroupsTx 在单事务中为规则新合成的一级分组维护独立的 film_category 行，
 // 避免借用首个子项 ID 导致后台父子 rowKey 冲突或子项被隐藏吞并。
-func ensureSyntheticRootGroups(sourceID string, rows []sourceTypeRow, groups []publicTypeGroup) {
+func ensureSyntheticRootGroupsTx(sourceID string, rows []sourceTypeRow, groups []publicTypeGroup) {
 	if db.Mdb == nil || strings.TrimSpace(sourceID) == "" {
 		return
 	}
 	prefix := syntheticRootPrefix(sourceID)
-	var existing []model.Category
-	if err := db.Mdb.Where("stable_key LIKE ?", prefix+"%").Find(&existing).Error; err != nil {
-		return
-	}
-	existingByKey := make(map[string]model.Category, len(existing))
-	for _, cat := range existing {
-		existingByKey[cat.StableKey] = cat
+	var desiredKeys = make(map[string]struct{})
+	for i := range groups {
+		if groups[i].Synthetic {
+			desiredKeys[syntheticRootStableKey(sourceID, groups[i].Name)] = struct{}{}
+		}
 	}
 	usedIDs := make(map[int64]struct{}, len(rows))
 	for _, row := range rows {
@@ -311,82 +378,85 @@ func ensureSyntheticRootGroups(sourceID string, rows []sourceTypeRow, groups []p
 			usedIDs[row.ID] = struct{}{}
 		}
 	}
-	desiredKeys := make(map[string]struct{})
-	for i := range groups {
-		if groups[i].Synthetic {
-			desiredKeys[syntheticRootStableKey(sourceID, groups[i].Name)] = struct{}{}
-		}
-	}
-	if len(desiredKeys) == 0 && len(existingByKey) == 0 {
-		return
-	}
 
 	changed := false
-	staleIDs := make([]int64, 0)
-	for key, cat := range existingByKey {
-		if _, keep := desiredKeys[key]; !keep && cat.Id > 0 {
-			staleIDs = append(staleIDs, cat.Id)
+	_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var existing []model.Category
+		if err := tx.Where("stable_key LIKE ?", prefix+"%").Find(&existing).Error; err != nil {
+			return err
 		}
-	}
-	if len(staleIDs) > 0 {
-		var mapped []int64
-		_ = db.Mdb.Model(&model.CategoryMapping{}).
-			Where("category_id IN ?", staleIDs).
-			Distinct("category_id").
-			Pluck("category_id", &mapped).Error
-		inUse := make(map[int64]struct{}, len(mapped))
-		for _, id := range mapped {
-			inUse[id] = struct{}{}
+		existingByKey := make(map[string]model.Category, len(existing))
+		for _, cat := range existing {
+			existingByKey[cat.StableKey] = cat
 		}
-		dropIDs := make([]int64, 0, len(staleIDs))
-		for _, id := range staleIDs {
-			if _, ok := inUse[id]; !ok {
-				dropIDs = append(dropIDs, id)
-			}
+		if len(desiredKeys) == 0 && len(existingByKey) == 0 {
+			return nil
 		}
-		if len(dropIDs) > 0 && db.Mdb.Where("id IN ?", dropIDs).Delete(&model.Category{}).Error == nil {
-			changed = true
-		}
-	}
 
-	for i := range groups {
-		if !groups[i].Synthetic {
-			continue
-		}
-		key := syntheticRootStableKey(sourceID, groups[i].Name)
-		cat, ok := existingByKey[key]
-		if !ok {
-			cat = model.Category{
-				Pid:       0,
-				Name:      groups[i].Name,
-				StableKey: key,
-				Show:      true,
-				Sort:      groups[i].Sort,
+		staleIDs := make([]int64, 0)
+		for key, cat := range existingByKey {
+			if _, keep := desiredKeys[key]; !keep && cat.Id > 0 {
+				staleIDs = append(staleIDs, cat.Id)
 			}
-			if err := db.Mdb.Create(&cat).Error; err != nil {
-				var again model.Category
-				if db.Mdb.Where("stable_key = ?", key).First(&again).Error != nil {
-					continue
+		}
+		if len(staleIDs) > 0 {
+			var mapped []int64
+			_ = tx.Model(&model.CategoryMapping{}).
+				Where("category_id IN ?", staleIDs).
+				Distinct("category_id").
+				Pluck("category_id", &mapped).Error
+			inUse := make(map[int64]struct{}, len(mapped))
+			for _, id := range mapped {
+				inUse[id] = struct{}{}
+			}
+			dropIDs := make([]int64, 0, len(staleIDs))
+			for _, id := range staleIDs {
+				if _, ok := inUse[id]; !ok {
+					dropIDs = append(dropIDs, id)
 				}
-				cat = again
-			} else {
-				changed = true
 			}
-			existingByKey[key] = cat
-		} else if cat.Name != groups[i].Name {
-			if db.Mdb.Model(&model.Category{}).Where("id = ?", cat.Id).Update("name", groups[i].Name).Error == nil {
-				cat.Name = groups[i].Name
+			if len(dropIDs) > 0 && tx.Where("id IN ?", dropIDs).Delete(&model.Category{}).Error == nil {
 				changed = true
 			}
 		}
-		groups[i].CategoryID = cat.Id
-		groups[i].Show = cat.Show
-		groups[i].Sort = cat.Sort
-		groups[i].ID = allocateSyntheticTypeID(cat.Id, usedIDs)
-		for j := range groups[i].Children {
-			groups[i].Children[j].Parent = groups[i].ID
+
+		for i := range groups {
+			if !groups[i].Synthetic {
+				continue
+			}
+			key := syntheticRootStableKey(sourceID, groups[i].Name)
+			cat, ok := existingByKey[key]
+			if !ok {
+				cat = model.Category{
+					Pid:       0,
+					Name:      groups[i].Name,
+					StableKey: key,
+					Show:      true,
+					Sort:      groups[i].Sort,
+				}
+				if err := tx.Create(&cat).Error; err != nil {
+					var again model.Category
+					if tx.Where("stable_key = ?", key).First(&again).Error != nil {
+						continue
+					}
+					cat = again
+				} else {
+					changed = true
+				}
+				existingByKey[key] = cat
+			} else if cat.Name != groups[i].Name {
+				if tx.Model(&model.Category{}).Where("id = ?", cat.Id).Update("name", groups[i].Name).Error == nil {
+					cat.Name = groups[i].Name
+					changed = true
+				}
+			}
+			groups[i].CategoryID = cat.Id
+			groups[i].Show = cat.Show
+			groups[i].Sort = cat.Sort
+			groups[i].ID = allocateSyntheticTypeID(cat.Id, usedIDs)
 		}
-	}
+		return nil
+	})
 	if changed {
 		taxonomy.RefreshCategoryCache()
 	}

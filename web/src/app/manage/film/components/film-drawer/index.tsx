@@ -66,6 +66,7 @@ export default function FilmDrawer({
   const loadedDetailRef = useRef<any>(null);
   const [loadedDetail, setLoadedDetail] = useState<any>(null);
   const [isManualFilm, setIsManualFilm] = useState(false);
+  const [playOwnerSourceId, setPlayOwnerSourceId] = useState("");
   const allCategoryListRef = useRef<any[]>([]);
 
   const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
@@ -128,9 +129,8 @@ export default function FilmDrawer({
   );
 
   const populateForm = useCallback(
-    (filmData: any, categoryList: any[]) => {
+    (filmData: any, categoryList: any[], isManual = false) => {
       if (!filmData) return;
-      const desc = filmData.descriptor || {};
       const isCustom = filmData.isCustomPicture === true;
       const displayPic = String(filmData.picture || "").trim();
       const savedCustom = String(filmData.customPicture || "").trim();
@@ -138,12 +138,29 @@ export default function FilmDrawer({
       const slidePic = filmData.customPictureSlide || filmData.pictureSlide || "";
       const cat = resolveCategoryFields(filmData, categoryList || allCategoryListRef.current);
       const allLines = Array.isArray(filmData.list) ? (filmData.list as PlayLine[]) : [];
-      const fallbackSourceId = String(filmData.firstSourceId || filmData.sourceId || "").trim();
+      const fallbackSourceId = String(
+        filmData.firstSourceId || filmData.sourceId || (isManual ? "manual" : ""),
+      ).trim();
       const primaryLines = allLines.filter((line) => isSourcePlayLine(line, primaryId));
-      const lines =
-        primaryLines.length > 0 || !filmData.isManualFilm || !fallbackSourceId
-          ? primaryLines
-          : allLines.filter((line) => isSourcePlayLine(line, fallbackSourceId));
+      let resolvedOwnerSourceId = primaryId;
+      let lines = primaryLines;
+      if (primaryLines.length === 0 && isManual) {
+        if (fallbackSourceId) {
+          const fallbackLines = allLines.filter((line) => isSourcePlayLine(line, fallbackSourceId));
+          if (fallbackLines.length > 0) {
+            lines = fallbackLines;
+            resolvedOwnerSourceId = fallbackSourceId;
+          }
+        }
+        if (lines.length === 0) {
+          const manualLines = allLines.filter((line) => isSourcePlayLine(line, "manual"));
+          if (manualLines.length > 0) {
+            lines = manualLines;
+            resolvedOwnerSourceId = "manual";
+          }
+        }
+      }
+      setPlayOwnerSourceId(resolvedOwnerSourceId);
       setPlayLines(lines);
       const initialLinks: Record<string, string> = {};
       const initialNames: Record<string, string> = {};
@@ -154,7 +171,7 @@ export default function FilmDrawer({
       });
       setLineLinksMap(initialLinks);
       setLineNamesMap(initialNames);
-      const ownerLine = lines.find((l) => isSourcePlayLine(l, primaryId)) || lines[0];
+      const ownerLine = lines.find((l) => isSourcePlayLine(l, resolvedOwnerSourceId)) || lines[0];
 
       const formattedPlayLink =
         ownerLine && ownerLine.linkList && ownerLine.linkList.length > 0
@@ -200,7 +217,8 @@ export default function FilmDrawer({
           if (cancelled) return;
           if (resp.code === 0 && resp.data) {
             const filmData = resp.data.detail || resp.data;
-            setIsManualFilm(Boolean(resp.data.isManualFilm));
+            const manual = Boolean(resp.data.isManualFilm);
+            setIsManualFilm(manual);
             loadedDetailRef.current = filmData;
             setLoadedDetail(filmData);
 
@@ -208,7 +226,7 @@ export default function FilmDrawer({
             if (cancelled) return;
             const categoryList =
               optionsData?.allCategories || allCategoryListRef.current || [];
-            populateForm(filmData, categoryList);
+            populateForm(filmData, categoryList, manual);
           } else {
             message.error(resp.msg || "获取失败");
           }
@@ -223,6 +241,7 @@ export default function FilmDrawer({
       loadedDetailRef.current = null;
       setLoadedDetail(null);
       setIsManualFilm(true);
+      setPlayOwnerSourceId(primaryId);
       setPlayLines([]);
       loadCategoryTree()
         .then((data) => {
@@ -361,11 +380,18 @@ export default function FilmDrawer({
 
       if (!filmId || isManualFilm) {
         const primarySourceId = String(payload.sourceId || "").trim();
-        const fallbackSourceId = String(loadedDetailRef.current?.firstSourceId || loadedDetailRef.current?.sourceId || "").trim();
-        const primaryOwnerLines = playLines.filter((l) => !primarySourceId || isSourcePlayLine(l, primarySourceId));
+        const effectiveOwnerSourceId = String(playOwnerSourceId || primarySourceId).trim();
+        const fallbackSourceId = String(
+          loadedDetailRef.current?.firstSourceId ||
+            loadedDetailRef.current?.sourceId ||
+            (isManualFilm ? "manual" : ""),
+        ).trim();
+        const directOwnerLines = playLines.filter(
+          (l) => !effectiveOwnerSourceId || isSourcePlayLine(l, effectiveOwnerSourceId),
+        );
         const ownerLines =
-          primaryOwnerLines.length > 0 || !isManualFilm || !fallbackSourceId
-            ? primaryOwnerLines
+          directOwnerLines.length > 0 || !isManualFilm || !fallbackSourceId
+            ? directOwnerLines
             : playLines.filter((l) => isSourcePlayLine(l, fallbackSourceId));
         const mergedPlay = mergePlayLinesForSave(ownerLines, lineLinksMap, values.playLink, playForm, lineNamesMap);
         if (!String(mergedPlay.playLink || "").trim()) {
@@ -398,6 +424,7 @@ export default function FilmDrawer({
     setTmdbSnapshot(null);
     setLoadedDetail(null);
     setIsManualFilm(false);
+    setPlayOwnerSourceId("");
     setPlayLines([]);
     setLineLinksMap({});
     setLineNamesMap({});
@@ -495,7 +522,7 @@ export default function FilmDrawer({
                 lines={playLines}
                 filmId={filmId}
                 editable={!filmId || isManualFilm}
-                ownerSourceId={primaryId}
+                ownerSourceId={playOwnerSourceId || primaryId}
                 lineLinks={lineLinksMap}
                 lineNames={lineNamesMap}
                 onLineLinkChange={(lineKey, newLink) => {

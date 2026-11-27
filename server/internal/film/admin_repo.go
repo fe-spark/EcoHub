@@ -2,6 +2,7 @@ package film
 
 import (
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"server/internal/config"
 	"server/internal/film/cache"
 	"server/internal/film/catalog"
@@ -45,10 +46,17 @@ func DelFilmSearchBatchDB(ids []int64) ([]int64, []int64, error) {
 		return nil, nil, nil
 	}
 
-	var indexes []model.FilmIndex
-	_ = db.Mdb.Where("mid IN ?", cleanIds).Find(&indexes)
+	unlockMids := writer.LockFilmMids(cleanIds)
+	defer unlockMids()
 
+	var indexes []model.FilmIndex
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("mid IN ?", cleanIds).
+			Order("mid ASC").
+			Find(&indexes).Error; err != nil {
+			return err
+		}
 		return catalog.DeleteFilmCascadeTx(tx, cleanIds)
 	})
 	if err != nil {

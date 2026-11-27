@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"sync"
 
+	"server/internal/access"
 	"server/internal/collect"
 	"server/internal/collectctl"
 	"server/internal/film"
@@ -43,7 +44,10 @@ func Wire() {
 			_, err := portal.IndexSvc.IndexPage(targetSourceID)
 			return err
 		}
-		siteops.OnResetRecoverAccess = func() { _ = InitSvc.AnalyticsConfigInit() }
+		siteops.OnResetRecoverAccess = func() {
+			access.StartCollector()
+			_ = InitSvc.AnalyticsConfigInit()
+		}
 		siteops.OnResetRecoverCrontab = func() { _ = InitSvc.CollectCrontabInit() }
 		siteops.OnResetReinitSite = InitSvc.ReinitAfterReset
 	})

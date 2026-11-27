@@ -213,7 +213,14 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) (map[string
 		})
 	}
 
-	counts, err := countSourceTypeTagsFromIndex(version, sourceTypeFilterKeys(sourceId, typeID))
+	filterKeys := sourceTypeFilterKeys(sourceId, typeID)
+	var counts map[string]map[string]int
+	var err error
+	if primary := currentPrimarySourceID(); primary != "" && strings.TrimSpace(sourceId) == primary {
+		counts, err = countSourceTypeTagsFromIndex(version, filterKeys)
+	} else {
+		counts, err = countSourceTypeTagsFromDB(sourceId, filterKeys)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +299,52 @@ func rawFilterHasDynamicTags(rows []model.SearchTagItem) bool {
 		}
 	}
 	return false
+}
+
+func countSourceTypeTagsFromDB(sourceID string, keys []string) (map[string]map[string]int, error) {
+	counts := map[string]map[string]int{
+		"Plot":     {},
+		"Area":     {},
+		"Language": {},
+		"Year":     {},
+	}
+	if db.Mdb == nil {
+		return counts, nil
+	}
+	cleanKeys := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k = strings.TrimSpace(k); k != "" {
+			cleanKeys = append(cleanKeys, k)
+		}
+	}
+	if len(cleanKeys) == 0 {
+		return counts, nil
+	}
+	type tagRow struct {
+		ClassTag string
+		Area     string
+		Language string
+		Year     int64
+	}
+	var rows []tagRow
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("class_tag, area, language, year").
+		Where(model.FilmHasPlaySourceSQL(), sourceID, model.LineKindPlay).
+		Where("root_category_key IN ? OR category_key IN ?", cleanKeys, cleanKeys).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		for _, part := range shared.SplitRawSearchTags(r.ClassTag) {
+			addSourceTypeTagCount(counts["Plot"], shared.NormalizeSearchTagValue("Plot", part))
+		}
+		addSourceTypeTagCount(counts["Area"], shared.NormalizeSearchTagValue("Area", r.Area))
+		addSourceTypeTagCount(counts["Language"], shared.NormalizeSearchTagValue("Language", r.Language))
+		if r.Year > 0 {
+			addSourceTypeTagCount(counts["Year"], fmt.Sprint(r.Year))
+		}
+	}
+	return counts, nil
 }
 
 func isDynamicFilterType(tagType string) bool {

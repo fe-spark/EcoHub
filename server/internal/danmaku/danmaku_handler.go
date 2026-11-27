@@ -67,6 +67,9 @@ func (h *DanmakuHandler) GetDanmaku(c *gin.Context) {
 	case len([]rune(title)) > 120 || episode > 10000:
 		meta.NetworkStatus = networkEmpty
 		meta.NetworkReason = "片名或集数超出匹配范围"
+	case !allowDanmakuSniff(c.ClientIP()):
+		meta.NetworkStatus = networkError
+		meta.NetworkReason = "全网弹幕请求过于频繁，请稍后再试"
 	default:
 		res := fetchSniffedDanmaku(basic.Danmaku, title, episode, true)
 		items = append(items, res.Items...)

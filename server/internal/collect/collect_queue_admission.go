@@ -189,9 +189,9 @@ func indexBuildBlocksCollect() bool {
 		return true
 	}
 	searchReseal.mu.Lock()
-	awaitDone := searchReseal.awaitDone
+	blocked := searchReseal.awaitDone || searchReseal.retryTimer != nil
 	searchReseal.mu.Unlock()
-	return awaitDone
+	return blocked
 }
 
 // collectAdmissionClosed 封口已冻结，或本轮已打开且当前没有采集队列。

@@ -3,6 +3,7 @@ package progress
 import (
 	"context"
 	"log"
+	"slices"
 	"server/internal/model"
 	"sync"
 	"time"
@@ -209,11 +210,18 @@ func FinishRun(ctx context.Context, sourceID string, retErr error) {
 	}
 }
 
+func cloneProgressData(data model.CollectProgress) model.CollectProgress {
+	if data.FailedPages != nil {
+		data.FailedPages = slices.Clone(data.FailedPages)
+	}
+	return data
+}
+
 func Snapshot(sourceID string) (model.CollectProgress, bool) {
 	if val, ok := store.Load(sourceID); ok {
 		state := val.(*progressState)
 		state.mu.RLock()
-		data := state.data
+		data := cloneProgressData(state.data)
 		state.mu.RUnlock()
 		return data, true
 	}

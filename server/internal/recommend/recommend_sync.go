@@ -57,7 +57,7 @@ func (s *HomeRecommendService) syncSingleGroup(ctx context.Context, group model.
 	}
 	limit := int(clampSyncLimit(group.SyncLimit))
 
-	cands, rates, err := hotchart.HotChartsSvc.GetRawCandidatesByKey(chartKey, false)
+	cands, rates, err := hotchart.HotChartsSvc.GetRawCandidatesByKeyCtx(ctx, chartKey, false)
 	if err != nil {
 		return RecommendSyncResult{GroupID: group.Id, Title: group.Title, ChartKey: chartKey}, err
 	}
@@ -80,7 +80,10 @@ func (s *HomeRecommendService) syncSingleGroup(ctx context.Context, group model.
 		})
 	}
 	now := time.Now()
-	if err := ReplaceHomeRecommendGroupItems(ctx, group.Id, group.SourceId, items, &now); err != nil {
+	// 为 DB 落库分配独立短超时，避免外部榜单拉取耗时逼近调用方预算导致落库误报超时。
+	dbCtx, dbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer dbCancel()
+	if err := ReplaceHomeRecommendGroupItems(dbCtx, group.Id, group.SourceId, items, &now); err != nil {
 		return RecommendSyncResult{GroupID: group.Id, Title: group.Title, ChartKey: chartKey, CandidateCount: len(cands)}, err
 	}
 	invalidateHomeCacheForSource(group.SourceId)
@@ -149,6 +152,12 @@ func (s *HomeRecommendService) SyncAllAutoGroups() {
 	}
 	autoSyncRunning = true
 	autoSyncMu.Unlock()
+	defer func() {
+		autoSyncMu.Lock()
+		autoSyncRunning = false
+		autoSyncPending = false
+		autoSyncMu.Unlock()
+	}()
 
 	for {
 		listCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

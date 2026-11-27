@@ -93,7 +93,10 @@ func (s *HomeRecommendService) ListAdmin(ctx context.Context, sourceID string) (
 			mids = append(mids, it.Mid)
 		}
 	}
-	liveByMid, _ := film.LiveBannerSnapshotsByMIDs(ctx, src.Id, mids)
+	liveByMid, err := film.LiveBannerSnapshotsByMIDs(ctx, src.Id, mids)
+	if err != nil {
+		return HomeRecommendListResult{}, err
+	}
 	vis := filmsnapshot.SourceCategoryVisibility(src.Id)
 
 	itemsByGroup := make(map[string][]model.HomeRecommendAdminItem)
@@ -128,7 +131,7 @@ func (s *HomeRecommendService) ListAdmin(ctx context.Context, sourceID string) (
 
 	visibleRoots, visibleCatMap := visibleRootCategories(src.Id)
 	adminCatNames := adminRootCategoryNames(src.Id)
-	catSlots, catInfos, _ := collectCategorySlots(filmsnapshot.GetActiveReadModelVersion(), src.Id, groups, visibleCatMap, false)
+	catSlots, catInfos, _ := collectCategorySlots(ctx, filmsnapshot.GetActiveReadModelVersion(), src.Id, groups, visibleCatMap, false)
 
 	out := make([]model.HomeRecommendAdminGroup, 0, len(groups))
 	for _, g := range groups {
@@ -174,45 +177,43 @@ type InitPresetGroupsResult struct {
 	SyncSummary RecommendBatchSyncResult   `json:"syncSummary"`
 }
 
-// InitPresetGroups 为指定采集站初始化 5 个默认推荐分组（已存在同名或同榜分组则跳过），并反馈首轮同步统计。
+// InitPresetGroups 为指定采集站初始化 5 个默认推荐分组（事务内行锁判重防并发重复插入），并反馈首轮同步统计。
 func (s *HomeRecommendService) InitPresetGroups(ctx context.Context, sourceID string) (InitPresetGroupsResult, error) {
 	src, _, _, err := banner.ResolveBannerSource(sourceID, true)
 	if err != nil {
 		return InitPresetGroupsResult{}, err
 	}
-	existing, err := ListHomeRecommendGroups(ctx, src.Id)
+	createdGroups, err := CreateMissingGroupsAtomicTx(ctx, src.Id, func(existing []model.HomeRecommendGroup, maxSort int64) []model.HomeRecommendGroup {
+		existByChart := make(map[string]bool, len(existing))
+		existByTitle := make(map[string]bool, len(existing))
+		for _, g := range existing {
+			if g.SyncChartKey != "" {
+				existByChart[g.SyncChartKey] = true
+			}
+			existByTitle[g.Title] = true
+		}
+		out := make([]model.HomeRecommendGroup, 0, len(RecommendChartOptions))
+		for _, opt := range RecommendChartOptions {
+			if existByChart[opt.Key] || existByTitle[opt.Title] {
+				continue
+			}
+			maxSort++
+			out = append(out, model.HomeRecommendGroup{
+				SourceId:     src.Id,
+				Title:        opt.Title,
+				Sort:         maxSort,
+				Enabled:      true,
+				AutoSync:     true,
+				SyncChartKey: opt.Key,
+				SyncLimit:    recommendSyncLimitDefault,
+			})
+		}
+		return out
+	})
 	if err != nil {
 		return InitPresetGroupsResult{}, err
 	}
-	existByChart := make(map[string]bool, len(existing))
-	existByTitle := make(map[string]bool, len(existing))
-	for _, g := range existing {
-		if g.SyncChartKey != "" {
-			existByChart[g.SyncChartKey] = true
-		}
-		existByTitle[g.Title] = true
-	}
-
-	createdGroups := make([]model.HomeRecommendGroup, 0, len(RecommendChartOptions))
-	for _, opt := range RecommendChartOptions {
-		if existByChart[opt.Key] || existByTitle[opt.Title] {
-			continue
-		}
-		created, err := CreateHomeRecommendGroup(ctx, model.HomeRecommendGroup{
-			SourceId:     src.Id,
-			Title:        opt.Title,
-			Enabled:      true,
-			AutoSync:     true,
-			SyncChartKey: opt.Key,
-			SyncLimit:    recommendSyncLimitDefault,
-		})
-		if err != nil {
-			return InitPresetGroupsResult{}, err
-		}
-		createdGroups = append(createdGroups, created)
-	}
 	summary := s.syncGroupList(ctx, createdGroups)
-	_ = MarkSourceHomeRecommendInited(ctx, src.Id)
 	invalidateHomeCacheForSource(src.Id)
 	groups, err := ListHomeRecommendGroups(ctx, src.Id)
 	if err != nil {
@@ -314,69 +315,66 @@ func clampSyncLimit(limit int64) int64 {
 }
 
 func (s *HomeRecommendService) UpdateGroup(ctx context.Context, id string, req RecommendGroupInput) error {
-	existing, err := GetHomeRecommendGroup(ctx, id)
+	updated, syncNow, err := UpdateHomeRecommendGroupAtomic(ctx, id, func(existing model.HomeRecommendGroup) (model.HomeRecommendGroup, bool, bool, error) {
+		prevCatID := existing.CategoryId
+		prevChartKey := existing.SyncChartKey
+		if strings.TrimSpace(req.Title) != "" {
+			existing.Title = strings.TrimSpace(req.Title)
+		}
+		if req.Enabled != nil {
+			existing.Enabled = *req.Enabled
+		}
+		if req.SyncChartKey != nil {
+			chartKey := strings.TrimSpace(*req.SyncChartKey)
+			if chartKey != "" && !isValidChartKey(chartKey) {
+				return model.HomeRecommendGroup{}, false, false, errors.New("请选择有效的热门榜单类型")
+			}
+			existing.SyncChartKey = chartKey
+			if chartKey != "" {
+				existing.CategoryId = 0
+			}
+		}
+		if req.CategoryId != nil {
+			catID := *req.CategoryId
+			if catID < 0 {
+				catID = 0
+			}
+			if catID > 0 {
+				if existing.SyncChartKey != "" {
+					return model.HomeRecommendGroup{}, false, false, errors.New("榜单同步与站点分类不能同时绑定")
+				}
+				if catID != prevCatID {
+					_, visibleCatMap := visibleRootCategories(existing.SourceId)
+					if cat, ok := visibleCatMap[catID]; !ok || !cat.Show {
+						return model.HomeRecommendGroup{}, false, false, errors.New("请选择当前站点显示中的一级分类")
+					}
+				}
+			}
+			existing.CategoryId = catID
+		}
+		if req.AutoSync != nil {
+			existing.AutoSync = *req.AutoSync
+		}
+		if existing.CategoryId > 0 || existing.SyncChartKey == "" {
+			if req.AutoSync != nil && *req.AutoSync {
+				return model.HomeRecommendGroup{}, false, false, errors.New("开启自动跟随榜单时，请选择对应榜单")
+			}
+			existing.AutoSync = false
+		}
+		if req.SyncLimit > 0 {
+			existing.SyncLimit = clampSyncLimit(req.SyncLimit)
+		}
+		catChanged := existing.CategoryId > 0 && existing.CategoryId != prevCatID
+		chartChanged := existing.SyncChartKey != "" && existing.SyncChartKey != prevChartKey
+		return existing, catChanged || chartChanged, chartChanged, nil
+	})
 	if err != nil {
 		return err
 	}
-	prevCatID := existing.CategoryId
-	prevChartKey := existing.SyncChartKey
-	if strings.TrimSpace(req.Title) != "" {
-		existing.Title = strings.TrimSpace(req.Title)
+	if syncNow {
+		_, _ = s.SyncGroupNow(ctx, updated.Id)
 	}
-	if req.Enabled != nil {
-		existing.Enabled = *req.Enabled
-	}
-	if req.SyncChartKey != nil {
-		chartKey := strings.TrimSpace(*req.SyncChartKey)
-		if chartKey != "" && !isValidChartKey(chartKey) {
-			return errors.New("请选择有效的热门榜单类型")
-		}
-		existing.SyncChartKey = chartKey
-		if chartKey != "" {
-			existing.CategoryId = 0
-		}
-	}
-	if req.CategoryId != nil {
-		catID := *req.CategoryId
-		if catID < 0 {
-			catID = 0
-		}
-		if catID > 0 {
-			if existing.SyncChartKey != "" {
-				return errors.New("榜单同步与站点分类不能同时绑定")
-			}
-			if catID != prevCatID {
-				_, visibleCatMap := visibleRootCategories(existing.SourceId)
-				if cat, ok := visibleCatMap[catID]; !ok || !cat.Show {
-					return errors.New("请选择当前站点显示中的一级分类")
-				}
-			}
-		}
-		existing.CategoryId = catID
-	}
-	if req.AutoSync != nil {
-		existing.AutoSync = *req.AutoSync
-	}
-	if existing.CategoryId > 0 || existing.SyncChartKey == "" {
-		if req.AutoSync != nil && *req.AutoSync {
-			return errors.New("开启自动跟随榜单时，请选择对应榜单")
-		}
-		existing.AutoSync = false
-	}
-	if req.SyncLimit > 0 {
-		existing.SyncLimit = clampSyncLimit(req.SyncLimit)
-	}
-	if err := UpdateHomeRecommendGroup(ctx, existing); err != nil {
-		return err
-	}
-	if existing.CategoryId > 0 && existing.CategoryId != prevCatID {
-		_ = ClearHomeRecommendGroupItems(ctx, existing.Id)
-	}
-	if existing.SyncChartKey != "" && existing.SyncChartKey != prevChartKey {
-		_ = ClearHomeRecommendGroupItems(ctx, existing.Id)
-		_, _ = s.SyncGroupNow(ctx, existing.Id)
-	}
-	invalidateHomeCacheForSource(existing.SourceId)
+	invalidateHomeCacheForSource(updated.SourceId)
 	return nil
 }
 

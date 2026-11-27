@@ -144,13 +144,5 @@ func SaveTMDBConfig(cfg model.TMDBConfig) error {
 	}); err != nil {
 		return err
 	}
-	return cacheTMDBConfig(cfg)
-}
-
-func cacheTMDBConfig(cfg model.TMDBConfig) error {
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return repobase.WriteConfigCache(config.TMDBConfigKey, string(data))
+	return repobase.DropConfigCache(config.TMDBConfigKey)
 }

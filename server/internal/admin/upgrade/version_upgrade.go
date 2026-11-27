@@ -196,9 +196,6 @@ func buildReplacementBody(old containerInspect, image string) (map[string]any, m
 	var hostConfig any = old.HostConfig
 	var hc map[string]any
 	if json.Unmarshal(old.HostConfig, &hc) == nil {
-		if mounts, ok := hc["Mounts"].([]any); ok && len(mounts) > 0 {
-			delete(hc, "Binds")
-		}
 		hostConfig = hc
 	}
 

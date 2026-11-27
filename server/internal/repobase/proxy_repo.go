@@ -112,15 +112,7 @@ func SaveProxyConfig(cfg model.ProxyConfig) error {
 		return err
 	}
 
-	return cacheProxyConfig(cfg)
-}
-
-func cacheProxyConfig(cfg model.ProxyConfig) error {
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return WriteConfigCache(config.ProxyConfigKey, string(data))
+	return DropConfigCache(config.ProxyConfigKey)
 }
 
 func proxyChannel(cfg model.ProxyConfig, enabled bool) (bool, string) {

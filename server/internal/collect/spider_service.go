@@ -82,14 +82,16 @@ func (s *SpiderService) SyncSourceCategoriesAsync(id string) {
 	if id == "" {
 		return
 	}
-	progress.BroadcastCategoryStatus(id, "syncing")
+	if ok, _ := progress.TryBeginCategorySync(id); !ok {
+		return
+	}
 	categorySyncs.Add(1)
-	go func() {
+	utils.GoSafe("异步同步采集站分类", func() {
 		defer categorySyncs.Done()
-		if _, err := s.SyncSourceCategories(id, ""); err != nil {
+		if _, err := s.syncSourceCategoriesClaimed(id, ""); err != nil {
 			syslog.Errorf("[SpiderService] 异步同步分类失败 id=%s: %v", id, err)
 		}
-	}()
+	})
 }
 
 // SyncAllSourceCategories 按现有采集站逐个拉取分类。某一站失败不影响其他站，最后返回首个错误。
@@ -101,20 +103,25 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 	if len(sources) == 0 {
 		return errors.New("没有采集站，不能同步分类")
 	}
-	for i := range sources {
-		progress.BroadcastCategoryStatus(sources[i].Id, "syncing")
-	}
 	var first error
 	failed := 0
 	for i := range sources {
 		source := sources[i]
-		pageCount, err := CollectCategory(&source)
-		if err != nil {
-			log.Printf("[SpiderService] 采集站分类同步失败: name=%s id=%s err=%v", source.Name, source.Id, err)
+		if ok, reason := progress.TryBeginCategorySync(source.Id); !ok {
+			if first == nil && reason != "" {
+				first = fmt.Errorf("%s: %s", source.Name, reason)
+			}
+			continue
+		}
+		progress.BroadcastCategoryStatus(source.Id, "syncing")
+		pageCount, syncErr := CollectCategory(&source)
+		progress.SetCategorySyncing(source.Id, false)
+		if syncErr != nil {
+			log.Printf("[SpiderService] 采集站分类同步失败: name=%s id=%s err=%v", source.Name, source.Id, syncErr)
 			progress.BroadcastCategoryStatus(source.Id, "failed")
 			failed++
 			if first == nil {
-				first = fmt.Errorf("%s: %w", source.Name, err)
+				first = fmt.Errorf("%s: %w", source.Name, syncErr)
 			}
 			continue
 		}
@@ -186,11 +193,15 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 		if progress.IsSourceDeleting(source.Id) {
 			continue
 		}
+		if ok, _ := progress.TryBeginCategorySync(source.Id); !ok {
+			continue
+		}
 		// 真正开始当前站点拉取时，才广播 syncing 状态，避免全局提前虚挂
 		progress.BroadcastCategoryStatus(source.Id, "syncing")
 		log.Printf("[SpiderService] 采集站还没有分类副本，开始补拉: name=%s id=%s", source.Name, source.Id)
 
 		pageCount, err := CollectCategory(&source)
+		progress.SetCategorySyncing(source.Id, false)
 		if err != nil {
 			log.Printf("[SpiderService] 补拉采集站分类失败: name=%s id=%s err=%v", source.Name, source.Id, err)
 			if sourcecatalog.FindCollectSourceById(source.Id) == nil {

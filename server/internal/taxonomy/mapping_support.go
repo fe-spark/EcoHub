@@ -1,33 +1,54 @@
 package taxonomy
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 )
 
+var reloadMappingMu sync.Mutex
+
 func InitMappingEngine() {
-	ReloadMappingRules()
+	_ = ReloadMappingRules()
 }
 
-func ReloadMappingRules() {
+// ReloadMappingRules 从数据库全量重载映射与分类关系快照；任一查询失败均保持原快照不覆盖。
+func ReloadMappingRules() error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接，保留现有映射快照")
+	}
+	reloadMappingMu.Lock()
+	defer reloadMappingMu.Unlock()
+
 	var rules []model.MappingRule
-	db.Mdb.Order("id ASC").Find(&rules)
+	if err := db.Mdb.Order("id ASC").Find(&rules).Error; err != nil {
+		syslog.Errorf("[Taxonomy] 重载映射规则失败（保留旧快照）: %v", err)
+		return err
+	}
 
 	var catMappings []model.CategoryMapping
-	db.Mdb.Find(&catMappings)
-	newSourceMap := make(map[string]int64)
+	if err := db.Mdb.Find(&catMappings).Error; err != nil {
+		syslog.Errorf("[Taxonomy] 重载分类映射失败（保留旧快照）: %v", err)
+		return err
+	}
+	newSourceMap := make(map[string]int64, len(catMappings))
 	for _, m := range catMappings {
 		newSourceMap[fmt.Sprintf("%s_%d", m.SourceId, m.SourceTypeId)] = m.CategoryId
 	}
 
 	var srcCats []model.SourceCategory
-	db.Mdb.Find(&srcCats)
+	if err := db.Mdb.Find(&srcCats).Error; err != nil {
+		syslog.Errorf("[Taxonomy] 重载原始来源分类失败（保留旧快照）: %v", err)
+		return err
+	}
 	newSrcCats := make(map[string]SourceCategoryInfo, len(srcCats))
 	for _, sc := range srcCats {
 		newSrcCats[fmt.Sprintf("%s_%d", sc.SourceId, sc.SourceTypeId)] = SourceCategoryInfo{
@@ -76,6 +97,7 @@ func ReloadMappingRules() {
 	})
 
 	RefreshCategoryCache()
+	return nil
 }
 
 func TouchRuleVersion() {

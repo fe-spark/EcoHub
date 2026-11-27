@@ -12,6 +12,7 @@ import (
 	"server/internal/mediaproxy"
 	"server/internal/model"
 	"server/internal/sourcecatalog"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -376,4 +377,19 @@ func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.Catego
 	cache.ClearTVBoxConfigCache()
 	cache.ClearTVBoxListCache()
 	return nil
+}
+
+func parseCategoryKeyTypeID(key string) int64 {
+	if key == "" {
+		return 0
+	}
+	parts := strings.Split(key, ":")
+	if len(parts) < 3 {
+		return 0
+	}
+	id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
 }

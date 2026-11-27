@@ -252,25 +252,25 @@ func MatchHotChartCandidates(version, sourceID string, candidates []HotChartCand
 	if len(neededTitles) > 0 {
 		idx := activeFilmSearchMetas.Load()
 		if idx != nil && idx.PrimaryID == sourceID {
-			for _, meta := range idx.Items {
+			visitMeta := func(meta *FilmSearchMeta) {
 				if meta == nil || meta.Mid <= 0 || !meta.HasPlaySource(sourceID) {
-					continue
+					return
 				}
 				if _, excluded := excludeSet[meta.Mid]; excluded {
-					continue
+					return
+				}
+				if _, seen := seenCandMid[meta.Mid]; seen {
+					return
 				}
 				norm := utils.NormalizeIdentityTitle(meta.Item.Name)
 				if norm == "" {
-					continue
+					return
 				}
 				if _, needed := neededTitles[norm]; !needed {
-					continue
+					return
 				}
 				if !vis(meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
-					continue
-				}
-				if _, seen := seenCandMid[meta.Mid]; seen {
-					continue
+					return
 				}
 				seenCandMid[meta.Mid] = struct{}{}
 				entriesByNorm[norm] = append(entriesByNorm[norm], candEntry{
@@ -280,6 +280,55 @@ func MatchHotChartCandidates(version, sourceID string, candidates []HotChartCand
 					year: meta.Item.Year,
 					hits: meta.Item.Hits,
 				})
+			}
+
+			// 优先通过倒排索引按候选标题召回小集合，避免对百万级内存影片全量执行多正则 NormalizeIdentityTitle。
+			fallbackCleanKeys := make(map[string]struct{})
+			checkedPos := make(map[int]struct{})
+			lookupTitle := func(title string) bool {
+				q := utils.BuildQueryContext(title)
+				if q.CleanKey == "" {
+					return true
+				}
+				if idx.SearchPosts != nil {
+					if positions, narrowed := idx.SearchPosts.lookup(q); narrowed {
+						for _, pos := range positions {
+							p := int(pos)
+							if p < 0 || p >= len(idx.Items) {
+								continue
+							}
+							if _, done := checkedPos[p]; done {
+								continue
+							}
+							checkedPos[p] = struct{}{}
+							visitMeta(idx.Items[p])
+						}
+						return true
+					}
+				}
+				fallbackCleanKeys[q.CleanKey] = struct{}{}
+				return false
+			}
+			for _, rawTitle := range unmatchedRawTitles {
+				lookupTitle(rawTitle)
+			}
+			for norm := range neededTitles {
+				lookupTitle(norm)
+			}
+			if len(fallbackCleanKeys) > 0 {
+				// 极短标题（如单字片名）倒排无法收窄时，仅对 CleanName 精确相等的条目调用 NormalizeIdentityTitle。
+				for pos, meta := range idx.Items {
+					if meta == nil || meta.Mid <= 0 {
+						continue
+					}
+					if _, done := checkedPos[pos]; done {
+						continue
+					}
+					if _, ok := fallbackCleanKeys[meta.Item.CleanName]; !ok {
+						continue
+					}
+					visitMeta(meta)
+				}
 			}
 		} else if db.Mdb != nil && len(unmatchedRawTitles) > 0 {
 			// 非主站或内存索引未覆盖该站时，使用 idx_film_index_name + 线路主键做精准回退
@@ -352,10 +401,18 @@ func ListSnapshotsByMIDsForHotCharts(ctx context.Context, mids []int64) ([]model
 
 // MovieBasicInfosByMIDs 按给定 Mid 列表批量组装前台展示用的影片基础信息映射。
 func MovieBasicInfosByMIDs(version string, mids []int64) (map[int64]model.MovieBasicInfo, error) {
+	return MovieBasicInfosByMIDsCtx(context.Background(), version, mids)
+}
+
+// MovieBasicInfosByMIDsCtx 按给定 Mid 列表批量组装前台展示用的影片基础信息映射，受 ctx 超时控制。
+func MovieBasicInfosByMIDsCtx(ctx context.Context, version string, mids []int64) (map[int64]model.MovieBasicInfo, error) {
 	if len(mids) == 0 {
 		return map[int64]model.MovieBasicInfo{}, nil
 	}
-	snaps, err := GetSnapshotsByMidsOrdered(version, mids)
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	snaps, err := ListSnapshotsByMIDsForHotCharts(ctx, mids)
 	if err != nil {
 		return nil, err
 	}

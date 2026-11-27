@@ -81,11 +81,7 @@ func decodeAnalyticsConfig(raw string) (model.AnalyticsConfig, error) {
 }
 
 func cacheAnalyticsConfig(cfg model.AnalyticsConfig) error {
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	return repobase.WriteConfigCache(config.AnalyticsConfigKey, string(data))
+	return repobase.DropConfigCache(config.AnalyticsConfigKey)
 }
 
 // GetAndSyncAnalyticsConfig 获取数据分析配置并同步运行状态

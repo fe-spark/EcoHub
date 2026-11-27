@@ -112,22 +112,44 @@ func WithSourceExclusive(id string, fn func() error) error {
 // SyncSourceCategories 拉取一个采集站的分类，并写入该站自己的副本。支持变更对比与确认。
 func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.CategorySyncResult, error) {
 	id = strings.TrimSpace(id)
+	if id == "" {
+		return model.CategorySyncResult{}, errors.New("采集站信息不存在")
+	}
+	if sourcecatalog.FindCollectSourceById(id) == nil {
+		progress.BroadcastCategoryStatus(id, "idle")
+		return model.CategorySyncResult{}, errors.New("采集站信息不存在")
+	}
+	if ok, reason := progress.TryBeginCategorySync(id); !ok {
+		return model.CategorySyncResult{}, errors.New(reason)
+	}
+	return s.syncSourceCategoriesClaimed(id, confirm)
+}
+
+func (s *SpiderService) syncSourceCategoriesClaimed(id, confirm string) (model.CategorySyncResult, error) {
+	id = strings.TrimSpace(id)
 	confirm = strings.TrimSpace(confirm)
+	settled := false
+	defer func() {
+		if !settled && id != "" {
+			progress.SetCategorySyncing(id, false)
+		}
+	}()
 
 	source := sourcecatalog.FindCollectSourceById(id)
 	if source == nil {
 		if id != "" {
+			settled = true
 			progress.BroadcastCategoryStatus(id, "idle")
 		}
 		return model.CategorySyncResult{}, errors.New("采集站信息不存在")
 	}
 
-	progress.BroadcastCategoryStatus(source.Id, "syncing")
 	log.Printf("[SpiderService] 拉取采集站分类: name=%s id=%s uri=%s confirm=%s", source.Name, source.Id, source.Uri, confirm)
 
 	categoryTree, pageCount, err := FetchCategoryTree(source)
 	if err != nil {
 		log.Printf("[SpiderService] 采集站分类拉取失败: name=%s id=%s err=%v", source.Name, source.Id, err)
+		settled = true
 		if sourcecatalog.FindCollectSourceById(source.Id) == nil {
 			progress.BroadcastCategoryStatus(source.Id, "idle")
 		} else {
@@ -140,11 +162,13 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 		changes, previewErr := catalog.PreviewSourceCategoryChanges(source.Id, categoryTree)
 		if previewErr != nil {
 			log.Printf("[SpiderService] 采集站分类预览失败: name=%s id=%s err=%v", source.Name, source.Id, previewErr)
+			settled = true
 			progress.BroadcastCategoryStatus(source.Id, "failed")
 			return model.CategorySyncResult{}, previewErr
 		}
 		if len(changes) > 0 {
 			log.Printf("[SpiderService] 采集站分类树发生变化，等待确认: name=%s id=%s count=%d", source.Name, source.Id, len(changes))
+			settled = true
 			progress.BroadcastCategoryConfirm(source.Id, source.Name, changes)
 			return model.CategorySyncResult{
 				NeedConfirm:   true,
@@ -157,9 +181,21 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 	}
 
 	clearData := confirm == model.CategorySyncClear
+	var releaseStop func()
+	if clearData {
+		stopRelease, stopErr := StopSourceForDelete(source.Id)
+		if stopErr != nil {
+			settled = true
+			progress.BroadcastCategoryStatus(source.Id, "failed")
+			return model.CategorySyncResult{}, fmt.Errorf("清空分类数据前停止该站采集失败: %w", stopErr)
+		}
+		releaseStop = stopRelease
+		defer releaseStop()
+	}
 	applyRes, err := ApplySourceCategory(source, categoryTree, clearData)
 	if err != nil {
 		log.Printf("[SpiderService] 采集站分类同步失败: name=%s id=%s err=%v", source.Name, source.Id, err)
+		settled = true
 		if sourcecatalog.FindCollectSourceById(source.Id) == nil {
 			progress.BroadcastCategoryStatus(source.Id, "idle")
 		} else {
@@ -189,6 +225,7 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 		}
 	}
 
+	settled = true
 	progress.BroadcastCategoryReadyMessage(source.Id, message, applyRes.DataCleared, pageCount)
 	return model.CategorySyncResult{
 		NeedConfirm:   false,

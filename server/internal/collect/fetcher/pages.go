@@ -38,6 +38,8 @@ const (
 	// consecutiveFetchFailLimit 连续这么多页抓取失败先暂停一次。
 	// 暂停结束后再连续这么多页失败，才中断本站这一轮。
 	consecutiveFetchFailLimit = 20
+	// consecutiveEmptyPageLimit 非定向全量/增量爬页时，连续超过该页数均返回空列表则提前收尾，防止恶意虚假总页数无限空转。
+	consecutiveEmptyPageLimit = 50
 	// progressLogPageStep 采集进度日志的页步长。
 	progressLogPageStep = 100
 	// failureLogStep 失败日志的步长。
@@ -72,6 +74,9 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	if totalWork <= 0 {
 		return false, 0, 0, nil, nil
 	}
+	if totalWork > MaxCollectPageCount {
+		return false, 0, 0, nil, fmt.Errorf("采集页数 %d 超过最大限制 %d", totalWork, MaxCollectPageCount)
+	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	fetches := newCollectFetch(ctx)
@@ -82,15 +87,7 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 		maxWorkers = totalWork
 	}
 
-	seed := make([]int, 0, totalWork)
-	if useTargetPages {
-		seed = append(seed, targetPages...)
-	} else {
-		for pg := 1; pg <= pageCount; pg++ {
-			seed = append(seed, pg)
-		}
-	}
-	pages := newPageFetchQueue(seed)
+	pages := newPageFetchQueue(pageCount, targetPages)
 	go func() {
 		<-ctx.Done()
 		pages.close()
@@ -100,6 +97,8 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 	var writeWG sync.WaitGroup
 	streak, stopStreakWait := newFetchStreak(ctx, s.Name)
 	defer stopStreakWait()
+	var emptyPageStreak atomic.Int64
+	var emptyStopOnce sync.Once
 	var stopErr error
 	var stoppedByStreak atomic.Bool
 	var stopOnce sync.Once
@@ -267,21 +266,19 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 						stopForStreak()
 					}
 				}
-				select {
-				case <-ctx.Done():
+				pg, ok := pages.next(ctx)
+				if !ok {
+					abandonStreak()
+					if ctx.Err() != nil {
+						markStopped()
+					}
+					return
+				}
+				if ctx.Err() != nil {
 					abandonStreak()
 					markStopped()
 					return
-				case pg, ok := <-pages.ch:
-					if !ok {
-						abandonStreak()
-						return
-					}
-					if ctx.Err() != nil {
-						abandonStreak()
-						markStopped()
-						return
-					}
+				}
 					progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 						if progress.IsTerminalStatus(cur.Status) || cur.Status == progress.StatusStopping || cur.Status == progress.StatusPaused {
 							return
@@ -349,6 +346,16 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 						markStopped()
 						return
 					}
+					if !useTargetPages && pageCount > consecutiveEmptyPageLimit {
+						if len(list) > 0 {
+							emptyPageStreak.Store(0)
+						} else if emptyPageStreak.Add(1) >= consecutiveEmptyPageLimit {
+							emptyStopOnce.Do(func() {
+								log.Printf("[Spider] 站点 %s 连续 %d 页返回空列表，提前结束后续分页抓取 (totalWork=%d)", s.Name, consecutiveEmptyPageLimit, totalWork)
+								pages.close()
+							})
+						}
+					}
 					page := pg
 					items := list
 					writeWG.Add(1)
@@ -382,7 +389,6 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 						recordPageFailure(page, "enqueue", submitErr)
 						continue
 					}
-				}
 			}
 		}(i)
 	}
@@ -395,6 +401,14 @@ func CollectPages(parentCtx context.Context, pageCount int, targetPages []int, s
 
 	for completion := range writeCompletions {
 		if completion.Err != nil {
+			if batch != nil {
+				if completion.Unmapped > 0 {
+					batch.AddCategorySkip(s.Id, completion.Unmapped)
+				}
+				if len(completion.AffectedMIDs) > 0 {
+					batch.AddAffectedMIDs(s, h, completion.AffectedMIDs)
+				}
+			}
 			if ctx.Err() != nil || errors.Is(completion.Err, context.Canceled) {
 				continue
 			}

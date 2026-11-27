@@ -274,10 +274,7 @@ func ReplaceMappingRules(exports []model.MappingRuleExport) error {
 		rows := make([]model.MappingRule, 0, len(exports))
 		for _, item := range exports {
 			group := strings.TrimSpace(item.Group)
-			matchType := strings.TrimSpace(item.MatchType)
-			if matchType == "" {
-				matchType = "exact"
-			}
+			matchType := normalizeMappingRuleMatchType(item.MatchType)
 			sourceID := strings.TrimSpace(item.SourceId)
 			if IsCategoryMappingGroup(group) {
 				if sourceID == "" {

@@ -10,6 +10,7 @@ import (
 	"server/internal/httpx"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,6 +18,16 @@ import (
 type UserHandler struct{}
 
 var UserHd = new(UserHandler)
+
+const (
+	loginWindow           = 10 * time.Minute
+	loginMaxEntries       = 4096
+	loginEvictBatch       = loginMaxEntries / 8
+	loginMaxAccountFails  = 5
+	loginMaxIPFails       = 20
+	loginAccountLockDur   = 30 * time.Second
+	loginIPLockDur        = 60 * time.Second
+)
 
 type loginAttemptState struct {
 	fails     int
@@ -29,20 +40,51 @@ var (
 	loginFailState = map[string]loginAttemptState{}
 )
 
-func loginLimiterKey(c *gin.Context, username string) string {
-	return c.ClientIP() + "|" + strings.ToLower(strings.TrimSpace(username))
+func loginLimiterKeys(c *gin.Context, username string) (ipKey string, ipAcctKey string) {
+	ip := utils.NormalizeClientIPKey(c.ClientIP())
+	return "ip|" + ip, "ipacct|" + ip + "|" + strings.ToLower(strings.TrimSpace(username))
 }
 
-func loginAccountLimiterKey(username string) string {
-	return "acct|" + strings.ToLower(strings.TrimSpace(username))
+func evictLoginAttemptsLocked(now time.Time) {
+	cutoff := now.Add(-loginWindow)
+	for k, st := range loginFailState {
+		if st.lastSeen.Before(cutoff) && !now.Before(st.lockUntil) {
+			delete(loginFailState, k)
+		}
+	}
+	if len(loginFailState) < loginMaxEntries {
+		return
+	}
+	evict := loginEvictBatch
+	for k, st := range loginFailState {
+		if evict <= 0 {
+			break
+		}
+		if now.Before(st.lockUntil) {
+			continue
+		}
+		delete(loginFailState, k)
+		evict--
+	}
+	for k := range loginFailState {
+		if evict <= 0 {
+			break
+		}
+		delete(loginFailState, k)
+		evict--
+	}
 }
 
-// reserveLoginAttempts 在同一把锁里检查并占一次尝试。并发请求不能都看到「还没锁定」。
-func reserveLoginAttempts(keys ...string) bool {
+// reserveLoginAttempts 在同一把锁里检查并占一次尝试，按纯 IP 与 IP+账号双维度限流（不跨 IP 全局锁死管理员账号）。
+func reserveLoginAttempts(ipKey, ipAcctKey string) bool {
 	now := time.Now()
 	loginFailMu.Lock()
 	defer loginFailMu.Unlock()
-	for _, key := range keys {
+
+	for _, key := range []string{ipKey, ipAcctKey} {
+		if key == "" {
+			continue
+		}
 		st, ok := loginFailState[key]
 		if !ok {
 			continue
@@ -50,27 +92,28 @@ func reserveLoginAttempts(keys ...string) bool {
 		if now.Before(st.lockUntil) {
 			return false
 		}
-		if now.Sub(st.lastSeen) > 10*time.Minute {
+		if now.Sub(st.lastSeen) > loginWindow {
 			delete(loginFailState, key)
 		}
 	}
-	if len(loginFailState) > 4096 {
-		cutoff := now.Add(-10 * time.Minute)
-		for k, st := range loginFailState {
-			if st.lastSeen.Before(cutoff) {
-				delete(loginFailState, k)
-			}
-		}
+	if len(loginFailState) >= loginMaxEntries {
+		evictLoginAttemptsLocked(now)
 	}
-	for _, key := range keys {
+
+	update := func(key string, limit int, dur time.Duration) {
+		if key == "" {
+			return
+		}
 		st := loginFailState[key]
 		st.fails++
 		st.lastSeen = now
-		if st.fails >= 5 {
-			st.lockUntil = now.Add(30 * time.Second)
+		if st.fails >= limit {
+			st.lockUntil = now.Add(dur)
 		}
 		loginFailState[key] = st
 	}
+	update(ipKey, loginMaxIPFails, loginIPLockDur)
+	update(ipAcctKey, loginMaxAccountFails, loginAccountLockDur)
 	return true
 }
 
@@ -93,10 +136,9 @@ func (h *UserHandler) Login(c *gin.Context) {
 		dto.Failed("用户名和密码信息不能为空", c)
 		return
 	}
-	limitKey := loginLimiterKey(c, u.UserName)
-	acctKey := loginAccountLimiterKey(u.UserName)
-	if !reserveLoginAttempts(limitKey, acctKey) {
-		dto.Failed("登录尝试过于频繁，请 30 秒后再试", c)
+	ipKey, ipAcctKey := loginLimiterKeys(c, u.UserName)
+	if !reserveLoginAttempts(ipKey, ipAcctKey) {
+		dto.Failed("登录尝试过于频繁，请稍后再试", c)
 		return
 	}
 	token, err := UserSvc.UserLogin(u.UserName, u.Password)
@@ -104,7 +146,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	clearLoginAttempts(limitKey, acctKey)
+	clearLoginAttempts(ipKey, ipAcctKey)
 	httpx.SetAuthCookie(c, token)
 	dto.SuccessOnlyMsg("登录成功!!!", c)
 }

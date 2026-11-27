@@ -6,6 +6,8 @@ import (
 
 	"server/internal/film"
 	"server/internal/model"
+
+	"gorm.io/gorm"
 )
 
 // AssembleBanners 用片库数据组装轮播行。影片不在片库、或在该站没有播放线路时视为不可用：
@@ -125,6 +127,20 @@ func checkFilmOnSource(mid int64, sourceID string) error {
 		return bannerInputErr("请选择影片")
 	}
 	ok, err := FilmsOnSource(context.Background(), sourceID, []int64{mid})
+	if err != nil {
+		return err
+	}
+	if !ok[mid] {
+		return bannerInputErr("影片不存在或不属于该采集站")
+	}
+	return nil
+}
+
+func checkFilmOnSourceTx(tx *gorm.DB, mid int64, sourceID string) error {
+	if mid <= 0 {
+		return bannerInputErr("请选择影片")
+	}
+	ok, err := FilmsOnSourceTx(tx, sourceID, []int64{mid})
 	if err != nil {
 		return err
 	}

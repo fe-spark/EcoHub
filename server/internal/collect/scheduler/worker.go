@@ -74,7 +74,11 @@ func (l *writeLane) selectQueueRoundRobinLocked() *writeQueue {
 
 func (l *writeLane) takeOneLocked(queue *writeQueue) (Job, jobMeta, func()) {
 	job := queue.pending[0]
+	queue.pending[0] = Job{}
 	queue.pending = queue.pending[1:]
+	if len(queue.pending) == 0 && cap(queue.pending) > 16 {
+		queue.pending = nil
+	}
 	if l.totalPending > 0 {
 		l.totalPending--
 	}

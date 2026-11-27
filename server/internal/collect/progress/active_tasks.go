@@ -43,7 +43,7 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		}
 		state := value.(*progressState)
 		state.mu.Lock()
-		progress := state.data
+		progress := cloneProgressData(state.data)
 
 		// 限流暂停和停止收尾都不在任务表里：暂停的 2 分钟内任务已被摘除，不能当成失联清成失败。
 		if progress.Status == StatusStopping || progress.Status == StatusPaused {
@@ -62,7 +62,7 @@ func GetActiveTaskProgress() []model.CollectProgress {
 			}
 			occupied := abandonedOccupied(id, status, live)
 			state.mu.Lock()
-			progress = state.data
+			progress = cloneProgressData(state.data)
 			_, live = tasks.Load(id)
 			if isActiveStatus(progress.Status) && shouldMarkAbandoned(progress.Status, live, occupied) {
 				old := progress.Status

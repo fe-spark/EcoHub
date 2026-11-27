@@ -22,6 +22,7 @@ import (
 	filmsnapshot "server/internal/film/snapshot"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repobase"
 	"server/internal/sourcecatalog"
 	"server/internal/taxonomy"
 	"server/internal/testutil"
@@ -849,6 +850,12 @@ func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
 
 func TestHandleProvideConfig_ReadsHeaderProvideKey(t *testing.T) {
 	gdb := setupProvideRedisNilTestDB(t)
+	if err := repobase.SaveSiteBasic(model.BasicConfig{
+		PrivateAccess: true,
+		ProvideKey:    "header-key-1234",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := gdb.Create(&model.FilmSource{
 		Id:    "src_hdr",
 		Name:  "Header主站",

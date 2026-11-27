@@ -82,7 +82,7 @@ func categoryOptionsFromTree(roots []*model.CategoryTree) []RecommendCategoryOpt
 
 // collectCategorySlots 批量收集多个分类分组的影片 ID，并一次 SQL 加载全部基础信息避免 N+1 查询。
 // 返回的 ok 为 false 表示加载过程中发生异常，首页不得缓存该降级结果。
-func collectCategorySlots(version, sourceID string, groups []model.HomeRecommendGroup, visibleCats map[int64]*model.CategoryTree, withHot bool) (map[int64]categoryMidsSlot, map[int64]model.MovieBasicInfo, bool) {
+func collectCategorySlots(ctx context.Context, version, sourceID string, groups []model.HomeRecommendGroup, visibleCats map[int64]*model.CategoryTree, withHot bool) (map[int64]categoryMidsSlot, map[int64]model.MovieBasicInfo, bool) {
 	slots := make(map[int64]categoryMidsSlot)
 	seenMids := make(map[int64]struct{})
 	allMids := make([]int64, 0)
@@ -117,7 +117,7 @@ func collectCategorySlots(version, sourceID string, groups []model.HomeRecommend
 			limit = int(clampSyncLimit(g.SyncLimit))
 		}
 		field, catID := categoryHomeField(cat)
-		movies, hot, err := filmsnapshot.HomeCategoryMids(version, sourceID, field, catID, limit, 50)
+		movies, hot, err := filmsnapshot.HomeCategoryMidsCtx(ctx, version, sourceID, field, catID, limit, 50)
 		if err != nil {
 			okAll = false
 			continue
@@ -134,7 +134,7 @@ func collectCategorySlots(version, sourceID string, groups []model.HomeRecommend
 	if len(allMids) == 0 {
 		return slots, map[int64]model.MovieBasicInfo{}, okAll
 	}
-	byID, err := filmsnapshot.MovieBasicInfosByMIDs(version, allMids)
+	byID, err := filmsnapshot.MovieBasicInfosByMIDsCtx(ctx, version, allMids)
 	if err != nil {
 		return slots, map[int64]model.MovieBasicInfo{}, false
 	}
@@ -214,7 +214,7 @@ func buildCategoryPublicSection(g model.HomeRecommendGroup, cat *model.CategoryT
 	}, true
 }
 
-// ImportCategoryGroups 一键导入当前站点「分类管理」中显示的一级分类为推荐分组（已存在则跳过）。
+// ImportCategoryGroups 一键导入当前站点「分类管理」中显示的一级分类为推荐分组（事务内行锁判重防并发重复插入）。
 func (s *HomeRecommendService) ImportCategoryGroups(ctx context.Context, sourceID string) (ImportCategoryGroupsResult, error) {
 	src, _, _, err := banner.ResolveBannerSource(sourceID, true)
 	if err != nil {
@@ -224,41 +224,40 @@ func (s *HomeRecommendService) ImportCategoryGroups(ctx context.Context, sourceI
 	if len(roots) == 0 {
 		return ImportCategoryGroupsResult{}, errors.New("当前采集站暂无已显示的一级分类")
 	}
-	existing, err := ListHomeRecommendGroups(ctx, src.Id)
+	created, err := CreateMissingGroupsAtomicTx(ctx, src.Id, func(existing []model.HomeRecommendGroup, maxSort int64) []model.HomeRecommendGroup {
+		existByCat := make(map[int64]bool, len(existing))
+		for _, g := range existing {
+			if g.CategoryId > 0 {
+				existByCat[g.CategoryId] = true
+			}
+		}
+		out := make([]model.HomeRecommendGroup, 0, len(roots))
+		for _, ch := range roots {
+			if existByCat[ch.Id] {
+				continue
+			}
+			maxSort++
+			out = append(out, model.HomeRecommendGroup{
+				SourceId:   src.Id,
+				Title:      ch.Name,
+				Sort:       maxSort,
+				Enabled:    true,
+				CategoryId: ch.Id,
+				SyncLimit:  recommendSyncLimitDefault,
+			})
+		}
+		return out
+	})
 	if err != nil {
 		return ImportCategoryGroupsResult{}, err
 	}
-	existByCat := make(map[int64]bool, len(existing))
-	for _, g := range existing {
-		if g.CategoryId > 0 {
-			existByCat[g.CategoryId] = true
-		}
-	}
-
-	createdCount := 0
-	for _, ch := range roots {
-		if existByCat[ch.Id] {
-			continue
-		}
-		if _, err := CreateHomeRecommendGroup(ctx, model.HomeRecommendGroup{
-			SourceId:   src.Id,
-			Title:      ch.Name,
-			Enabled:    true,
-			CategoryId: ch.Id,
-			SyncLimit:  recommendSyncLimitDefault,
-		}); err != nil {
-			return ImportCategoryGroupsResult{}, err
-		}
-		createdCount++
-	}
-	_ = MarkSourceHomeRecommendInited(ctx, src.Id)
 	invalidateHomeCacheForSource(src.Id)
 	groups, err := ListHomeRecommendGroups(ctx, src.Id)
 	if err != nil {
 		return ImportCategoryGroupsResult{}, err
 	}
 	return ImportCategoryGroupsResult{
-		CreatedCount: createdCount,
+		CreatedCount: len(created),
 		Groups:       groups,
 	}, nil
 }

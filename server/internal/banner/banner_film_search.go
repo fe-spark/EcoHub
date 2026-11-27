@@ -2,6 +2,7 @@ package banner
 
 import (
 	"context"
+	"math"
 	"strings"
 
 	filmshared "server/internal/film/shared"
@@ -77,15 +78,29 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 		ctx = context.Background()
 	}
 
-	offset := (page.Current - 1) * page.PageSize
+	// 仅做乘法防溢出，不额外引入人为总页数截断分支。
+	offsetOverflow := page.Current-1 > math.MaxInt/page.PageSize
+	offset := math.MaxInt
+	if !offsetOverflow {
+		offset = (page.Current - 1) * page.PageSize
+	}
 	var mids []int64
+	handledInMemory := false
 	if keyword == "" {
 		if fastMids, total, ok := snapshot.PagePrimarySourceFilmMids(sourceID, sortField, offset, page.PageSize); ok {
+			handledInMemory = true
 			page.Total = total
 			if total == 0 {
 				page.PageCount = 0
 				return []BannerFilmOption{}, nil
 			}
+			page.PageCount = (total + page.PageSize - 1) / page.PageSize
+			mids = fastMids
+		}
+	} else {
+		if fastMids, total, ok := snapshot.SearchPrimarySourceFilmMids(sourceID, keyword, sortField, offset, page.PageSize); ok {
+			handledInMemory = true
+			page.Total = total
 			page.PageCount = (total + page.PageSize - 1) / page.PageSize
 			mids = fastMids
 		}
@@ -114,30 +129,60 @@ func SearchBannerFilmOptions(ctx context.Context, sourceID, keyword, sortField s
 	}
 	var rows []row
 
-	if mids == nil {
+	if !handledInMemory {
 		query := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).
 			Where(model.FilmHasPlaySourceSQL(), sourceID, model.LineKindPlay)
 		if keyword != "" {
+			if len([]rune(keyword)) < 2 || offsetOverflow {
+				page.Total = 0
+				page.PageCount = 0
+				return []BannerFilmOption{}, nil
+			}
 			needle := escapeBannerLikeNeedle(keyword)
 			query = query.Where(
 				"(name LIKE ? ESCAPE '!' OR sub_title LIKE ? ESCAPE '!' OR actor LIKE ? ESCAPE '!' OR director LIKE ? ESCAPE '!')",
 				needle, needle, needle, needle,
 			)
-		}
-		if err := dto.GetPage(query, page); err != nil {
-			return nil, err
-		}
-		if page.Total == 0 {
-			return []BannerFilmOption{}, nil
-		}
-		// 延迟关联：先按排序取当前页 mid，再按主键批量回表取展示字段，避免深分页排序携带大字段。
-		if err := query.
-			Select("mid").
-			Order(bannerFilmOrderClause(sortField, keyword != "")).
-			Offset(offset).
-			Limit(page.PageSize).
-			Pluck("mid", &mids).Error; err != nil {
-			return nil, err
+			// 带 4 列 LIKE 搜索避免全表 COUNT(*)，多取 1 条探测是否有下一页。
+			var probed []int64
+			if err := query.
+				Select("mid").
+				Order(bannerFilmOrderClause(sortField, true)).
+				Offset(offset).
+				Limit(page.PageSize + 1).
+				Pluck("mid", &probed).Error; err != nil {
+				return nil, err
+			}
+			hasMore := len(probed) > page.PageSize
+			if hasMore {
+				mids = probed[:page.PageSize]
+				page.Total = offset + len(mids) + 1
+				page.PageCount = page.Current + 1
+			} else {
+				mids = probed
+				page.Total = offset + len(mids)
+				if page.Total == 0 {
+					page.PageCount = 0
+				} else {
+					page.PageCount = page.Current
+				}
+			}
+		} else {
+			if err := dto.GetPage(query, page); err != nil {
+				return nil, err
+			}
+			if page.Total == 0 || offsetOverflow || offset >= page.Total {
+				return []BannerFilmOption{}, nil
+			}
+			// 延迟关联：先按排序取当前页 mid，再按主键批量回表取展示字段，避免深分页排序携带大字段。
+			if err := query.
+				Select("mid").
+				Order(bannerFilmOrderClause(sortField, false)).
+				Offset(offset).
+				Limit(page.PageSize).
+				Pluck("mid", &mids).Error; err != nil {
+				return nil, err
+			}
 		}
 	}
 	if len(mids) == 0 {

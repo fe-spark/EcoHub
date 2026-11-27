@@ -25,13 +25,15 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/utils"
 )
 
 type ProvideService struct{}
 
 var (
-	ProvideSvc       = new(ProvideService)
-	tvboxListSfGroup singleflight.Group
+	ProvideSvc        = new(ProvideService)
+	tvboxClassSfGroup singleflight.Group
+	tvboxListSfGroup  singleflight.Group
 )
 
 // GetClassList 获取当前主站的分类列表和筛选条件。
@@ -43,19 +45,50 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 	if sourceId != "" {
 		cacheKey = fmt.Sprintf("%s:src_%s:v%s", config.TVBoxConfigCacheKey, sourceId, categoryVersion)
 	}
+	type classListResult struct {
+		ClassList []model.FilmClass
+		Filters   map[string][]map[string]any
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var res struct {
-				ClassList []model.FilmClass
-				Filters   map[string][]map[string]any
-			}
+			var res classListResult
 			if json.Unmarshal([]byte(data), &res) == nil {
 				return res.ClassList, res.Filters, nil
 			}
 		}
 	}
 
-	listGen := filmsnapshot.GetSearchCacheVersion()
+	val, err, _ := tvboxClassSfGroup.Do(cacheKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var res classListResult
+				if json.Unmarshal([]byte(data), &res) == nil {
+					return res, nil
+				}
+			}
+		}
+		listGen := filmsnapshot.GetSearchCacheVersion()
+		classList, filters, buildErr := p.buildClassListFresh(sourceId)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		res := classListResult{ClassList: classList, Filters: filters}
+		if db.Rdb != nil {
+			if data, marshalErr := json.Marshal(res); marshalErr == nil {
+				jitter := time.Duration(rand.Intn(60)) * time.Second
+				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), 5*time.Minute+jitter, listGen)
+			}
+		}
+		return res, nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	res := val.(classListResult)
+	return res.ClassList, res.Filters, nil
+}
+
+func (p *ProvideService) buildClassListFresh(sourceId string) ([]model.FilmClass, map[string][]map[string]any, error) {
 	var classList []model.FilmClass
 	filters := make(map[string][]map[string]any)
 
@@ -200,18 +233,6 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 	if filterErr != nil {
 		return nil, nil, filterErr
 	}
-
-	// 写入 Redis 缓存 (5 分钟)
-	if db.Rdb != nil {
-		res := struct {
-			ClassList []model.FilmClass
-			Filters   map[string][]map[string]any
-		}{classList, filters}
-		if data, err := json.Marshal(res); err == nil {
-			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Minute*5, listGen)
-		}
-	}
-
 	return classList, filters, nil
 }
 
@@ -220,6 +241,13 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	if limit <= 0 {
 		limit = 20
 	}
+	if limit > 100 {
+		limit = 100
+	}
+	if pg <= 0 {
+		pg = 1
+	}
+	sort = utils.NormalizeSearchSortField(sort)
 	wd = strings.TrimSpace(wd)
 	sourceId := primaryProvideSourceID()
 	if sourceId == "" {
@@ -241,9 +269,9 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		VodList   []model.FilmList
 	}
 
-	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
+	// 1. 常规列表前 20 页尝试 Redis 缓存，防止深翻页与随机 sort 打爆键空间。
 	cacheKey := ""
-	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
+	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" && pg <= 20 {
 		if sourceId != "" {
 			cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:src_%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, sourceId, t, cid, pg, sort, limit)
 		} else {
@@ -370,6 +398,10 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 	basic, err := repobase.GetSiteBasic()
 	if err != nil {
 		return nil, err
+	}
+	privateAccess, expectedKey, _ := repobase.AccessGuardConfig()
+	if !privateAccess || expectedKey == "" || key != expectedKey {
+		key = ""
 	}
 	siteName := displaySiteName(basic.SiteName)
 	cacheKey := config.TVBoxNetworkConfigCacheKey + ":site:" + url.QueryEscape(baseURL) + ":" + url.QueryEscape(siteName)

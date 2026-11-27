@@ -327,9 +327,7 @@ func publishStreamWindowReal(mids []int64) error {
 }
 
 func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
-	if _, err := drainStreamPublishLocked(true, false); err != nil {
-		return err
-	}
+	_, drainErr := drainStreamPublishLocked(true, false)
 	var mids []int64
 	if takeMIDs != nil {
 		mids = takeMIDs()
@@ -340,7 +338,7 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	if shouldWarmup {
 		filmsnapshot.FlushSnapshotCacheInvalidation()
 	}
-	return nil
+	return drainErr
 }
 
 func resetStreamPublishBufferForTest() {

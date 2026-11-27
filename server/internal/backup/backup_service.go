@@ -3,7 +3,6 @@ package backup
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"server/internal/access"
 	"server/internal/admin/upgrade"
 	"server/internal/banner"
@@ -13,11 +12,9 @@ import (
 	filmrepo "server/internal/film"
 	"server/internal/film/catalog"
 	filmsnapshot "server/internal/film/snapshot"
-	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/mapping"
 	"server/internal/mediaproxy"
-	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/proxy"
@@ -26,8 +23,6 @@ import (
 	"server/internal/sourcecatalog"
 	"server/internal/tmdb"
 	"server/internal/utils"
-	"sort"
-	"strings"
 	"time"
 )
 
@@ -37,11 +32,18 @@ type BackupService struct{}
 var (
 	BackupSvc                      = new(BackupService)
 	syncImportedSourceCategoriesFn = func() {
-		go func() {
+		done := make(chan struct{})
+		utils.GoSafe("导入采集站后自动同步分类树", func() {
+			defer close(done)
 			if err := collect.SpiderSvc.SyncAllSourceCategories(); err != nil {
 				syslog.Errorf("[Backup] 导入采集站后自动同步分类树失败: %v", err)
 			}
-		}()
+		})
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			syslog.Warnf("[Backup] 导入后自动同步分类树超时，已提前释放维护锁")
+		}
 	}
 )
 
@@ -80,20 +82,9 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 		return model.ConfigBackup{}, err
 	}
 
-	rules, err := mapping.ListAllMappingRules(mapping.MappingRuleQuery{})
+	exports, err := exportMappingRuleItems()
 	if err != nil {
 		return model.ConfigBackup{}, err
-	}
-	exports := make([]model.MappingRuleExport, 0, len(rules))
-	for _, r := range rules {
-		exports = append(exports, model.MappingRuleExport{
-			SourceId:  r.SourceId,
-			Group:     r.Group,
-			Raw:       r.Raw,
-			Target:    r.Target,
-			MatchType: r.MatchType,
-			Remarks:   r.Remarks,
-		})
 	}
 
 	return model.ConfigBackup{
@@ -112,7 +103,7 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 }
 
 // ImportConfig 按模块恢复配置备份（调用方已校验密码）
-func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error {
+func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) (retErr error) {
 	if !req.Modules.Any() {
 		return errors.New("请至少选择一个要导入的模块")
 	}
@@ -126,7 +117,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		return err
 	}
 
-	// 2. 与站点重置及并发导入严格互斥，导入采集站前停掉采集与排队删站。
+	// 2. 与站点重置及并发导入严格互斥，导入采集站或映射规则前先停掉采集与排队删站。
 	if siteops.ResetSvc.SiteResetRunning() {
 		return errors.New("站点数据正在重置中，请稍后再导入配置")
 	}
@@ -139,8 +130,8 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		return errors.New("站点数据正在重置中，请稍后再导入配置")
 	}
 	var oldPrimaryBeforeImport *model.FilmSource
-	if req.Modules.FilmSources {
-		if err := collect.StopAllTasksAndWait(0, "导入采集站配置，停止采集"); err != nil {
+	if req.Modules.FilmSources || req.Modules.MappingRules {
+		if err := collect.StopAllTasksAndWait(0, "导入配置，停止采集"); err != nil {
 			return fmt.Errorf("停止进行中的采集失败: %w", err)
 		}
 		collectctl.CollectSvc.CancelDelFilmSources(nil)
@@ -150,6 +141,30 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 
 	needCategoryRefresh := false
 	primaryChanged := false
+	filmSourcesCommitted := false
+	mappingRulesCommitted := false
+	defer func() {
+		if retErr != nil {
+			return
+		}
+		if needCategoryRefresh {
+			if err := catalog.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
+				syslog.Errorf("[Backup] 刷新来源分类映射失败: %v", err)
+			}
+			// applyPrimaryChanged 已执行过 RefreshAccessDataCaches，避免重复扫删 Redis 前缀
+			if !primaryChanged {
+				if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
+					syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
+				}
+			}
+		}
+		if filmSourcesCommitted {
+			syncImportedSourceCategoriesFn()
+		}
+		if filmSourcesCommitted || mappingRulesCommitted {
+			filmrepo.RefreshInventoryStatsAsync()
+		}
+	}()
 
 	if req.Modules.Site {
 		if err := repobase.SaveSiteBasic(*backup.Site); err != nil {
@@ -165,7 +180,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		list := backup.FilmSources
 		var replaceErr error
 		if err := filmsnapshot.WithPrimaryMutation(func(_ bool) error {
-			// 导入前清理旧站限流器
 			oldSources, err := collect.GetCollectSourceList()
 			if err != nil {
 				return err
@@ -187,7 +201,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			return replaceErr
 		}
 		primaryChanged = collectctl.ApplyPrimaryChanged(oldPrimaryBeforeImport, sourcecatalog.CurrentPrimarySource())
-		// 主站 ID 没变时 applyPrimaryChanged 不会动缓存。地址或启用状态变了，搜索和首页仍要失效。
 		if !primaryChanged {
 			repobase.ClearIndexPageCache()
 			filmsnapshot.BumpSearchCacheVersion()
@@ -196,6 +209,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		filmsnapshot.ClearDynamicPlayCaches()
 		filmsnapshot.ClearDerivedFilmListCaches()
 		needCategoryRefresh = true
+		filmSourcesCommitted = true
 	}
 
 	if req.Modules.Banners {
@@ -209,11 +223,11 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.MappingRules {
-		exports := backup.MappingRules
-		if err := mapping.ReplaceMappingRules(exports); err != nil {
+		if err := mapping.ReplaceMappingRules(backup.MappingRules); err != nil {
 			return fmt.Errorf("导入映射规则失败: %w", err)
 		}
 		needCategoryRefresh = true
+		mappingRulesCommitted = true
 	}
 
 	if req.Modules.Proxy {
@@ -236,23 +250,16 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.Notify {
-		if err := notify.SaveNotifyConfig(*backup.Notify); err != nil {
+		notifyCfg, err := notify.ValidateNotifyConfig(*backup.Notify)
+		if err != nil {
+			return fmt.Errorf("导入通知配置失败: %w", err)
+		}
+		if err := notify.SaveNotifyConfig(notifyCfg); err != nil {
 			return fmt.Errorf("导入通知配置失败: %w", err)
 		}
 		notify.NotifySvc.EnsureBotPoller()
 	}
 
-	if needCategoryRefresh {
-		if err := catalog.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
-			syslog.Errorf("[Backup] 刷新来源分类映射失败: %v", err)
-		}
-		// applyPrimaryChanged 已执行过 RefreshAccessDataCaches，避免重复扫删 Redis 前缀
-		if !primaryChanged {
-			if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
-				syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
-			}
-		}
-	}
 	if req.Modules.Analytics {
 		if err := access.SaveAnalyticsConfig(*backup.Analytics); err != nil {
 			return fmt.Errorf("导入数据分析配置失败: %w", err)
@@ -260,151 +267,24 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		access.SetEnabled(backup.Analytics.Enabled)
 	}
 
-	if req.Modules.FilmSources {
-		syncImportedSourceCategoriesFn()
-	}
-	if req.Modules.FilmSources || req.Modules.MappingRules {
-		filmrepo.RefreshInventoryStatsAsync()
-	}
-
 	return nil
 }
 
-func validateImportPayload(req model.ConfigBackupImportRequest) error {
-	b := req.Backup
-	if req.Modules.Site {
-		if b.Site == nil {
-			return errors.New("备份中缺少网站配置数据")
-		}
-		cleanKey, err := model.ValidateProvideKey(b.Site.PrivateAccess, b.Site.ProvideKey)
-		if err != nil {
-			return err
-		}
-		b.Site.ProvideKey = cleanKey
-		if err := mediaproxy.ValidateMediaProxyConfig(b.Site.MediaProxy); err != nil {
-			return fmt.Errorf("媒体反代配置无效: %w", err)
-		}
-		if apiURL := strings.TrimSpace(b.Site.Danmaku.ApiURL); apiURL != "" && !utils.IsSafeOutboundURL(apiURL) {
-			return errors.New("弹幕接口地址无效或不允许访问内网地址")
-		}
-	}
-	if req.Modules.FilmSources {
-		if b.FilmSources == nil {
-			return errors.New("备份中缺少采集站")
-		}
-		seenID := make(map[string]struct{}, len(b.FilmSources))
-		seenURI := make(map[string]struct{}, len(b.FilmSources))
-		for _, src := range b.FilmSources {
-			uri := strings.TrimSpace(src.Uri)
-			if !utils.IsSafeOutboundURL(uri) {
-				return fmt.Errorf("采集站 %q 接口地址无效或不允许访问内网地址", src.Name)
-			}
-			// shortcut: 协议大小写和连续多个结尾斜杠仍视为不同地址, 导入里出现再收紧
-			key := uri
-			if u, err := url.Parse(uri); err == nil && u.Host != "" {
-				u.Host = strings.ToLower(u.Host)
-				u.Path = strings.TrimSuffix(u.Path, "/")
-				key = u.String()
-			}
-			if _, dup := seenURI[key]; dup {
-				return fmt.Errorf("备份中包含重复采集站地址: %s", uri)
-			}
-			seenURI[key] = struct{}{}
-			id := strings.TrimSpace(src.Id)
-			if id == "" {
-				id = utils.GenerateHashKey(uri)
-			}
-			if _, dup := seenID[id]; dup {
-				return fmt.Errorf("备份中包含重复采集站 ID: %s", id)
-			}
-			seenID[id] = struct{}{}
-		}
-	}
-	if req.Modules.Banners && b.BannerSlots == nil && b.Banners == nil {
-		return errors.New("备份中缺少首页轮播")
-	}
-	if req.Modules.MappingRules && b.MappingRules == nil {
-		return errors.New("备份中缺少映射规则")
-	}
-	if req.Modules.Proxy {
-		if b.Proxy == nil {
-			return errors.New("备份中缺少网络代理配置数据")
-		}
-		if _, err := proxy.ValidateAndNormalizeProxyConfig(*b.Proxy); err != nil {
-			return fmt.Errorf("网络代理配置无效: %w", err)
-		}
-	}
-	if req.Modules.TMDB {
-		if b.TMDB == nil {
-			return errors.New("备份中缺少 TMDB 刮削配置数据")
-		}
-		if err := tmdb.ValidateTMDBImageDomain(b.TMDB.ImageDomain); err != nil {
-			return err
-		}
-	}
-	if req.Modules.Notify && b.Notify == nil {
-		return errors.New("备份中缺少通知配置数据")
-	}
-	if req.Modules.Analytics && b.Analytics == nil {
-		return errors.New("备份中缺少数据分析配置数据")
-	}
-	return nil
-}
-
-// importBannerSlots 新版备份直接用 bannerSlots，只保留现有站点、且片库里还有这部影片的行；
-// 旧版备份的全局 banners 按迁移规则分到站点。备份里的 id 重复时重新生成；非法的覆盖值只丢弃该字段。
-func importBannerSlots(backup model.ConfigBackup) ([]model.BannerSlot, error) {
-	if backup.BannerSlots == nil {
-		return migration.ConvertLegacyBanners(db.Mdb, backup.Banners)
-	}
-	mids := make([]int64, 0, len(backup.BannerSlots))
-	for _, s := range backup.BannerSlots {
-		if s.Mid > 0 {
-			mids = append(mids, s.Mid)
-		}
-	}
-	existing, err := banner.ExistingFilmMids(mids)
+func exportMappingRuleItems() ([]model.MappingRuleExport, error) {
+	rules, err := mapping.ListAllMappingRules(mapping.MappingRuleQuery{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]model.BannerSlot, 0, len(backup.BannerSlots))
-	seen := make(map[string]bool, len(backup.BannerSlots))
-	usedIDs := make(map[string]bool, len(backup.BannerSlots))
-	sourceOK := map[string]bool{}
-	nextSort := map[string]int64{}
-	sorted := append([]model.BannerSlot(nil), backup.BannerSlots...)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Sort < sorted[j].Sort })
-	for _, s := range sorted {
-		s.SourceId = strings.TrimSpace(s.SourceId)
-		if s.SourceId == "" || s.Mid <= 0 || !existing[s.Mid] {
-			continue
-		}
-		ok, checked := sourceOK[s.SourceId]
-		if !checked {
-			ok = sourcecatalog.FindCollectSourceById(s.SourceId) != nil
-			sourceOK[s.SourceId] = ok
-		}
-		if !ok {
-			continue
-		}
-		key := fmt.Sprintf("%s:%d", s.SourceId, s.Mid)
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		s.Id = strings.TrimSpace(s.Id)
-		if s.Id == "" || len(s.Id) > 64 || usedIDs[s.Id] {
-			id, err := utils.GenerateSalt()
-			if err != nil {
-				return nil, err
-			}
-			s.Id = id
-		}
-		usedIDs[s.Id] = true
-		model.SanitizeBannerSlot(&s)
-		nextSort[s.SourceId]++
-		s.Sort = nextSort[s.SourceId]
-		out = append(out, s)
+	exports := make([]model.MappingRuleExport, 0, len(rules))
+	for _, r := range rules {
+		exports = append(exports, model.MappingRuleExport{
+			SourceId:  r.SourceId,
+			Group:     r.Group,
+			Raw:       r.Raw,
+			Target:    r.Target,
+			MatchType: r.MatchType,
+			Remarks:   r.Remarks,
+		})
 	}
-	return out, nil
+	return exports, nil
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"server/internal/film"
 	"server/internal/film/snapshot"
 	"server/internal/film/writer"
 	"server/internal/infra/syslog"
@@ -33,18 +32,15 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 		return 0, errors.New("获取 TMDB 详情失败")
 	}
 
-	indexRec, err := film.FindFilmIndex(req.Mid)
-	if err != nil {
-		return 0, fmt.Errorf("未找到对应的影片信息 (mid=%d): %w", req.Mid, err)
-	}
-
-	updates := filmScrapeUpdates(indexRec, *tmdbData, req.Fields)
 	scrapeRecord := model.FilmTMDBScrape{
 		Mid:       req.Mid,
 		TmdbID:    req.TmdbID,
 		MediaType: tmdbData.MediaType,
 	}
-	if err := SaveFilmScrape(req.Mid, updates, scrapeRecord); err != nil {
+	lockedPid, err := SaveFilmScrape(req.Mid, func(existing model.FilmIndex) map[string]any {
+		return filmScrapeUpdates(existing, *tmdbData, req.Fields)
+	}, scrapeRecord)
+	if err != nil {
 		return 0, fmt.Errorf("写入影片失败: %w", err)
 	}
 
@@ -58,8 +54,8 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 	}
 
 	// 清理分类列表缓存
-	if indexRec.Pid > 0 {
-		writer.ClearFilmIndexCachesByPidSet(map[int64]struct{}{indexRec.Pid: {}})
+	if lockedPid > 0 {
+		writer.ClearFilmIndexCachesByPidSet(map[int64]struct{}{lockedPid: {}})
 	}
 
 	return req.Mid, nil

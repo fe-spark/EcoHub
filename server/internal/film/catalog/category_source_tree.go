@@ -24,6 +24,8 @@ func GetSourceBoundCategoryTreeWithCounts(sourceID string, keyCounts map[string]
 	if db.Mdb == nil || sourceID == "" {
 		return root
 	}
+	// 管理端读取分类树时按需补齐规则合成一级分组行；前台只读视图保持无副作用。
+	EnsureSyntheticRootGroupsForSource(sourceID)
 	view, err := loadPublicSourceTypes(sourceID)
 	if err != nil || len(view.Groups) == 0 {
 		return root

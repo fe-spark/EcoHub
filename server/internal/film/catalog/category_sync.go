@@ -59,6 +59,30 @@ func applyCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preser
 	}
 
 	var applyResult CategoryApplyResult
+	dataClearedBeforeTx := false
+	if clearCollected {
+		var oldSourceCategories []model.SourceCategory
+		if err := db.Mdb.Where("source_id = ?", sourceId).Order("source_type_id ASC").Find(&oldSourceCategories).Error; err != nil {
+			return CategoryApplyResult{}, err
+		}
+		if len(oldSourceCategories) > 0 && len(plans) == 0 {
+			return CategoryApplyResult{}, errors.New("采集站返回的分类为空，未更新")
+		}
+		if len(oldSourceCategories) > 0 {
+			candidatePlans := appendOtherCategoryPlan(plans, oldSourceCategories)
+			changes := DiffSourceCategoryTree(oldSourceCategories, candidatePlans)
+			if len(changes) > 0 {
+				// 分类树结构变化时先分短事务批量清理历史数据，避免在单事务中删除大站数据引发长锁与回滚段膨胀。
+				res, err := clearChangedSourceDataBatched(sourceId)
+				if err != nil {
+					return CategoryApplyResult{}, err
+				}
+				applyResult = res
+				dataClearedBeforeTx = true
+			}
+		}
+	}
+
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		var oldSourceCategories []model.SourceCategory
 		if err := tx.Where("source_id = ?", sourceId).Order("source_type_id ASC").Find(&oldSourceCategories).Error; err != nil {
@@ -70,14 +94,9 @@ func applyCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preser
 		}
 		plans = appendOtherCategoryPlan(plans, oldSourceCategories)
 
-		if clearCollected && len(oldSourceCategories) > 0 {
-			changes := DiffSourceCategoryTree(oldSourceCategories, plans)
-			if len(changes) > 0 {
-				res, err := clearChangedSourceDataTx(tx, sourceId, changes)
-				if err != nil {
-					return err
-				}
-				applyResult = res
+		if dataClearedBeforeTx {
+			if err := AssertSourceDataCleanedTx(tx, sourceId); err != nil {
+				return err
 			}
 		}
 		var oldCategories []model.Category
@@ -261,6 +280,7 @@ func applyCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preser
 		return CategoryApplyResult{}, err
 	}
 
+	EnsureSyntheticRootGroupsForSource(sourceId)
 	if !skipRebuild {
 		MarkCategoryChanged()
 	}

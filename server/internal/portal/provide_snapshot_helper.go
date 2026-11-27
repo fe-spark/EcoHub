@@ -1,10 +1,10 @@
 package portal
 
 import (
-	"server/internal/film/catalog"
 	"strings"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/taxonomy"
 )
@@ -15,18 +15,29 @@ func currentProvideCategoryIDsBySourceKey(sourceKey string) ([]int64, error) {
 		return nil, nil
 	}
 
-	mappings, err := catalog.ListCategoryMappings()
-	if err != nil {
+	sourceID, sourceTypeID, ok := taxonomy.ParseSourceCategoryKey(sourceKey)
+	if !ok {
+		return nil, nil
+	}
+	if localID := taxonomy.GetLocalCategoryId(sourceID, sourceTypeID); localID > 0 {
+		return []int64{localID}, nil
+	}
+	if db.Mdb == nil {
+		return nil, nil
+	}
+
+	var mappings []model.CategoryMapping
+	if err := db.Mdb.Model(&model.CategoryMapping{}).
+		Select("category_id").
+		Where("source_id = ? AND source_type_id = ? AND category_id > 0", sourceID, sourceTypeID).
+		Find(&mappings).Error; err != nil {
 		return nil, err
 	}
 
-	ids := make([]int64, 0)
-	seen := make(map[int64]struct{})
+	ids := make([]int64, 0, len(mappings))
+	seen := make(map[int64]struct{}, len(mappings))
 	for _, mapping := range mappings {
-		if taxonomy.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId) != sourceKey || mapping.CategoryId <= 0 {
-			continue
-		}
-		if _, ok := seen[mapping.CategoryId]; ok {
+		if _, exists := seen[mapping.CategoryId]; exists {
 			continue
 		}
 		seen[mapping.CategoryId] = struct{}{}

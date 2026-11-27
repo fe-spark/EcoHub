@@ -4,6 +4,8 @@ import (
 	"mime"
 	"net/http"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"server/internal/access"
 	"server/internal/admin"
@@ -51,6 +53,8 @@ func SetupRouter() *gin.Engine {
 	r.Use(middleware.AccessLog())
 	r.Use(gin.Recovery())
 	r.Use(middleware.Cors())
+	r.Use(httpPolicyMiddleware())
+	r.Use(maintenanceGuardMiddleware())
 
 	r.GET(config.FilmPictureAccess+"*name", serveFilmPicture)
 
@@ -291,4 +295,57 @@ func SetupRouter() *gin.Engine {
 	}
 
 	return r
+}
+
+const defaultRequestBodyMaxBytes = 2 << 20 // 2MB
+
+func isSSERoutePath(path string) bool {
+	return path == "/api/manage/system/logs/stream" ||
+		path == "/api/manage/collect/progress-stream" ||
+		path == "/api/manage/spider/clear/progress"
+}
+
+func hasDedicatedBodyLimitPath(path string) bool {
+	return path == "/api/manage/file/upload" || path == "/api/manage/config/backup/import"
+}
+
+// httpPolicyMiddleware 统一设置常规路由请求体大小上限与读写超时（放行大文件上传接口与长连接 SSE）。
+func httpPolicyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if !isSSERoutePath(path) {
+			rc := http.NewResponseController(c.Writer)
+			_ = rc.SetReadDeadline(time.Now().Add(15 * time.Second))
+			_ = rc.SetWriteDeadline(time.Now().Add(60 * time.Second))
+		}
+		if c.Request.Body != nil &&
+			c.Request.Method != http.MethodGet &&
+			c.Request.Method != http.MethodHead &&
+			!hasDedicatedBodyLimitPath(path) &&
+			!strings.HasPrefix(path, config.FilmPictureAccess) {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, defaultRequestBodyMaxBytes)
+		}
+		c.Next()
+	}
+}
+
+func maintenanceGuardMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !siteops.ResetSvc.SiteMaintenanceActive() {
+			c.Next()
+			return
+		}
+		path := c.Request.URL.Path
+		if path == "/api/config/basic" ||
+			path == "/api/manage/spider/clear" ||
+			path == "/api/manage/spider/clear/progress" ||
+			path == "/api/manage/spider/clear/stats" {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+			"code": 1,
+			"msg":  "系统维护中，请稍后再试",
+		})
+	}
 }

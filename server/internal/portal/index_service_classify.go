@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"server/internal/film/catalog"
 	"strings"
 	"sync"
@@ -134,7 +135,15 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 	if version == "" {
 		return nil, filmsnapshot.ErrSearchIndexMissing
 	}
-	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
+	limit := 24
+	if page != nil && page.PageSize > 0 {
+		limit = page.PageSize
+	}
+	if limit > 48 {
+		limit = 48
+	}
+	normPage := &dto.Page{Current: 1, PageSize: limit}
+	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, normPage)
 	if sourceId != "" {
 		cacheKey = fmt.Sprintf("%s:src_%s:st3", cacheKey, sourceId)
 	}
@@ -147,11 +156,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		}
 	}
 
-	limit := 24
-	if page != nil && page.PageSize > 0 {
-		limit = page.PageSize
-	}
-	sfKey := fmt.Sprintf("%s:%d", cacheKey, limit)
+	sfKey := cacheKey
 	val, err, _ := indexClassSF.Do(sfKey, func() (any, error) {
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
@@ -222,7 +227,8 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		res["recent"] = recentMovies
 		if db.Rdb != nil {
 			if data, err := json.Marshal(res); err == nil {
-				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Hour*12, listGen)
+				jitter := time.Duration(rand.Intn(900)) * time.Second
+				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), 12*time.Hour+jitter, listGen)
 			}
 		}
 		return res, nil

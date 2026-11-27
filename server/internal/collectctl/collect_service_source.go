@@ -102,6 +102,13 @@ func (s *CollectService) UpdateFilmSourceWithAuth(source model.FilmSource, newPr
 		}()
 
 		var needClean bool
+		var releaseClean func()
+		defer func() {
+			if releaseClean != nil {
+				releaseClean()
+			}
+		}()
+
 		err = filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
 			latest := sourcecatalog.FindCollectSourceById(source.Id)
 			if latest == nil {
@@ -140,10 +147,15 @@ func (s *CollectService) UpdateFilmSourceWithAuth(source model.FilmSource, newPr
 				}
 			}
 			if isUriChanged {
+				rel, stopErr := collect.StopSourceForDelete(source.Id)
+				if stopErr != nil {
+					return stopErr
+				}
+				releaseClean = rel
+				cleaningURISources.Store(source.Id, struct{}{})
 				needClean = true
-				return nil
 			}
-			if err := s.updateFilmSourceCore(source, false, 0); err != nil {
+			if err := s.updateFilmSourceCore(source, isUriChanged, 0); err != nil {
 				return err
 			}
 			if disablingPrimary {
@@ -157,61 +169,23 @@ func (s *CollectService) UpdateFilmSourceWithAuth(source model.FilmSource, newPr
 			return nil
 		})
 		if err != nil || !needClean {
+			if needClean {
+				cleaningURISources.Delete(source.Id)
+			}
 			return err
 		}
-
-		// 耗时分批清库在全局主站锁外执行（受单站独占锁与采集准入互斥保护），避免与旧地址采集并发读写删冲突
-		cleaned = true
-		cleaningURISources.Store(source.Id, struct{}{})
 		defer cleaningURISources.Delete(source.Id)
-		releaseClean, stopErr := collect.StopSourceForDelete(source.Id)
-		if stopErr != nil {
-			return stopErr
-		}
-		defer releaseClean()
+
+		// 新地址与站态已先落库，再持有单站删除锁分批清旧影片数据，防止二阶段失败导致站点配置保留旧地址而全量数据蒸发。
+		cleaned = true
 		var cleanErr error
 		orphanMids, cleanErr = collect.CleanCollectSourceData(source.Id)
 		if cleanErr != nil {
 			err = cleanErr
 			return err
 		}
-
-		err = filmsnapshot.WithPrimaryMutation(func(searchBusy bool) error {
-			latest := sourcecatalog.FindCollectSourceById(source.Id)
-			if latest == nil {
-				return errors.New("采集站信息不存在")
-			}
-			if progress.IsSourceDeleting(source.Id) {
-				return errors.New("该站正在删除")
-			}
-			if latest.State != source.State {
-				if reason := sourceBusyReason(source.Id); reason != "" {
-					return errors.New(reason)
-				}
-			}
-			oldPrimary := sourcecatalog.CurrentPrimarySource()
-			disablingPrimary := oldPrimary != nil && oldPrimary.Id == source.Id && latest.State && !source.State
-			if disablingPrimary {
-				if !allowPrimaryHandover {
-					return ErrPrimarySwitchForbidden
-				}
-				if err := planPrimaryHandover(searchBusy, source.Id, newPrimaryID, confirmClearPrimary); err != nil {
-					return err
-				}
-			}
-			if err := s.updateFilmSourceCore(source, true, len(orphanMids)); err != nil {
-				return err
-			}
-			if disablingPrimary {
-				if err := applyPrimaryHandover(oldPrimary, source.Id, newPrimaryID, confirmClearPrimary); err != nil {
-					return err
-				}
-			} else if oldPrimary == nil && source.State {
-				applyPrimaryChanged(oldPrimary, sourcecatalog.CurrentPrimarySource())
-			}
-			return nil
-		})
-		return err
+		syslog.Infof("[Collect] 采集源 %s(%s) 换源旧数据清理完成，删除孤儿档案 %d 部", source.Name, source.Id, len(orphanMids))
+		return nil
 	})
 }
 

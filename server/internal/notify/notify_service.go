@@ -54,28 +54,49 @@ func (s *NotifyService) UpdateConfig(incoming model.NotifyConfig) (model.NotifyC
 	return PublicNotifyConfig(merged), nil
 }
 
+// ValidateBotToken 校验 Telegram Bot Token 不含空白、控制字符及 URL 路径分隔符。
+func ValidateBotToken(token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil
+	}
+	for _, r := range token {
+		if r <= 0x20 || r == 0x7f || r == '/' || r == '?' || r == '#' || r == '%' || r == '\\' {
+			return errors.New("Bot Token 包含非法字符")
+		}
+	}
+	return nil
+}
+
+// ValidateNotifyConfig 规范化并校验通知配置（供在线更新与备份导入复用）。
+func ValidateNotifyConfig(cfg model.NotifyConfig) (model.NotifyConfig, error) {
+	cfg = NormalizeNotifyConfig(cfg)
+	if err := ValidateBotToken(cfg.BotToken); err != nil {
+		return model.NotifyConfig{}, err
+	}
+	for _, cid := range cfg.ChatIDs {
+		if _, _, err := parseChatTarget(cid); err != nil {
+			return model.NotifyConfig{}, err
+		}
+	}
+	if cfg.Enabled {
+		if cfg.BotToken == "" {
+			return model.NotifyConfig{}, errors.New("启用通知时 Bot Token 不能为空")
+		}
+		if len(cfg.ChatIDs) == 0 {
+			return model.NotifyConfig{}, errors.New("启用通知时请至少配置一个 Chat ID")
+		}
+	}
+	return cfg, nil
+}
+
 func validateAndMergeNotifyConfig(stored, incoming model.NotifyConfig) (model.NotifyConfig, error) {
 	incoming.BotToken = strings.TrimSpace(incoming.BotToken)
 	// 仅当提交的是脱敏占位串时保留原 Token；空字符串视为显式清空
 	if IsMaskedBotToken(incoming.BotToken) {
 		incoming.BotToken = stored.BotToken
 	}
-	incoming = NormalizeNotifyConfig(incoming)
-
-	for _, cid := range incoming.ChatIDs {
-		if _, _, err := parseChatTarget(cid); err != nil {
-			return model.NotifyConfig{}, err
-		}
-	}
-	if incoming.Enabled {
-		if incoming.BotToken == "" {
-			return model.NotifyConfig{}, errors.New("启用通知时 Bot Token 不能为空")
-		}
-		if len(incoming.ChatIDs) == 0 {
-			return model.NotifyConfig{}, errors.New("启用通知时请至少配置一个 Chat ID")
-		}
-	}
-	return incoming, nil
+	return ValidateNotifyConfig(incoming)
 }
 
 // SendTest 发送测试通知（支持传入未保存的草稿 Token 和 ChatIDs）
@@ -90,6 +111,9 @@ func (s *NotifyService) SendTest(req model.NotifyTestReq) (model.NotifyTestResul
 	}
 	if token == "" {
 		return model.NotifyTestResult{}, errors.New("请先填写有效的 Telegram Bot Token")
+	}
+	if err := ValidateBotToken(token); err != nil {
+		return model.NotifyTestResult{}, err
 	}
 
 	chatIDs := req.ChatIDs

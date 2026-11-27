@@ -1,9 +1,7 @@
 package utils
 
 import (
-	"crypto/md5"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -84,17 +82,6 @@ func GenerateSalt() (string, error) {
 	return fmt.Sprintf("%X", b), nil
 }
 
-// PasswordEncrypt 密码加密 , (password+salt) md5 * 3
-func PasswordEncrypt(password, salt string) string {
-	b := fmt.Append(nil, password, salt) // 将字符串转换为字节切片
-	var r [16]byte
-	for range 3 {
-		r = md5.Sum(b) // 调用md5.Sum()函数进行加密
-		b = []byte(hex.EncodeToString(r[:]))
-	}
-	return hex.EncodeToString(r[:])
-}
-
 // ValidURL 校验http/https链接是否是符合规范的URL
 func ValidURL(s string) bool {
 	u, err := url.ParseRequestURI(strings.TrimSpace(s))
@@ -125,7 +112,7 @@ func IsSafeOutboundURL(s string) bool {
 		return false
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return isPublicOutboundIP(ip)
+		return IsPublicOutboundIP(ip)
 	}
 	ips, err := net.LookupIP(host)
 	if err != nil || len(ips) == 0 {
@@ -133,25 +120,11 @@ func IsSafeOutboundURL(s string) bool {
 		return true
 	}
 	for _, ip := range ips {
-		if !isPublicOutboundIP(ip) {
+		if !IsPublicOutboundIP(ip) {
 			return false
 		}
 	}
 	return true
-}
-
-func isPublicOutboundIP(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if ip4 := ip.To4(); ip4 != nil {
-		// 拒绝 RFC 6598 共享地址段 100.64.0.0/10（含部分云厂商元数据服务地址）。
-		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
-			return false
-		}
-		ip = ip4
-	}
-	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsUnspecified()
 }
 
 // CheckSafeOutboundRedirect 拦截重定向至内网或云元数据地址（SSRF 防护）。
@@ -175,27 +148,10 @@ func SafeOutboundDialControl(_, address string, _ syscall.RawConn) error {
 		return errors.New("目标地址无效")
 	}
 	ip := net.ParseIP(host)
-	if !isPublicOutboundIP(ip) {
+	if !IsPublicOutboundIP(ip) {
 		return errors.New("拒绝连接非公网地址")
 	}
 	return nil
-}
-
-// IsTrustedForwardedPeer 仅当直连对端 TCP 地址为空（单测）或属本机/内网代理网段时才采信 X-Forwarded-* 请求头。
-func IsTrustedForwardedPeer(remoteAddr string) bool {
-	remoteAddr = strings.TrimSpace(remoteAddr)
-	if remoteAddr == "" {
-		return true
-	}
-	host := remoteAddr
-	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		host = h
-	}
-	ip := net.ParseIP(strings.TrimSpace(host))
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // ContainsAny 判断字符串是否包含切片中的任意一个关键词

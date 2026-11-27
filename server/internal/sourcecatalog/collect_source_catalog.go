@@ -117,6 +117,11 @@ func FindCollectSourceForDelete(id string) *model.FilmSource {
 	return nil
 }
 
+// HasCollectSource 从进程内站点目录判断采集站是否存在，避免高频只读路径逐次查库。
+func HasCollectSource(id string) bool {
+	return FindCollectSourceForDelete(id) != nil
+}
+
 // GetCollectSourceListDB 使用指定数据库连接获取采集站 API 列表（按排序序号升序）。
 func GetCollectSourceListDB(connDB *gorm.DB) ([]model.FilmSource, error) {
 	if connDB == nil {

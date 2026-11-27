@@ -66,7 +66,7 @@ func (s *HomeRecommendService) HomeSections(sourceID string) ([]model.HomeRecomm
 				if vis, visErr := filmsnapshot.VisiblePlayableMIDs(ctx, sourceID, mids); visErr != nil {
 					log.Printf("[HomeRecommend] 校验影片可见性失败 source=%s: %v", sourceID, visErr)
 					cacheable = false
-				} else if loadedByID, infoErr := filmsnapshot.MovieBasicInfosByMIDs(version, mids); infoErr != nil {
+				} else if loadedByID, infoErr := filmsnapshot.MovieBasicInfosByMIDsCtx(ctx, version, mids); infoErr != nil {
 					log.Printf("[HomeRecommend] 读取推荐影片信息失败 source=%s: %v", sourceID, infoErr)
 					cacheable = false
 				} else {
@@ -89,7 +89,7 @@ func (s *HomeRecommendService) HomeSections(sourceID string) ([]model.HomeRecomm
 	if hasCategoryGroup {
 		_, visibleCatMap = visibleRootCategories(sourceID)
 		var catOK bool
-		catSlots, catInfos, catOK = collectCategorySlots(version, sourceID, groups, visibleCatMap, true)
+		catSlots, catInfos, catOK = collectCategorySlots(ctx, version, sourceID, groups, visibleCatMap, true)
 		if !catOK {
 			cacheable = false
 		}

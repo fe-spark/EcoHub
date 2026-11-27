@@ -23,8 +23,22 @@ type TMDBService struct{}
 var TMDBSvc = new(TMDBService)
 
 const (
-	httpTimeout = 8 * time.Second
+	httpTimeout             = 8 * time.Second
+	maxTMDBCandidateBody    = 4 << 20 // 4MB
+	maxTMDBDetailBody       = 2 << 20 // 2MB
+	maxTMDBErrorBodySnippet = 64 << 10
 )
+
+func readLimitedTMDBBody(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("TMDB 响应超过 %d 字节上限", limit)
+	}
+	return data, nil
+}
 
 var (
 	tmdbAPIBaseURL = "https://api.themoviedb.org/3"
@@ -248,14 +262,18 @@ func (s *TMDBService) fetchTMDBCandidates(cfg model.TMDBConfig, kw, year, mediaT
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxTMDBErrorBodySnippet))
 		return nil, fmt.Errorf("TMDB 返回错误 (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
+	rawBody, err := readLimitedTMDBBody(resp.Body, maxTMDBCandidateBody)
+	if err != nil {
+		return nil, fmt.Errorf("读取 TMDB 数据失败: %w", err)
+	}
 	var searchResp struct {
 		Results []model.RawTMDBItem `json:"results"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+	if err := json.Unmarshal(rawBody, &searchResp); err != nil {
 		return nil, fmt.Errorf("解析 TMDB 数据失败: %w", err)
 	}
 	return parseCandidates(searchResp.Results, mediaType, year, cfg.ImageDomain), nil
@@ -366,8 +384,12 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		return nil, fmt.Errorf("TMDB 详情返回错误 (HTTP %d)", resp.StatusCode)
 	}
 
+	rawBody, err := readLimitedTMDBBody(resp.Body, maxTMDBDetailBody)
+	if err != nil {
+		return nil, fmt.Errorf("读取 TMDB 详情失败: %w", err)
+	}
 	var raw model.TMDBDetailRaw
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.Unmarshal(rawBody, &raw); err != nil {
 		return nil, err
 	}
 

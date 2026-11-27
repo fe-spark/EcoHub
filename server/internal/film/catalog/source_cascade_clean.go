@@ -42,36 +42,6 @@ func deleteHomeRecommendsBySource(conn *gorm.DB, sourceID string) error {
 	return nil
 }
 
-// CascadeCleanSourceDataTx 在调用方事务内删除该站档案和挂载数据。
-// 返回被删除的档案 mid；其他站的档案不删。
-func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
-	id = strings.TrimSpace(id)
-	if id == "" || tx == nil {
-		return nil, errors.New("采集站不存在")
-	}
-	var owned []int64
-	if err := tx.Unscoped().Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-		return nil, err
-	}
-	// 该站的轮播与首页推荐整组删除；其他站轮播/推荐里的该站影片随档案一起删。
-	if err := tx.Where("source_id = ?", id).Delete(&model.BannerSlot{}).Error; err != nil {
-		return nil, err
-	}
-	if err := deleteHomeRecommendsBySource(tx, id); err != nil {
-		return nil, err
-	}
-	if err := DeleteFilmCascadeTx(tx, owned); err != nil {
-		return nil, err
-	}
-	return owned, nil
-}
-
 func CleanSourceDataBatched(id string) ([]int64, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

@@ -131,11 +131,16 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 	if err := collectLifecycle.beginSource(id); err != nil {
 		if errors.Is(err, errCollectDuringMaintenance) {
 			log.Printf("[Spider] 站点 %s 停止采集：维护任务执行中（%s）", id, maintenanceRunningDetail())
-			progress.MarkStopped(id)
-			recordSourceStatusSnapshot(batchCtx, *s, progress.StatusStopped, "", false)
 			if batchCtx != nil {
+				if epoch, ok := batchCtx.progressEpoch(id); ok {
+					progress.MarkStoppedIfEpoch(id, epoch)
+				} else {
+					progress.MarkStopped(id)
+				}
+				recordSourceStatusSnapshot(batchCtx, *s, progress.StatusStopped, "", false)
 				batchCtx.releaseSourceOccupy(id)
 			} else {
+				progress.MarkStopped(id)
 				releaseCollectSourceIDs(id)
 			}
 			releasedPreparedOccupy = true
@@ -467,31 +472,3 @@ func StartBatchCollectRetry(parentBatchID string, hour int, claim CollectClaim, 
 
 // beforeRegisterCollectRunHook 仅供测试：登记运行之前调用，用于在这个窗口里模拟单站停止 + 重试。
 var beforeRegisterCollectRunHook func(id string)
-
-// skipSourceFailedNotify 用户停止、派发终止、同站已在跑都不是采集源故障，不发异常告警。
-func skipSourceFailedNotify(err error) bool {
-	return errors.Is(err, context.Canceled) ||
-		errors.Is(err, progress.ErrDispatchStopped) ||
-		errors.Is(err, progress.ErrStopRequested) ||
-		errors.Is(err, progress.ErrTaskExists)
-}
-
-// canRegisterCollectRun 登记运行前（任务表锁内）复核本次运行仍可开跑：
-// 一键终止过则不开；有批次时占用令牌和进度代次都必须还是本批次的。
-// 单站停止后立刻重试，重试会换掉占用令牌、进度代次加一；旧批次这时才走到登记，
-// 不能顶替重试登记任务、沿用重试的代次去改进度，否则重试会因任务已存在退出并把进度标成失败。
-func canRegisterCollectRun(id string, runVersion *uint64, batchCtx *collectBatchContext) error {
-	if runVersion != nil && isDispatchStopped(*runVersion) {
-		return progress.ErrDispatchStopped
-	}
-	if batchCtx == nil {
-		return nil
-	}
-	if !batchCtx.ownsOccupy(id) {
-		return progress.ErrStopRequested
-	}
-	if epoch, ok := batchCtx.progressEpoch(id); ok && progress.Epoch(id) != epoch {
-		return progress.ErrStopRequested
-	}
-	return nil
-}

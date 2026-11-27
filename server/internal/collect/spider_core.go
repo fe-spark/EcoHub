@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"server/internal/collect/fetcher"
 	"server/internal/film/converter"
 	"server/internal/model"
 	"server/internal/utils"
@@ -95,6 +96,9 @@ func (jc *JsonCollect) GetPageCount(r utils.RequestInfo) (count int, err error) 
 		return
 	}
 	count = int(res.PageCount)
+	if count < 0 || count > fetcher.MaxCollectPageCount {
+		return 0, fmt.Errorf("采集站返回异常总页数: %d", count)
+	}
 	log.Printf("[Spider] JSON 源探页完成 ac=%s h=%s pagecount=%d total=%d", ac, h, count, res.Total)
 	return
 }
@@ -124,4 +128,17 @@ func (jc *JsonCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDet
 	// 处理details信息
 	list = converter.ConvertFilmDetails(detailPage.List)
 	return
+}
+
+func normalizeCollectSourceDefaults(source *model.FilmSource) {
+	normalizeCollectCd(source)
+	if source.Format == "" {
+		source.Format = model.SourceFormatJSON
+	}
+}
+
+func normalizeCollectCd(source *model.FilmSource) {
+	if source.Cd <= 0 {
+		source.Cd = 24
+	}
 }

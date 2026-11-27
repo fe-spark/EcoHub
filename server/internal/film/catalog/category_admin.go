@@ -94,6 +94,7 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 	categoryOrderWriteMu.Lock()
 	defer categoryOrderWriteMu.Unlock()
 
+	EnsureSyntheticRootGroupsForSource(sourceID)
 	expectedTree := GetSourceBoundCategoryTree(sourceID)
 	expectedIDs := collectTreeNodeAndMemberIDs(expectedTree.Children)
 

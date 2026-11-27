@@ -2,7 +2,6 @@ package portal
 
 import (
 	"net/url"
-	"server/internal/film"
 	"server/internal/mediaproxy"
 	"server/internal/sourcecatalog"
 	"strconv"
@@ -82,12 +81,6 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 	if detail.Id <= 0 {
 		dto.Failed("暂无影片信息", c)
 		return
-	}
-	if c.Query("stored") == "1" {
-		if err := film.UseStoredFilm(&detail); err != nil {
-			dto.Failed(err.Error(), c)
-			return
-		}
 	}
 	var playableList []model.PlayLinkVo
 	for _, src := range detail.List {

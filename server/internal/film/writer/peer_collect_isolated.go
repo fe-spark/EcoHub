@@ -15,7 +15,11 @@ func savePeerFilmsIsolated(ctx context.Context, source *model.FilmSource, page i
 	useCustomSave := reflect.ValueOf(savePeerFilm).Pointer() != defaultSavePeerFilmPtr
 	for _, detail := range details {
 		if ctx != nil && ctx.Err() != nil {
-			return model.Mids{}, ctx.Err()
+			return model.Mids{
+				Affected: uniqueMIDs(affected),
+				Notify:   uniqueMIDs(notify),
+				Unmapped: unmapped,
+			}, ctx.Err()
 		}
 		var (
 			mid         int64
@@ -41,7 +45,11 @@ func savePeerFilmsIsolated(ctx context.Context, source *model.FilmSource, page i
 			}
 			log.Printf("[Spider][PeerCollect] 单片入库失败 source=%s page=%d vod=%d err=%v",
 				source.Id, page, detail.Id, err)
-			return model.Mids{}, err
+			return model.Mids{
+				Affected: uniqueMIDs(affected),
+				Notify:   uniqueMIDs(notify),
+				Unmapped: unmapped,
+			}, err
 		}
 		if mid <= 0 || !stored {
 			continue

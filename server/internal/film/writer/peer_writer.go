@@ -355,6 +355,15 @@ func saveSinglePeerDetailTxCtx(ctx context.Context, source *model.FilmSource, de
 			}
 		}
 
+		won, err := claimSourceVodTimeTx(tx, source.Id, detail.Id, detail.UpdateTime)
+		if err != nil {
+			return err
+		}
+		if !won {
+			mid = 0
+			isNew = false
+			return nil
+		}
 		if filmIndex == nil {
 			if !shared.HasPlayableLinks(detail) {
 				return errors.New("影片没有有效播放链接，不能建档")
@@ -370,15 +379,9 @@ func saveSinglePeerDetailTxCtx(ctx context.Context, source *model.FilmSource, de
 			if err := shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid); err != nil {
 				return err
 			}
-		}
-		won, err := claimSourceVodTimeTx(tx, source.Id, detail.Id, detail.UpdateTime)
-		if err != nil {
-			return err
-		}
-		if !won {
-			mid = 0
-			isNew = false
-			return nil
+			if _, err := claimSourceVodTimeTx(tx, source.Id, detail.Id, detail.UpdateTime); err != nil {
+				return err
+			}
 		}
 		newLines := buildPlaylistsFromDetail(mid, source.Id, detail)
 		var playChanged bool

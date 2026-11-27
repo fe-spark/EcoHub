@@ -77,8 +77,20 @@ func (s *HomeRecommendService) GenerateQuickPreview(ctx context.Context, req Rec
 		Groups:   make([]RecommendGenerateGroupPreview, 0, len(req.Quotas)),
 	}
 
+	seenQuota := make(map[string]struct{}, len(req.Quotas))
 	for _, q := range req.Quotas {
-		g, exists := groupByID[strings.TrimSpace(q.GroupId)]
+		if ctx.Err() != nil {
+			return RecommendGenerateResult{}, ctx.Err()
+		}
+		gid := strings.TrimSpace(q.GroupId)
+		if _, dup := seenQuota[gid]; dup {
+			continue
+		}
+		seenQuota[gid] = struct{}{}
+		if len(out.Groups) >= 30 {
+			break
+		}
+		g, exists := groupByID[gid]
 		if !exists || strings.TrimSpace(g.SyncChartKey) != "" || g.CategoryId > 0 || q.Count <= 0 {
 			continue
 		}
@@ -109,7 +121,7 @@ func (s *HomeRecommendService) GenerateQuickPreview(ctx context.Context, req Rec
 }
 
 func generateDoubanGroupPreview(ctx context.Context, readVersion, sourceID string, g model.HomeRecommendGroup, count int) ([]model.HomeRecommendAdminItem, error) {
-	cands, err := hotchart.HotChartsSvc.GetRawCandidatesByCategoryName(g.Title)
+	cands, err := hotchart.HotChartsSvc.GetRawCandidatesByCategoryNameCtx(ctx, g.Title)
 	if err != nil {
 		return nil, err
 	}
@@ -211,11 +223,21 @@ func (s *HomeRecommendService) PublishQuickDeck(ctx context.Context, req Recomme
 	if err != nil {
 		return err
 	}
+	batch := make([]struct {
+		GroupID string
+		Items   []model.HomeRecommendItem
+	}, 0, len(req.Groups))
+	seenGroup := make(map[string]struct{}, len(req.Groups))
 	for _, gp := range req.Groups {
-		g, err := GetHomeRecommendGroup(ctx, gp.GroupId)
+		gid := strings.TrimSpace(gp.GroupId)
+		if _, dup := seenGroup[gid]; dup {
+			continue
+		}
+		g, err := GetHomeRecommendGroup(ctx, gid)
 		if err != nil || g.SourceId != src.Id || strings.TrimSpace(g.SyncChartKey) != "" || g.CategoryId > 0 {
 			continue
 		}
+		seenGroup[gid] = struct{}{}
 		items := make([]model.HomeRecommendItem, 0, len(gp.Items))
 		seen := make(map[int64]bool, len(gp.Items))
 		for _, it := range gp.Items {
@@ -228,10 +250,16 @@ func (s *HomeRecommendService) PublishQuickDeck(ctx context.Context, req Recomme
 				DoubanScore: strings.TrimSpace(it.DoubanScore),
 			})
 		}
-		if err := ReplaceHomeRecommendGroupItems(ctx, g.Id, src.Id, items, nil); err != nil {
+		batch = append(batch, struct {
+			GroupID string
+			Items   []model.HomeRecommendItem
+		}{GroupID: g.Id, Items: items})
+	}
+	if len(batch) > 0 {
+		if err := ReplaceMultipleGroupItemsAtomic(ctx, src.Id, batch); err != nil {
 			return err
 		}
+		invalidateHomeCacheForSource(src.Id)
 	}
-	invalidateHomeCacheForSource(src.Id)
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
 )
@@ -177,6 +178,25 @@ var (
 	catNameCacheAt   time.Time
 )
 
+const maxCatIdByNameCacheEntries = 2048
+
+// resolveCategoryIDByNameMemoryOnly 仅查进程内分类缓存（优先 access 本地缓存，其次 taxonomy 内存快照），绝不查库。
+func resolveCategoryIDByNameMemoryOnly(name string) (int64, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, false
+	}
+	catNameCacheMu.RLock()
+	if time.Since(catNameCacheAt) < 5*time.Minute {
+		if id, ok := catIdByNameCache[name]; ok {
+			catNameCacheMu.RUnlock()
+			return id, id > 0
+		}
+	}
+	catNameCacheMu.RUnlock()
+	return taxonomy.LookupCategoryIDByNameMemoryOnly(name)
+}
+
 func resolveCategoryIDByName(name string) (int64, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -184,12 +204,16 @@ func resolveCategoryIDByName(name string) (int64, bool, error) {
 	}
 	catNameCacheMu.RLock()
 	if time.Since(catNameCacheAt) < 5*time.Minute {
-		if id, ok := catIdByNameCache[name]; ok && id > 0 {
+		if id, ok := catIdByNameCache[name]; ok {
 			catNameCacheMu.RUnlock()
-			return id, true, nil
+			return id, id > 0, nil
 		}
 	}
 	catNameCacheMu.RUnlock()
+
+	if id, ok := taxonomy.LookupCategoryIDByNameMemoryOnly(name); ok {
+		return id, true, nil
+	}
 
 	if db.Mdb == nil {
 		return 0, false, nil
@@ -201,14 +225,32 @@ func resolveCategoryIDByName(name string) (int64, bool, error) {
 		Where("name = ?", name).
 		First(&cat).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && cat.Id <= 0) {
+		catNameCacheMu.Lock()
+		if catNameCacheAt.IsZero() || time.Since(catNameCacheAt) >= 5*time.Minute {
+			catNameCache = map[int64]string{}
+			catIdByNameCache = map[string]int64{}
+			catNameCacheAt = time.Now()
+		}
+		if len(catIdByNameCache) < maxCatIdByNameCacheEntries {
+			// 写入负缓存占位（<= 0），避免无索引 categories.name 遭无效名称穿透扫描。
+			catIdByNameCache[name] = 0
+		}
+		catNameCacheMu.Unlock()
 		return 0, false, nil
 	}
 	if err != nil {
 		return 0, false, err
 	}
 	catNameCacheMu.Lock()
+	if catNameCacheAt.IsZero() || time.Since(catNameCacheAt) >= 5*time.Minute {
+		catNameCache = map[int64]string{}
+		catIdByNameCache = map[string]int64{}
+		catNameCacheAt = time.Now()
+	}
 	catNameCache[cat.Id] = cat.Name
-	catIdByNameCache[cat.Name] = cat.Id
+	if len(catIdByNameCache) < maxCatIdByNameCacheEntries {
+		catIdByNameCache[cat.Name] = cat.Id
+	}
 	catNameCacheMu.Unlock()
 	return cat.Id, true, nil
 }

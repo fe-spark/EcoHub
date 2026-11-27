@@ -2,6 +2,7 @@ package mapping
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -165,6 +166,35 @@ func refreshProjectedReadModelAfterMappingRuleChange(groups ...string) error {
 			film.RefreshInventoryStatsAsync()
 			return nil
 		}
+	}
+	return nil
+}
+
+// ValidateMappingRulesForImport 校验备份导入的映射规则集合，确保与单条增改校验口径一致且无重复生效点。
+func ValidateMappingRulesForImport(exports []model.MappingRuleExport) error {
+	seen := make(map[string]struct{}, len(exports))
+	for idx, item := range exports {
+		rawMatchType := strings.TrimSpace(strings.ToLower(item.MatchType))
+		if rawMatchType != "" && rawMatchType != "exact" && rawMatchType != "regex" {
+			return fmt.Errorf("第 %d 条映射规则匹配方式无效: %s", idx+1, item.MatchType)
+		}
+		rule := model.MappingRule{
+			SourceId:  item.SourceId,
+			Group:     item.Group,
+			Raw:       item.Raw,
+			Target:    item.Target,
+			MatchType: rawMatchType,
+			Remarks:   item.Remarks,
+		}
+		prepareMappingRule(&rule)
+		if err := validateMappingRule(rule); err != nil {
+			return fmt.Errorf("第 %d 条映射规则无效: %w", idx+1, err)
+		}
+		effectKey := fmt.Sprintf("%s\x00%s\x00%s\x00%s", rule.SourceId, rule.Group, rule.Raw, rule.MatchType)
+		if _, dup := seen[effectKey]; dup {
+			return fmt.Errorf("第 %d 条映射规则与之前规则重复（分组=%s 原始值=%s 匹配方式=%s）", idx+1, rule.Group, rule.Raw, rule.MatchType)
+		}
+		seen[effectKey] = struct{}{}
 	}
 	return nil
 }

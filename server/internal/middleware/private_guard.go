@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"crypto/subtle"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -46,14 +45,7 @@ func extractProvideKey(c *gin.Context) string {
 }
 
 func rateLimitClientKey(c *gin.Context) string {
-	ipStr := realClientIP(c)
-	parsed := net.ParseIP(ipStr)
-	if parsed != nil && parsed.To4() == nil {
-		if ip16 := parsed.To16(); ip16 != nil {
-			return ip16.Mask(net.CIDRMask(64, 128)).String() + "/64"
-		}
-	}
-	return ipStr
+	return utils.NormalizeClientIPKey(realClientIP(c))
 }
 
 func isProvideKeyAllowed(clientIP string) bool {

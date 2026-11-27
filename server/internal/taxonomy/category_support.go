@@ -270,6 +270,30 @@ var (
 	rootCategoryCNameCache sync.Map // cName (string) -> rootPid (int64)
 )
 
+// LookupCategoryIDByNameMemoryOnly 仅从进程内分类缓存按名称精确查找分类 ID，绝不触发数据库查询。
+func LookupCategoryIDByNameMemoryOnly(name string) (int64, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, false
+	}
+	catMu.RLock()
+	defer catMu.RUnlock()
+	if !catInitialized {
+		return 0, false
+	}
+	var matchedID int64
+	categoryNameCache.Range(func(key, val any) bool {
+		id, ok1 := key.(int64)
+		cname, ok2 := val.(string)
+		if ok1 && ok2 && strings.TrimSpace(cname) == name {
+			matchedID = id
+			return false
+		}
+		return true
+	})
+	return matchedID, matchedID > 0
+}
+
 // ClearRootCategoryCNameCache 清空分类名称推断缓存。
 func ClearRootCategoryCNameCache() {
 	rootCategoryCNameCache.Clear()

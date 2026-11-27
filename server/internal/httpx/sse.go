@@ -6,23 +6,26 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"server/internal/model/dto"
 
 	"github.com/gin-gonic/gin"
 )
 
+const sseWriteTimeout = 15 * time.Second
+
 // ErrSSEWrite 表示事件已序列化，但写给客户端失败。序列化失败不包这层错误。
 var ErrSSEWrite = errors.New("sse write")
 
-// SSEWriter 负责 SSE 响应头、并发写出和刷新。
+// SSEWriter 负责 SSE 响应头、并发写出与写超时保护。
 type SSEWriter struct {
 	w  http.ResponseWriter
 	f  http.Flusher
 	mu sync.Mutex
 }
 
-// OpenSSE 开始一条 SSE 响应。当前 Writer 不能刷新时已写失败响应。
+// OpenSSE 开始一条 SSE 响应。当前 Writer 不能刷新或握手写出失败时返回 false。
 func OpenSSE(c *gin.Context) (*SSEWriter, bool) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache, no-transform")
@@ -36,7 +39,9 @@ func OpenSSE(c *gin.Context) (*SSEWriter, bool) {
 	}
 	flusher.Flush()
 	writer := &SSEWriter{w: c.Writer, f: flusher}
-	_ = writer.Comment("ready")
+	if err := writer.Comment("ready"); err != nil {
+		return nil, false
+	}
 	return writer, true
 }
 
@@ -54,6 +59,7 @@ func (s *SSEWriter) SendEvent(name string, v any) error {
 func (s *SSEWriter) Comment(text string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_ = http.NewResponseController(s.w).SetWriteDeadline(time.Now().Add(sseWriteTimeout))
 	if _, err := fmt.Fprintf(s.w, ": %s\n\n", text); err != nil {
 		return fmt.Errorf("%w: %s", ErrSSEWrite, err.Error())
 	}
@@ -68,6 +74,7 @@ func (s *SSEWriter) send(event string, v any) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_ = http.NewResponseController(s.w).SetWriteDeadline(time.Now().Add(sseWriteTimeout))
 	var writeErr error
 	if event == "" {
 		_, writeErr = fmt.Fprintf(s.w, "data: %s\n\n", payload)

@@ -93,11 +93,7 @@ func SaveSiteBasic(c model.BasicConfig) error {
 		return err
 	}
 
-	data, err := json.Marshal(c)
-	if err != nil {
-		return err
-	}
-	if err := WriteConfigCache(config.SiteConfigBasic, string(data)); err != nil {
+	if err := DropConfigCache(config.SiteConfigBasic); err != nil {
 		return err
 	}
 	ClearIndexPageCache()

@@ -56,7 +56,7 @@ func TestUserHandler_LoginAccountLimiterAndUnifiedError(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		c, w := testJSONUserContext(http.MethodPost, "/api/login", `{"userName":"nobody_user","password":"bad"}`)
-		c.Request.Header.Set("X-Forwarded-For", fmt.Sprintf("10.0.0.%d", i+1))
+		c.Request.RemoteAddr = "203.0.113.10:12345"
 		UserHd.Login(c)
 		var resp dto.Response
 		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
@@ -67,16 +67,27 @@ func TestUserHandler_LoginAccountLimiterAndUnifiedError(t *testing.T) {
 		}
 	}
 
-	// 即使换第 6 个 IP，账号维度限流仍应生效
+	// 同 IP 第 6 次失败应被锁定；同时验证不同合法 IP 不会被恶意锁定同一账号
 	c6, w6 := testJSONUserContext(http.MethodPost, "/api/login", `{"userName":"nobody_user","password":"bad"}`)
-	c6.Request.Header.Set("X-Forwarded-For", "10.0.0.99")
+	c6.Request.RemoteAddr = "203.0.113.10:12345"
 	UserHd.Login(c6)
 	var resp6 dto.Response
 	if err := json.Unmarshal(w6.Body.Bytes(), &resp6); err != nil {
 		t.Fatal(err)
 	}
 	if resp6.Code != dto.FAILED || !strings.Contains(resp6.Msg, "频繁") {
-		t.Fatalf("expected account rate limit on 6th attempt, got code=%d msg=%q", resp6.Code, resp6.Msg)
+		t.Fatalf("expected ip+account rate limit on 6th attempt, got code=%d msg=%q", resp6.Code, resp6.Msg)
+	}
+
+	cOther, wOther := testJSONUserContext(http.MethodPost, "/api/login", `{"userName":"nobody_user","password":"bad"}`)
+	cOther.Request.RemoteAddr = "203.0.113.99:12345"
+	UserHd.Login(cOther)
+	var respOther dto.Response
+	if err := json.Unmarshal(wOther.Body.Bytes(), &respOther); err != nil {
+		t.Fatal(err)
+	}
+	if respOther.Msg != "用户名或密码错误" {
+		t.Fatalf("expected other IP not locked by global account DoS, got %q", respOther.Msg)
 	}
 }
 
@@ -91,7 +102,7 @@ func TestReserveLoginAttempts_ParallelBurstStopsAtFive(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if reserveLoginAttempts("acct|burst") {
+			if reserveLoginAttempts("ip|203.0.113.1", "ipacct|203.0.113.1|burst") {
 				allowed.Add(1)
 			}
 		}()
@@ -99,5 +110,32 @@ func TestReserveLoginAttempts_ParallelBurstStopsAtFive(t *testing.T) {
 	wg.Wait()
 	if got := allowed.Load(); got != 5 {
 		t.Fatalf("parallel burst allowed %d, want 5", got)
+	}
+}
+
+func TestReserveLoginAttempts_EvictsActiveWhenFullAndLimitsIP(t *testing.T) {
+	loginFailMu.Lock()
+	loginFailState = map[string]loginAttemptState{}
+	loginFailMu.Unlock()
+
+	for i := 0; i < loginMaxEntries+50; i++ {
+		if !reserveLoginAttempts("", fmt.Sprintf("ipacct|198.51.100.%d|u%d", i%200, i)) {
+			t.Fatalf("unexpected limit at i=%d", i)
+		}
+	}
+	loginFailMu.Lock()
+	size := len(loginFailState)
+	loginFailMu.Unlock()
+	if size >= loginMaxEntries {
+		t.Fatalf("expected active eviction keeping map < %d, got %d", loginMaxEntries, size)
+	}
+
+	for i := 0; i < loginMaxIPFails; i++ {
+		if !reserveLoginAttempts("ip|198.51.100.88", fmt.Sprintf("ipacct|198.51.100.88|rand_%d", i)) {
+			t.Fatalf("unexpected ip block at i=%d", i)
+		}
+	}
+	if reserveLoginAttempts("ip|198.51.100.88", "ipacct|198.51.100.88|rand_next") {
+		t.Fatal("expected pure IP rate limit to block distinct username spraying")
 	}
 }

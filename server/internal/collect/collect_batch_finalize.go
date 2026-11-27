@@ -27,8 +27,6 @@ func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	b.mu.Unlock()
 	if hasTok && tok > 0 {
 		releaseCollectTokens(map[string]uint64{id: tok})
-	} else {
-		releaseCollectSourceIDs(id)
 	}
 }
 
@@ -190,9 +188,7 @@ func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error 
 	defer collectLifecycle.endPublish()
 	publishMu.Lock()
 	defer publishMu.Unlock()
-	if _, err := drainStreamPublishLocked(true, false); err != nil {
-		return err
-	}
+	_, drainErr := drainStreamPublishLocked(true, false)
 	mids := b.takeSourceMIDs(source.Id)
 	if !isPreferredCollectSource(source.Id) {
 		mids = nil
@@ -200,7 +196,7 @@ func (b *collectBatchContext) sealFinishedSource(source model.FilmSource) error 
 	schedulePrimarySearchReseal(mids)
 	filmcache.ClearTVBoxConfigCache()
 	b.warmPrimaryHome(source.Id)
-	return nil
+	return drainErr
 }
 
 func (b *collectBatchContext) warmPrimaryHome(sourceID string) {

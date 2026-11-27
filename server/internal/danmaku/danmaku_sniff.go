@@ -42,7 +42,6 @@ func signDandanplayRequest(req *http.Request, appID, appSecret, apiPath string) 
 	}
 	req.Header.Set("X-AppId", appID)
 	if appSecret != "" {
-		req.Header.Set("X-AppSecret", appSecret)
 		timestamp := time.Now().Unix()
 		toSign := fmt.Sprintf("%s%d%s%s", appID, timestamp, apiPath, appSecret)
 		hash := sha256.Sum256([]byte(toSign))
@@ -122,7 +121,11 @@ func fetchSniffedDanmaku(cfg model.DanmakuConfig, title string, episode int, use
 		return sniffResult{Status: networkError, Reason: "未配置自建弹幕接口，也没有填写弹弹play AppId"}
 	}
 	baseURL := resolveDanmuBaseURL(cfg)
-	cacheKey := fmt.Sprintf("%s:Danmaku:%s:%s:%d", config.RedisKeyPrefix, url.QueryEscape(baseURL), title, episode)
+	normalizedTitle := cleanSearchTitle(title)
+	if normalizedTitle == "" {
+		return sniffResult{Status: networkEmpty, Reason: "缺少有效片名"}
+	}
+	cacheKey := fmt.Sprintf("%s:Danmaku:%s:%s:%d", config.RedisKeyPrefix, url.QueryEscape(baseURL), normalizedTitle, episode)
 	if useCache && db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.DanmakuItem
@@ -133,7 +136,14 @@ func fetchSniffedDanmaku(cfg model.DanmakuConfig, title string, episode int, use
 	}
 
 	val, _, _ := danmakuSniffSF.Do(cacheKey, func() (any, error) {
-		match, err := searchDandanplayEpisode(cfg, baseURL, title, episode)
+		select {
+		case danmakuSniffSem <- struct{}{}:
+			defer func() { <-danmakuSniffSem }()
+		case <-time.After(1500 * time.Millisecond):
+			return sniffResult{Status: networkError, Reason: "弹幕嗅探并发繁忙，请稍后重试"}, nil
+		}
+
+		match, err := searchDandanplayEpisode(cfg, baseURL, normalizedTitle, episode)
 		if err != nil {
 			return sniffResult{Status: networkError, Reason: upstreamReason(err)}, nil
 		}
@@ -225,8 +235,10 @@ func danmakuHTTPClient(timeout time.Duration) (*http.Client, error) {
 	}, nil
 }
 
-func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, rawTitle string, targetEpisode int) (dandanMatch, error) {
-	title := cleanSearchTitle(rawTitle)
+func searchDandanplayEpisode(cfg model.DanmakuConfig, baseURL, title string, targetEpisode int) (dandanMatch, error) {
+	if cleaned := cleanSearchTitle(title); cleaned != "" {
+		title = cleaned
+	}
 	apiPath := "/api/v2/search/episodes"
 	apiURL := fmt.Sprintf("%s/search/episodes?anime=%s", baseURL, url.QueryEscape(title))
 	req, err := http.NewRequest("GET", apiURL, nil)

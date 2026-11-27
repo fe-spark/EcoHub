@@ -16,6 +16,7 @@ import (
 	"server/internal/taxonomy"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SaveDetailOptions struct {
@@ -129,9 +130,17 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 	var existingFilm model.FilmIndex
 	isManualUpdate := false
 	if detail.Id > 0 {
-		if err := db.Mdb.Where("mid = ?", detail.Id).First(&existingFilm).Error; err == nil && existingFilm.Mid > 0 {
-			isManualUpdate = true
+		err := db.Mdb.Where("mid = ?", detail.Id).First(&existingFilm).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return 0, errors.New("影片不存在或已被删除")
+			}
+			return 0, err
 		}
+		if existingFilm.Mid <= 0 {
+			return 0, errors.New("影片不存在或已被删除")
+		}
+		isManualUpdate = true
 	}
 
 	var mid int64
@@ -141,6 +150,16 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 		unlock := lockManualUpdate(source, existingFilm, detail)
 		defer unlock()
 		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+			// 在行锁与写锁保护下重读最新档案，防止与并发 TMDB 刮削/采集写回/删片产生 TOCTOU 丢失更新或孤儿线路。
+			var freshFilm model.FilmIndex
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("mid = ?", mid).First(&freshFilm).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errors.New("影片不存在或已被删除")
+				}
+				return err
+			}
+			existingFilm = freshFilm
+
 			categoryVersion := taxonomy.GetCategoryVersion()
 			ruleVersion := taxonomy.GetRuleVersion()
 			if detail.Pid <= 0 && existingFilm.Pid > 0 {
@@ -230,12 +249,20 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 				"update_reason":        "后台修改",
 				"update_stamp":         time.Now().Unix(),
 			}
-			if err := tx.Model(&model.FilmIndex{}).Where("mid = ?", mid).Updates(updateCols).Error; err != nil {
-				return err
+			res := tx.Model(&model.FilmIndex{}).Where("mid = ?", mid).Updates(updateCols)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return errors.New("影片不存在或已被删除")
 			}
 
 			// 播放资源保存：仅自建影片允许更新/清空播放线路，采集入库影片禁止覆盖采集站线路。
+			// 历史自建影片（first_source_id="manual"）沿用 "manual" 归属，避免把新线路误写入当前采集主站。
 			ownerSourceID := strings.TrimSpace(sourceID)
+			if strings.TrimSpace(existingFilm.FirstSourceId) == "manual" {
+				ownerSourceID = "manual"
+			}
 			if ownerSourceID == "" {
 				ownerSourceID = strings.TrimSpace(existingFilm.FirstSourceId)
 			}

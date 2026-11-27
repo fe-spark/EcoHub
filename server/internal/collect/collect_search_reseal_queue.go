@@ -27,6 +27,7 @@ type searchResealQueue struct {
 	running            bool
 	retryWait          time.Duration
 	retryTimer         *time.Timer
+	retryTimerGen      uint64
 	rebuildRetries     int
 	sealRetries        int
 	// awaitDone 停等本轮触发的整表重建终态。只有这时才响应 done/idle。
@@ -227,15 +228,17 @@ func (q *searchResealQueue) sealFrozenRound() bool {
 		q.mu.Lock()
 		q.sealRetries++
 		exhausted := q.sealRetries >= maxRebuildSealingRetries
+		var exhaustedIDs []string
 		if exhausted {
 			q.running = false
 			q.sealRetries = 0
 			q.retryWait = 0
+			exhaustedIDs = q.takeSealingLocked()
 		}
 		q.mu.Unlock()
 		if exhausted {
 			log.Printf("[Spider] 封口重试达到上限(%d)，标记检索失败并释放准入 mids=%d", maxRebuildSealingRetries, len(mids))
-			q.finishSealingCycle(true, false)
+			q.finishSealingIDs(exhaustedIDs, true, false)
 			return true
 		}
 		q.restorePending(mids, verifiedPrimary)
@@ -341,8 +344,7 @@ func (q *searchResealQueue) complete() {
 	q.finishSealingCycle(false, false)
 }
 
-func (q *searchResealQueue) finishSealingCycle(failed, sealedMIDs bool) {
-	q.mu.Lock()
+func (q *searchResealQueue) takeSealingLocked() []string {
 	ids := make([]string, 0, len(q.sealing))
 	for id := range q.sealing {
 		ids = append(ids, id)
@@ -350,15 +352,45 @@ func (q *searchResealQueue) finishSealingCycle(failed, sealedMIDs bool) {
 	q.sealing = map[string]struct{}{}
 	q.stopRetryTimerLocked()
 	q.rebuildRetries = 0
+	return ids
+}
+
+func (q *searchResealQueue) finishSealingCycle(failed, sealedMIDs bool) {
+	q.mu.Lock()
+	ids := q.takeSealingLocked()
 	q.mu.Unlock()
+	q.finishSealingIDs(ids, failed, sealedMIDs)
+}
+
+func (q *searchResealQueue) finishSealingIDs(ids []string, failed, sealedMIDs bool) {
 	if failed {
 		progress.MarkSealFailed(ids)
 	} else {
 		progress.MarkSealed(ids)
 	}
-	if (len(ids) > 0 || sealedMIDs) && !IsCollecting() {
-		triggerCollectDoneHooks()
+	if len(ids) > 0 || sealedMIDs {
+		// 异步检查 IsCollecting 并触发收尾钩子，避免在 searchRebuild.mu 回调栈内同步获取 collectLifecycle.mu 引发 AB-BA 死锁。
+		go func() {
+			if !IsCollecting() {
+				triggerCollectDoneHooks()
+			}
+		}()
 	}
+}
+
+// cancelRetryForReset 在全站重置前取消退避重试定时器并清空待检索状态，避免清库中途触发延迟索引重建。
+func (q *searchResealQueue) cancelRetryForReset() {
+	q.mu.Lock()
+	q.stopRetryTimerLocked()
+	q.pending = map[int64]struct{}{}
+	q.sealing = map[string]struct{}{}
+	q.verifiedPrimary = ""
+	q.allPendingVerified = false
+	q.rebuildRetries = 0
+	q.sealRetries = 0
+	q.retryWait = 0
+	q.awaitDone = false
+	q.mu.Unlock()
 }
 
 // onSearchIndexTerminal 仅在停等本轮重建时处理终态：done 收口，idle 调度重试避免永久卡在待检索。
@@ -374,10 +406,9 @@ func (q *searchResealQueue) onSearchIndexTerminal(status string) {
 		return
 	}
 	if status == "done" {
-		q.stopRetryTimerLocked()
-		q.rebuildRetries = 0
+		ids := q.takeSealingLocked()
 		q.mu.Unlock()
-		q.complete()
+		q.finishSealingIDs(ids, false, false)
 		return
 	}
 	q.scheduleIdleRebuildRetryLocked()
@@ -387,6 +418,7 @@ func (q *searchResealQueue) onSearchIndexTerminal(status string) {
 const maxRebuildSealingRetries = 5
 
 func (q *searchResealQueue) stopRetryTimerLocked() {
+	q.retryTimerGen++
 	if q.retryTimer != nil {
 		q.retryTimer.Stop()
 		q.retryTimer = nil
@@ -401,26 +433,34 @@ func (q *searchResealQueue) scheduleIdleRebuildRetryLocked() {
 		return
 	}
 	if q.rebuildRetries >= maxRebuildSealingRetries {
-		q.rebuildRetries = 0
-		q.stopRetryTimerLocked()
+		ids := q.takeSealingLocked()
 		syslog.Errorf("[Spider] 检索索引重建连续 %d 次失败，释放待检索站点状态，请手动触发索引重建", maxRebuildSealingRetries)
-		go q.finishSealingCycle(true, false)
+		go q.finishSealingIDs(ids, true, false)
 		return
 	}
 	wait := q.advanceRetryWaitLocked(2 * time.Second)
 	q.rebuildRetries++
 	q.stopRetryTimerLocked()
-	q.retryTimer = time.AfterFunc(wait, q.retryAfterIdle)
+	gen := q.retryTimerGen
+	q.retryTimer = time.AfterFunc(wait, func() {
+		q.retryAfterIdleGen(gen)
+	})
 	log.Printf("[Spider] 检索索引重建失败，%s 后重试封口收尾 (%d/%d)", wait, q.rebuildRetries, maxRebuildSealingRetries)
 }
 
 func (q *searchResealQueue) retryAfterIdle() {
+	q.retryAfterIdleGen(0)
+}
+
+func (q *searchResealQueue) retryAfterIdleGen(gen uint64) {
 	q.mu.Lock()
+	if gen == 0 || q.retryTimerGen == gen {
+		q.retryTimer = nil
+	}
 	if len(q.sealing) == 0 || q.running || q.awaitDone {
 		q.mu.Unlock()
 		return
 	}
-	q.retryTimer = nil
 	if db.Mdb == nil {
 		// 无库时无法重建，仍需走退避重试并在达上限后释放待检索站点，避免永久卡在 StatusSealing。
 		q.scheduleIdleRebuildRetryLocked()

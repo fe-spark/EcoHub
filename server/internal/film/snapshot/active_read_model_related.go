@@ -15,7 +15,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/taxonomy"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -140,13 +139,21 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	seen := make(map[int64]struct{}, candidatePoolLimit+1)
 	seen[current.Mid] = struct{}{}
 	list := make([]model.FilmListSnapshot, 0, candidatePoolLimit)
+	effectiveSourceID := strings.TrimSpace(sourceID)
+	if effectiveSourceID == "" {
+		effectiveSourceID = strings.TrimSpace(current.SourceId)
+	}
+	if effectiveSourceID == "" {
+		effectiveSourceID = currentPrimarySourceID()
+	}
+	categoryVisible := SourceCategoryVisibility(effectiveSourceID)
 
 	appendUnique := func(src []model.FilmListSnapshot) {
 		for _, item := range src {
 			if _, ok := seen[item.Mid]; ok {
 				continue
 			}
-			if !taxonomy.IsCategoryVisible(item.Cid, item.Pid) {
+			if !categoryVisible(item.CategoryKey, item.RootCategoryKey, item.Cid, item.Pid) {
 				continue
 			}
 			seen[item.Mid] = struct{}{}
@@ -293,6 +300,14 @@ func recallRelatedMidsFromIndex(idx *filmSearchMetaIndex, current model.FilmList
 	for mid := range seen {
 		picked[mid] = struct{}{}
 	}
+	effectiveSourceID := strings.TrimSpace(sourceID)
+	if effectiveSourceID == "" {
+		effectiveSourceID = strings.TrimSpace(current.SourceId)
+	}
+	if effectiveSourceID == "" {
+		effectiveSourceID = idx.PrimaryID
+	}
+	categoryVisible := SourceCategoryVisibility(effectiveSourceID)
 	accept := func(meta *FilmSearchMeta) bool {
 		if meta == nil || meta.Mid <= 0 {
 			return false
@@ -300,7 +315,7 @@ func recallRelatedMidsFromIndex(idx *filmSearchMetaIndex, current model.FilmList
 		if _, exists := picked[meta.Mid]; exists {
 			return false
 		}
-		if !taxonomy.IsCategoryVisible(meta.Cid, meta.Pid) {
+		if !categoryVisible(meta.CategoryKey, meta.RootCategoryKey, meta.Cid, meta.Pid) {
 			return false
 		}
 		if sourceID != "" && !meta.HasPlaySource(sourceID) {

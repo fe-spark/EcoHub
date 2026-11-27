@@ -54,6 +54,9 @@ func cloneMovieDetailVo(v model.MovieDetailVo) model.MovieDetailVo {
 	return cp
 }
 
+const filmDetailMissingSentinel = "__MISSING__"
+const filmDetailMissingTTL = 45 * time.Second
+
 // GetFilmDetail 影片详情信息页面处理（基础聚合版，按采集站权重排序）。
 func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 	if id <= 0 {
@@ -63,6 +66,9 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 	cacheKey := fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, id)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" && data != "{}" {
+			if data == filmDetailMissingSentinel {
+				return model.MovieDetailVo{}, nil
+			}
 			var cached model.MovieDetailVo
 			if json.Unmarshal([]byte(data), &cached) == nil {
 				if !taxonomy.IsCategoryVisible(cached.Cid, cached.Pid) {
@@ -76,6 +82,9 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 	val, err, _ := filmDetailSfGroup.Do(cacheKey, func() (any, error) {
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" && data != "{}" {
+				if data == filmDetailMissingSentinel {
+					return model.MovieDetailVo{}, nil
+				}
 				var cached model.MovieDetailVo
 				if json.Unmarshal([]byte(data), &cached) == nil {
 					if !taxonomy.IsCategoryVisible(cached.Cid, cached.Pid) {
@@ -96,6 +105,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			return model.MovieDetailVo{}, snapErr
 		}
 		if snapshot == nil {
+			storeFilmPlayInfoCache(cacheKey, filmDetailMissingSentinel, filmDetailMissingTTL, playGen)
 			return model.MovieDetailVo{}, nil
 		}
 		if !taxonomy.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
@@ -106,6 +116,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
 		if movieDetail == nil {
 			filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
+			storeFilmPlayInfoCache(cacheKey, filmDetailMissingSentinel, filmDetailMissingTTL, playGen)
 			return model.MovieDetailVo{}, nil
 		}
 

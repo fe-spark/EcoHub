@@ -43,6 +43,9 @@ var (
 
 // EnsureBotPoller 根据当前通知配置与代理配置启停 Telegram getUpdates 轮询协程
 func (s *NotifyService) EnsureBotPoller() {
+	pollerCfgMu.Lock()
+	defer pollerCfgMu.Unlock()
+
 	cfg, err := GetNotifyConfig()
 	if err != nil {
 		syslog.Errorf("[Notify] 读取通知配置失败，保持轮询状态: %v", err)
@@ -60,17 +63,17 @@ func (s *NotifyService) EnsureBotPoller() {
 	if !ok {
 		proxyURL = ""
 	}
-	ensurePollerState(token, strings.TrimSpace(proxyURL))
+	ensurePollerStateLocked(token, strings.TrimSpace(proxyURL))
 }
 
 // StopBotPoller 停止 Telegram 轮询协程
 func (s *NotifyService) StopBotPoller() {
-	ensurePollerState("", "")
-}
-
-func ensurePollerState(token, proxyURL string) {
 	pollerCfgMu.Lock()
 	defer pollerCfgMu.Unlock()
+	ensurePollerStateLocked("", "")
+}
+
+func ensurePollerStateLocked(token, proxyURL string) {
 
 	pollerMu.Lock()
 	if activePoller != nil {
@@ -97,11 +100,13 @@ func ensurePollerState(token, proxyURL string) {
 	pollerMu.Unlock()
 
 	if old != nil {
-		// 等待旧 getUpdates 循环退出再启动新轮询，避免同 Token 并发拉取触发 409 冲突。
+		// 等待旧 getUpdates 循环退出再启动新轮询；若超时仍未结束则放弃本轮启动，避免同 Token 双开引发 409 冲突。
 		select {
 		case <-old.pollDone:
 		case <-old.done:
 		case <-time.After(5 * time.Second):
+			syslog.Warnf("[Notify] 旧 Telegram 轮询未在 5s 内退出，放弃并发拉起防 409 冲突")
+			return
 		}
 	}
 

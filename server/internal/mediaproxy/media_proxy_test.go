@@ -167,5 +167,18 @@ func TestWrapMediaURL(t *testing.T) {
 		if got := WrapMediaURL(remotePic); !strings.HasPrefix(got, "https://wsrv.nl/?url=") {
 			t.Errorf("expected remote picture proxied, got %q", got)
 		}
+
+		// 前缀混淆域名与 userinfo URL 不可命中同源白名单
+		spoofPic := "https://mysite.example.com.evil.com/upload/pic/1.jpg"
+		if got := WrapMediaURL(spoofPic); !strings.HasPrefix(got, "https://wsrv.nl/?url=") {
+			t.Errorf("expected spoof host proxied, got %q", got)
+		}
+		userInfoPic := "https://mysite.example.com@evil.com/upload/pic/1.jpg"
+		if got := WrapMediaURL(userInfoPic); got != "" && !strings.HasPrefix(got, "https://wsrv.nl/?url=") {
+			t.Errorf("expected userinfo host proxied or rejected, got %q", got)
+		}
+		if got := WrapMediaURL("http://[100.64.0.1]/a.jpg"); got != "http://[100.64.0.1]/a.jpg" {
+			t.Errorf("expected cgnat url unproxied, got %q", got)
+		}
 	})
 }

@@ -197,7 +197,10 @@ func releaseQueuedCollectOccupies() {
 }
 
 func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
-	if batchCtx != nil && !batchCtx.ownsOccupy(id) {
+	if batchCtx != nil {
+		if batchCtx.ownsOccupy(id) {
+			batchCtx.markSourceFailed(id)
+		}
 		batchCtx.releaseSourceOccupy(id)
 		return
 	}
@@ -207,7 +210,7 @@ func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
 			cur.Status = progress.StatusFailed
 		}
 	})
-	batchCtx.releaseSourceOccupy(id)
+	releaseCollectSourceIDs(id)
 }
 
 // abandon 占好的站不再采集：只停占用那一代进度，按令牌放占用，不碰同站之后的新采集。

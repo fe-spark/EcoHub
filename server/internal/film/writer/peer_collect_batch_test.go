@@ -302,11 +302,13 @@ func openPeerPageDB(t *testing.T) *gorm.DB {
 		&model.Category{},
 		&model.CategoryMapping{},
 		&model.SourceCategory{},
+		&model.MappingRule{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	_ = gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true}).Error
 	db.Mdb = gdb
+	taxonomy.StoreMappingSnapshotForTest(nil)
 	taxonomy.RefreshCategoryCache()
 	return gdb
 }

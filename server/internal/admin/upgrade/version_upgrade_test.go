@@ -109,13 +109,13 @@ func TestBuildReplacementBody(t *testing.T) {
 		t.Fatalf("expected Hostname to be removed")
 	}
 
-	// 检查 Mounts 存在时 Binds 被清理
+	// 检查 Mounts 存在时保留 Binds，防止 -v 卷在升级后静默丢失
 	hc, ok := body["HostConfig"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected HostConfig map")
 	}
-	if _, exists := hc["Binds"]; exists {
-		t.Fatalf("expected Binds removed when Mounts present")
+	if _, exists := hc["Binds"]; !exists {
+		t.Fatalf("expected Binds preserved when Mounts present")
 	}
 
 	// 检查多网络时：创建体中只保留 1 个网络，其余放入 extraNets 避免 Docker 创建报错
