@@ -2,13 +2,17 @@ package migration
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"slices"
 	"strings"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -40,12 +44,13 @@ func migrateDropCollectRecordFilms(gdb *gorm.DB) error {
 		if err := backfillSingleUpdateTargetMids(gdb, legacyFilmTable); err != nil {
 			return err
 		}
-		if err := gdb.Migrator().DropTable(legacyFilmTable); err != nil {
+		if err := dropLegacyCollectRecordFilmsTable(gdb, legacyFilmTable); err != nil {
 			return err
 		}
 	}
 
 	if gdb.Migrator().HasTable(&model.CollectRecord{}) && gdb.Migrator().HasColumn(&model.CollectRecord{}, "ledger") {
+		log.Printf("[Migration] 正在清理 %s.ledger 废弃列...", model.TableCollectRecord)
 		if err := gdb.Exec("ALTER TABLE " + model.TableCollectRecord + " DROP COLUMN ledger").Error; err != nil {
 			return err
 		}
@@ -70,15 +75,55 @@ func ensureFilmIndexLastRecordSchema(gdb *gorm.DB) error {
 	if exists && slices.Equal(curCols, notifyFilmIndexSpec.cols) {
 		return nil
 	}
-	return rebuildFilmIndex(gdb, isSQLite, notifyFilmIndexSpec, exists)
+	started := time.Now()
+	if err := rebuildFilmIndex(gdb, isSQLite, notifyFilmIndexSpec, exists); err != nil {
+		return err
+	}
+	log.Printf("[Migration] %s.%s 联合索引构建完成 (耗时 %s)", model.TableFilmIndex, notifyFilmIndexSpec.name, time.Since(started).Round(time.Millisecond))
+	return nil
 }
 
 func addLastRecordIDColumn(gdb *gorm.DB, isSQLite bool) error {
 	if isSQLite {
 		return gdb.Exec("ALTER TABLE " + model.TableFilmIndex + " ADD COLUMN last_record_id integer NOT NULL DEFAULT 0").Error
 	}
-	alterSQL := "ALTER TABLE " + model.TableFilmIndex + " ADD COLUMN last_record_id bigint unsigned NOT NULL DEFAULT 0, ALGORITHM=INPLACE, LOCK=NONE"
-	// 线上百万级 film_index 走长读超时连接执行在线 DDL，避免默认 30s readTimeout 中断。
+	started := time.Now()
+	// MySQL 8.0+ 表尾加列优先使用 ALGORITHM=INSTANT（毫秒级完成），避免强行 INPLACE 触发百万行整表复制重建。
+	instantSQL := "ALTER TABLE " + model.TableFilmIndex + " ADD COLUMN last_record_id bigint unsigned NOT NULL DEFAULT 0, ALGORITHM=INSTANT"
+	log.Printf("[Migration] 正在为 %s 新增 last_record_id 列（优先 ALGORITHM=INSTANT）...", model.TableFilmIndex)
+	err := execMigrationDDL(gdb, instantSQL)
+	if err == nil {
+		log.Printf("[Migration] %s 新增 last_record_id 完成 (ALGORITHM=INSTANT, 耗时 %s)", model.TableFilmIndex, time.Since(started).Round(time.Millisecond))
+		return nil
+	}
+	if !isMySQLInstantUnsupported(err) {
+		return err
+	}
+	log.Printf("[Migration] 当前 MySQL 不支持 ALGORITHM=INSTANT (%v)，回退在线 INPLACE 加列...", err)
+	inplaceSQL := "ALTER TABLE " + model.TableFilmIndex + " ADD COLUMN last_record_id bigint unsigned NOT NULL DEFAULT 0, ALGORITHM=INPLACE, LOCK=NONE"
+	if err := execMigrationDDL(gdb, inplaceSQL); err != nil {
+		return err
+	}
+	log.Printf("[Migration] %s 新增 last_record_id 完成 (ALGORITHM=INPLACE, 耗时 %s)", model.TableFilmIndex, time.Since(started).Round(time.Millisecond))
+	return nil
+}
+
+func dropLegacyCollectRecordFilmsTable(gdb *gorm.DB, tableName string) error {
+	isSQLite := gdb.Dialector != nil && gdb.Dialector.Name() == "sqlite"
+	if isSQLite {
+		return gdb.Migrator().DropTable(tableName)
+	}
+	started := time.Now()
+	log.Printf("[Migration] 正在删除旧账本表 %s...", tableName)
+	if err := execMigrationDDL(gdb, "DROP TABLE IF EXISTS "+tableName); err != nil {
+		return err
+	}
+	log.Printf("[Migration] 已删除旧账本表 %s (耗时 %s)", tableName, time.Since(started).Round(time.Millisecond))
+	return nil
+}
+
+// execMigrationDDL 在线执行大表 DDL；连真实主库时走长读超时直连，避免默认 30s readTimeout 中断。
+func execMigrationDDL(gdb *gorm.DB, ddlSQL string) error {
 	if db.Mdb != nil && gdb == db.Mdb && strings.TrimSpace(config.MysqlDsn) != "" {
 		conn, err := db.OpenLongReadConn(config.MysqlDsn)
 		if err != nil {
@@ -88,10 +133,25 @@ func addLastRecordIDColumn(gdb *gorm.DB, isSQLite bool) error {
 		if _, err := conn.Exec("SET SESSION net_read_timeout = 1800, net_write_timeout = 1800"); err != nil {
 			return err
 		}
-		_, err = conn.Exec(alterSQL)
+		_, err = conn.Exec(ddlSQL)
 		return err
 	}
-	return gdb.Exec(alterSQL).Error
+	return gdb.Exec(ddlSQL).Error
+}
+
+func isMySQLInstantUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	var mysqlErr *mysqldriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		switch mysqlErr.Number {
+		case 1845, 1846, 1064:
+			return true
+		}
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "INSTANT") && (strings.Contains(msg, "NOT SUPPORTED") || strings.Contains(msg, "SYNTAX"))
 }
 
 func backfillSingleUpdateTargetMids(gdb *gorm.DB, legacyFilmTable string) error {

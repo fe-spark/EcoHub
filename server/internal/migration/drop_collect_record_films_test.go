@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"server/internal/model"
 
 	"github.com/glebarez/sqlite"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -147,5 +149,25 @@ func TestMigrateDropCollectRecordFilms_MySQLRerun(t *testing.T) {
 	}
 	if updated.TargetMids != "[777]" {
 		t.Fatalf("expected target_mids=[777], got %q", updated.TargetMids)
+	}
+}
+
+func TestIsMySQLInstantUnsupported(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"1845", &mysqldriver.MySQLError{Number: 1845, Message: "ALGORITHM=INSTANT is not supported"}, true},
+		{"1846", &mysqldriver.MySQLError{Number: 1846, Message: "ALGORITHM=INSTANT is not supported. Reason: MAX_ROW_VERSION"}, true},
+		{"1064", &mysqldriver.MySQLError{Number: 1064, Message: "You have an error in your SQL syntax"}, true},
+		{"other_mysql", &mysqldriver.MySQLError{Number: 1205, Message: "Lock wait timeout exceeded"}, false},
+		{"wrapped_text", errors.New("ALGORITHM=INSTANT is not supported for this operation"), true},
+	}
+	for _, tc := range cases {
+		if got := isMySQLInstantUnsupported(tc.err); got != tc.want {
+			t.Fatalf("%s: got %v want %v", tc.name, got, tc.want)
+		}
 	}
 }
