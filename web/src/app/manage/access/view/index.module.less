@@ -1,43 +1,51 @@
 .pageStack {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+.fixedHeader {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .pageHeader {
   margin-bottom: 0 !important;
 }
 
-.stickyBar {
-  position: sticky;
-  top: 16px;
-  z-index: 6;
+.controlBar {
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 10px;
   padding: 10px 14px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
 
-  /* 遮住吸顶时顶栏与控制栏之间的 16px 间距，避免滚动内容从顶部缝隙透出 */
-  &::before {
-    content: "";
-    position: absolute;
-    left: -1px;
-    right: -1px;
-    bottom: calc(100% + 1px);
-    height: 16px;
-    background: var(--ant-color-bg-layout);
-    pointer-events: none;
-  }
+.scrollBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 4px;
+  padding-bottom: 16px;
 }
 
 @media (max-width: 992px) {
-  .stickyBar {
-    top: 12px;
+  .pageStack {
+    height: auto;
+  }
 
-    &::before {
-      height: 12px;
-    }
+  .scrollBody {
+    overflow: visible;
+    padding-right: 0;
   }
 }
 

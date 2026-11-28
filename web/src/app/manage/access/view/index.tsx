@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Button, DatePicker, Dropdown, Segmented, Space, Switch, Tabs, Tag } from "antd";
 import type { MenuProps, TabsProps } from "antd";
 import {
@@ -37,6 +37,7 @@ function disabledFutureDay(d: Dayjs) {
 
 export default function AccessPageView() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("traffic");
+  const scrollBodyRef = useRef<HTMLDivElement | null>(null);
   const [module, setModule] = useState<AnalyticsModule>("all");
   const [platform, setPlatform] = useState<AppPlatform>("all");
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
@@ -181,173 +182,178 @@ export default function AccessPageView() {
 
   return (
     <div className={styles.pageStack}>
-      <ManagePageHeader
-        className={styles.pageHeader}
-        title="数据分析"
-        description="全站流量趋势、终端构成、片源热度与实时访问流水。"
-        actions={
-          <Tag color={isToday ? "processing" : "default"} style={{ margin: 0 }}>
-            {isToday ? "实时统计" : `历史归档 · ${dayStr}`}
-          </Tag>
-        }
-      />
+      {/* 固定顶部上下文区：页头 + 全局控制栏 + 三视角导航 */}
+      <div className={styles.fixedHeader}>
+        <ManagePageHeader
+          className={styles.pageHeader}
+          title="数据分析"
+          description="全站流量趋势、终端构成、片源热度与实时访问流水。"
+          actions={
+            <Tag color={isToday ? "processing" : "default"} style={{ margin: 0 }}>
+              {isToday ? "实时统计" : `历史归档 · ${dayStr}`}
+            </Tag>
+          }
+        />
 
-      {/* 吸顶全局控制栏：统一收拢终端范围、时间选择与刷新控制 */}
-      <div className={styles.stickyBar}>
-        <div className={styles.toolbarInner}>
-          <Space size={10} wrap align="center">
-            <Segmented
-              value={module}
-              options={MODULE_TABS}
-              onChange={(val) => {
-                setModule(val as AnalyticsModule);
-                setLogPage(1);
-              }}
-            />
-            {module === "app" && (
+        <div className={styles.controlBar}>
+          <div className={styles.toolbarInner}>
+            <Space size={10} wrap align="center">
               <Segmented
-                size="small"
-                value={platform}
-                options={PLATFORM_TABS}
+                value={module}
+                options={MODULE_TABS}
                 onChange={(val) => {
-                  setPlatform(val as AppPlatform);
+                  setModule(val as AnalyticsModule);
                   setLogPage(1);
                 }}
               />
-            )}
-          </Space>
-
-          <Space size={8} wrap align="center">
-            <Button
-              size="middle"
-              type={dayStr === todayStr ? "primary" : "default"}
-              ghost={dayStr === todayStr}
-              onClick={() => handleDateChange(dayjs())}
-            >
-              今天
-            </Button>
-            <Button
-              size="middle"
-              type={dayStr === yesterdayStr ? "primary" : "default"}
-              ghost={dayStr === yesterdayStr}
-              onClick={() => handleDateChange(dayjs().subtract(1, "day"))}
-            >
-              昨天
-            </Button>
-            <DatePicker
-              allowClear={false}
-              value={selectedDay}
-              onChange={handleDateChange}
-              disabledDate={disabledFutureDay}
-              cellRender={(current, info) => {
-                if (info.type !== "date") return info.originNode;
-                const d = current as Dayjs;
-                const hasData = availableDaySet.has(d.format("YYYY-MM-DD"));
-                return (
-                  <div className="ant-picker-cell-inner">
-                    {d.date()}
-                    {hasData && <span className={styles.dateDot} />}
-                  </div>
-                );
-              }}
-              style={{ width: 136 }}
-            />
-            {isToday ? (
-              <Space.Compact>
-                <Button onClick={triggerManualRefresh}>
-                  <Space size={6} align="center">
-                    <ReloadOutlined spin={isRefreshing} />
-                    <span>刷新</span>
-                    {autoRefresh && (
-                      <span style={{ fontSize: 12, color: "var(--ant-color-text-tertiary)" }}>
-                        {refreshInterval}s
-                      </span>
-                    )}
-                    <Badge status={autoRefresh ? "processing" : "default"} />
-                  </Space>
-                </Button>
-                <Dropdown
-                  placement="bottomRight"
-                  menu={{
-                    items: refreshMenuItems,
-                    selectable: true,
-                    selectedKeys: autoRefresh ? [String(refreshInterval)] : [],
-                    onClick: handleRefreshMenuClick,
+              {module === "app" && (
+                <Segmented
+                  size="small"
+                  value={platform}
+                  options={PLATFORM_TABS}
+                  onChange={(val) => {
+                    setPlatform(val as AppPlatform);
+                    setLogPage(1);
                   }}
-                >
-                  <Button icon={<DownOutlined />} />
-                </Dropdown>
-              </Space.Compact>
-            ) : (
-              <Button icon={<ReloadOutlined spin={isRefreshing} />} onClick={triggerManualRefresh}>
-                刷新
+                />
+              )}
+            </Space>
+
+            <Space size={8} wrap align="center">
+              <Button
+                size="middle"
+                type={dayStr === todayStr ? "primary" : "default"}
+                ghost={dayStr === todayStr}
+                onClick={() => handleDateChange(dayjs())}
+              >
+                今天
               </Button>
-            )}
-          </Space>
+              <Button
+                size="middle"
+                type={dayStr === yesterdayStr ? "primary" : "default"}
+                ghost={dayStr === yesterdayStr}
+                onClick={() => handleDateChange(dayjs().subtract(1, "day"))}
+              >
+                昨天
+              </Button>
+              <DatePicker
+                allowClear={false}
+                value={selectedDay}
+                onChange={handleDateChange}
+                disabledDate={disabledFutureDay}
+                cellRender={(current, info) => {
+                  if (info.type !== "date") return info.originNode;
+                  const d = current as Dayjs;
+                  const hasData = availableDaySet.has(d.format("YYYY-MM-DD"));
+                  return (
+                    <div className="ant-picker-cell-inner">
+                      {d.date()}
+                      {hasData && <span className={styles.dateDot} />}
+                    </div>
+                  );
+                }}
+                style={{ width: 136 }}
+              />
+              {isToday ? (
+                <Space.Compact>
+                  <Button onClick={triggerManualRefresh}>
+                    <Space size={6} align="center">
+                      <ReloadOutlined spin={isRefreshing} />
+                      <span>刷新</span>
+                      {autoRefresh && (
+                        <span style={{ fontSize: 12, color: "var(--ant-color-text-tertiary)" }}>
+                          {refreshInterval}s
+                        </span>
+                      )}
+                      <Badge status={autoRefresh ? "processing" : "default"} />
+                    </Space>
+                  </Button>
+                  <Dropdown
+                    placement="bottomRight"
+                    menu={{
+                      items: refreshMenuItems,
+                      selectable: true,
+                      selectedKeys: autoRefresh ? [String(refreshInterval)] : [],
+                      onClick: handleRefreshMenuClick,
+                    }}
+                  >
+                    <Button icon={<DownOutlined />} />
+                  </Dropdown>
+                </Space.Compact>
+              ) : (
+                <Button icon={<ReloadOutlined spin={isRefreshing} />} onClick={triggerManualRefresh}>
+                  刷新
+                </Button>
+              )}
+            </Space>
+          </div>
+        </div>
+
+        <div className={styles.workspaceTabs}>
+          <Tabs
+            activeKey={activeTab}
+            items={tabItems}
+            onChange={(key) => {
+              setActiveTab(key as WorkspaceTab);
+              scrollBodyRef.current?.scrollTo({ top: 0 });
+            }}
+            tabBarStyle={{ marginBottom: 0 }}
+          />
         </div>
       </div>
 
-      {/* 核心 KPI 条：始终可见，提供跨视角全局体感 */}
-      <KpiOverviewGrid
-        globalOverview={data?.global}
-        scopedOverview={data?.scoped}
-        module={module}
-        platform={platform}
-        loading={loading}
-      />
-
-      {/* 三视角工作区导航 */}
-      <div className={styles.workspaceTabs}>
-        <Tabs
-          activeKey={activeTab}
-          items={tabItems}
-          onChange={(key) => setActiveTab(key as WorkspaceTab)}
-          tabBarStyle={{ marginBottom: 0 }}
-        />
-      </div>
-
-      {/* 按当前视角条件渲染，避免不可见图表无谓挂载及零宽度问题 */}
-      {activeTab === "traffic" && (
-        <TrafficChartsSection
+      {/* 下方独立滚动内容区：避免 sticky 偏移与顶部穿帮 */}
+      <div ref={scrollBodyRef} className={styles.scrollBody}>
+        <KpiOverviewGrid
           globalOverview={data?.global}
           scopedOverview={data?.scoped}
           module={module}
           platform={platform}
           loading={loading}
         />
-      )}
 
-      {activeTab === "content" && (
-        <TopRankingsSection
-          sources={data?.sources || []}
-          playTops={data?.playTops || []}
-          searchTops={data?.searchTops || []}
-          classifyTops={data?.classifyTops || []}
-          pageTops={data?.pageTops || []}
-          dayStr={dayStr}
-          module={module}
-          platform={platform}
-          loading={loading}
-        />
-      )}
+        {activeTab === "traffic" && (
+          <TrafficChartsSection
+            globalOverview={data?.global}
+            scopedOverview={data?.scoped}
+            module={module}
+            platform={platform}
+            loading={loading}
+          />
+        )}
 
-      {activeTab === "logs" && (
-        <AccessLogsCard
-          module={module}
-          logs={logs}
-          total={logsTotal}
-          loading={logsLoading || (loading && logs.length === 0)}
-          action={logAction}
-          keyword={logKeyword}
-          page={logPage}
-          pageSize={logPageSize}
-          onFilterChange={handleLogFilterChange}
-          onPageChange={(nextPage, nextSize) => {
-            setLogPage(nextPage);
-            setLogPageSize(nextSize);
-          }}
-        />
-      )}
+        {activeTab === "content" && (
+          <TopRankingsSection
+            sources={data?.sources || []}
+            playTops={data?.playTops || []}
+            searchTops={data?.searchTops || []}
+            classifyTops={data?.classifyTops || []}
+            pageTops={data?.pageTops || []}
+            dayStr={dayStr}
+            module={module}
+            platform={platform}
+            loading={loading}
+          />
+        )}
+
+        {activeTab === "logs" && (
+          <AccessLogsCard
+            module={module}
+            logs={logs}
+            total={logsTotal}
+            loading={logsLoading || (loading && logs.length === 0)}
+            action={logAction}
+            keyword={logKeyword}
+            page={logPage}
+            pageSize={logPageSize}
+            onFilterChange={handleLogFilterChange}
+            onPageChange={(nextPage, nextSize) => {
+              setLogPage(nextPage);
+              setLogPageSize(nextSize);
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }
