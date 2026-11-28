@@ -280,6 +280,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, batchCtx
 				FailedPages: failedPagesList,
 				Error:       errMsg,
 			})
+			batchCtx.releaseSourceFilmSet(s.Id)
 			if originalErr != nil && !hadWrites {
 				return
 			}

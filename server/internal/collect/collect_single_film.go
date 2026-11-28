@@ -85,6 +85,9 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 	}
 
 	writeCtx, cancelWrite := context.WithTimeout(ctx, 30*time.Second)
+	if batchCtx != nil {
+		writeCtx = batchCtx.WriteContext(writeCtx, s)
+	}
 	written, err := saveCollectedFilmForCollect(writeCtx, s, 1, list)
 	cancelWrite()
 	if err != nil {
@@ -93,6 +96,7 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 	if batchCtx != nil {
 		batchCtx.markSourceFinished(*s)
 		batchCtx.addAffectedMIDs(s, 1, written.Affected)
+		batchCtx.releaseSourceFilmSet(s.Id)
 	}
 	return written, nil
 }

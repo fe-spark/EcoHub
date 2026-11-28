@@ -82,7 +82,7 @@ export function useHomeSource({
         return;
       }
       modal.confirm({
-        title: "切换采集源？",
+        title: "切换站点？",
         content: "当前调整还没保存，继续后会丢掉这次修改。",
         okText: "切换",
         cancelText: "留下",
@@ -99,6 +99,7 @@ export function useHomeSource({
     sources,
     sourceId,
     primaryId,
+    primaryName: primary?.name || "",
     primaryLoading,
     refreshPrimary,
     syncSources,

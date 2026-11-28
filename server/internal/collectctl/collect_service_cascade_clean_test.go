@@ -128,7 +128,6 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.CategoryMapping{},
 		&model.Category{},
 		&model.CollectRecord{},
-		&model.CollectRecordFilmItem{},
 		&model.CollectSourceStats{},
 		&model.PrimaryState{},
 	); err != nil {

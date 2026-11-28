@@ -99,8 +99,9 @@ func TestCollectBatchContext_StreamEnqueueKeepsTagMIDsIsolated(t *testing.T) {
 	if got := batchB.takeAffectedMIDs(); len(got) != 0 {
 		t.Fatalf("batch B 非主站不应堆积待封口集 = %v; want []", got)
 	}
-	if len(batchB.ledgerPending) != 2 || batchB.ledgerPending[0].mid != 300 || batchB.ledgerPending[1].mid != 400 {
-		t.Fatalf("batch B 账本缓冲应独立保留 = %+v", batchB.ledgerPending)
+	counts := batchB.snapshotSourceFilmCounts()
+	if counts[sourceB.Id] != 2 {
+		t.Fatalf("batch B 内存入库计数应独立保留 2, got = %+v", counts)
 	}
 }
 

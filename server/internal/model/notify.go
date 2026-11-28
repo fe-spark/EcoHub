@@ -58,11 +58,12 @@ type SourceNotifyResult struct {
 
 // CollectBatchNotifyPayload 采集批次汇总通知载荷
 type CollectBatchNotifyPayload struct {
-	CollectBatchID string               `json:"collectBatchId,omitempty"`
-	Trigger        string               `json:"trigger"`
-	StartedAt      time.Time            `json:"startedAt"`
-	FinishedAt     time.Time            `json:"finishedAt"`
-	Sources        []SourceNotifyResult `json:"sources"`
+	CollectRecordID uint                 `json:"collectRecordId,omitempty"`
+	CollectBatchID  string               `json:"collectBatchId,omitempty"`
+	Trigger         string               `json:"trigger"`
+	StartedAt       time.Time            `json:"startedAt"`
+	FinishedAt      time.Time            `json:"finishedAt"`
+	Sources         []SourceNotifyResult `json:"sources"`
 }
 
 // NotifyFilmItem 通知翻页会话中的单片精简项
@@ -71,38 +72,25 @@ type NotifyFilmItem struct {
 	Name string `json:"name"`
 }
 
-// NotifySourceCategoryGroup 单站分类聚合计数，实际翻页片单统一从 collect_record_films 账本按需查询。
+// NotifySourceCategoryGroup 主站分类聚合计数，实际翻页片单统一从 film_index 按 (first_source_id, last_record_id) 单表索引查询。
 type NotifySourceCategoryGroup struct {
 	CategoryID   int64  `json:"categoryId"`
 	CategoryName string `json:"categoryName"`
 	Count        int    `json:"count,omitempty"`
 }
 
-// NotifySourceSession 采集汇总内单个站点的交互会话状态
-type NotifySourceSession struct {
-	SourceID     string                      `json:"sourceId"`
-	SourceName   string                      `json:"sourceName"`
-	IsPrimary    bool                        `json:"isPrimary,omitempty"`
-	Status       string                      `json:"status"`
-	Error        string                      `json:"error,omitempty"`
-	PageTotal    int                         `json:"pageTotal"`
-	SuccessCnt   int                         `json:"successCnt"`
-	FailedCnt    int                         `json:"failedCnt"`
-	FilmsTotal   int                         `json:"filmsTotal"`
-	AllCount     int                         `json:"allCount,omitempty"`
-	CategorySkip int                         `json:"categorySkip,omitempty"`
-	OverviewHTML string                      `json:"overviewHtml"`
-	Categories   []NotifySourceCategoryGroup `json:"categories,omitempty"`
-}
-
-// NotifyBatchSession TG 消息内联按钮翻页会话（存于内存 + Redis，TTL 24h）
+// NotifyBatchSession TG 消息内联按钮翻页会话（存于内存 + Redis，TTL 24h，仅维护当前主站更新片单）
 type NotifyBatchSession struct {
-	BatchID        string                `json:"batchId"`
-	CollectBatchID string                `json:"collectBatchId,omitempty"`
-	SiteName       string                `json:"siteName"`
-	OverviewHTML   string                `json:"overviewHtml"`
-	PageSize       int                   `json:"pageSize"`
-	Sources        []NotifySourceSession `json:"sources,omitempty"`
+	BatchID           string                      `json:"batchId"`
+	CollectBatchID    string                      `json:"collectBatchId,omitempty"`
+	CollectRecordID   uint                        `json:"collectRecordId,omitempty"`
+	SiteName          string                      `json:"siteName"`
+	PrimarySourceID   string                      `json:"primarySourceId,omitempty"`
+	PrimarySourceName string                      `json:"primarySourceName,omitempty"`
+	PrimaryTotal      int                         `json:"primaryTotal,omitempty"`
+	OverviewHTML      string                      `json:"overviewHtml"`
+	PageSize          int                         `json:"pageSize"`
+	Categories        []NotifySourceCategoryGroup `json:"categories,omitempty"`
 }
 
 // NotifyTestReq 测试发送通知请求参数（支持草稿）

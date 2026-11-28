@@ -31,7 +31,6 @@ const (
 	TableAnalyticsConfig    = "analytics_config_records"
 	TableDanmakuRecord      = "danmaku_record"
 	TableCollectRecord      = "collect_records"
-	TableCollectRecordFilm  = "collect_record_films"
 	TablePrimaryState       = "primary_state"
 )
 
@@ -73,5 +72,4 @@ var AllModels = []any{
 	&DanmakuRecord{},
 	&AnalyticsConfigRecord{},
 	&CollectRecord{},
-	&CollectRecordFilmItem{},
 }

@@ -335,6 +335,10 @@ func stampNewFilmPlaySummary(fi *model.FilmIndex, source *model.FilmSource, deta
 func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem, sources []model.FilmSource) error {
 	categoryVersion := taxonomy.GetCategoryVersion()
 	ruleVersion := taxonomy.GetRuleVersion()
+	var recordID uint
+	if tx != nil && tx.Statement != nil {
+		recordID = CollectRecordIDFromContext(tx.Statement.Context)
+	}
 	newFilms := make([]model.FilmIndex, 0)
 	newIdx := make([]int, 0)
 	for i := range items {
@@ -352,6 +356,9 @@ func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageIt
 		}
 		fi.Mid = 0
 		fi.FirstSourceId = source.Id
+		if recordID > 0 {
+			fi.LastRecordID = recordID
+		}
 		stampNewFilmPlaySummary(&fi, source, items[i].detail, sources)
 		newFilms = append(newFilms, fi)
 		newIdx = append(newIdx, i)

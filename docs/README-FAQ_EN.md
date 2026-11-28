@@ -88,14 +88,14 @@ The site category page and TVBox derive their filter options from the same filte
 
 | Filter | Rule | Consistent |
 | --- | --- | --- |
-| Category | Expanded by the source's category rules into the same set of source categories (including merged groups); only films with a play line from that source are listed | Yes. The site uses the main source; TVBox uses each subscribed site's own source |
+| Category | Expanded by the source's category rules into the same set of source categories (including merged groups); only films with a play line from that source are listed | Yes. Both the site and TVBox use the current main source |
 | Genre (剧情) | The film's genre tags contain the selected value | Yes |
 | Region, language | Exactly equal to the selected value | Yes |
 | Year | Equal to the selected year; no filtering when the value is not a number | Yes |
 | "其他" (Other) | Value not among the filter options, including empty values | Yes |
 | Sort | Recently updated, popularity, rating, year. When sorting by year, films from the same year are then ordered by update time | Yes |
 
-Both use a Redis cache with different lifetimes: site filter results are cached for 2 hours; TVBox list pages without genre, region, language, or year filters are cached for approximately 12 hours, and those with filters for 3 minutes. For short-lived inconsistencies, check the cache first.
+Both use different cache strategies: site filter results are cached in Redis for 2 hours; TVBox caches regular list pages (without search keywords or filter conditions, up to page 20) in Redis for approximately 12 hours (1 minute for empty results), while filtered requests or pages beyond 20 query the read-model snapshot directly. For short-lived inconsistencies, check the cache first.
 
 ## Network
 

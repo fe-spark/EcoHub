@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { Select, Tag } from "antd";
+import { Alert, Button, Flex, Select, Space, Tag } from "antd";
 import { DatabaseOutlined } from "@ant-design/icons";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
@@ -74,7 +74,7 @@ interface ContentSourceSelectProps {
   onChange: (sourceId: string) => void;
 }
 
-/** 内容管理统一采集源选择器，内置「采集源」前缀并与主站/非主站标签联动。 */
+/** 内容管理统一站点选择器，仅保留图标前缀与站名，并与主站/非主站标签联动。 */
 export function ContentSourceSelect({
   sources,
   sourceId,
@@ -86,7 +86,8 @@ export function ContentSourceSelect({
   return (
     <div className={styles.sourceField}>
       <Select
-        placeholder="选择采集源"
+        aria-label="选择站点"
+        placeholder="选择站点"
         className={styles.sourceSelect}
         // 选中值用 1 倍行高才能和前缀齐，但行高一变选择器会被内容撑矮，高度要钉回 token
         styles={{
@@ -95,28 +96,96 @@ export function ContentSourceSelect({
           content: { lineHeight: 1 },
         }}
         prefix={
-          <span className={styles.sourcePrefix}>
+          <span className={styles.sourcePrefix} aria-hidden="true">
             <DatabaseOutlined />
-            采集源
           </span>
         }
         value={sourceId || undefined}
         disabled={disabled}
         onChange={(value) => onChange(String(value))}
         options={sources.map((source) => ({
-          label: source.state === false ? `${source.name} (已停用)` : source.name,
+          label: source.name,
           value: source.id,
+          isPrimary: Boolean(primaryId && source.id === primaryId),
+          disabledState: source.state === false,
         }))}
+        optionRender={(option) => {
+          const data = option.data as {
+            label: string;
+            isPrimary: boolean;
+            disabledState: boolean;
+          };
+          return (
+            <Flex align="center" justify="space-between" gap={8}>
+              <span>{data.label}</span>
+              {data.isPrimary || data.disabledState ? (
+                <Space size={4}>
+                  {data.isPrimary ? (
+                    <Tag color="gold" variant="filled" style={{ margin: 0 }}>
+                      主站
+                    </Tag>
+                  ) : null}
+                  {data.disabledState ? (
+                    <Tag variant="filled" style={{ margin: 0 }}>
+                      已停用
+                    </Tag>
+                  ) : null}
+                </Space>
+              ) : null}
+            </Flex>
+          );
+        }}
         showSearch
         optionFilterProp="label"
         popupMatchSelectWidth={false}
       />
       {sourceId && primaryId ? (
-        <Tag color={isPrimary ? "processing" : "default"} style={{ margin: 0 }}>
-          {isPrimary ? "主站" : "非主站"}
+        <Tag color={isPrimary ? "processing" : "warning"} style={{ margin: 0 }}>
+          {isPrimary ? "当前主站" : "非主站"}
         </Tag>
       ) : null}
     </div>
+  );
+}
+
+interface ContentNonPrimaryAlertProps {
+  sources: ContentSourceOption[];
+  sourceId: string;
+  primaryId?: string;
+  primaryName?: string;
+  scopeLabel: string;
+  disabled?: boolean;
+  onSwitchToPrimary: (primaryId: string) => void;
+}
+
+/** 预配置非主站提示条：明确当前仅修改指定备用站配置，并提供一键切回当前主站入口。 */
+export function ContentNonPrimaryAlert({
+  sources,
+  sourceId,
+  primaryId,
+  primaryName,
+  scopeLabel,
+  disabled = false,
+  onSwitchToPrimary,
+}: ContentNonPrimaryAlertProps) {
+  if (!sourceId || !primaryId || sourceId === primaryId) {
+    return null;
+  }
+  const currentName = sources.find((item) => item.id === sourceId)?.name || sourceId;
+  const resolvedPrimaryName =
+    primaryName || sources.find((item) => item.id === primaryId)?.name || "";
+
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      title={`正在预配置非主站「${currentName}」的${scopeLabel}，保存仅作用于该站点，不会变更全局主站或线上前台展示`}
+      action={
+        <Button size="small" disabled={disabled} onClick={() => onSwitchToPrimary(primaryId)}>
+          {resolvedPrimaryName ? `切回主站「${resolvedPrimaryName}」` : "切回主站"}
+        </Button>
+      }
+    />
   );
 }
 

@@ -10,7 +10,6 @@ import (
 
 	"server/internal/collect/ledger"
 	"server/internal/collect/progress"
-	"server/internal/infra/db"
 	"server/internal/model"
 )
 
@@ -152,7 +151,7 @@ func emitBatchNotify(b *collectBatchContext) {
 			CategorySkip: b.CategorySkip(src.Id),
 		})
 	}
-	settledResults, ledgerSaved := persistCollectRecord(b, results)
+	settledResults, recordID := persistCollectRecord(b, results)
 	if len(settledResults) == 0 {
 		return
 	}
@@ -168,17 +167,13 @@ func emitBatchNotify(b *collectBatchContext) {
 		notifyResults[i] = r
 	}
 
-	collectBatchID := ""
-	if ledgerSaved {
-		collectBatchID = b.batchID
-	}
-
 	d.OnBatchSummary(model.CollectBatchNotifyPayload{
-		CollectBatchID: collectBatchID,
-		Trigger:        trigger,
-		StartedAt:      startedAt,
-		FinishedAt:     time.Now(),
-		Sources:        notifyResults,
+		CollectRecordID: recordID,
+		CollectBatchID:  b.batchID,
+		Trigger:         trigger,
+		StartedAt:       startedAt,
+		FinishedAt:      time.Now(),
+		Sources:         notifyResults,
 	})
 }
 
@@ -223,56 +218,23 @@ func settleSourceStatus(status, errMsg string, successCnt int) (string, string) 
 	return status, errMsg
 }
 
-func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyResult) ([]model.SourceNotifyResult, bool) {
+func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyResult) ([]model.SourceNotifyResult, uint) {
 	if b == nil || strings.TrimSpace(b.batchID) == "" {
-		return results, false
+		return results, 0
 	}
 	if err := b.recordStart(); err != nil {
 		log.Printf("[Spider] 初始采集记录写入失败 batchID=%s: %v", b.batchID, err)
-		return results, false
+		return results, 0
 	}
 
 	b.recordMu.Lock()
 	defer b.recordMu.Unlock()
 
-	finalFlushErr := b.flushLedgerLocked()
-
 	b.mu.Lock()
 	recordID := b.recordID
-	flushErr := b.ledgerFlushErr
-	ledgerWritten := b.ledgerWritten
-	isSingleReplay := len(b.replayFilmIDs) > 0
 	b.mu.Unlock()
 
-	var bySource map[string]int
-	ledgerReady := false
-	if finalFlushErr != nil || flushErr != nil {
-		err := flushErr
-		if err == nil {
-			err = finalFlushErr
-		}
-		log.Printf("[Spider] 采集账本写入异常，清理半截账本并继续结算终态 batchID=%s err=%v", b.batchID, err)
-		b.cleanupIncompleteLedgerLocked()
-	} else if ledgerWritten {
-		storedTotal, counts, err := ledger.FilmRowCounts(db.Mdb, recordID)
-		if err != nil {
-			log.Printf("[Spider] 对账采集账本行数失败，清理半截账本并继续结算终态 batchID=%s err=%v", b.batchID, err)
-			b.cleanupIncompleteLedgerLocked()
-		} else {
-			bySource = counts
-			ledgerReady = storedTotal > 0
-		}
-	} else if isSingleReplay {
-		// 单片更新所有站都未发生实质变更时，写入重放目标编号以支持列表展示片名与重试。
-		if replayItems := b.singleReplayItemsLocked(); len(replayItems) > 0 {
-			if err := ledger.AppendCollectRecordFilms(replayItems); err != nil {
-				log.Printf("[Spider] 单片重放账本写入失败，继续结算终态 batchID=%s err=%v", b.batchID, err)
-				b.cleanupIncompleteLedgerLocked()
-			} else {
-				ledgerReady = true
-			}
-		}
-	}
+	bySource := b.snapshotSourceFilmCounts()
 
 	if next, removed := b.withoutDroppedResults(results); removed {
 		results = next
@@ -293,8 +255,8 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		status, errMsg := settleSourceStatus(results[i].Status, results[i].Error, results[i].SuccessCnt)
 		results[i].Status = status
 		results[i].Error = errMsg
-		if bySource != nil {
-			results[i].FilmsTotal = bySource[results[i].SourceID]
+		if cnt, ok := bySource[results[i].SourceID]; ok {
+			results[i].FilmsTotal = cnt
 		}
 		r := results[i]
 		totalPage += r.PageTotal
@@ -335,7 +297,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	detailBytes, err := json.Marshal(details)
 	if err != nil {
 		log.Printf("[Spider] 采集明细序列化失败 batchID=%s: %v", b.batchID, err)
-		return results, false
+		return results, 0
 	}
 
 	var errSummary strings.Builder
@@ -371,7 +333,7 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 		PageFailed:     failPage,
 		ErrorMsg:       errSummary.String(),
 		DetailJson:     string(detailBytes),
-		Ledger:         ledgerReady,
+		TargetMids:     b.targetMidsJSON(),
 	}
 
 	log.Printf("[Spider] 结算采集记录 batchID=%s status=%s sources=%d done=%d partial=%d failed=%d stopped=%d interrupted=%d pageTotal=%d pageSuccess=%d pageFailed=%d filmRows=%d durationMs=%d err=%s",
@@ -380,25 +342,12 @@ func persistCollectRecord(b *collectBatchContext, results []model.SourceNotifyRe
 	var completeErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if completeErr = ledger.CompleteCollectRecord(b.batchID, comp); completeErr == nil {
-			return results, ledgerReady
+			return results, recordID
 		}
 		if attempt < 2 {
 			time.Sleep(time.Duration(200<<attempt) * time.Millisecond)
 		}
 	}
 	log.Printf("[Spider] 结算采集记录写入失败 batchID=%s status=%s err=%v", b.batchID, status, completeErr)
-	b.cleanupIncompleteLedgerLocked()
-	return results, false
-}
-
-func (b *collectBatchContext) cleanupIncompleteLedgerLocked() {
-	b.mu.Lock()
-	recordID := b.recordID
-	b.mu.Unlock()
-	if recordID == 0 {
-		return
-	}
-	if err := ledger.DeleteCollectRecordFilms(recordID); err != nil {
-		log.Printf("[Spider] 清理未结算账本失败 batchID=%s recordID=%d err=%v", b.batchID, recordID, err)
-	}
+	return results, 0
 }

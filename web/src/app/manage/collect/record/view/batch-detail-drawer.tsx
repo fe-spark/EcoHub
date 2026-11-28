@@ -22,6 +22,7 @@ import {
 } from "./types";
 import {
   effectiveDurationMs,
+  formatBatchPageSummary,
   formatCollectFilms,
   formatDuration,
   formatSourceWindow,
@@ -29,15 +30,16 @@ import {
   getHourLabel,
   parseCollectError,
   parseSourceDetails,
+  resolveBatchFilmIngress,
 } from "./record-format";
 import { RecordStatusMark, renderTriggerTag } from "./history-columns";
-import { BatchFilmsModal } from "./batch-films-modal";
 import { ErrorDetailModal } from "./error-detail-modal";
 import styles from "./batch-detail-drawer.module.less";
 
 export interface BatchDetailDrawerProps {
   open: boolean;
   record: CollectHistoryRecord | null;
+  primaryId?: string;
   canWrite: boolean;
   retryingBatchIds: Set<string>;
   retryingSourceKeys: Set<string>;
@@ -81,6 +83,7 @@ function summaryAccentClass(status: string): string {
 export function BatchDetailDrawer({
   open,
   record,
+  primaryId,
   canWrite,
   retryingBatchIds,
   retryingSourceKeys,
@@ -88,13 +91,11 @@ export function BatchDetailDrawer({
   onRetryBatch,
   onRetrySingleSource,
 }: BatchDetailDrawerProps) {
-  const [modalSource, setModalSource] = useState<{ id: string; name: string } | null>(null);
   const [errorSource, setErrorSource] = useState<CollectRecordSourceDetail | null>(null);
   const [normalExpanded, setNormalExpanded] = useState(false);
 
   useEffect(() => {
     if (!open) {
-      setModalSource(null);
       setErrorSource(null);
       setNormalExpanded(false);
     }
@@ -105,7 +106,6 @@ export function BatchDetailDrawer({
   const batchStatus = resolveBatchStatus(record);
   const isRunning = batchStatus === "running";
   const singleFilm = isSingleFilmRecord(record);
-  const canOpenFilms = record.ledger === true && !isRunning;
   const details = parseSourceDetails(record.detailJson);
 
   const normalizedDetails = details.map((item) => ({
@@ -138,7 +138,14 @@ export function BatchDetailDrawer({
   const refTime = record.finishedAt || record.startedAt;
   const isWithinHalfHour = refTime ? dayjs().diff(dayjs(refTime), "minute") < 30 : false;
 
-  const filmCount = Math.max(0, record.filmCount ?? 0);
+  const ingress = resolveBatchFilmIngress(record, details, primaryId);
+  const pageSummary = formatBatchPageSummary(record, details);
+  const ingressTitle = singleFilm
+    ? "单片入库"
+    : details.length === 1
+      ? "单站入库"
+      : "主站入库";
+  const ingressNote = ingress.subLabel.replace(/^主站「(.+)」$/, "$1");
 
   return (
     <Drawer
@@ -194,57 +201,73 @@ export function BatchDetailDrawer({
 
           <div className={styles.summaryMetrics}>
             <div className={styles.summaryMetric}>
-              <span className={styles.metricLabel}>更新影片</span>
+              <span className={styles.metricLabel}>{ingressTitle}</span>
               <div className={styles.metricValRow}>
-                {filmCount > 0 && canOpenFilms ? (
-                  <button
-                    type="button"
-                    className={styles.metricLinkBtn}
-                    onClick={() => setModalSource({ id: "", name: "全部站点" })}
-                  >
-                    <span>+{filmCount.toLocaleString("zh-CN")} 部</span>
-                    <RightOutlined className={styles.metricArrow} />
-                  </button>
-                ) : (
-                  <span className={filmCount > 0 ? styles.metricValue : styles.metricMuted}>
-                    {filmCount > 0
-                      ? `+${filmCount.toLocaleString("zh-CN")} 部`
-                      : formatCollectFilms(0, { status: batchStatus })}
-                  </span>
-                )}
+                <span className={ingress.tone === "active" ? styles.metricValue : styles.metricMuted}>
+                  {ingress.label}
+                </span>
+                {ingressNote ? (
+                  <span className={styles.metricInlineNote}>{ingressNote}</span>
+                ) : null}
               </div>
             </div>
 
             <div className={styles.summaryMetric}>
-              <div className={styles.metricHeaderRow}>
-                <span className={styles.metricLabel}>站点汇总</span>
-                <span className={styles.metricCountTotal}>共 {totalSites} 站</span>
+              <span className={styles.metricLabel}>分页完成</span>
+              <div className={styles.metricValRow}>
+                <span
+                  className={
+                    pageSummary.tone === "muted" ? styles.metricMuted : styles.metricValue
+                  }
+                >
+                  {pageSummary.primary}
+                </span>
+                {pageSummary.failedText || pageSummary.secondary ? (
+                  <span
+                    className={
+                      pageSummary.tone === "fail"
+                        ? `${styles.metricInlineNote} ${styles.breakdownError}`
+                        : styles.metricInlineNote
+                    }
+                  >
+                    {[pageSummary.failedText, pageSummary.secondary].filter(Boolean).join(" · ")}
+                  </span>
+                ) : null}
               </div>
+            </div>
+          </div>
+
+          <div className={styles.siteSummarySection}>
+            <div className={styles.siteSummaryHeader}>
+              <span className={styles.metricLabel}>站点汇总</span>
               {!isRunning && details.length > 0 ? (
-                <div className={styles.siteProgressBlock}>
-                  <div className={styles.siteProgressBar}>
-                    {donePct > 0 ? (
-                      <div className={styles.segSuccess} style={{ width: `${donePct}%` }} />
-                    ) : null}
-                    {abnormalPct > 0 ? (
-                      <div className={styles.segError} style={{ width: `${abnormalPct}%` }} />
-                    ) : null}
-                    {stoppedCount > 0 && stoppedPct > 0 ? (
-                      <div className={styles.segMuted} style={{ width: `${stoppedPct}%` }} />
-                    ) : null}
-                  </div>
-                  <div className={styles.siteBreakdownText}>
-                    <span>{doneCount} 成功</span>
-                    {abnormalCount > 0 ? (
-                      <span className={styles.breakdownError}>{abnormalCount} 异常</span>
-                    ) : null}
-                    {stoppedCount > 0 ? <span>{stoppedCount} 已停止</span> : null}
-                  </div>
+                <div className={styles.siteBreakdownText}>
+                  <span className={styles.metricCountTotal}>共 {totalSites} 站</span>
+                  <span>{doneCount} 成功</span>
+                  {abnormalCount > 0 ? (
+                    <span className={styles.breakdownError}>{abnormalCount} 异常</span>
+                  ) : null}
+                  {stoppedCount > 0 ? <span>{stoppedCount} 已停止</span> : null}
                 </div>
               ) : (
-                <span className={styles.metricMuted}>{isRunning ? "采集中" : "—"}</span>
+                <span className={styles.metricCountTotal}>
+                  {isRunning ? "采集中" : totalSites > 0 ? `共 ${totalSites} 站` : "—"}
+                </span>
               )}
             </div>
+            {!isRunning && details.length > 0 ? (
+              <div className={styles.siteProgressBar}>
+                {donePct > 0 ? (
+                  <div className={styles.segSuccess} style={{ width: `${donePct}%` }} />
+                ) : null}
+                {abnormalPct > 0 ? (
+                  <div className={styles.segError} style={{ width: `${abnormalPct}%` }} />
+                ) : null}
+                {stoppedCount > 0 && stoppedPct > 0 ? (
+                  <div className={styles.segMuted} style={{ width: `${stoppedPct}%` }} />
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -286,6 +309,11 @@ export function BatchDetailDrawer({
                         <div className={styles.cardHeader}>
                           <div className={styles.cardTitleGroup}>
                             <span className={styles.sourceName}>{item.sourceName || item.sourceId}</span>
+                            {primaryId && item.sourceId === primaryId ? (
+                              <Tag color="gold" variant="filled" style={{ marginInlineEnd: 0 }}>
+                                主站
+                              </Tag>
+                            ) : null}
                             {windowLabel ? <Tag variant="filled">{windowLabel}</Tag> : null}
                             <RecordStatusMark status={shownStatus} scope="source" />
                           </div>
@@ -325,22 +353,7 @@ export function BatchDetailDrawer({
                             </span>
                           ) : null}
                           {item.filmsTotal > 0 ? (
-                            canOpenFilms ? (
-                              <button
-                                type="button"
-                                className={styles.inlineLink}
-                                onClick={() =>
-                                  setModalSource({
-                                    id: item.sourceId,
-                                    name: item.sourceName || item.sourceId,
-                                  })
-                                }
-                              >
-                                更新 +{item.filmsTotal.toLocaleString("zh-CN")} 部
-                              </button>
-                            ) : (
-                              <span>更新 +{item.filmsTotal.toLocaleString("zh-CN")} 部</span>
-                            )
+                            <span>更新 +{item.filmsTotal.toLocaleString("zh-CN")} 部</span>
                           ) : (
                             <span>{formatCollectFilms(0, { status: shownStatus })}</span>
                           )}
@@ -397,7 +410,17 @@ export function BatchDetailDrawer({
                       return (
                         <div key={item.sourceId || index} className={styles.compactRow}>
                           <div className={styles.compactLeft}>
-                            <span className={styles.sourceName}>{item.sourceName || item.sourceId}</span>
+                            <span
+                              className={styles.sourceName}
+                              title={item.sourceName || item.sourceId}
+                            >
+                              {item.sourceName || item.sourceId}
+                            </span>
+                            {primaryId && item.sourceId === primaryId ? (
+                              <Tag color="gold" variant="filled" style={{ marginInlineEnd: 0 }}>
+                                主站
+                              </Tag>
+                            ) : null}
                             {windowLabel ? <span className={styles.windowBadge}>{windowLabel}</span> : null}
                           </div>
                           <div className={styles.compactRight}>
@@ -411,22 +434,7 @@ export function BatchDetailDrawer({
                               {sourceRunning ? (
                                 "—"
                               ) : item.filmsTotal > 0 ? (
-                                canOpenFilms ? (
-                                  <button
-                                    type="button"
-                                    className={styles.inlineLink}
-                                    onClick={() =>
-                                      setModalSource({
-                                        id: item.sourceId,
-                                        name: item.sourceName || item.sourceId,
-                                      })
-                                    }
-                                  >
-                                    +{item.filmsTotal.toLocaleString("zh-CN")} 部
-                                  </button>
-                                ) : (
-                                  `+${item.filmsTotal.toLocaleString("zh-CN")} 部`
-                                )
+                                `+${item.filmsTotal.toLocaleString("zh-CN")} 部`
                               ) : (
                                 formatCollectFilms(0, { status: shownStatus })
                               )}
@@ -442,14 +450,6 @@ export function BatchDetailDrawer({
           </>
         )}
       </div>
-
-      <BatchFilmsModal
-        open={open && !!modalSource}
-        batchId={record.batchId}
-        sourceId={modalSource?.id || ""}
-        sourceName={modalSource?.name || ""}
-        onClose={() => setModalSource(null)}
-      />
 
       <ErrorDetailModal
         open={open && !!errorSource}

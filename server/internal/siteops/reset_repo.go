@@ -27,7 +27,6 @@ var (
 		model.TableFilmIndex,
 	}
 	resetCollectTables = []string{
-		model.TableCollectRecordFilm,
 		model.TableCollectRecord,
 		model.TableCollectSourceStats,
 		model.TableSearchTag,

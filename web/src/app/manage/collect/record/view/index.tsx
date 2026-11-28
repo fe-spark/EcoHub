@@ -14,14 +14,16 @@ import type { Dayjs } from "dayjs";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { usePrimarySource } from "@/lib/manage-primary";
 import {
   ContentPageShell,
   ContentSectionCard,
 } from "@/app/manage/components/content-shell";
 import { CollectHistoryRecord, isSingleFilmRecord } from "./types";
 import { BatchDetailDrawer } from "./batch-detail-drawer";
-import { BatchFilmsModal } from "./batch-films-modal";
+import { ErrorDetailModal } from "./error-detail-modal";
 import { getHistoryColumns } from "./history-columns";
+import { type BatchErrorPreview } from "./record-format";
 import { RecordFilterBar, FilterParams } from "./record-filter-bar";
 import styles from "./index.module.less";
 
@@ -57,7 +59,7 @@ export default function CollectRecordPageView() {
 
   const [activeRecord, setActiveRecord] = useState<CollectHistoryRecord | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
-  const [filmsRecord, setFilmsRecord] = useState<CollectHistoryRecord | null>(null);
+  const [quickError, setQuickError] = useState<BatchErrorPreview | null>(null);
 
   const pageRef = useRef(page);
   const paramsRef = useRef(params);
@@ -69,6 +71,8 @@ export default function CollectRecordPageView() {
 
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
+  const { primary } = usePrimarySource();
+  const primaryId = primary?.id || "";
 
   const getRecords = useCallback(
     async (
@@ -278,12 +282,13 @@ export default function CollectRecordPageView() {
     () =>
       getHistoryColumns({
         canWrite,
+        primaryId,
         retryingBatchIds,
         onRetryBatch: handleRetryBatch,
         onOpenDetail: handleOpenDetail,
-        onOpenFilms: setFilmsRecord,
+        onOpenError: setQuickError,
       }),
-    [canWrite, retryingBatchIds, handleRetryBatch, handleOpenDetail],
+    [canWrite, primaryId, retryingBatchIds, handleRetryBatch, handleOpenDetail],
   );
 
   const refreshMenuItems: MenuProps["items"] = [
@@ -441,8 +446,9 @@ export default function CollectRecordPageView() {
           })}
           loading={loading}
           size="middle"
+          tableLayout="fixed"
           pagination={false}
-          scroll={{ x: 880 }}
+          scroll={{ x: 1180 }}
           rowSelection={
             canWrite
               ? {
@@ -460,6 +466,7 @@ export default function CollectRecordPageView() {
       <BatchDetailDrawer
         open={detailDrawerOpen}
         record={activeRecord}
+        primaryId={primaryId}
         canWrite={canWrite}
         retryingBatchIds={retryingBatchIds}
         retryingSourceKeys={retryingSourceKeys}
@@ -468,13 +475,14 @@ export default function CollectRecordPageView() {
         onRetrySingleSource={handleRetrySingleSource}
       />
 
-      <BatchFilmsModal
-        open={!!filmsRecord}
-        batchId={filmsRecord?.batchId || ""}
-        sourceId=""
-        sourceName="全部站点"
-        onClose={() => setFilmsRecord(null)}
+      <ErrorDetailModal
+        open={Boolean(quickError)}
+        title={quickError?.modalTitle}
+        text={quickError?.modalText || ""}
+        pages={quickError?.modalPages}
+        onClose={() => setQuickError(null)}
       />
+
     </ContentPageShell>
   );
 }

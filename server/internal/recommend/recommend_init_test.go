@@ -214,7 +214,6 @@ func TestHomeRecommendInit_SourceUpdateKeepsFlagAndCleanResets(t *testing.T) {
 		&model.MovieSourceMapping{},
 		&model.MovieMatchKey{},
 		&model.BannerSlot{},
-		&model.CollectRecordFilmItem{},
 	); err != nil {
 		t.Fatalf("migrate extra tables: %v", err)
 	}

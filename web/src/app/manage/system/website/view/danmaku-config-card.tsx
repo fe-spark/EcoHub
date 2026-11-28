@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { forwardRef, useImperativeHandle, useState } from "react";
 import {
   Button,
   Card,
@@ -14,12 +14,10 @@ import {
 import {
   CommentOutlined,
 } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/client-api";
-import { useAppMessage } from "@/lib/useAppMessage";
-import { useSiteConfig } from "@/components/common/SiteGuard";
-import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { ApiPost } from "@/lib/client-api";
 import ProxyOutletBanner from "@/app/manage/components/proxy-outlet-banner";
-import { isFormValuesEqual } from "@/lib/deep-equal";
+import type { ConfigCardHandle } from "./types";
+import { ConfigLoadErrorAlert, useSiteConfigCard } from "./use-config-card";
 import styles from "./danmaku-config-card.module.less";
 
 export interface DanmakuConfigPayload {
@@ -52,78 +50,61 @@ function normalizeDanmakuConfig(
 
 interface DanmakuConfigCardProps {
   canWrite: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) {
-  const [data, setData] = useState<DanmakuConfigPayload>(DEFAULT_DANMAKU_CONFIG);
-  const [draft, setDraft] = useState<DanmakuConfigPayload>(DEFAULT_DANMAKU_CONFIG);
-  const [isTouched, setIsTouched] = useState(false);
-  const [fetching, setFetching] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [testTitle, setTestTitle] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ type: "success" | "warning" | "danger"; text: string } | null>(null);
+const DanmakuConfigCard = forwardRef<ConfigCardHandle, DanmakuConfigCardProps>(
+  function DanmakuConfigCard({ canWrite, onDirtyChange }, ref) {
+    const [testTitle, setTestTitle] = useState("");
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState<{ type: "success" | "warning" | "danger"; text: string } | null>(null);
 
-  const { message } = useAppMessage();
-  const { refresh: refreshSiteConfig } = useSiteConfig();
+    const {
+      data,
+      draft,
+      setDraft,
+      setIsTouched,
+      fetching,
+      loadError,
+      reload,
+      hasDirty,
+      save,
+      discard,
+      editable,
+      message,
+    } = useSiteConfigCard<DanmakuConfigPayload>({
+      loadUrl: "/manage/config/danmaku",
+      saveUrl: "/manage/config/danmaku",
+      defaultValue: DEFAULT_DANMAKU_CONFIG,
+      normalize: normalizeDanmakuConfig,
+      loadErrorText: "加载弹幕系统配置失败",
+      saveErrorText: "保存弹幕系统配置失败",
+      canWrite,
+      onDirtyChange,
+    });
 
-  const loadData = useCallback(async () => {
-    setFetching(true);
-    try {
-      const resp = await ApiGet("/manage/config/danmaku");
-      if (resp.code === 0 && resp.data) {
-        const normalized = normalizeDanmakuConfig(resp.data);
-        setData(normalized);
-        setDraft(normalized);
-        setIsTouched(false);
-      }
-    } finally {
-      setFetching(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const hasDirty = useMemo(() => {
-    return isTouched && !isFormValuesEqual(draft, data);
-  }, [isTouched, draft, data]);
-
-  const handleCancel = () => {
-    setDraft(data);
-    setIsTouched(false);
-  };
-
-  const handleSave = async () => {
-    if (!canWrite) return;
-    if (draft.enabled && draft.autoSniff && !draft.apiUrl.trim()) {
-      if (!draft.appId?.trim()) {
-        message.error("使用弹弹play官方接口嗅探时，必须填写 AppId");
-        return;
-      }
-      if (!draft.appSecret?.trim() && !data.appSecret?.trim()) {
-        message.error("使用弹弹play官方接口嗅探时，必须填写 AppSecret");
-        return;
-      }
-    }
-    setSaving(true);
-    try {
-      const normalized = normalizeDanmakuConfig(draft);
-      const resp = await ApiPost("/manage/config/danmaku", normalized);
-      if (resp.code === 0) {
-        message.success(resp.msg || "弹幕系统配置已保存");
-        setData(normalized);
-        setDraft(normalized);
-        setIsTouched(false);
-        await refreshSiteConfig();
-      } else {
-        message.error(resp.msg || "保存失败");
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
+    useImperativeHandle(
+      ref,
+      () => ({
+        isDirty: () => hasDirty,
+        validate: () => {
+          if (draft.enabled && draft.autoSniff && !draft.apiUrl.trim()) {
+            if (!draft.appId?.trim()) {
+              message.error("使用弹弹play官方接口嗅探时，必须填写 AppId");
+              return false;
+            }
+            if (!draft.appSecret?.trim() && !data.appSecret?.trim()) {
+              message.error("使用弹弹play官方接口嗅探时，必须填写 AppSecret");
+              return false;
+            }
+          }
+          return true;
+        },
+        save: () => save(),
+        discard,
+      }),
+      [hasDirty, draft.enabled, draft.autoSniff, draft.apiUrl, draft.appId, draft.appSecret, data.appSecret, save, discard, message],
+    );
 
   // 用当前填写（可未保存）的配置试拉一次全网弹幕，不读写缓存
   const handleTest = async () => {
@@ -148,6 +129,8 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
       if (status === "ok") setTestResult({ type: "success", text: `${matched}第 1 集共 ${count} 条全网弹幕` });
       else if (status === "empty") setTestResult({ type: "warning", text: `${matched}${reason || "未找到全网弹幕"}` });
       else setTestResult({ type: "danger", text: `失败：${reason || "未知原因"}` });
+    } catch {
+      setTestResult({ type: "danger", text: "测试请求失败，请检查网络或服务端状态" });
     } finally {
       setTesting(false);
     }
@@ -166,6 +149,12 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
       }
     >
       <Spin spinning={fetching} description="正在加载弹幕配置...">
+        <ConfigLoadErrorAlert
+          visible={loadError}
+          text="加载弹幕系统配置失败"
+          loading={fetching}
+          onRetry={() => void reload()}
+        />
         <Flex vertical gap={16}>
           {/* 启用弹幕系统 */}
           <Flex align="center" justify="space-between">
@@ -176,7 +165,7 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
               </Typography.Text>
             </Flex>
             <Switch
-              disabled={!canWrite}
+              disabled={!editable}
               checked={currentValues.enabled}
               checkedChildren="开启"
               unCheckedChildren="关闭"
@@ -200,7 +189,7 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
                   </Typography.Text>
                 </Flex>
                 <Switch
-                  disabled={!canWrite}
+                  disabled={!editable}
                   checked={currentValues.autoSniff}
                   checkedChildren="开启"
                   unCheckedChildren="关闭"
@@ -219,7 +208,7 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
                   <div className={styles.field}>
                     <Typography.Text strong>自定义弹幕 API 地址 (可选)</Typography.Text>
                     <Input
-                      disabled={!canWrite}
+                      disabled={!editable}
                       placeholder="留空默认走官方接口；自建节点可填如 http://192.168.1.100:9321/api/v2"
                       value={currentValues.apiUrl || ""}
                       onChange={(e) => {
@@ -239,7 +228,7 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
                       弹弹play AppId {currentValues.apiUrl?.trim() ? "(已配自建节点，选填)" : "(官方接口必填)"}
                     </Typography.Text>
                     <Input
-                      disabled={!canWrite}
+                      disabled={!editable}
                       placeholder="填写开放平台分配的 AppId（例如 jedqb3k6s7）"
                       value={currentValues.appId || ""}
                       onChange={(e) => {
@@ -259,7 +248,7 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
                       弹弹play AppSecret {currentValues.apiUrl?.trim() ? "(已配自建节点，选填)" : "(官方接口必填)"}
                     </Typography.Text>
                     <Input.Password
-                      disabled={!canWrite}
+                      disabled={!editable}
                       placeholder="填写 dev.dandanplay.com 分配的 AppSecret 密钥"
                       value={currentValues.appSecret || ""}
                       onChange={(e) => {
@@ -278,13 +267,13 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
                     <Typography.Text strong>测试全网弹幕</Typography.Text>
                     <Space.Compact style={{ width: "100%", marginTop: 6 }}>
                       <Input
-                        disabled={!canWrite}
+                        disabled={!editable}
                         placeholder="填一个片名，例如 葬送的芙莉莲"
                         value={testTitle}
                         onChange={(e) => setTestTitle(e.target.value)}
                         onPressEnter={() => void handleTest()}
                       />
-                      <Button disabled={!canWrite} loading={testing} onClick={() => void handleTest()}>
+                      <Button disabled={!editable} loading={testing} onClick={() => void handleTest()}>
                         测试
                       </Button>
                     </Space.Compact>
@@ -299,12 +288,8 @@ export default function DanmakuConfigCard({ canWrite }: DanmakuConfigCardProps) 
         </Flex>
       </Spin>
 
-      <UnsavedChangesBar
-        visible={hasDirty}
-        saving={saving}
-        onDiscard={handleCancel}
-        onSave={() => void handleSave()}
-      />
     </Card>
   );
-}
+});
+
+export default DanmakuConfigCard;

@@ -144,9 +144,10 @@ func (MovieMatchKey) TableName() string {
 
 // FilmIndexIdentity 索引标识层：只负责来源与主键归属。
 type FilmIndexIdentity struct {
-	Mid           int64  `json:"mid" gorm:"primaryKey;autoIncrement;index:idx_root_key_upd_stamp,priority:3;index:idx_root_key_hits_val,priority:3;index:idx_cat_key_upd_stamp,priority:3;index:idx_cat_key_hits_val,priority:3;index:idx_cid_update,priority:3;index:idx_cid_hits,priority:3"` // 系统内全局唯一影片 ID
-	FirstSourceId string `json:"firstSourceId" gorm:"size:32"`                                                                                                                                                                                                                                     // 首次录入该片的站点 ID
-	DbId          int64  `json:"dbId"`                                                                                                                                                                                                                                                             // 豆瓣 ID (用于精准去重)
+	Mid           int64  `json:"mid" gorm:"primaryKey;autoIncrement;index:idx_root_key_upd_stamp,priority:3;index:idx_root_key_hits_val,priority:3;index:idx_cat_key_upd_stamp,priority:3;index:idx_cat_key_hits_val,priority:3;index:idx_cid_update,priority:3;index:idx_cid_hits,priority:3;index:idx_film_index_source_record_mid,priority:4"` // 系统内全局唯一影片 ID
+	FirstSourceId string `json:"firstSourceId" gorm:"size:32;index:idx_film_index_source_record_mid,priority:1"`                                                                                                                                                                                                                                   // 首次录入该片的站点 ID
+	LastRecordID  uint   `json:"lastRecordId" gorm:"not null;default:0;index:idx_film_index_source_record_mid,priority:2"`                                                                                                                                                                                                                         // 最近一次触发该片新增/实质更新的采集记录主键
+	DbId          int64  `json:"dbId"`                                                                                                                                                                                                                                                                                                             // 豆瓣 ID (用于精准去重)
 }
 
 // FilmIndexCategory 分类层：RootCategoryKey/CategoryKey 是来源分类身份；Pid/Cid/CName 仅作写入快照和兼容展示。
@@ -219,7 +220,7 @@ type FilmIndexDerived struct {
 type FilmIndex struct {
 	CreatedAt         time.Time      `json:"createdAt"`
 	UpdatedAt         time.Time      `json:"updatedAt"`
-	DeletedAt         gorm.DeletedAt `json:"deletedAt" gorm:"index"`
+	DeletedAt         gorm.DeletedAt `json:"deletedAt" gorm:"index;index:idx_film_index_source_record_mid,priority:3"`
 	FilmIndexIdentity `gorm:"embedded"`
 	FilmIndexCategory `gorm:"embedded"`
 	FilmIndexContent  `gorm:"embedded"`

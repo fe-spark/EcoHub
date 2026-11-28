@@ -52,9 +52,10 @@ import styles from "./notice-config-card.module.less";
 
 interface NoticeConfigCardProps {
   canWrite: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
+export default function NoticeConfigCard({ canWrite, onDirtyChange }: NoticeConfigCardProps) {
   const [data, setData] = useState<NoticeConfig>(createDefaultNoticeConfig);
   const [draft, setDraft] = useState<NoticeConfig>(createDefaultNoticeConfig);
   const [isTouched, setIsTouched] = useState(false);
@@ -140,25 +141,27 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
         setData(normalized);
         setDraft(normalized);
         setIsTouched(false);
+      } else {
+        message.error(resp.msg || "加载公告配置失败");
       }
+    } catch {
+      // client-api 已统一弹出错误提示
     } finally {
       setFetching(false);
     }
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
   const hasDirty = useMemo(() => {
-    return (
-      isTouched &&
-      !isFormValuesEqual(
-        normalizeNoticeConfig(draft),
-        normalizeNoticeConfig(data)
-      )
-    );
+    return isTouched && !isFormValuesEqual(draft, data);
   }, [isTouched, draft, data]);
+
+  useEffect(() => {
+    onDirtyChange?.(hasDirty);
+  }, [hasDirty, onDirtyChange]);
 
   const currentValues = draft;
 

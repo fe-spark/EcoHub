@@ -171,11 +171,7 @@ func DelCollectResource(id string) ([]int64, error) {
 	if err != nil {
 		return orphanMids, err
 	}
-	// 仅在清理账本与收口阶段暂停同批其他站刷账，避免耗时影片清库阻塞活跃批次。
 	err = PauseActiveBatchRecords(id, func() error {
-		if err := catalog.DeleteBySourceBatched(&model.CollectRecordFilmItem{}, model.TableCollectRecordFilm, "source_id", id); err != nil {
-			return err
-		}
 		return db.Mdb.Transaction(func(tx *gorm.DB) error {
 			if err := catalog.ClearSourceCategoryDataTx(tx, id); err != nil {
 				return err

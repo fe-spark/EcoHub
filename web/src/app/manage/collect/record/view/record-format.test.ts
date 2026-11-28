@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   collectErrorReason,
+  formatBatchPageSummary,
   formatBatchSourceStat,
   formatCollectFilms,
   formatSourceWindow,
   getHourLabel,
   parseCollectError,
+  resolveBatchErrorPreview,
+  resolveBatchFilmIngress,
 } from "./record-format";
 import { resolveBatchStatus } from "./types";
 
@@ -91,4 +94,57 @@ test("异常解析剥离前缀与重复的 url= 后缀并匹配摘要标签", ()
     method: "GET",
     url: "https://b.test/api",
   });
+});
+
+test("多站入库指标仅提取当前主站去重结果而不跨站累加", () => {
+  const details = [
+    { sourceId: "s1", sourceName: "副站", status: "done", pageTotal: 1, pageCurrent: 1, successCnt: 1, failedCnt: 0, filmsTotal: 99 },
+    { sourceId: "s2", sourceName: "主站A", status: "done", pageTotal: 1, pageCurrent: 1, successCnt: 1, failedCnt: 0, filmsTotal: 12 },
+  ] as const;
+  const withPrimary = resolveBatchFilmIngress(
+    { status: "success", trigger: "cron", tag: "cron_collect", filmCount: 111, sourceCount: 2 },
+    [...details],
+    "s2",
+  );
+  assert.deepEqual(withPrimary, {
+    label: "+12 部",
+    subLabel: "主站「主站A」",
+    tone: "active",
+  });
+
+  const withoutPrimary = resolveBatchFilmIngress(
+    { status: "success", trigger: "manual", tag: "batch_collect", filmCount: 99, sourceCount: 2 },
+    [...details],
+    "s3",
+  );
+  assert.equal(withoutPrimary.label, "未含主站");
+});
+
+test("分页进度与异常摘要能准确提炼单站失败页与错因", () => {
+  const details = [
+    {
+      sourceId: "s3",
+      sourceName: "资源站B",
+      status: "partial" as const,
+      pageTotal: 10,
+      pageCurrent: 8,
+      successCnt: 8,
+      failedCnt: 2,
+      filmsTotal: 4,
+      failedPages: [3, 9],
+      error: 'Get "https://b.test/api": context deadline exceeded',
+    },
+  ];
+  const pages = formatBatchPageSummary(
+    { status: "partial", trigger: "manual", tag: "batch_collect", pageTotal: 10, pageSuccess: 8, pageFailed: 2 },
+    details,
+  );
+  assert.equal(pages.primary, "8 / 10 页");
+  assert.equal(pages.failedText, "失败 2 页");
+  assert.equal(pages.secondary, "失败页：3, 9");
+
+  const errPreview = resolveBatchErrorPreview({ status: "partial", errorMsg: "" }, details);
+  assert.equal(errPreview?.sourceName, "资源站B");
+  assert.equal(errPreview?.summary, "请求超时");
+  assert.deepEqual(errPreview?.modalPages, [3, 9]);
 });

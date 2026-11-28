@@ -211,7 +211,6 @@ func SetupRouter() *gin.Engine {
 			collectGroup.POST(`/page-total`, collectctl.CollectHd.RefreshSitePageTotal)
 
 			collectGroup.GET(`/history/list`, collectctl.CollectRecordHd.HistoryList)
-			collectGroup.GET(`/history/films`, collectctl.CollectRecordHd.HistoryFilms)
 			collectGroup.POST(`/history/delete`, collectctl.CollectRecordHd.HistoryDelete)
 			collectGroup.POST(`/history/clear`, collectctl.CollectRecordHd.HistoryClear)
 			collectGroup.POST(`/history/retry`, collectctl.CollectRecordHd.HistoryRetry)

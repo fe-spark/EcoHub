@@ -114,13 +114,19 @@ func refreshRemarksAndPlaySummaryWithStampTx(tx *gorm.DB, mids []int64, stampMid
 		"play_from_summary = CASE " + strings.Join(summaryCases, " ") + " END",
 		"updated_at = ?",
 	}
-	args := make([]any, 0, len(remarksArgs)+len(summaryArgs)+len(stampArgs)+2)
+	args := make([]any, 0, len(remarksArgs)+len(summaryArgs)+len(stampArgs)+3)
 	args = append(args, remarksArgs...)
 	args = append(args, summaryArgs...)
 	args = append(args, now)
 	if len(stampCases) > 0 {
 		setExprs = append(setExprs, "update_stamp = CASE "+strings.Join(stampCases, " ")+" ELSE update_stamp END")
 		args = append(args, stampArgs...)
+	}
+	if tx != nil && tx.Statement != nil {
+		if recordID := CollectRecordIDFromContext(tx.Statement.Context); recordID > 0 {
+			setExprs = append(setExprs, "last_record_id = ?")
+			args = append(args, recordID)
+		}
 	}
 	args = append(args, ordered)
 	query := "UPDATE " + model.TableFilmIndex + " SET " + strings.Join(setExprs, ", ") + " WHERE mid IN ?"

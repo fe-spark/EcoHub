@@ -87,39 +87,28 @@
 .summaryMetrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px 20px;
 }
 
 .summaryMetric {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
-}
-
-.metricHeaderRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 .metricLabel {
   font-size: 12px;
+  line-height: 18px;
   color: var(--ant-color-text-secondary);
-}
-
-.metricCountTotal {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ant-color-text);
-  font-variant-numeric: tabular-nums;
 }
 
 .metricValRow {
   display: flex;
-  align-items: center;
-  min-height: 28px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
 }
 
 .metricValue,
@@ -127,7 +116,8 @@
   font-size: 20px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .metricValue {
@@ -140,35 +130,34 @@
   color: var(--ant-color-text-secondary);
 }
 
-.metricLinkBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border: 1px solid var(--ant-color-primary-border);
-  border-radius: 999px;
-  background: var(--ant-color-primary-bg);
-  color: var(--ant-color-primary);
-  font-size: 16px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-
-  &:hover {
-    background: var(--ant-color-primary-bg-hover);
-    border-color: var(--ant-color-primary);
-  }
+.metricInlineNote {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-tertiary);
+  overflow-wrap: anywhere;
 }
 
-.metricArrow {
-  font-size: 11px;
-}
-
-.siteProgressBlock {
+.siteSummarySection {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.siteSummaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.metricCountTotal {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  font-variant-numeric: tabular-nums;
 }
 
 .siteProgressBar {
@@ -284,20 +273,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.inlineLink {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  font-weight: 600;
-  color: var(--ant-color-primary);
-  cursor: pointer;
-
-  &:hover {
-    text-decoration: underline;
-  }
-}
-
 .errorBar {
   display: flex;
   align-items: center;
@@ -375,10 +350,22 @@
 }
 
 .compactLeft {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
+}
+
+.compactLeft .sourceName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.abnormalCard .sourceName {
+  overflow-wrap: anywhere;
 }
 
 .compactRight {

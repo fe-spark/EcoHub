@@ -77,6 +77,16 @@ function normalizeTipImage(raw: string): string {
   return "";
 }
 
+/** 校验赞赏收款码图片地址（空值视为合法未填写）。 */
+export function isValidTipImage(raw: string): boolean {
+  return !raw.trim() || normalizeTipImage(raw) !== "";
+}
+
+/** 校验赞赏外链地址（空值视为合法未填写）。 */
+export function isValidTipLink(raw: string): boolean {
+  return !raw.trim() || normalizeTipLink(raw) !== "";
+}
+
 export function normalizeTipConfig(input?: Partial<TipConfig> | null): TipConfig {
   const title = truncateChars(String(input?.title ?? "").trim() || DEFAULT_TIP_TITLE, MAX_TIP_TITLE_LEN);
   const message = truncateChars(

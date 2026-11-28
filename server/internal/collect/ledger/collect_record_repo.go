@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,26 +12,6 @@ import (
 
 	"gorm.io/gorm"
 )
-
-// removeRecordsAndFilms 在同一事务里删记录，并删掉这些记录对应的影片账本行（仅供删站收口事务复用）。
-func removeRecordsAndFilms(tx *gorm.DB, rows []model.CollectRecord) error {
-	if len(rows) == 0 {
-		return nil
-	}
-	ids := make([]uint, 0, len(rows))
-	for _, row := range rows {
-		if row.ID > 0 {
-			ids = append(ids, row.ID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	if err := tx.Where("id IN ?", ids).Delete(&model.CollectRecord{}).Error; err != nil {
-		return err
-	}
-	return deleteCollectFilmsByRecordIDs(tx, ids)
-}
 
 // CreateCollectRecord 创建采集运行记录（初始状态一般为 running）
 func CreateCollectRecord(rec *model.CollectRecord) error {
@@ -72,10 +53,12 @@ func CompleteCollectRecord(batchID string, c model.CollectRecordCompletion) erro
 		"page_failed":     c.PageFailed,
 		"error_msg":       c.ErrorMsg,
 		"detail_json":     c.DetailJson,
-		"ledger":          c.Ledger,
 	}
 	if c.SourceCount > 0 {
 		updates["source_count"] = c.SourceCount
+	}
+	if strings.TrimSpace(c.TargetMids) != "" {
+		updates["target_mids"] = c.TargetMids
 	}
 
 	var rec model.CollectRecord
@@ -170,7 +153,7 @@ func GetCollectRecordList(q model.CollectRecordQuery) ([]model.CollectRecord, in
 	return list, total, nil
 }
 
-// DeleteCollectRecords 按 ID 列表批量删除已结束采集记录，账本行在事务外分批清理避免大事务锁表。
+// DeleteCollectRecords 按 ID 列表批量删除已结束采集记录（进行中记录跳过）。
 func DeleteCollectRecords(ids []uint) error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
@@ -178,28 +161,11 @@ func DeleteCollectRecords(ids []uint) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	session := db.Mdb.Session(&gorm.Session{SkipDefaultTransaction: true})
-	var targetIDs []uint
-	if err := session.Model(&model.CollectRecord{}).
-		Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).
-		Pluck("id", &targetIDs).Error; err != nil {
-		return err
-	}
-	if len(targetIDs) == 0 {
-		return nil
-	}
-	if err := session.Where("id IN ? AND status != ?", targetIDs, model.CollectRecordStatusRunning).
-		Delete(&model.CollectRecord{}).Error; err != nil {
-		return err
-	}
-	gone, err := recordIDsWithoutRecord(session, targetIDs)
-	if err != nil {
-		return err
-	}
-	return deleteCollectFilmsByRecordIDs(session, gone)
+	return db.Mdb.Where("id IN ? AND status != ?", ids, model.CollectRecordStatusRunning).
+		Delete(&model.CollectRecord{}).Error
 }
 
-// ClearCollectRecords 清空已结束的采集记录，保留进行中批次及其账本；分批删除避免大事务超时。
+// ClearCollectRecords 清空已结束的采集记录，保留进行中批次；分批删除避免大事务超时。
 func ClearCollectRecords() error {
 	if db.Mdb == nil {
 		return errors.New("数据库未连接")
@@ -227,20 +193,13 @@ func ClearCollectRecords() error {
 			Delete(&model.CollectRecord{}).Error; err != nil {
 			return err
 		}
-		gone, err := recordIDsWithoutRecord(session, ids)
-		if err != nil {
-			return err
-		}
-		if err := deleteCollectFilmsByRecordIDs(session, gone); err != nil {
-			return err
-		}
 		if len(ids) < recordChunk {
 			return nil
 		}
 	}
 }
 
-// MarkInterruptedCollectRecords 服务启动时兜底把残留 running 状态标记为 interrupted，并按已落库账本对账影片数。
+// MarkInterruptedCollectRecords 服务启动时兜底把残留 running 状态标记为 interrupted。
 func MarkInterruptedCollectRecords() error {
 	if db.Mdb == nil {
 		return nil
@@ -255,23 +214,13 @@ func MarkInterruptedCollectRecords() error {
 		if duration < 0 {
 			duration = 0
 		}
-		films, bySource, err := FilmRowCounts(db.Mdb, rec.ID)
-		if err != nil {
-			return err
-		}
 		updates := map[string]any{
 			"status":      model.CollectRecordStatusInterrupted,
 			"finished_at": now,
 			"duration_ms": duration,
 			"error_msg":   "服务重启，任务异常中断",
-			"film_count":  films,
-			"ledger":      films > 0,
 		}
-		detail, err := applyStoredFilmTotals(rec.DetailJson, bySource)
-		if err != nil {
-			return err
-		}
-		if detail != "" {
+		if detail, err := markRunningDetailsInterrupted(rec.DetailJson); err == nil && detail != "" {
 			updates["detail_json"] = detail
 		}
 		if err := db.Mdb.Model(&model.CollectRecord{}).
@@ -281,4 +230,30 @@ func MarkInterruptedCollectRecords() error {
 		}
 	}
 	return nil
+}
+
+func markRunningDetailsInterrupted(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	var details []model.CollectRecordSourceDetail
+	if err := json.Unmarshal([]byte(raw), &details); err != nil {
+		return "", fmt.Errorf("批次明细损坏: %w", err)
+	}
+	changed := false
+	for i := range details {
+		if details[i].Status == "running" || details[i].Status == "starting" {
+			details[i].Status = model.CollectRecordStatusInterrupted
+			changed = true
+		}
+	}
+	if !changed {
+		return "", nil
+	}
+	out, err := json.Marshal(details)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }

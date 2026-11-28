@@ -87,15 +87,8 @@ func (b *collectBatchContext) dropSourceLocked(sourceID string) {
 	}
 	b.droppedSources[sourceID] = struct{}{}
 	delete(b.pendingSealMIDs, sourceID)
-	if len(b.ledgerPending) > 0 {
-		kept := b.ledgerPending[:0]
-		for _, item := range b.ledgerPending {
-			if item.sourceID != sourceID {
-				kept = append(kept, item)
-			}
-		}
-		b.ledgerPending = kept
-	}
+	delete(b.sourceFilmCounts, sourceID)
+	delete(b.sourceFilmSets, sourceID)
 }
 
 func (b *collectBatchContext) withoutDroppedResults(results []model.SourceNotifyResult) ([]model.SourceNotifyResult, bool) {

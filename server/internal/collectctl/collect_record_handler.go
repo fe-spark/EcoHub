@@ -63,54 +63,6 @@ func (h *CollectRecordHandler) HistoryList(c *gin.Context) {
 	}, "获取采集历史记录成功", c)
 }
 
-// HistoryFilms 分页获取某批次某站点入库/更新的全部影片清单
-func (h *CollectRecordHandler) HistoryFilms(c *gin.Context) {
-	batchID := strings.TrimSpace(c.Query("batchId"))
-	if batchID == "" {
-		dto.Failed("缺少批次号参数", c)
-		return
-	}
-	sourceID := strings.TrimSpace(c.Query("sourceId"))
-	afterSource := strings.TrimSpace(c.Query("afterSource"))
-	afterMid, _ := strconv.ParseInt(c.Query("afterMid"), 10, 64)
-	afterName := c.Query("afterName")
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
-	if pageSize < 1 {
-		pageSize = 20
-	} else if pageSize > 100 {
-		pageSize = 100
-	}
-	keyword := strings.TrimSpace(c.Query("keyword"))
-
-	page, err := CollectRecordSvc.GetBatchFilms(model.CollectRecordFilmQuery{
-		BatchID:     batchID,
-		SourceID:    sourceID,
-		AfterSource: afterSource,
-		AfterName:   afterName,
-		AfterMid:    afterMid,
-		PageSize:    pageSize,
-		Keyword:     keyword,
-	})
-	if err != nil {
-		dto.Failed("获取批次影片清单失败: "+err.Error(), c)
-		return
-	}
-	if page.List == nil {
-		page.List = []model.CollectRecordFilm{}
-	}
-
-	dto.Success(gin.H{
-		"list":            page.List,
-		"total":           page.Total,
-		"pageSize":        pageSize,
-		"nextAfterSource": page.NextAfterSource,
-		"nextAfterName":   page.NextAfterName,
-		"nextAfterMid":    page.NextAfterMid,
-		"hasMore":         page.HasMore,
-		"truncated":       page.Truncated,
-	}, "获取批次影片清单成功", c)
-}
-
 // HistoryDelete 批量删除采集历史记录
 func (h *CollectRecordHandler) HistoryDelete(c *gin.Context) {
 	var req struct {

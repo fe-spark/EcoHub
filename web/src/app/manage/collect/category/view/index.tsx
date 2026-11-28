@@ -3,6 +3,7 @@
 import { Button } from "antd";
 import { ApartmentOutlined, ReloadOutlined } from "@ant-design/icons";
 import {
+  ContentNonPrimaryAlert,
   ContentPageShell,
   ContentSectionCard,
   ContentSourceSelect,
@@ -36,6 +37,15 @@ export default function CategoryWorkspacePageView() {
     });
   };
 
+  const selectSourceWithGuard = (nextSourceId: string) => {
+    if (!nextSourceId || nextSourceId === treeState.sourceId) return;
+    runUnlessDirty(
+      () => void treeState.selectSource(nextSourceId),
+      "切换站点？",
+      "切换",
+    );
+  };
+
   return (
     <ContentPageShell
       title="分类管理"
@@ -46,18 +56,21 @@ export default function CategoryWorkspacePageView() {
           sourceId={treeState.sourceId}
           primaryId={treeState.primaryId}
           disabled={treeState.loadingTree || treeState.savingTree}
-          onChange={(nextSourceId) => {
-            if (nextSourceId === treeState.sourceId) return;
-            runUnlessDirty(
-              () => void treeState.selectSource(nextSourceId),
-              "切换采集源？",
-              "切换",
-            );
-          }}
+          onChange={selectSourceWithGuard}
         />
       }
       dirty={canWrite && treeState.hasPendingChanges}
     >
+      <ContentNonPrimaryAlert
+        sources={treeState.sources}
+        sourceId={treeState.sourceId}
+        primaryId={treeState.primaryId}
+        primaryName={treeState.primaryName}
+        scopeLabel="分类排序与显隐"
+        disabled={treeState.loadingTree || treeState.savingTree}
+        onSwitchToPrimary={selectSourceWithGuard}
+      />
+
       <ContentSectionCard
         icon={<ApartmentOutlined />}
         title="分类结构"

@@ -39,47 +39,35 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 	}
 
 	collectBatchID := strings.TrimSpace(payload.CollectBatchID)
-	hasLedger := false
-	primaryStatsUnavailable := false
-	statsBySource := make(map[string][]BatchSourceCategoryStatRow, len(payload.Sources))
-	statsFailed := make(map[string]bool, len(payload.Sources))
-	if collectBatchID != "" {
-		ok, err := HasCollectBatchLedger(collectBatchID)
-		if err != nil {
-			syslog.Warnf("[Notify] 查询账本状态失败，降级仅发汇总 batch=%s err=%v", collectBatchID, err)
-			if activeSourceID != "" {
+	recordID := payload.CollectRecordID
+	if recordID == 0 && collectBatchID != "" {
+		if resolvedID, resolveErr := sourcecatalog.ResolveCollectRecordID(collectBatchID); resolveErr == nil {
+			recordID = resolvedID
+		}
+	}
+
+	var (
+		primaryRows             []BatchSourceCategoryStatRow
+		primaryStatsUnavailable bool
+		primaryCats             []model.NotifySourceCategoryGroup
+		primaryTotal            int
+	)
+	if activeSourceID != "" && recordID > 0 {
+		statsCtx, cancel := context.WithTimeout(context.Background(), notifySourceStatsTimeout)
+		rows, statErr := loadBatchPrimaryCategoryStatsFn(statsCtx, recordID, activeSourceID)
+		cancel()
+		if statErr != nil {
+			syslog.Warnf("[Notify] 统计主站分类失败，降级仅发汇总 batch=%s source=%s err=%v", collectBatchID, activeSourceID, statErr)
+			primaryStatsUnavailable = true
+		} else {
+			primaryRows = rows
+			cats, allCount, catErr := buildSourceCategoryCountsFromStats(activeSourceID, rows)
+			if catErr != nil {
+				syslog.Warnf("[Notify] 聚合主站分类导航失败，降级仅发汇总 batch=%s source=%s err=%v", collectBatchID, activeSourceID, catErr)
 				primaryStatsUnavailable = true
-			}
-		} else if ok {
-			hasLedger = true
-			seenSources := make(map[string]struct{}, len(payload.Sources)+1)
-			loadStats := func(sid string) {
-				sid = strings.TrimSpace(sid)
-				if sid == "" {
-					return
-				}
-				if _, done := seenSources[sid]; done {
-					return
-				}
-				seenSources[sid] = struct{}{}
-				statsCtx, cancel := context.WithTimeout(context.Background(), notifySourceStatsTimeout)
-				rows, statErr := loadBatchSourceCategoryStatsFn(statsCtx, collectBatchID, sid)
-				cancel()
-				if statErr != nil {
-					syslog.Warnf("[Notify] 统计站点分类失败，降级仅发汇总 batch=%s source=%s err=%v", collectBatchID, sid, statErr)
-					statsFailed[sid] = true
-					if sid == activeSourceID {
-						primaryStatsUnavailable = true
-					}
-					return
-				}
-				statsBySource[sid] = rows
-			}
-			for _, src := range payload.Sources {
-				loadStats(src.SourceID)
-			}
-			if activeSourceID != "" {
-				loadStats(activeSourceID)
+			} else {
+				primaryCats = cats
+				primaryTotal = allCount
 			}
 		}
 	}
@@ -88,49 +76,7 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 	if primaryStatsUnavailable {
 		visibleCount = -1
 	} else {
-		visibleCount = countPrimaryVisibleFromStats(activeSourceID, statsBySource[activeSourceID])
-	}
-
-	sources := make([]model.NotifySourceSession, 0, len(payload.Sources))
-	for _, src := range payload.Sources {
-		srcID := strings.TrimSpace(src.SourceID)
-		isPrimary := activeSourceID != "" && srcID == activeSourceID
-		var (
-			srcCats     []model.NotifySourceCategoryGroup
-			srcAllCount int
-		)
-		if hasLedger {
-			if statsFailed[srcID] {
-				srcAllCount = src.FilmsTotal
-			} else {
-				var catErr error
-				srcCats, srcAllCount, catErr = buildSourceCategoryCountsFromStats(srcID, statsBySource[srcID])
-				if catErr != nil {
-					syslog.Warnf("[Notify] 聚合站点分类导航失败，降级仅发汇总 batch=%s source=%s err=%v", collectBatchID, srcID, catErr)
-					srcCats = nil
-					srcAllCount = src.FilmsTotal
-				}
-			}
-		}
-		displayTotal := src.FilmsTotal
-		if srcAllCount > displayTotal {
-			displayTotal = srcAllCount
-		}
-		sources = append(sources, model.NotifySourceSession{
-			SourceID:     srcID,
-			SourceName:   strings.TrimSpace(src.SourceName),
-			IsPrimary:    isPrimary,
-			Status:       src.Status,
-			Error:        src.Error,
-			PageTotal:    src.PageTotal,
-			SuccessCnt:   src.SuccessCnt,
-			FailedCnt:    src.FailedCnt,
-			FilmsTotal:   displayTotal,
-			AllCount:     srcAllCount,
-			CategorySkip: src.CategorySkip,
-			OverviewHTML: formatSourceDetailHTML(siteName, src, isPrimary, srcAllCount),
-			Categories:   srcCats,
-		})
+		visibleCount = countPrimaryVisibleFromStats(activeSourceID, primaryRows)
 	}
 
 	batchID, err := utils.GenerateSalt()
@@ -140,19 +86,20 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 	if len(batchID) > 10 {
 		batchID = batchID[:10]
 	}
-	overview := formatBatchOverviewHTML(siteName, payload, activeSourceName, visibleCount)
 
-	sessionCollectBatchID := ""
-	if hasLedger {
-		sessionCollectBatchID = collectBatchID
-	}
+	overview := formatBatchOverviewHTML(siteName, payload, activeSourceName, primaryTotal, visibleCount)
+
 	return model.NotifyBatchSession{
-		BatchID:        batchID,
-		CollectBatchID: sessionCollectBatchID,
-		SiteName:       siteName,
-		OverviewHTML:   overview,
-		PageSize:       pageSize,
-		Sources:        sources,
+		BatchID:           batchID,
+		CollectBatchID:    collectBatchID,
+		CollectRecordID:   recordID,
+		SiteName:          siteName,
+		PrimarySourceID:   activeSourceID,
+		PrimarySourceName: activeSourceName,
+		PrimaryTotal:      primaryTotal,
+		OverviewHTML:      overview,
+		PageSize:          pageSize,
+		Categories:        primaryCats,
 	}, nil
 }
 
@@ -217,9 +164,9 @@ func (m sourceCategoryMatcher) matchRootID(categoryKey, rootCategoryKey string, 
 	return 0, false
 }
 
-func (m sourceCategoryMatcher) buildPageQuery(batchID, sourceID string, cats []model.NotifySourceCategoryGroup, catIdx, limit, offset int) BatchSourceCategoryPageQuery {
+func (m sourceCategoryMatcher) buildPageQuery(recordID uint, sourceID string, cats []model.NotifySourceCategoryGroup, catIdx, limit, offset int) BatchSourceCategoryPageQuery {
 	q := BatchSourceCategoryPageQuery{
-		BatchID:         batchID,
+		RecordID:        recordID,
 		SourceID:        sourceID,
 		UseCategoryKeys: m.useSourceKeys,
 		KnownKeys:       m.allKeys,

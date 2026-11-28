@@ -19,9 +19,6 @@ func PurgeSourceCollectHistoryBatched(sourceID string) error {
 		return nil
 	}
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("source_id = ?", sourceID).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
-			return err
-		}
 		return sourcecatalog.DeleteCollectSourceStatsTx(tx, sourceID)
 	}); err != nil {
 		return err
@@ -65,14 +62,11 @@ func buildAliveSourceSet(aliveIDs []string) map[string]struct{} {
 	return alive
 }
 
-// PurgeSourceCollectHistoryTx 删站时在既有事务内清掉该站的清单行、统计与历史记录。
+// PurgeSourceCollectHistoryTx 删站时在既有事务内清掉该站的统计与历史记录。
 func PurgeSourceCollectHistoryTx(tx *gorm.DB, sourceID string) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if tx == nil || sourceID == "" {
 		return nil
-	}
-	if err := tx.Where("source_id = ?", sourceID).Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
-		return err
 	}
 	if err := sourcecatalog.DeleteCollectSourceStatsTx(tx, sourceID); err != nil {
 		return err
@@ -99,7 +93,7 @@ func PurgeSourceCollectHistoryTx(tx *gorm.DB, sourceID string) error {
 
 func purgeSourceCollectHistoryChunk(tx *gorm.DB, sourceID string, cursor uint, scanChunk int, alive map[string]struct{}) (uint, bool, error) {
 	var rows []model.CollectRecord
-	if err := tx.Select("id", "batch_id", "status", "ledger", "error_msg", "detail_json").
+	if err := tx.Select("id", "batch_id", "status", "error_msg", "detail_json").
 		Where("id > ? AND detail_json LIKE ?", cursor, "%"+sourceID+"%").
 		Order("id ASC").
 		Limit(scanChunk).
@@ -110,70 +104,34 @@ func purgeSourceCollectHistoryChunk(tx *gorm.DB, sourceID string, cursor uint, s
 		return cursor, false, nil
 	}
 	nextCursor := rows[len(rows)-1].ID
-	chunkDrop := make([]model.CollectRecord, 0)
+	dropIDs := make([]uint, 0)
 	chunkKeep := make([]model.CollectRecord, 0)
-	recountIDs := make([]uint, 0)
 	for _, row := range rows {
 		if !strings.Contains(row.DetailJson, sourceID) {
 			continue
 		}
 		if collectRecordOnlySource(row.DetailJson, sourceID, alive) {
-			chunkDrop = append(chunkDrop, row)
+			if row.ID > 0 {
+				dropIDs = append(dropIDs, row.ID)
+			}
 			continue
 		}
 		chunkKeep = append(chunkKeep, row)
-		if row.Ledger || row.Status == model.CollectRecordStatusRunning {
-			recountIDs = append(recountIDs, row.ID)
-		}
 	}
-	if len(chunkDrop) > 0 {
-		if err := removeRecordsAndFilms(tx, chunkDrop); err != nil {
+	if len(dropIDs) > 0 {
+		if err := tx.Where("id IN ?", dropIDs).Delete(&model.CollectRecord{}).Error; err != nil {
 			return nextCursor, false, err
 		}
 	}
-	if len(chunkKeep) > 0 {
-		totalsByRec, bySourceByRec, err := filmRowCountsBatch(tx, recountIDs)
-		if err != nil {
+	for _, row := range chunkKeep {
+		if _, err := stripSourceFromCollectRecord(tx, row, sourceID); err != nil {
 			return nextCursor, false, err
-		}
-		for _, row := range chunkKeep {
-			if _, err := stripSourceFromCollectRecord(tx, row, sourceID, totalsByRec[row.ID], bySourceByRec[row.ID]); err != nil {
-				return nextCursor, false, err
-			}
 		}
 	}
 	return nextCursor, len(rows) >= scanChunk, nil
 }
 
-func filmRowCountsBatch(tx *gorm.DB, recordIDs []uint) (map[uint]int, map[uint]map[string]int, error) {
-	totals := make(map[uint]int, len(recordIDs))
-	byRec := make(map[uint]map[string]int, len(recordIDs))
-	if tx == nil || len(recordIDs) == 0 {
-		return totals, byRec, nil
-	}
-	var rows []struct {
-		RecordID uint   `gorm:"column:record_id"`
-		SourceID string `gorm:"column:source_id"`
-		N        int    `gorm:"column:n"`
-	}
-	if err := tx.Model(&model.CollectRecordFilmItem{}).
-		Select("record_id, source_id, COUNT(*) AS n").
-		Where("record_id IN ?", recordIDs).
-		Group("record_id, source_id").
-		Scan(&rows).Error; err != nil {
-		return nil, nil, err
-	}
-	for _, r := range rows {
-		totals[r.RecordID] += r.N
-		if byRec[r.RecordID] == nil {
-			byRec[r.RecordID] = map[string]int{}
-		}
-		byRec[r.RecordID][r.SourceID] = r.N
-	}
-	return totals, byRec, nil
-}
-
-func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID string, precomputedTotal int, precomputedBySource map[string]int) (string, error) {
+func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID string) (string, error) {
 	var details []model.CollectRecordSourceDetail
 	if err := json.Unmarshal([]byte(row.DetailJson), &details); err != nil {
 		return "", err
@@ -189,16 +147,8 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 		return row.DetailJson, nil
 	}
 	filmCount := 0
-	if row.Ledger || row.Status == model.CollectRecordStatusRunning {
-		filmCount = precomputedTotal
-		for i := range kept {
-			kept[i].FilmsTotal = precomputedBySource[kept[i].SourceID]
-		}
-	} else {
-		// 账本已淘汰的已结束批次沿用存活站点既有统计数，避免重算覆盖清零。
-		for _, d := range kept {
-			filmCount += d.FilmsTotal
-		}
+	for _, d := range kept {
+		filmCount += d.FilmsTotal
 	}
 	raw, err := json.Marshal(kept)
 	if err != nil {
@@ -250,7 +200,6 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 		"success_sources": done,
 		"failed_sources":  failed + partial,
 		"film_count":      filmCount,
-		"ledger":          row.Ledger && filmCount > 0,
 		"page_total":      pageTotal,
 		"page_success":    pageSuccess,
 		"page_failed":     pageFailed,
@@ -261,7 +210,7 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 	}
 	if res.RowsAffected == 0 {
 		var fresh model.CollectRecord
-		if err := tx.Select("id", "batch_id", "status", "ledger", "error_msg", "detail_json").
+		if err := tx.Select("id", "batch_id", "status", "error_msg", "detail_json").
 			Where("id = ?", row.ID).First(&fresh).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return "", nil
@@ -269,7 +218,7 @@ func stripSourceFromCollectRecord(tx *gorm.DB, row model.CollectRecord, sourceID
 			return "", err
 		}
 		if fresh.Status != row.Status {
-			return stripSourceFromCollectRecord(tx, fresh, sourceID, precomputedTotal, precomputedBySource)
+			return stripSourceFromCollectRecord(tx, fresh, sourceID)
 		}
 	}
 	return string(raw), nil

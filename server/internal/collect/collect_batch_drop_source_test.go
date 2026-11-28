@@ -24,7 +24,7 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.FilmIndex{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -40,7 +40,6 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	}
 	batch.AddAffectedMIDs(&srcA, 24, []int64{1})
 	batch.AddAffectedMIDs(&srcB, 24, []int64{2})
-	batch.flushLedger()
 	batch.recordSourceSnapshot(model.CollectRecordSourceDetail{
 		SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone,
 		PageTotal: 3, SuccessCnt: 3, FilmsTotal: 1,
@@ -51,10 +50,6 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	})
 
 	err = PauseActiveBatchRecords(srcA.Id, func() error {
-		if err := db.Mdb.Where("record_id = ? AND source_id = ?", batch.recordID, srcA.Id).
-			Delete(&model.CollectRecordFilmItem{}).Error; err != nil {
-			return err
-		}
 		return db.Mdb.Model(&model.CollectRecord{}).Where("id = ?", batch.recordID).
 			Updates(map[string]any{"source_count": 1}).Error
 	})
@@ -62,10 +57,8 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 已摘除的站点再追加也不会落库。
+	// 已摘除的站点再追加也不会计入部数。
 	batch.AddAffectedMIDs(&srcA, 24, []int64{9})
-	batch.AddAffectedMIDs(&srcB, 24, []int64{2})
-	batch.flushLedger()
 
 	running, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
@@ -73,14 +66,6 @@ func TestDeletedSourceStaysOutOfRunningBatch(t *testing.T) {
 	}
 	if running.Status != model.CollectRecordStatusRunning || running.SourceCount != 1 {
 		t.Fatalf("running status=%s sources=%d", running.Status, running.SourceCount)
-	}
-	if !strings.Contains(running.DetailJson, `"status":"running"`) || strings.Contains(running.DetailJson, `"filmsTotal":1`) {
-		t.Fatalf("running detail should stay the start roster, detail=%s", running.DetailJson)
-	}
-	if page, err := ledger.QueryCollectRecordFilms(model.CollectRecordFilmQuery{
-		BatchID: batch.batchID, SourceID: srcA.Id, PageSize: 10,
-	}); err != nil || page.Total != 0 {
-		t.Fatalf("deleted source films total=%d err=%v", page.Total, err)
 	}
 
 	persistCollectRecord(batch, []model.SourceNotifyResult{

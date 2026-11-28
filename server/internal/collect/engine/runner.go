@@ -19,6 +19,7 @@ import (
 // Batch 采集批次在抓取阶段需要的状态回调接口（实现需 nil-safe）。
 type Batch interface {
 	IsStandalone() bool
+	WriteContext(ctx context.Context, s *model.FilmSource) context.Context
 	AddAffectedMIDs(s *model.FilmSource, h int, mids []int64)
 	RecordSourceError(sourceID, reason string)
 	AddCategorySkip(sourceID string, unmapped int)
@@ -269,6 +270,9 @@ func (r *Runner) CollectPages(
 		r.WritePool.Submit(ctx, page, func(writeCtx context.Context) (model.Mids, error) {
 			if r.SavePage == nil {
 				return model.Mids{}, errors.New("SavePage 未配置")
+			}
+			if batch != nil {
+				writeCtx = batch.WriteContext(writeCtx, s)
 			}
 			return r.SavePage(writeCtx, s, page, items)
 		}, func(res WriteResult) {

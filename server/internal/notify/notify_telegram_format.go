@@ -2,7 +2,6 @@ package notify
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"server/internal/model"
@@ -55,19 +54,29 @@ func formatDurationSec(sec int64) string {
 	return fmt.Sprintf("%d时%d分", h, rm)
 }
 
-func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPayload, primaryName string, updatedCount int) string {
+const maxFailedSourcesInOverview = 8
+
+func isNotifySourceAbnormal(s model.SourceNotifyResult) bool {
+	return s.Status == model.CollectStatusFailed ||
+		s.Status == model.CollectRecordStatusPartial ||
+		s.Status == model.CollectRecordStatusInterrupted ||
+		s.Error != ""
+}
+
+func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPayload, primaryName string, primaryTotal, visibleCount int) string {
 	durSec := int64(payload.FinishedAt.Sub(payload.StartedAt).Seconds())
 	if durSec < 0 {
 		durSec = 0
 	}
-	successSrc, failedSrc, totalStored := 0, 0, 0
+	successSrc, failedSrc := 0, 0
+	var failedItems []model.SourceNotifyResult
 	for _, s := range payload.Sources {
-		if s.Status == model.CollectStatusFailed || s.Error != "" {
+		if isNotifySourceAbnormal(s) {
 			failedSrc++
+			failedItems = append(failedItems, s)
 		} else {
 			successSrc++
 		}
-		totalStored += s.FilmsTotal
 	}
 
 	var b strings.Builder
@@ -77,74 +86,54 @@ func formatBatchOverviewHTML(siteName string, payload model.CollectBatchNotifyPa
 		html.EscapeString(formatDurationSec(durSec)),
 	)
 	if failedSrc > 0 {
-		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个，失败 <b>%d</b> 个 · 共入库 <b>%d</b> 部\n", successSrc, failedSrc, totalStored)
+		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个，异常 <b>%d</b> 个\n", successSrc, failedSrc)
 	} else {
-		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个 · 共入库 <b>%d</b> 部\n", successSrc, totalStored)
+		fmt.Fprintf(&b, "📊 站点：成功 <b>%d</b> 个\n", successSrc)
 	}
 	if name := strings.TrimSpace(primaryName); name != "" {
-		if updatedCount < 0 {
-			fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 前台可见：统计超时\n", html.EscapeString(singleLine(name)))
+		if visibleCount < 0 {
+			fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 统计超时\n", html.EscapeString(singleLine(name)))
 		} else {
-			fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 前台可见 <b>%d</b> 部\n", html.EscapeString(singleLine(name)), updatedCount)
+			fmt.Fprintf(&b, "⭐ 主站：<b>%s</b> · 本次更新 <b>%d</b> 部（前台可见 <b>%d</b> 部）\n",
+				html.EscapeString(singleLine(name)), primaryTotal, visibleCount)
 		}
-	} else if updatedCount < 0 {
+	} else if visibleCount < 0 {
 		b.WriteString("🎬 前台可见：统计超时\n")
 	} else {
-		fmt.Fprintf(&b, "🎬 前台可见：<b>%d</b> 部\n", updatedCount)
-	}
-	if len(payload.Sources) > 0 {
-		b.WriteString("\n👇 点击站点查看分类与片单")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func sourceStatusIconAndLabel(status, errMsg string) (string, string) {
-	if status == model.CollectStatusFailed || errMsg != "" {
-		return "❌", "失败"
-	}
-	if status == model.CollectStatusStopped {
-		return "⏹", "已停止"
-	}
-	return "✅", "完成"
-}
-
-func formatSourceDetailHTML(siteName string, src model.SourceNotifyResult, isPrimary bool, filmCount int) string {
-	icon, statusLabel := sourceStatusIconAndLabel(src.Status, src.Error)
-	title := html.EscapeString(singleLine(src.SourceName))
-	if title == "" {
-		title = html.EscapeString(singleLine(src.SourceID))
-	}
-	primaryBadge := ""
-	if isPrimary {
-		primaryBadge = "⭐ "
-	}
-	displayTotal := src.FilmsTotal
-	if filmCount > displayTotal {
-		displayTotal = filmCount
+		fmt.Fprintf(&b, "🎬 前台可见：<b>%d</b> 部\n", visibleCount)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 站点明细 · %s%s</b>\n", formatTitlePrefix(siteName), primaryBadge, title)
-	fmt.Fprintf(&b, "%s 状态：%s · 🎬 入库：<b>%d</b> 部", icon, statusLabel, displayTotal)
-	if src.PageTotal > 0 {
-		fmt.Fprintf(&b, " · 📄 页数：%d/%d", src.SuccessCnt, src.PageTotal)
-	}
-	b.WriteString("\n")
-	if src.FailedCnt > 0 || src.CategorySkip > 0 {
-		var extras []string
-		if src.FailedCnt > 0 {
-			extras = append(extras, fmt.Sprintf("失败 %d 页", src.FailedCnt))
+	if len(failedItems) > 0 {
+		b.WriteString("\n⚠️ <b>异常站点：</b>\n")
+		limit := len(failedItems)
+		if limit > maxFailedSourcesInOverview {
+			limit = maxFailedSourcesInOverview
 		}
-		if src.CategorySkip > 0 {
-			extras = append(extras, fmt.Sprintf("跳过未映射 %d 部", src.CategorySkip))
+		for i := 0; i < limit; i++ {
+			s := failedItems[i]
+			name := singleLine(s.SourceName)
+			if name == "" {
+				name = singleLine(s.SourceID)
+			}
+			var parts []string
+			if s.FailedCnt > 0 {
+				parts = append(parts, fmt.Sprintf("失败 %d 页", s.FailedCnt))
+			}
+			if msg := strings.TrimSpace(singleLine(s.Error)); msg != "" {
+				parts = append(parts, truncateRunes(msg, 80))
+			}
+			if len(parts) == 0 {
+				parts = append(parts, "执行失败")
+			}
+			fmt.Fprintf(&b, "· <b>%s</b>：%s\n", html.EscapeString(name), html.EscapeString(strings.Join(parts, " · ")))
 		}
-		b.WriteString("ℹ️ " + strings.Join(extras, "，") + "\n")
+		if len(failedItems) > limit {
+			fmt.Fprintf(&b, "· <i>其余 %d 个异常站点请在后台查看</i>\n", len(failedItems)-limit)
+		}
 	}
-	if strings.TrimSpace(src.Error) != "" {
-		fmt.Fprintf(&b, "⚠️ 原因：<code>%s</code>\n", html.EscapeString(truncateRunes(singleLine(src.Error), 300)))
-	}
-	if filmCount > 0 {
-		b.WriteString("\n👇 选择分类查看片单")
+
+	if primaryTotal > 0 {
+		b.WriteString("\n👇 选择主站分类查看更新片单")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -152,6 +141,17 @@ func formatSourceDetailHTML(siteName string, src model.SourceNotifyResult, isPri
 func isTelegramSupportedWebURL(raw string) bool {
 	lower := strings.ToLower(strings.TrimSpace(raw))
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+func buildManageRecordURL(siteURL, collectBatchID string) string {
+	base := strings.TrimRight(strings.TrimSpace(siteURL), "/")
+	if !isTelegramSupportedWebURL(base) {
+		return ""
+	}
+	if id := strings.TrimSpace(collectBatchID); id != "" {
+		return fmt.Sprintf("%s/manage/collect/record?batchId=%s", base, id)
+	}
+	return base + "/manage/collect/record"
 }
 
 // maxNotifyListPages 限制 Telegram 内联片单最大翻页深度，避免全量批次下深 OFFSET 回表超时。
@@ -218,45 +218,58 @@ func formatFilmItemsPageHTML(siteName, title string, page, totalPages, start, to
 	return b.String(), nil
 }
 
-func formatSourceFilmListPageHTML(ctx context.Context, sess model.NotifyBatchSession, srcIdx, catIdx, page int) (string, int, int, error) {
+func formatPrimaryFilmListPageHTML(ctx context.Context, sess model.NotifyBatchSession, catIdx, page int) (string, int, int, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if srcIdx < 0 || srcIdx >= len(sess.Sources) {
-		return "", 1, 1, errors.New("站点不存在")
-	}
-	src := sess.Sources[srcIdx]
 	catTitle := "全部"
-	total := src.AllCount
-	if catIdx >= 0 && catIdx < len(src.Categories) {
-		selectedCat := src.Categories[catIdx]
+	total := sess.PrimaryTotal
+	if catIdx >= 0 && catIdx < len(sess.Categories) {
+		selectedCat := sess.Categories[catIdx]
 		catTitle = selectedCat.CategoryName
 		total = selectedCat.Count
 	}
 	curPage, totalPages, start, end := clampPageRange(total, sess.PageSize, page)
 	var items []model.NotifyFilmItem
-	if total > 0 && strings.TrimSpace(sess.CollectBatchID) != "" {
-		matcher, err := loadSourceCategoryMatcher(src.SourceID)
+	if total > 0 && sess.CollectRecordID > 0 && strings.TrimSpace(sess.PrimarySourceID) != "" {
+		matcher, err := loadSourceCategoryMatcher(sess.PrimarySourceID)
 		if err != nil {
 			return "", curPage, totalPages, err
 		}
-		items, err = LoadBatchSourceCategoryPage(
+		items, err = LoadBatchPrimaryCategoryPage(
 			ctx,
-			matcher.buildPageQuery(sess.CollectBatchID, src.SourceID, src.Categories, catIdx, end-start, start),
+			matcher.buildPageQuery(sess.CollectRecordID, sess.PrimarySourceID, sess.Categories, catIdx, end-start, start),
 		)
 		if err != nil {
 			return "", curPage, totalPages, err
 		}
+		// 若旧批次部分影片被后续批次覆写 last_record_id，导致深页偏移查空，回退首页避免误导空页。
+		if len(items) == 0 && curPage > 1 {
+			curPage, totalPages, start = 1, 1, 0
+			pageSize := sess.PageSize
+			if pageSize <= 0 {
+				pageSize = model.DefaultNotifyPageSize
+			}
+			items, err = LoadBatchPrimaryCategoryPage(
+				ctx,
+				matcher.buildPageQuery(sess.CollectRecordID, sess.PrimarySourceID, sess.Categories, catIdx, pageSize, 0),
+			)
+			if err != nil {
+				return "", curPage, totalPages, err
+			}
+		}
 	}
-	srcTitle := singleLine(src.SourceName)
+	srcTitle := singleLine(sess.PrimarySourceName)
 	if srcTitle == "" {
-		srcTitle = src.SourceID
+		srcTitle = sess.PrimarySourceID
 	}
-	text, err := formatFilmItemsPageHTML(sess.SiteName, fmt.Sprintf("%s · %s", srcTitle, catTitle), curPage, totalPages, start, total, items)
+	title := catTitle
+	if srcTitle != "" {
+		title = fmt.Sprintf("%s · %s", srcTitle, catTitle)
+	}
+	text, err := formatFilmItemsPageHTML(sess.SiteName, title, curPage, totalPages, start, total, items)
 	return text, curPage, totalPages, err
 }
-
-const maxSiteButtonsPerPage = 90
 
 func safeTruncateHTML(htmlText string, maxRunes int) string {
 	if maxRunes <= 0 || utf8.RuneCountInString(htmlText) <= maxRunes {
@@ -282,7 +295,6 @@ func safeTruncateHTML(htmlText string, maxRunes int) string {
 		used += sep + lineRunes
 	}
 	if len(kept) == 0 {
-		// 单行本身超长时，剥离标签后做纯文本转义截断作为兜底
 		plain := html.UnescapeString(htmlTagStripRe.ReplaceAllString(htmlText, ""))
 		return html.EscapeString(truncateRunes(plain, budget)) + "\n..."
 	}
@@ -297,7 +309,6 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-// 定时任务失败原因的截断上限：多步错误按行拼接，逐行截断，避免第一行过长把后面的步骤挤掉。
 const (
 	cronReasonLineMax  = 200
 	cronReasonTotalMax = 600
@@ -310,7 +321,6 @@ func singleLine(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// formatReasonCodeLines 按行截断并各自包裹 <code>，保证多行错误被 safeTruncateHTML 截断后标签仍自闭合。
 func formatReasonCodeLines(s string, lineMax, totalMax int) string {
 	text := truncateReasonLines(s, lineMax, totalMax)
 	if text == "" {
@@ -323,7 +333,6 @@ func formatReasonCodeLines(s string, lineMax, totalMax int) string {
 	return strings.Join(lines, "\n")
 }
 
-// truncateReasonLines 按行截断（按 rune 计数，不会截坏中文），再整体截断。空行丢弃。
 func truncateReasonLines(s string, lineMax, totalMax int) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	kept := make([]string, 0, len(lines))

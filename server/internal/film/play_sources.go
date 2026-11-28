@@ -200,6 +200,7 @@ func LoadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		return nil, nil, err
 	}
 	sortPlayListSources(playList, sourceOrderMap)
+	disambiguateManualPlayNames(playList)
 
 	return playList, downloadList, nil
 }
@@ -297,10 +298,33 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, ma
 	for mid := range result {
 		lines := result[mid]
 		sortPlayListSources(lines, sourceOrderMap)
+		disambiguateManualPlayNames(lines)
 		result[mid] = lines
 	}
 
 	return result, brokenPlaylistMids(seen, failedN), nil
+}
+
+// disambiguateManualPlayNames 为同一影片下重名的手动线路追加序号后缀，避免 TVBox 等客户端出现同名线路标签。
+func disambiguateManualPlayNames(lines []model.PlayLinkVo) {
+	counts := make(map[string]int)
+	for _, line := range lines {
+		if line.IsManual || line.SourceId == "manual" {
+			counts[line.Name]++
+		}
+	}
+	seen := make(map[string]int)
+	for i := range lines {
+		if !(lines[i].IsManual || lines[i].SourceId == "manual") {
+			continue
+		}
+		name := lines[i].Name
+		if counts[name] <= 1 {
+			continue
+		}
+		seen[name]++
+		lines[i].Name = fmt.Sprintf("%s-%d", name, seen[name])
+	}
 }
 
 func sortPlayListSources(lines []model.PlayLinkVo, orderMap map[string]int) {

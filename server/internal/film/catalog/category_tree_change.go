@@ -148,19 +148,13 @@ func clearChangedSourceDataBatched(sourceId string) (CategoryApplyResult, error)
 	if err := db.Mdb.Model(&model.MovieSourceMapping{}).Where("source_id = ?", sourceId).Count(&hasMapping).Error; err != nil {
 		return CategoryApplyResult{}, err
 	}
-	var hasCollectRecordFilm int64
-	if db.Mdb.Migrator().HasTable(&model.CollectRecordFilmItem{}) {
-		if err := db.Mdb.Model(&model.CollectRecordFilmItem{}).Where("source_id = ?", sourceId).Count(&hasCollectRecordFilm).Error; err != nil {
-			return CategoryApplyResult{}, err
-		}
-	}
 	orphanMids, err := CleanSourceDataBatched(sourceId)
 	if err != nil {
 		return CategoryApplyResult{}, err
 	}
 
 	return CategoryApplyResult{
-		DataCleared: hasPlaylist > 0 || hasMapping > 0 || hasCollectRecordFilm > 0 || len(orphanMids) > 0,
+		DataCleared: hasPlaylist > 0 || hasMapping > 0 || len(orphanMids) > 0,
 		OrphanMids:  orphanMids,
 	}, nil
 }

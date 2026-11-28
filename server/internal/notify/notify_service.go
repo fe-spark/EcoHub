@@ -198,7 +198,7 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 		failedSources := 0
 		totalStored := 0
 		for _, src := range payload.Sources {
-			if src.Status == model.CollectStatusFailed || src.Error != "" {
+			if isNotifySourceAbnormal(src) {
 				failedSources++
 			}
 			totalStored += src.FilmsTotal
@@ -213,11 +213,15 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 			return
 		}
 
-		var markup *InlineKeyboardMarkup
-		if len(sess.Sources) > 0 {
-			_ = SaveNotifyBatchSession(sess)
-			markup = buildOverviewKeyboard(sess, 1)
+		manageURL := ""
+		if basic, basicErr := repobase.GetSiteBasic(); basicErr == nil {
+			manageURL = buildManageRecordURL(basic.SiteURL, sess.CollectBatchID)
 		}
+
+		if sess.PrimaryTotal > 0 {
+			_ = SaveNotifyBatchSession(sess)
+		}
+		markup := buildPrimaryOverviewKeyboard(sess, manageURL)
 
 		broadcastTelegram(cfg.BotToken, cfg.ChatIDs, sess.OverviewHTML, markup)
 	})

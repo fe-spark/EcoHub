@@ -78,7 +78,7 @@ const EVENT_ITEMS: {
     title: "采集批次汇总",
     badge: "核心简报",
     color: "blue",
-    desc: "整批采集结束后推送各源统计与分类更新片单（支持按钮翻页）",
+    desc: "整批采集结束后推送全局统计、异常站点与当前主站分类更新片单（支持按钮翻页）",
   },
   {
     field: "collectSourceFailed",
@@ -267,7 +267,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                   <Flex vertical gap={4}>
                     <span className={styles.masterSwitchTitle}>启用 Telegram 消息通知</span>
                     <span className={styles.masterSwitchDesc}>
-                      开启后自动推送采集汇总与异常告警，并启动后台轮询支持 TG 消息内分类切换与按钮翻页
+                      开启后自动推送采集汇总与异常告警，并启动后台轮询支持 TG 消息内当前主站分类筛选与翻页
                     </span>
                   </Flex>
                   <Form.Item name="enabled" valuePropName="checked" noStyle>
@@ -429,8 +429,9 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                   </Col>
                   <Col xs={24} md={12}>
                     <Form.Item
-                      label="单页片单展示条数 (1 ~ 20)"
+                      label="主站单页片单展示条数 (1 ~ 20)"
                       name="maxFilmsInMessage"
+                      tooltip="仅针对当前主站在本次采集批次中新增或更新的影片列表生效"
                       style={{ marginBottom: 0 }}
                     >
                       <InputNumber min={1} max={20} style={{ width: "100%" }} />

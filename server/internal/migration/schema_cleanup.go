@@ -6,6 +6,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// legacyCollectRecordFilmItem 仅供历史迁移 20261126_schema_cleanup 兼容执行，后续迁移 20261128_drop_collect_record_films 已删除该表。
+type legacyCollectRecordFilmItem struct {
+	RecordID uint   `gorm:"primaryKey;autoIncrement:false;index:idx_crf_source_record,priority:2;not null"`
+	SourceID string `gorm:"primaryKey;index:idx_crf_source_record,priority:1;size:32;not null"`
+	Mid      int64  `gorm:"primaryKey;autoIncrement:false;not null"`
+}
+
+func (legacyCollectRecordFilmItem) TableName() string {
+	return "collect_record_films"
+}
+
 // migrateSchemaCleanup 执行破坏性表结构清理与重建（不迁移旧数据）：
 // 1. 按聚簇主键 (record_id, source_id, mid) 清空重建 collect_record_films，并关闭存量记录的 ledger 标记；
 // 2. 删除 home_recommend_group 废弃的 builtin / builtin_key 列。
@@ -13,14 +24,14 @@ func migrateSchemaCleanup(gdb *gorm.DB) error {
 	if gdb == nil {
 		return nil
 	}
-	if err := gdb.Migrator().DropTable(&model.CollectRecordFilmItem{}); err != nil {
+	if err := gdb.Migrator().DropTable(&legacyCollectRecordFilmItem{}); err != nil {
 		return err
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecordFilmItem{}); err != nil {
+	if err := gdb.AutoMigrate(&legacyCollectRecordFilmItem{}); err != nil {
 		return err
 	}
-	if gdb.Migrator().HasTable(&model.CollectRecord{}) {
-		if err := gdb.Model(&model.CollectRecord{}).
+	if gdb.Migrator().HasTable(&model.CollectRecord{}) && gdb.Migrator().HasColumn(&model.CollectRecord{}, "ledger") {
+		if err := gdb.Table(model.TableCollectRecord).
 			Where("ledger = ?", true).
 			Update("ledger", false).Error; err != nil {
 			return err

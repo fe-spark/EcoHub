@@ -109,7 +109,6 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 	gdb.Create(&model.SearchTagItem{Pid: 1, TagType: "Area", Name: "大陆", Value: "大陆", Score: 1})
 	rec := model.CollectRecord{BatchID: "rec_1", Trigger: "manual"}
 	gdb.Create(&rec)
-	gdb.Create(&model.CollectRecordFilmItem{RecordID: rec.ID, SourceID: "custom_src", Mid: 1001})
 	gdb.Create(&model.Category{Id: 99, Pid: 0, Name: "旧分类", Show: true})
 	gdb.Create(&model.SourceCategory{SourceId: "custom_src", SourceTypeId: 1, RawName: "动作"})
 	gdb.Create(&model.CategoryMapping{SourceId: "custom_src", SourceTypeId: 1, CategoryId: 99})

@@ -61,9 +61,9 @@ type CollectRecord struct {
 	SourceCount    int                 `gorm:"not null;default:0" json:"sourceCount"`       // 覆盖站点数
 	SuccessSources int                 `gorm:"not null;default:0" json:"successSources"`    // 成功站点数
 	FailedSources  int                 `gorm:"not null;default:0" json:"failedSources"`     // 失败站点数
-	FilmCount      int                 `gorm:"not null;default:0" json:"filmCount"`         // 更新影片行数。有清单时与清单行数一致
-	Ledger         bool                `gorm:"not null" json:"ledger"`                      // 是否写入了影片编号。结束前没有清单
-	FilmName       string              `gorm:"-" json:"filmName,omitempty"`                 // 单片更新的片名，按清单从影片库回填
+	FilmCount      int                 `gorm:"not null;default:0" json:"filmCount"`         // 更新影片部数（内存聚合统计）
+	TargetMids     string              `gorm:"type:text" json:"-"`                          // 仅单片更新记录目标影片 ID 的 JSON 数组
+	FilmName       string              `gorm:"-" json:"filmName,omitempty"`                 // 单片更新的片名，按 TargetMids 从影片库回填
 	Films          []CollectRecordFilm `gorm:"-" json:"films,omitempty"`                    // 单片更新可跳转的影片
 	PageTotal      int                 `gorm:"not null;default:0" json:"pageTotal"`         // 总页数
 	PageSuccess    int                 `gorm:"not null;default:0" json:"pageSuccess"`       // 成功页数
@@ -75,7 +75,7 @@ type CollectRecord struct {
 	DetailJson     string              `gorm:"type:mediumtext" json:"detailJson,omitempty"` // 站点明细 JSON，含全部失败页，TEXT 64KB 装不下大站的失败页
 }
 
-// CollectRecordFilm 采集批次清单里的一行影片。全部站点按清单行返回，并带上 SourceID。
+// CollectRecordFilm 单片更新回显的影片项。
 type CollectRecordFilm struct {
 	Mid      int64  `json:"mid"`
 	Name     string `json:"name"`
@@ -116,7 +116,7 @@ type CollectRecordCompletion struct {
 	PageFailed     int       `json:"pageFailed"`
 	ErrorMsg       string    `json:"errorMsg"`
 	DetailJson     string    `json:"detailJson"`
-	Ledger         bool      `json:"ledger"`
+	TargetMids     string    `json:"targetMids,omitempty"`
 }
 
 // CollectRecordRetryReq 重试失败站点请求参数
@@ -147,40 +147,4 @@ type CollectRecordQuery struct {
 	UpdatedOnly bool      `json:"updatedOnly"` // 只看有入库
 	FailedOnly  bool      `json:"failedOnly"`  // 只看有失败或中断
 	BatchID     string    `json:"batchId"`
-}
-
-// CollectRecordFilmItem 采集批次入库/更新影片账本。
-// 聚簇主键 (record_id, source_id, mid) 兼具唯一去重与全站/单站顺序游标能力，仅保留 idx_crf_source_record 用于删站清理。
-type CollectRecordFilmItem struct {
-	RecordID uint   `gorm:"primaryKey;autoIncrement:false;index:idx_crf_source_record,priority:2;not null" json:"recordId"`
-	SourceID string `gorm:"primaryKey;index:idx_crf_source_record,priority:1;size:32;not null" json:"sourceId"`
-	Mid      int64  `gorm:"primaryKey;autoIncrement:false;not null" json:"mid"`
-}
-
-func (CollectRecordFilmItem) TableName() string {
-	return TableCollectRecordFilm
-}
-
-// CollectRecordFilmQuery 批次影片清单分页查询入参。
-// 浏览态按 (afterSource, afterMid) 游标翻页；搜索态按 (afterName, afterMid, afterSource) 游标翻页。
-type CollectRecordFilmQuery struct {
-	BatchID     string `json:"batchId"`
-	SourceID    string `json:"sourceId"`
-	AfterSource string `json:"afterSource"`
-	AfterName   string `json:"afterName"`
-	AfterMid    int64  `json:"afterMid"`
-	PageSize    int    `json:"pageSize"`
-	Keyword     string `json:"keyword"`
-}
-
-// CollectRecordFilmPage 清单的一页。
-// 浏览态 Total 为记录部数；搜索态不执行全表 COUNT（Total 为 -1），触发扫描预算上限时 Truncated 为 true。
-type CollectRecordFilmPage struct {
-	List            []CollectRecordFilm
-	Total           int64
-	NextAfterSource string
-	NextAfterName   string
-	NextAfterMid    int64
-	HasMore         bool
-	Truncated       bool
 }

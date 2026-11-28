@@ -8,7 +8,6 @@ import {
   FieldTimeOutlined,
   PauseCircleOutlined,
   ReloadOutlined,
-  RightOutlined,
   ScheduleOutlined,
   SyncOutlined,
   UserOutlined,
@@ -25,12 +24,15 @@ import {
 } from "./types";
 import {
   effectiveDurationMs,
+  formatBatchPageSummary,
   formatBatchSourceStat,
-  formatCollectFilms,
   formatDuration,
   formatStartedAt,
   getHourLabel,
   parseSourceDetails,
+  resolveBatchErrorPreview,
+  resolveBatchFilmIngress,
+  type BatchErrorPreview,
 } from "./record-format";
 import styles from "./index.module.less";
 
@@ -141,20 +143,21 @@ export function RecordStatusMark({
 
 export interface GetHistoryColumnsOptions {
   canWrite: boolean;
+  primaryId?: string;
   retryingBatchIds: Set<string>;
   onRetryBatch: (record: CollectHistoryRecord) => void;
   onOpenDetail: (record: CollectHistoryRecord) => void;
-  onOpenFilms: (record: CollectHistoryRecord) => void;
+  onOpenError: (preview: BatchErrorPreview) => void;
 }
 
 export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<CollectHistoryRecord> {
-  const { canWrite, retryingBatchIds, onRetryBatch, onOpenDetail, onOpenFilms } = opts;
+  const { canWrite, primaryId, retryingBatchIds, onRetryBatch, onOpenDetail, onOpenError } = opts;
 
   return [
     {
       title: "执行时间",
       key: "startedAt",
-      width: 204,
+      width: 188,
       render: (_, record) => {
         const started = formatStartedAt(record.startedAt);
         const duration = formatDuration(effectiveDurationMs(record));
@@ -171,29 +174,27 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       },
     },
     {
-      title: "方式与内容",
+      title: "任务",
       key: "trigger",
-      width: 244,
+      width: 224,
       render: (_, record) => {
         const singleFilm = isSingleFilmRecord(record);
         const films = singleFilm ? singleFilmTargets(record) : [];
-        const details = parseSourceDetails(record.detailJson);
+        const visibleFilms = films.slice(0, 2);
+        const extraFilms = Math.max(0, films.length - visibleFilms.length);
         const hourLabel = getHourLabel(record.hour, record);
-        const singleSourceName =
-          record.tag === "single_collect" && details.length === 1 ? details[0].sourceName : "";
-        const scopeText = [singleSourceName, hourLabel].filter(Boolean).join(" · ");
 
         return (
           <div className={styles.cellStack}>
             <div className={styles.triggerRow}>
               {renderTriggerTag(record.trigger)}
-              {!singleFilm && scopeText ? <span className={styles.scopePill}>{scopeText}</span> : null}
+              {!singleFilm && hourLabel ? <span className={styles.scopePill}>{hourLabel}</span> : null}
             </div>
-            {singleFilm && films.length > 0 ? (
-              <Space size={4} wrap>
-                {films.map((film) => {
+            {singleFilm && visibleFilms.length > 0 ? (
+              <div className={styles.filmChipsRow}>
+                {visibleFilms.map((film) => {
                   const tag = (
-                    <Tag className={styles.filmChip} style={tagStyle}>
+                    <Tag className={styles.filmChip} style={tagStyle} title={film.name}>
                       {film.name}
                     </Tag>
                   );
@@ -209,31 +210,35 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
                     </Link>
                   );
                 })}
-              </Space>
+                {extraFilms > 0 ? (
+                  <span className={styles.subText}>等 {films.length} 部</span>
+                ) : null}
+              </div>
             ) : null}
           </div>
         );
       },
     },
     {
-      title: "状态",
+      title: "执行状态",
       key: "status",
-      width: 200,
+      width: 176,
       render: (_, record) => {
         const status = resolveBatchStatus(record);
         const details = parseSourceDetails(record.detailJson);
         const stat = formatBatchSourceStat(record, details);
         const showSites = stat.primary !== "-";
+        const statLine = [stat.primary, stat.secondary].filter(Boolean).join(" · ");
 
         return (
           <div className={styles.cellStack}>
             <RecordStatusMark status={status} scope="batch" />
             {showSites ? (
-              <span className={styles.subText}>
+              <span className={styles.subTextEllipsis} title={statLine}>
                 <span>{stat.primary}</span>
                 {stat.secondary ? (
                   <span className={stat.tone === "fail" ? styles.subTextDanger : styles.subTextWarn}>
-                    · {stat.secondary}
+                    {" "}· {stat.secondary}
                   </span>
                 ) : null}
               </span>
@@ -243,37 +248,110 @@ export function getHistoryColumns(opts: GetHistoryColumnsOptions): ColumnsType<C
       },
     },
     {
-      title: "更新影片",
-      key: "films",
-      width: 144,
+      title: "分页进度",
+      key: "pages",
+      width: 184,
       render: (_, record) => {
-        const count = Math.max(0, record.filmCount ?? 0);
-        if (count <= 0) {
-          return <span className={styles.filmNumberMuted}>{formatCollectFilms(0, record)}</span>;
+        const details = parseSourceDetails(record.detailJson);
+        const pages = formatBatchPageSummary(record, details);
+        return (
+          <div className={styles.cellStack}>
+            <div className={styles.pageProgressRow}>
+              <span
+                className={
+                  pages.tone === "muted"
+                    ? styles.filmNumberMuted
+                    : pages.tone === "running"
+                      ? `${styles.pagePrimary} ${styles.subTextAccent}`
+                      : styles.pagePrimary
+                }
+              >
+                {pages.primary}
+              </span>
+              {pages.failedText ? (
+                <span className={styles.pageFailedBadge}>{pages.failedText}</span>
+              ) : null}
+            </div>
+            {pages.secondary ? (
+              <span
+                className={
+                  pages.tone === "fail"
+                    ? `${styles.subTextEllipsis} ${styles.subTextDanger}`
+                    : styles.subTextEllipsis
+                }
+                title={pages.secondary}
+              >
+                {pages.secondary}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      title: "主站入库",
+      key: "films",
+      width: 148,
+      render: (_, record) => {
+        const details = parseSourceDetails(record.detailJson);
+        const ingress = resolveBatchFilmIngress(record, details, primaryId);
+        return (
+          <div className={styles.cellStack}>
+            <span className={ingress.tone === "active" ? styles.filmNumber : styles.filmNumberMuted}>
+              {ingress.label}
+            </span>
+            {ingress.subLabel ? (
+              <span className={styles.subTextEllipsis} title={ingress.subLabel}>
+                {ingress.subLabel}
+              </span>
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      title: "异常摘要",
+      key: "errors",
+      width: 224,
+      render: (_, record) => {
+        const details = parseSourceDetails(record.detailJson);
+        const preview = resolveBatchErrorPreview(record, details);
+        if (!preview) {
+          return <span className={styles.filmNumberMuted}>-</span>;
         }
-        const formatted = `+${count.toLocaleString("zh-CN")} 部`;
-        if (record.ledger === true && record.status !== "running") {
-          return (
+        return (
+          <div className={styles.cellStack}>
             <button
               type="button"
-              className={styles.filmActionPill}
+              className={styles.errorPreviewBtn}
               onClick={(event) => {
                 event.stopPropagation();
-                onOpenFilms(record);
+                onOpenError(preview);
               }}
             >
-              <span>{formatted}</span>
-              <RightOutlined className={styles.filmPillArrow} />
+              {preview.summary ? (
+                <span className={styles.errorSummaryBadge}>{preview.summary}</span>
+              ) : (
+                <CloseCircleOutlined className={styles.errorSummaryIcon} />
+              )}
+              <span className={styles.errorSummaryText}>
+                {preview.sourceName ? `${preview.sourceName}：${preview.detail}` : preview.detail}
+              </span>
             </button>
-          );
-        }
-        return <span className={styles.filmNumber}>{formatted}</span>;
+            {preview.abnormalCount > 1 ? (
+              <span className={`${styles.subText} ${styles.subTextDanger}`}>
+                共 {preview.abnormalCount} 个异常站点
+              </span>
+            ) : null}
+          </div>
+        );
       },
     },
     {
       title: "操作",
       key: "action",
-      width: 136,
+      width: 132,
+      fixed: "right",
       align: "right",
       render: (_, record) => {
         const isRetrying = retryingBatchIds.has(record.batchId);

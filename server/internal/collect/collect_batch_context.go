@@ -1,8 +1,10 @@
 package collect
 
 import (
+	"context"
 	"log"
 	"server/internal/collect/engine"
+	"server/internal/film/writer"
 	"server/internal/model"
 	"strings"
 	"sync"
@@ -18,11 +20,6 @@ var (
 	activeBatches   = make(map[*collectBatchContext]struct{})
 	batchSeq        atomic.Uint64
 )
-
-type pendingLedgerFilm struct {
-	sourceID string
-	mid      int64
-}
 
 func registerActiveBatch(b *collectBatchContext) {
 	if b == nil {
@@ -49,7 +46,7 @@ func unregisterActiveBatch(b *collectBatchContext) {
 }
 
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）。
-// 锁顺序约定：始终先 recordMu 再 mu，避免流式刷账与删站摘除交叉死锁。
+// 锁顺序约定：始终先 recordMu 再 mu，避免结算与删站摘除交叉死锁。
 type collectBatchContext struct {
 	mu                sync.Mutex
 	recordMu          sync.Mutex
@@ -68,10 +65,8 @@ type collectBatchContext struct {
 	primaryWarmedUp   bool
 	pendingSealMIDs   map[string][]int64
 	page1Seeds        map[string]*engine.Page1Result
-	ledgerPending     []pendingLedgerFilm
-	ledgerFlushAt     time.Time
-	ledgerWritten     bool
-	ledgerFlushErr    error
+	sourceFilmCounts  map[string]int
+	sourceFilmSets    map[string]map[int64]struct{}
 	sourceHours       map[string]int
 	sourceErrors      map[string]string
 	sourceSkips       map[string]categorySkipCount
@@ -95,23 +90,24 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		standalone = isStandalone[0]
 	}
 	b := &collectBatchContext{
-		seq:             batchSeq.Add(1),
-		batchID:         generateBatchID(startedAt),
-		trigger:         trigger,
-		tag:             tag,
-		sources:         sources,
-		startedAt:       startedAt,
-		isStandalone:    standalone,
-		pendingSealMIDs: make(map[string][]int64, len(sources)),
-		page1Seeds:      make(map[string]*engine.Page1Result, len(sources)),
-		ledgerFlushAt:   time.Now(),
-		sourceHours:     make(map[string]int),
-		sourceErrors:    make(map[string]string),
-		sourceSkips:     make(map[string]categorySkipCount),
-		finishedSources: make(map[string]model.FilmSource),
-		sourceSnapshots: make(map[string]model.CollectRecordSourceDetail),
-		occupyTokens:    snapshotOccupyTokens(sources),
-		progressEpochs:  snapshotProgressEpochs(sources),
+		seq:              batchSeq.Add(1),
+		batchID:          generateBatchID(startedAt),
+		trigger:          trigger,
+		tag:              tag,
+		sources:          sources,
+		startedAt:        startedAt,
+		isStandalone:     standalone,
+		pendingSealMIDs:  make(map[string][]int64, len(sources)),
+		page1Seeds:       make(map[string]*engine.Page1Result, len(sources)),
+		sourceFilmCounts: make(map[string]int, len(sources)),
+		sourceFilmSets:   make(map[string]map[int64]struct{}, len(sources)),
+		sourceHours:      make(map[string]int),
+		sourceErrors:     make(map[string]string),
+		sourceSkips:      make(map[string]categorySkipCount),
+		finishedSources:  make(map[string]model.FilmSource),
+		sourceSnapshots:  make(map[string]model.CollectRecordSourceDetail),
+		occupyTokens:     snapshotOccupyTokens(sources),
+		progressEpochs:   snapshotProgressEpochs(sources),
 	}
 
 	registerActiveBatch(b)
@@ -180,22 +176,46 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, _ int, mids [
 	if b == nil || s == nil || len(mids) == 0 {
 		return
 	}
+	seen := make(map[int64]struct{}, len(mids))
 	kept := make([]int64, 0, len(mids))
 	for _, mid := range mids {
-		if mid > 0 {
-			kept = append(kept, mid)
+		if mid <= 0 {
+			continue
 		}
+		if _, dup := seen[mid]; dup {
+			continue
+		}
+		seen[mid] = struct{}{}
+		kept = append(kept, mid)
 	}
 	if len(kept) == 0 {
 		return
 	}
 	pref := currentPreferredSourceID()
-	shouldFlush := false
 	b.mu.Lock()
 	if b.sourceDroppedLocked(s.Id) {
 		b.mu.Unlock()
 		return
 	}
+	if b.sourceFilmCounts == nil {
+		b.sourceFilmCounts = make(map[string]int)
+	}
+	if b.sourceFilmSets == nil {
+		b.sourceFilmSets = make(map[string]map[int64]struct{})
+	}
+	filmSet := b.sourceFilmSets[s.Id]
+	if filmSet == nil {
+		filmSet = make(map[int64]struct{}, len(kept))
+		b.sourceFilmSets[s.Id] = filmSet
+	}
+	added := 0
+	for _, mid := range kept {
+		if _, exists := filmSet[mid]; !exists {
+			filmSet[mid] = struct{}{}
+			added++
+		}
+	}
+	b.sourceFilmCounts[s.Id] += added
 	// 非主站不进检索索引封口，跳过切片暂存以减少并发全量采集内存占用。
 	if pref == "" || pref == s.Id {
 		if b.pendingSealMIDs == nil {
@@ -203,15 +223,47 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, _ int, mids [
 		}
 		b.pendingSealMIDs[s.Id] = append(b.pendingSealMIDs[s.Id], kept...)
 	}
-	shouldFlush = b.enqueueLedgerLocked(s.Id, kept)
 	b.mu.Unlock()
 
-	if shouldFlush {
-		b.flushLedger()
-	}
 	if err := enqueueStreamPublish(s.Id, kept); err != nil {
 		log.Printf("[Spider][StreamPublish] 流式刷窗失败 source=%s err=%v", s.Id, err)
 	}
+}
+
+// releaseSourceFilmSet 在单站采集写库结束后立即释放该站去重集合，保留 sourceFilmCounts 供批次结算使用，避免多站全量采集时堆内存持续累积。
+func (b *collectBatchContext) releaseSourceFilmSet(sourceID string) {
+	if b == nil {
+		return
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	b.mu.Lock()
+	delete(b.sourceFilmSets, sourceID)
+	b.mu.Unlock()
+}
+
+// WriteContext 为主站写库上下文注入当前批次记录 ID，非主站或无有效记录 ID 时透传原上下文。
+func (b *collectBatchContext) WriteContext(ctx context.Context, s *model.FilmSource) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if b == nil || s == nil {
+		return ctx
+	}
+	pref := currentPreferredSourceID()
+	if pref != "" && pref != strings.TrimSpace(s.Id) {
+		return ctx
+	}
+	b.mu.Lock()
+	dropped := b.sourceDroppedLocked(s.Id)
+	recordID := b.recordID
+	b.mu.Unlock()
+	if dropped || recordID == 0 {
+		return ctx
+	}
+	return writer.WithCollectRecordID(ctx, recordID)
 }
 
 // IsStandalone 实现 fetcher.Batch：单站采集，不与其他站点合并发布。

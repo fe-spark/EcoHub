@@ -34,29 +34,40 @@ func (s *CollectRecordService) GetHistoryList(q model.CollectRecordQuery) ([]mod
 	return list, total, nil
 }
 
-func attachSingleFilmNames(list []model.CollectRecord) error {
-	recordIDs := make([]uint, 0)
-	for i := range list {
-		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate {
+func parseTargetMids(raw string) []int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var ids []int64
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
 			continue
 		}
-		if list[i].ID > 0 {
-			recordIDs = append(recordIDs, list[i].ID)
+		if _, ok := seen[id]; ok {
+			continue
 		}
+		seen[id] = struct{}{}
+		out = append(out, id)
 	}
-	midsByRecord, err := ledger.ListCollectRecordMids(recordIDs)
-	if err != nil {
-		return err
-	}
+	return out
+}
+
+func attachSingleFilmNames(list []model.CollectRecord) error {
 	ids := make([]int64, 0)
 	seen := make(map[int64]struct{})
 	parsed := make([][]int64, len(list))
 	for i := range list {
-		rowIDs := midsByRecord[list[i].ID]
-		if len(rowIDs) == 0 {
+		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate {
 			continue
 		}
-		if list[i].Trigger != model.CollectTriggerSingleUpdate && list[i].Tag != model.CollectTagSingleUpdate {
+		rowIDs := parseTargetMids(list[i].TargetMids)
+		if len(rowIDs) == 0 {
 			continue
 		}
 		parsed[i] = rowIDs
@@ -95,11 +106,6 @@ func attachSingleFilmNames(list []model.CollectRecord) error {
 	return nil
 }
 
-// GetBatchFilms 分页获取某采集批次的影片清单。
-func (s *CollectRecordService) GetBatchFilms(q model.CollectRecordFilmQuery) (model.CollectRecordFilmPage, error) {
-	return ledger.QueryCollectRecordFilms(q)
-}
-
 // DeleteHistory 批量删除指定 ID 列表的历史记录
 func (s *CollectRecordService) DeleteHistory(ids []uint) error {
 	return ledger.DeleteCollectRecords(ids)
@@ -122,13 +128,9 @@ func (s *CollectRecordService) RetryBatchFailedSources(req model.CollectRecordRe
 		return model.CollectBatchResult{}, errors.New("未找到对应采集记录")
 	}
 
-	// 单片更新没有时间窗口。按清单里的影片重放，不能走小时采集。
+	// 单片更新没有时间窗口。按记录里的 target_mids 重放，不能走小时采集。
 	if rec.Trigger == model.CollectTriggerSingleUpdate || rec.Tag == model.CollectTagSingleUpdate {
-		midsByRecord, err := ledger.ListCollectRecordMids([]uint{rec.ID})
-		if err != nil {
-			return model.CollectBatchResult{}, err
-		}
-		ids := midsByRecord[rec.ID]
+		ids := parseTargetMids(rec.TargetMids)
 		if len(ids) == 0 {
 			return model.CollectBatchResult{}, errors.New("单片更新缺少影片编号，无法重试")
 		}

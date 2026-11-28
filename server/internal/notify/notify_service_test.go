@@ -2,10 +2,7 @@ package notify
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +13,6 @@ import (
 	"server/internal/film/catalog"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repobase"
 	"server/internal/sourcecatalog"
 	"server/internal/taxonomy"
 	"server/internal/testutil"
@@ -26,1458 +22,396 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func setupNotifyConfigDB(t *testing.T) {
+func setupNotifyTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := testutil.MemDSN(t)
-	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.NotifyConfigRecord{}, &model.ProxyConfigRecord{}, &model.FilmIndex{}); err != nil {
-		t.Fatal(err)
-	}
-	prev := db.Mdb
-	db.Mdb = gdb
-	t.Cleanup(func() { db.Mdb = prev })
-}
-
-func TestPublishFailed_DisabledDoesNotBurnCooldown(t *testing.T) {
-	setupNotifyConfigDB(t)
-	s := &NotifyService{alertLast: map[string]time.Time{}}
-	s.PublishSourceFailed("src1", "站", "超时")
-	s.PublishCronFailed("task1", "清理", "失败")
-	s.alertMu.Lock()
-	defer s.alertMu.Unlock()
-	if len(s.alertLast) != 0 {
-		t.Fatalf("disabled notify recorded cooldown: %+v", s.alertLast)
-	}
-}
-
-func TestMaskAndMergeNotifyConfig(t *testing.T) {
-	rawToken := "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
-	masked := MaskBotToken(rawToken)
-	if masked == rawToken || !strings.Contains(masked, "***") {
-		t.Fatalf("expected masked token, got %q", masked)
-	}
-	if !IsMaskedBotToken(masked) {
-		t.Fatalf("expected IsMaskedBotToken(%q) to be true", masked)
-	}
-
-	stored := DefaultNotifyConfig()
-	stored.BotToken = rawToken
-	stored.ChatIDs = []string{"-100123456"}
-
-	incoming := model.NotifyConfig{
-		Enabled:            true,
-		BotToken:           masked,
-		ChatIDs:            []string{" -100123456 ", "-100999:42", "-100123456"},
-		Events:             stored.Events,
-		OnlyNotifyOnUpdate: true,
-		MaxFilmsInMessage:  25,
-	}
-	merged, err := validateAndMergeNotifyConfig(stored, incoming)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if merged.BotToken != rawToken {
-		t.Fatalf("expected stored token preserved, got %q", merged.BotToken)
-	}
-	if len(merged.ChatIDs) != 2 || merged.ChatIDs[1] != "-100999:42" {
-		t.Fatalf("unexpected chatIds: %+v", merged.ChatIDs)
-	}
-	if merged.MaxFilmsInMessage != model.MaxNotifyPageSize {
-		t.Fatalf("expected capped pageSize %d, got %d", model.MaxNotifyPageSize, merged.MaxFilmsInMessage)
-	}
-
-	// 显式清空 BotToken（禁用状态下）应保留为空，不再回填旧值
-	cleared := model.NotifyConfig{
-		Enabled:           false,
-		BotToken:          "",
-		ChatIDs:           []string{"-100123456"},
-		Events:            stored.Events,
-		MaxFilmsInMessage: 15,
-	}
-	mergedCleared, err := validateAndMergeNotifyConfig(stored, cleared)
-	if err != nil {
-		t.Fatalf("unexpected error clearing token: %v", err)
-	}
-	if mergedCleared.BotToken != "" {
-		t.Fatalf("expected BotToken to be cleared, got %q", mergedCleared.BotToken)
-	}
-
-	// 测试非法 threadId
-	bad := incoming
-	bad.ChatIDs = []string{"-100123:abc"}
-	if _, err := validateAndMergeNotifyConfig(stored, bad); err == nil {
-		t.Fatalf("expected error on invalid threadId")
-	}
-}
-
-func TestNotifyCallbackAndPagination(t *testing.T) {
-	setupNotifyConfigDB(t)
-	gdb := db.Mdb
 	if err := gdb.AutoMigrate(
+		&model.SiteConfigRecord{},
+		&model.NotifyConfigRecord{},
+		&model.ProxyConfigRecord{},
 		&model.FilmSource{},
+		&model.PrimaryState{},
 		&model.Category{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.CollectRecord{},
-		&model.CollectRecordFilmItem{},
+		&model.FilmIndex{},
 	); err != nil {
-		t.Fatal(err)
+		t.Fatalf("migrate: %v", err)
 	}
+	prevMdb := db.Mdb
 	prevRdb := db.Rdb
+	db.Mdb = gdb
 	db.Rdb = nil
-	t.Cleanup(func() { db.Rdb = prevRdb })
+	t.Cleanup(func() {
+		db.Mdb = prevMdb
+		db.Rdb = prevRdb
+	})
+	return gdb
+}
 
-	now := time.Now()
-	const batchID = "cb_ledger_1"
-	for _, item := range []any{
-		&model.FilmSource{Id: "s1", Name: "主站", Uri: "http://1", State: true, Sort: 0},
-		&model.Category{Id: 10, Pid: 0, Name: "电影", StableKey: "cat_10", Show: true, Sort: 1},
-		&model.SourceCategory{SourceId: "s1", SourceTypeId: 1, RawName: "电影"},
-		&model.CategoryMapping{SourceId: "s1", SourceTypeId: 1, CategoryId: 10},
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "s1"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:s1:1", RootCategoryKey: "source:s1:1"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "影片A"},
-		},
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "s1"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:s1:1", RootCategoryKey: "source:s1:1"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "影片B"},
-		},
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103, FirstSourceId: "s1"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:s1:1", RootCategoryKey: "source:s1:1"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "影片C"},
-		},
-	} {
-		if err := gdb.Create(item).Error; err != nil {
-			t.Fatal(err)
+func setupNotifyConfigDB(t *testing.T) {
+	t.Helper()
+	setupNotifyTestDB(t)
+}
+
+func TestParseNotifyCallbackCmd_TwoLevelPrimaryProtocol(t *testing.T) {
+	cases := []struct {
+		raw    string
+		ok     bool
+		action string
+		catIdx int
+		page   int
+	}{
+		{"nfp:abc123:noop:0", true, "noop", -1, 0},
+		{"nfp:abc123:info:0", true, "info", -1, 0},
+		{"nfp:abc123:home:0", true, "home", -1, 0},
+		{"nfp:abc123:c:-1:1", true, "cat_page", -1, 1},
+		{"nfp:abc123:c:2:3", true, "cat_page", 2, 3},
+		{"nfp:abc123:c:0:0", false, "", 0, 0},
+		{"nfp:abc123:s:0", false, "", 0, 0},
+		{"invalid", false, "", 0, 0},
+	}
+	for _, tc := range cases {
+		cmd, ok := parseNotifyCallbackCmd(tc.raw)
+		if ok != tc.ok {
+			t.Fatalf("raw=%q ok=%v want %v", tc.raw, ok, tc.ok)
+		}
+		if ok && (cmd.action != tc.action || cmd.catIdx != tc.catIdx || cmd.page != tc.page) {
+			t.Fatalf("raw=%q got %+v want action=%s cat=%d page=%d", tc.raw, cmd, tc.action, tc.catIdx, tc.page)
 		}
 	}
-	rec := &model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}
+}
+
+func TestBuildPrimaryOverviewAndSingleTablePagination(t *testing.T) {
+	gdb := setupNotifyTestDB(t)
+
+	_ = gdb.Create(&model.SiteConfigRecord{
+		SiteName: "测试影视",
+		SiteURL:  "https://eco.example.com",
+	}).Error
+
+	primarySrc := model.FilmSource{Id: "src_primary", Name: "主站A", Uri: "https://a.example", State: true, Sort: 0}
+	otherSrc := model.FilmSource{Id: "src_other", Name: "副站B", Uri: "https://b.example", State: true, Sort: 1}
+	_ = gdb.Create(&primarySrc).Error
+	_ = gdb.Create(&otherSrc).Error
+	_ = gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: primarySrc.Id}).Error
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+
+	_ = gdb.Create(&model.Category{Id: 1, Name: "电影", StableKey: "movie", Show: true}).Error
+	_ = gdb.Create(&model.Category{Id: 2, Name: "剧集", StableKey: "series", Show: true}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: primarySrc.Id, SourceTypeId: 1, RawName: "电影"}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: primarySrc.Id, SourceTypeId: 11, ParentSourceTypeId: 1, RawName: "动作片"}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: primarySrc.Id, SourceTypeId: 2, RawName: "剧集"}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: primarySrc.Id, SourceTypeId: 21, ParentSourceTypeId: 2, RawName: "国产剧"}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: primarySrc.Id, SourceTypeId: 11, CategoryId: 1}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: primarySrc.Id, SourceTypeId: 21, CategoryId: 2}).Error
+	catalog.ClearCategoryCache()
+	taxonomy.RefreshCategoryCache()
+	t.Cleanup(catalog.ClearCategoryCache)
+
+	rec := &model.CollectRecord{
+		BatchID:   "batch_primary_1",
+		Trigger:   model.CollectTriggerCron,
+		Status:    model.CollectRecordStatusPartial,
+		StartedAt: time.Now().Add(-30 * time.Second),
+	}
 	if err := gdb.Create(rec).Error; err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range []model.CollectRecordFilmItem{
-		{RecordID: rec.ID, SourceID: "s1", Mid: 101},
-		{RecordID: rec.ID, SourceID: "s1", Mid: 102},
-		{RecordID: rec.ID, SourceID: "s1", Mid: 103},
-	} {
-		if err := gdb.Create(&row).Error; err != nil {
+
+	// 主站更新 3 部（电影 2 部、剧集 1 部），副站更新 1 部不应混入主站片单
+	films := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: primarySrc.Id, LastRecordID: rec.ID},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11, RootCategoryKey: taxonomy.BuildSourceCategoryKey(primarySrc.Id, 1), CategoryKey: taxonomy.BuildSourceCategoryKey(primarySrc.Id, 11)},
+			FilmIndexContent:  model.FilmIndexContent{Name: "流浪地球"},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: primarySrc.Id, LastRecordID: rec.ID},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11, RootCategoryKey: taxonomy.BuildSourceCategoryKey(primarySrc.Id, 1), CategoryKey: taxonomy.BuildSourceCategoryKey(primarySrc.Id, 11)},
+			FilmIndexContent:  model.FilmIndexContent{Name: "星际穿越"},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103, FirstSourceId: primarySrc.Id, LastRecordID: rec.ID},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 2, Cid: 21, RootCategoryKey: taxonomy.BuildSourceCategoryKey(primarySrc.Id, 2), CategoryKey: taxonomy.BuildSourceCategoryKey(primarySrc.Id, 21)},
+			FilmIndexContent:  model.FilmIndexContent{Name: "三体"},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 104, FirstSourceId: otherSrc.Id, LastRecordID: rec.ID},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11, RootCategoryKey: taxonomy.BuildSourceCategoryKey(otherSrc.Id, 1), CategoryKey: taxonomy.BuildSourceCategoryKey(otherSrc.Id, 11)},
+			FilmIndexContent:  model.FilmIndexContent{Name: "副站影片"},
+		},
+	}
+	for i := range films {
+		if err := gdb.Create(&films[i]).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	_ = sourcecatalog.RefreshCollectSourceCatalog()
-	taxonomy.ReloadMappingRules()
-	taxonomy.RefreshCategoryCache()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
 
-	if err := SaveNotifyConfig(model.NotifyConfig{
-		Enabled:  true,
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"-100111", "-100222:5"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	sess := model.NotifyBatchSession{
-		BatchID:        "b123",
-		CollectBatchID: batchID,
-		SiteName:       "EcoHub",
-		OverviewHTML:   "<b>[EcoHub] 采集汇总</b>",
-		PageSize:       2,
-		Sources: []model.NotifySourceSession{
-			{
-				SourceID:   "s1",
-				SourceName: "主站",
-				AllCount:   3,
-				Categories: []model.NotifySourceCategoryGroup{
-					{CategoryID: 1, CategoryName: "电影", Count: 3},
-				},
-			},
-		},
-	}
-	if err := SaveNotifyBatchSession(sess); err != nil {
-		t.Fatalf("SaveNotifyBatchSession failed: %v", err)
-	}
-
-	// 无论是否配置 SiteURL，分类与“全部”按钮均应生成内联翻页 CallbackData
-	kb := buildSourceCategoryKeyboard(sess.BatchID, 0, sess.Sources[0].Categories, sess.Sources[0].AllCount)
-	if kb == nil || len(kb.InlineKeyboard) == 0 {
-		t.Fatalf("expected non-empty category keyboard")
-	}
-	if got := kb.InlineKeyboard[0][0].CallbackData; got != "nfp:b123:sc:0:0:1" {
-		t.Fatalf("unexpected category button callback: %q", got)
-	}
-	if got := kb.InlineKeyboard[0][1].CallbackData; got != "nfp:b123:sc:0:-1:1" {
-		t.Fatalf("unexpected all button callback: %q", got)
-	}
-
-	cmd, ok := parseNotifyCallbackCmd("nfp:b123:sc:0:0:1")
-	if !ok || cmd.batchID != "b123" || cmd.action != "spage_cat" || cmd.srcIdx != 0 || cmd.catIdx != 0 || cmd.page != 1 {
-		t.Fatalf("unexpected callback parse result: %+v ok=%v", cmd, ok)
-	}
-
-	// 未配置 SiteURL 时，片单正常展示但不附带超链接
-	pageHTML, _, totalPages, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, 0, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if totalPages != 2 || !strings.Contains(pageHTML, "影片A") || !strings.Contains(pageHTML, "影片B") || strings.Contains(pageHTML, "影片C") {
-		t.Fatalf("unexpected page 1 html (totalPages=%d): %s", totalPages, pageHTML)
-	}
-	if strings.Contains(pageHTML, "<a href=") {
-		t.Fatalf("did not expect film link when siteURL is empty: %s", pageHTML)
-	}
-
-	// 配置 SiteURL 后，每部影片可直接跳转播放页
-	if err := repobase.SaveSiteBasic(model.BasicConfig{SiteName: "EcoHub", SiteURL: "http://localhost:3300/"}); err != nil {
-		t.Fatal(err)
-	}
-	linkedHTML, _, _, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, -1, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(linkedHTML, `<a href="http://localhost:3300/play?id=101">影片A</a>`) {
-		t.Fatalf("expected film play link in page html: %s", linkedHTML)
-	}
-
-	page2HTML, _, _, err := formatSourceFilmListPageHTML(context.Background(), sess, 0, 0, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(page2HTML, "影片C") {
-		t.Fatalf("expected page 2 to contain 影片C: %s", page2HTML)
-	}
-}
-
-func TestSendTestAndCallbackEditWithMockServer(t *testing.T) {
-	setupNotifyConfigDB(t)
-	var (
-		mu      sync.Mutex
-		methods []string
-	)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		methods = append(methods, r.URL.Path)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":     true,
-			"result": map[string]any{"message_id": 1},
-		})
-	}))
-	defer ts.Close()
-
-	oldBase := tgAPIBaseURL
-	tgAPIBaseURL = ts.URL
-	defer func() { tgAPIBaseURL = oldBase }()
-
-	res, err := NotifySvc.SendTest(model.NotifyTestReq{
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"-100111", "-100222:5"},
-	})
-	if err != nil {
-		t.Fatalf("SendTest failed: %v", err)
-	}
-	if res.Sent != 2 || len(res.Failed) != 0 {
-		t.Fatalf("unexpected SendTest result: %+v", res)
-	}
-
-	if err := SaveNotifyConfig(model.NotifyConfig{
-		Enabled:  true,
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"-100111", "-100222:5"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	sess := model.NotifyBatchSession{
-		BatchID:      "t999",
-		SiteName:     "TestSite",
-		OverviewHTML: "<b>Overview</b>",
-		PageSize:     15,
-		Sources: []model.NotifySourceSession{
-			{SourceID: "s1", SourceName: "站点1", AllCount: 1, OverviewHTML: "<b>站点1</b>"},
-		},
-	}
-	_ = SaveNotifyBatchSession(sess)
-
-	handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
-		ID:   "cb1",
-		Data: "nfp:t999:sc:0:-1:1",
-		Message: &tgMessage{
-			MessageID: 88,
-			Chat:      &tgChat{ID: -100111},
-		},
-	})
-
-	// 未授权 chat_id 必须被白名单拦截，不触发 editMessageText
-	handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
-		ID:   "cb_unauth",
-		Data: "nfp:t999:sc:0:-1:1",
-		Message: &tgMessage{
-			MessageID: 89,
-			Chat:      &tgChat{ID: -999999},
-		},
-	})
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(methods) < 4 {
-		t.Fatalf("expected at least 4 telegram API calls, got %v", methods)
-	}
-	editCount := 0
-	for _, m := range methods {
-		if strings.HasSuffix(m, "/editMessageText") {
-			editCount++
-		}
-	}
-	if editCount != 1 {
-		t.Fatalf("expected unauthorized callback not to trigger editMessageText, got %d edits (%v)", editCount, methods)
-	}
-}
-
-func TestFormatBatchOverviewHTML(t *testing.T) {
-	now := time.Now()
 	payload := model.CollectBatchNotifyPayload{
-		Trigger:    model.CollectTriggerCron,
-		StartedAt:  now.Add(-65 * time.Second),
-		FinishedAt: now,
+		CollectRecordID: rec.ID,
+		CollectBatchID:  rec.BatchID,
+		Trigger:         model.CollectTriggerCron,
+		StartedAt:       time.Now().Add(-30 * time.Second),
+		FinishedAt:      time.Now(),
 		Sources: []model.SourceNotifyResult{
-			{
-				SourceID:   "s1",
-				SourceName: "资源站A",
-				Status:     model.CollectStatusDone,
-				PageTotal:  5,
-				SuccessCnt: 5,
-				FilmsTotal: 9,
-			},
-			{
-				SourceID:   "s2",
-				SourceName: "资源站B",
-				Status:     model.CollectStatusFailed,
-				Error:      "connection timeout",
-			},
+			{SourceID: primarySrc.Id, SourceName: primarySrc.Name, Status: model.CollectRecordStatusSuccess, FilmsTotal: 3, PageTotal: 2, SuccessCnt: 2},
+			{SourceID: otherSrc.Id, SourceName: otherSrc.Name, Status: model.CollectRecordStatusFailed, FilmsTotal: 1, FailedCnt: 2, Error: "请求超时"},
 		},
 	}
-	out := formatBatchOverviewHTML("EcoHub", payload, "资源站A", 12)
-	if !strings.Contains(out, "定时任务") || !strings.Contains(out, "1分5秒") || !strings.Contains(out, "成功 <b>1</b> 个，失败 <b>1</b> 个") || !strings.Contains(out, "共入库 <b>9</b> 部") || !strings.Contains(out, "⭐ 主站：<b>资源站A</b> · 前台可见 <b>12</b> 部") {
-		t.Fatalf("unexpected compact overview HTML: %s", out)
-	}
-	if strings.Contains(out, "connection timeout") {
-		t.Fatalf("compact overview should not expand full source error lines: %s", out)
-	}
-}
 
-func TestFormatPrimaryChangeHTML(t *testing.T) {
-	oldPrimary := &model.FilmSource{Id: "s1", Name: "量子资源"}
-	newPrimary := &model.FilmSource{Id: "s2", Name: "非凡资源"}
-	enabled := []model.FilmSource{
-		{Id: "s2", Name: "非凡资源", State: true},
-		{Id: "s1", Name: "量子资源", State: true},
-		{Id: "s3", Name: "暴风资源", State: true},
+	sess, err := buildNotifyBatchSession(payload, 2)
+	if err != nil {
+		t.Fatalf("buildNotifyBatchSession: %v", err)
+	}
+	if sess.PrimarySourceID != primarySrc.Id || sess.PrimaryTotal != 3 || len(sess.Categories) != 2 {
+		t.Fatalf("unexpected primary session: %+v", sess)
+	}
+	if !strings.Contains(sess.OverviewHTML, "主站A") || !strings.Contains(sess.OverviewHTML, "副站B") || !strings.Contains(sess.OverviewHTML, "请求超时") {
+		t.Fatalf("overview missing expected info: %s", sess.OverviewHTML)
 	}
 
-	switchedHTML := formatPrimaryChangeHTML("EcoHub", oldPrimary, newPrimary, enabled)
-	if !strings.Contains(switchedHTML, "主站已切换") ||
-		!strings.Contains(switchedHTML, "<b>量子资源</b> → <b>非凡资源</b>") ||
-		!strings.Contains(switchedHTML, "<b>非凡资源</b> → 量子资源 → 暴风资源") {
-		t.Fatalf("unexpected switched HTML: %s", switchedHTML)
-	}
-
-	clearedHTML := formatPrimaryChangeHTML("EcoHub", oldPrimary, nil, enabled)
-	if !strings.Contains(clearedHTML, "主站已置空") ||
-		!strings.Contains(clearedHTML, "<b>量子资源</b> → 无") {
-		t.Fatalf("unexpected cleared HTML: %s", clearedHTML)
-	}
-}
-
-func TestSafeTruncateHTMLAndOverviewLimit(t *testing.T) {
-	// 多行超长 HTML 截断不应留下半截标签
-	var lines []string
-	for i := 0; i < 30; i++ {
-		lines = append(lines, "· <b>测试影片</b> (<code>#100</code>)")
-	}
-	truncated := safeTruncateHTML(strings.Join(lines, "\n"), 200)
-	if strings.Count(truncated, "<b>") != strings.Count(truncated, "</b>") {
-		t.Fatalf("unbalanced <b> tags after truncate: %s", truncated)
-	}
-	if strings.Count(truncated, "<code>") != strings.Count(truncated, "</code>") {
-		t.Fatalf("unbalanced <code> tags after truncate: %s", truncated)
-	}
-
-	// 单行超长兜底剥离标签并保持合法长度
-	longSingle := "<b>" + strings.Repeat("A", 500) + "</b>"
-	singleTruncated := safeTruncateHTML(longSingle, 100)
-	if strings.Contains(singleTruncated, "<b>") {
-		t.Fatalf("expected tags stripped on single-line overflow: %s", singleTruncated)
-	}
-
-	// 超多站点时首屏文字精简且站点按钮自动分页，不超 Telegram 单条 100 按钮与 4096 字符限制
-	var sources []model.SourceNotifyResult
-	var sourceSessions []model.NotifySourceSession
-	for i := 0; i < 120; i++ {
-		name := fmt.Sprintf("采集站点_%03d_%s", i, strings.Repeat("X", 15))
-		sources = append(sources, model.SourceNotifyResult{
-			SourceID:   fmt.Sprintf("s_%d", i),
-			SourceName: name,
-			Status:     model.CollectStatusDone,
-			FilmsTotal: i,
-		})
-		sourceSessions = append(sourceSessions, model.NotifySourceSession{
-			SourceID:   fmt.Sprintf("s_%d", i),
-			SourceName: name,
-			Status:     model.CollectStatusDone,
-			FilmsTotal: i,
-		})
-	}
-	overview := formatBatchOverviewHTML("EcoHub", model.CollectBatchNotifyPayload{
-		Trigger:    model.CollectTriggerManual,
-		StartedAt:  time.Now().Add(-10 * time.Second),
-		FinishedAt: time.Now(),
-		Sources:    sources,
-	}, "", 5)
-	if len([]rune(overview)) > telegramMaxMessageLen {
-		t.Fatalf("overview exceeded telegram max len: %d", len([]rune(overview)))
-	}
-	kb := buildOverviewKeyboard(model.NotifyBatchSession{BatchID: "b120", Sources: sourceSessions}, 1)
-	if kb == nil {
-		t.Fatal("expected overview keyboard")
-	}
-	btnCount := 0
-	for _, r := range kb.InlineKeyboard {
-		btnCount += len(r)
-	}
-	if btnCount > 100 {
-		t.Fatalf("overview keyboard exceeded telegram 100 button limit: %d", btnCount)
+	manageURL := buildManageRecordURL("https://eco.example.com", rec.BatchID)
+	kb := buildPrimaryOverviewKeyboard(sess, manageURL)
+	if kb == nil || len(kb.InlineKeyboard) < 2 {
+		t.Fatalf("expected category buttons + manage URL button, got %+v", kb)
 	}
 	lastRow := kb.InlineKeyboard[len(kb.InlineKeyboard)-1]
-	if len(lastRow) != 3 || lastRow[1].CallbackData != "nfp:b120:info:-2" || lastRow[2].CallbackData != "nfp:b120:sp:2" {
-		t.Fatalf("expected site pagination row, got %+v", lastRow)
+	if len(lastRow) != 1 || lastRow[0].URL != manageURL {
+		t.Fatalf("expected manage URL button %q, got %+v", manageURL, lastRow)
+	}
+
+	// 验证单表分页：全部第 1 页应返回 2 条，第 2 页返回 1 条且不含副站影片
+	page1, cur1, total1, err := formatPrimaryFilmListPageHTML(context.Background(), sess, -1, 1)
+	if err != nil || cur1 != 1 || total1 != 2 {
+		t.Fatalf("page1 cur=%d total=%d err=%v", cur1, total1, err)
+	}
+	if !strings.Contains(page1, "流浪地球") || !strings.Contains(page1, "星际穿越") || strings.Contains(page1, "副站影片") {
+		t.Fatalf("unexpected page1 html: %s", page1)
+	}
+
+	page2, cur2, total2, err := formatPrimaryFilmListPageHTML(context.Background(), sess, -1, 2)
+	if err != nil || cur2 != 2 || total2 != 2 || !strings.Contains(page2, "三体") {
+		t.Fatalf("unexpected page2 cur=%d total=%d err=%v html=%s", cur2, total2, err, page2)
+	}
+
+	// 验证分类筛选（剧集 catIdx=1）
+	catPage, _, catTotal, err := formatPrimaryFilmListPageHTML(context.Background(), sess, 1, 1)
+	if err != nil || catTotal != 1 || !strings.Contains(catPage, "三体") || strings.Contains(catPage, "流浪地球") {
+		t.Fatalf("unexpected cat page total=%d err=%v html=%s", catTotal, err, catPage)
+	}
+
+	// 验证主站切换后翻看旧通知仍查原主站，不会串数据
+	if err := sourcecatalog.SetPrimarySourceID(otherSrc.Id); err != nil {
+		t.Fatalf("SetPrimarySourceID: %v", err)
+	}
+	oldSessPage, _, _, err := formatPrimaryFilmListPageHTML(context.Background(), sess, -1, 1)
+	if err != nil || !strings.Contains(oldSessPage, "流浪地球") || strings.Contains(oldSessPage, "副站影片") {
+		t.Fatalf("old session after primary switch got unexpected html: err=%v html=%s", err, oldSessPage)
+	}
+
+	// 验证当部分影片被后续批次覆写 last_record_id 导致第 2 页变空时，回退渲染第 1 页而非展示空尾页
+	_ = gdb.Model(&model.FilmIndex{}).Where("mid IN ?", []int64{102, 103}).Update("last_record_id", rec.ID+99).Error
+	fallbackHTML, curF, totalF, err := formatPrimaryFilmListPageHTML(context.Background(), sess, -1, 2)
+	if err != nil || curF != 1 || totalF != 1 || !strings.Contains(fallbackHTML, "流浪地球") {
+		t.Fatalf("expected fallback to page 1/1 with remaining film, got cur=%d total=%d err=%v html=%s", curF, totalF, err, fallbackHTML)
 	}
 }
 
-func TestFormatOverviewCategorySkipAndMultilineSafe(t *testing.T) {
-	now := time.Now()
-	src1 := model.SourceNotifyResult{
-		SourceID:     "s1",
-		SourceName:   "站\n名",
-		Status:       model.CollectStatusDone,
-		FilmsTotal:   8,
-		CategorySkip: 2,
-	}
-	src2 := model.SourceNotifyResult{
-		SourceID:   "s2",
-		SourceName: "报错站",
-		Status:     model.CollectStatusFailed,
-		Error:      "line1\nline2",
-	}
-	payload := model.CollectBatchNotifyPayload{
-		Trigger:    model.CollectTriggerCron,
-		StartedAt:  now.Add(-5 * time.Second),
-		FinishedAt: now,
-		Sources:    []model.SourceNotifyResult{src1, src2},
-	}
-	out := formatBatchOverviewHTML("EcoHub", payload, "站 名", 8)
-	if !strings.Contains(out, "成功 <b>1</b> 个，失败 <b>1</b> 个") || !strings.Contains(out, "共入库 <b>8</b> 部") {
-		t.Fatalf("unexpected source counts: %s", out)
-	}
-	d1 := formatSourceDetailHTML("EcoHub", src1, true, 8)
-	if !strings.Contains(d1, "⭐ 站 名") || !strings.Contains(d1, "跳过未映射 2 部") || !strings.Contains(d1, "✅ 状态：完成") {
-		t.Fatalf("unexpected primary source detail HTML: %s", d1)
-	}
-	d2 := formatSourceDetailHTML("EcoHub", src2, false, 0)
-	if strings.Contains(d2, "line1\nline2") || !strings.Contains(d2, "<code>line1 line2</code>") {
-		t.Fatalf("multiline error should be single-lined inside <code>: %s", d2)
-	}
-
-	reasonHTML := formatReasonCodeLines("first error\nsecond error", 200, 600)
-	if reasonHTML != "<code>first error</code>\n<code>second error</code>" {
-		t.Fatalf("unexpected reason code lines: %s", reasonHTML)
-	}
-	cut := safeTruncateHTML(reasonHTML, 32)
-	if strings.Count(cut, "<code>") != strings.Count(cut, "</code>") {
-		t.Fatalf("truncated multiline code tags unbalanced: %s", cut)
-	}
-
-	orderHTML := formatSourceOrderChangeHTML("EcoHub", []model.FilmSource{
-		{Id: "s1", Name: "主站", State: true},
-		{Id: "s2", Name: "备站", State: true},
-	})
-	if !strings.Contains(orderHTML, "采集站排序已调整") || !strings.Contains(orderHTML, "<b>主站</b> → 备站") {
-		t.Fatalf("unexpected order change HTML: %s", orderHTML)
-	}
-}
-
-func TestBuildNotifyBatchSession_FiltersHiddenCategory(t *testing.T) {
-	setupNotifyConfigDB(t)
-	gdb := db.Mdb
-	if err := gdb.AutoMigrate(
-		&model.FilmSource{},
-		&model.Category{},
-		&model.SourceCategory{},
-		&model.CategoryMapping{},
-		&model.PrimaryState{},
-		&model.MappingRule{},
-		&model.CollectRecord{},
-		&model.CollectRecordFilmItem{},
-	); err != nil {
-		t.Fatal(err)
-	}
-	prevRdb := db.Rdb
-	db.Rdb = nil
-	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
-	sourcecatalog.InvalidatePrimarySourceCache()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
-	t.Cleanup(func() {
-		db.Rdb = prevRdb
-		taxonomy.StoreMappingSnapshotForTest(prevSnap)
-		sourcecatalog.InvalidatePrimarySourceCache()
-		catalog.InvalidatePublicSourceCache()
-		catalog.MarkCategoryChanged()
-	})
-
-	if err := gdb.Create(&model.FilmSource{Id: "src_notify_hide", Name: "主站", Uri: "http://1", State: true, Sort: 0}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: "src_notify_hide"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.Category{Id: 10, Pid: 0, Name: "电影", StableKey: "cat_10", Show: true, Sort: 1}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.Category{Id: 20, Pid: 0, Name: "隐藏区", StableKey: "cat_20", Show: true, Sort: 2}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Model(&model.Category{}).Where("id = ?", 20).Update("show", false).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.SourceCategory{SourceId: "src_notify_hide", SourceTypeId: 1, RawName: "电影"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.SourceCategory{SourceId: "src_notify_hide", SourceTypeId: 2, RawName: "隐藏区"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_notify_hide", SourceTypeId: 1, CategoryId: 10}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_notify_hide", SourceTypeId: 2, CategoryId: 20}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "src_notify_hide"},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_notify_hide:1", RootCategoryKey: "source:src_notify_hide:1"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "可见电影", UpdateStamp: 200},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "src_notify_hide"},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, Cid: 20, CategoryKey: "source:src_notify_hide:2", RootCategoryKey: "source:src_notify_hide:2"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "隐藏电影", UpdateStamp: 200},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_peer_other", Name: "非主站", Uri: "http://2", State: true, Sort: 1}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.SourceCategory{SourceId: "src_peer_other", SourceTypeId: 99, RawName: "电影"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_peer_other", SourceTypeId: 99, CategoryId: 10}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103, FirstSourceId: "src_peer_other"},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_peer_other:99", RootCategoryKey: "source:src_peer_other:99"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "非主站电影", UpdateStamp: 300},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 104, FirstSourceId: "src_notify_hide"},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 1, CategoryKey: "source:src_notify_hide:999", RootCategoryKey: "source:src_notify_hide:999"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "未映射主站影片", UpdateStamp: 150},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	const batchID = "batch_hide_01"
-	now := time.Now()
-	hideRec := &model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}
-	if err := gdb.Create(hideRec).Error; err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range []model.CollectRecordFilmItem{
-		{RecordID: hideRec.ID, SourceID: "src_notify_hide", Mid: 101},
-		{RecordID: hideRec.ID, SourceID: "src_notify_hide", Mid: 102},
-		{RecordID: hideRec.ID, SourceID: "src_peer_other", Mid: 103},
-		{RecordID: hideRec.ID, SourceID: "src_notify_hide", Mid: 104},
-	} {
-		if err := gdb.Create(&row).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-
+func TestBuildPrimaryOverview_ZeroPrimaryWithFailedSecondary(t *testing.T) {
+	gdb := setupNotifyTestDB(t)
+	_ = gdb.Create(&model.SiteConfigRecord{SiteName: "测试站", SiteURL: "https://eco.example.com"}).Error
+	primarySrc := model.FilmSource{Id: "src_a", Name: "主站A", Uri: "https://a.example", State: true, Sort: 0}
+	otherSrc := model.FilmSource{Id: "src_b", Name: "副站B", Uri: "https://b.example", State: true, Sort: 1}
+	_ = gdb.Create(&primarySrc).Error
+	_ = gdb.Create(&otherSrc).Error
+	_ = gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: primarySrc.Id}).Error
 	_ = sourcecatalog.RefreshCollectSourceCatalog()
-	taxonomy.ReloadMappingRules()
-	taxonomy.RefreshCategoryCache()
-	sourcecatalog.InvalidatePrimarySourceCache()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
 
-	sess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
-		CollectBatchID: batchID,
-		Sources: []model.SourceNotifyResult{
-			{SourceID: "src_notify_hide", SourceName: "主站", Status: model.CollectStatusDone, FilmsTotal: 3},
-			{SourceID: "src_peer_other", SourceName: "非主站", Status: model.CollectStatusDone, FilmsTotal: 1},
-		},
-	}, 15)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(sess.OverviewHTML, "前台可见 <b>2</b> 部") {
-		t.Fatalf("expected overview count 2, got: %s", sess.OverviewHTML)
-	}
-	if sess.Sources[0].AllCount != 3 {
-		t.Fatalf("expected source allCount 3, got %d", sess.Sources[0].AllCount)
-	}
-	if len(sess.Sources[0].Categories) != 2 || sess.Sources[0].Categories[0].CategoryName != "电影" || sess.Sources[0].Categories[0].Count != 1 || sess.Sources[0].Categories[1].CategoryName != "其他" || sess.Sources[0].Categories[1].Count != 2 {
-		t.Fatalf("unexpected primary categories: %+v", sess.Sources[0].Categories)
-	}
-
-	// 置空主站时，前台可见应严格为 0
-	if err := gdb.Where("id = ?", 1).Delete(&model.PrimaryState{}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Model(&model.FilmSource{}).Where("1 = 1").Update("state", false).Error; err != nil {
-		t.Fatal(err)
-	}
-	sourcecatalog.InvalidatePrimarySourceCache()
-	emptySess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
-		CollectBatchID: batchID,
-		Sources: []model.SourceNotifyResult{
-			{SourceID: "src_notify_hide", SourceName: "主站", Status: model.CollectStatusDone, FilmsTotal: 3},
-		},
-	}, 15)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(emptySess.OverviewHTML, "前台可见：<b>0</b> 部") {
-		t.Fatalf("expected overview count 0 without primary source, got: %s", emptySess.OverviewHTML)
-	}
-}
-
-func TestNotifyPerSiteReplyAndCategoryDrilldown(t *testing.T) {
-	setupNotifyConfigDB(t)
-	gdb := db.Mdb
-	if err := gdb.AutoMigrate(
-		&model.FilmSource{},
-		&model.Category{},
-		&model.SourceCategory{},
-		&model.CategoryMapping{},
-		&model.PrimaryState{},
-		&model.MappingRule{},
-		&model.CollectRecord{},
-		&model.CollectRecordFilmItem{},
-	); err != nil {
-		t.Fatal(err)
-	}
-	prevRdb := db.Rdb
-	db.Rdb = nil
-	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
-	sourcecatalog.InvalidatePrimarySourceCache()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
-	t.Cleanup(func() {
-		db.Rdb = prevRdb
-		taxonomy.StoreMappingSnapshotForTest(prevSnap)
-		sourcecatalog.InvalidatePrimarySourceCache()
-		catalog.InvalidatePublicSourceCache()
-		catalog.MarkCategoryChanged()
-	})
-
-	if err := gdb.Create(&model.FilmSource{Id: "src_main", Name: "速博(SUBO)", Uri: "http://1", State: true, Sort: 0}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_sub", Name: "HD(BF)", Uri: "http://2", State: true, Sort: 1}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: "src_main"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.Category{Id: 10, Pid: 0, Name: "电影", StableKey: "cat_10", Show: true, Sort: 1}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.Category{Id: 11, Pid: 0, Name: "动漫", StableKey: "cat_11", Show: true, Sort: 2}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.SourceCategory{SourceId: "src_main", SourceTypeId: 1, RawName: "动漫"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.SourceCategory{SourceId: "src_sub", SourceTypeId: 2, RawName: "电影"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.SourceCategory{SourceId: "src_sub", SourceTypeId: 3, RawName: "动漫"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_main", SourceTypeId: 1, CategoryId: 11}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_sub", SourceTypeId: 2, CategoryId: 10}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.CategoryMapping{SourceId: "src_sub", SourceTypeId: 3, CategoryId: 11}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 201, FirstSourceId: "src_main"},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: 11, Cid: 11, CategoryKey: "source:src_main:1", RootCategoryKey: "source:src_main:1"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "主站动漫", UpdateStamp: 500},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 202, FirstSourceId: "src_sub"},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_sub:2", RootCategoryKey: "source:src_sub:2"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "备站电影1", UpdateStamp: 400},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 203, FirstSourceId: "src_sub"},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: 11, Cid: 11, CategoryKey: "source:src_sub:3", RootCategoryKey: "source:src_sub:3"},
-		FilmIndexContent:  model.FilmIndexContent{Name: "备站动漫1", UpdateStamp: 300},
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	const batchID = "batch_drill_01"
-	now := time.Now()
-	drillRec := &model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}
-	if err := gdb.Create(drillRec).Error; err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range []model.CollectRecordFilmItem{
-		{RecordID: drillRec.ID, SourceID: "src_main", Mid: 201},
-		{RecordID: drillRec.ID, SourceID: "src_sub", Mid: 202},
-		{RecordID: drillRec.ID, SourceID: "src_sub", Mid: 203},
-	} {
-		if err := gdb.Create(&row).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	_ = sourcecatalog.RefreshCollectSourceCatalog()
-	taxonomy.ReloadMappingRules()
-	taxonomy.RefreshCategoryCache()
-	sourcecatalog.InvalidatePrimarySourceCache()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
-
-	sess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
-		CollectBatchID: batchID,
-		Trigger:        model.CollectTriggerManual,
-		StartedAt:      time.Now().Add(-10 * time.Second),
-		FinishedAt:     time.Now(),
-		Sources: []model.SourceNotifyResult{
-			{SourceID: "src_main", SourceName: "速博(SUBO)", Status: model.CollectStatusDone, FilmsTotal: 1},
-			{SourceID: "src_sub", SourceName: "HD(BF)", Status: model.CollectStatusDone, FilmsTotal: 2},
-			{SourceID: "src_zero", SourceName: "U酷(UKU)", Status: model.CollectStatusDone, FilmsTotal: 0},
-		},
-	}, 15)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := SaveNotifyBatchSession(sess); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(sess.OverviewHTML, "前台可见 <b>1</b> 部") {
-		t.Fatalf("expected primary visible count 1 in overview, got: %s", sess.OverviewHTML)
-	}
-
-	// 1. 汇总键盘应包含全部 3 个站点按钮，且主站带 ⭐ 标识
-	overviewKB := buildOverviewKeyboard(sess, 1)
-	if overviewKB == nil || len(overviewKB.InlineKeyboard) != 2 {
-		t.Fatalf("expected 2 rows for 3 sites, got %+v", overviewKB)
-	}
-	if !strings.HasPrefix(overviewKB.InlineKeyboard[0][0].Text, "⭐ 速博(SUBO)") {
-		t.Fatalf("expected primary star prefix on first button, got %q", overviewKB.InlineKeyboard[0][0].Text)
-	}
-	if overviewKB.InlineKeyboard[0][1].CallbackData != fmt.Sprintf("nfp:%s:s:1", sess.BatchID) {
-		t.Fatalf("unexpected second site callback: %q", overviewKB.InlineKeyboard[0][1].CallbackData)
-	}
-	if overviewKB.InlineKeyboard[1][0].Text != "✅ U酷(UKU) (0)" {
-		t.Fatalf("unexpected zero site button text: %q", overviewKB.InlineKeyboard[1][0].Text)
-	}
-
-	type apiCall struct {
-		Path string
-		Body map[string]any
-	}
-	var (
-		mu    sync.Mutex
-		calls []apiCall
-	)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var body map[string]any
-		_ = json.Unmarshal(raw, &body)
-		mu.Lock()
-		calls = append(calls, apiCall{Path: r.URL.Path, Body: body})
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
-	}))
-	defer ts.Close()
-	oldBase := tgAPIBaseURL
-	tgAPIBaseURL = ts.URL
-	defer func() { tgAPIBaseURL = oldBase }()
-
-	if err := SaveNotifyConfig(model.NotifyConfig{
-		Enabled:  true,
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"-100111"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// 2. 点击站点按钮应回复新消息并附带该站点对应分类按钮
-	handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
-		ID:   "cb_src",
-		Data: fmt.Sprintf("nfp:%s:s:1", sess.BatchID),
-		Message: &tgMessage{
-			MessageID:       77,
-			MessageThreadID: 9,
-			Chat:            &tgChat{ID: -100111},
-		},
-	})
-
-	// 3. 点击该站点的「电影」分类按钮应编辑回复消息展示对应片单与返回分类按钮
-	handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
-		ID:   "cb_cat",
-		Data: fmt.Sprintf("nfp:%s:sc:1:0:1", sess.BatchID),
-		Message: &tgMessage{
-			MessageID: 88,
-			Chat:      &tgChat{ID: -100111},
-		},
-	})
-
-	// 4. 点击返回站点分类应编辑回该站点分类页
-	handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
-		ID:   "cb_back",
-		Data: fmt.Sprintf("nfp:%s:sb:1", sess.BatchID),
-		Message: &tgMessage{
-			MessageID: 88,
-			Chat:      &tgChat{ID: -100111},
-		},
-	})
-
-	mu.Lock()
-	defer mu.Unlock()
-	var sawSendReply, sawEditList, sawEditBack bool
-	for _, c := range calls {
-		if strings.HasSuffix(c.Path, "/sendMessage") {
-			if c.Body["reply_to_message_id"] == float64(77) && c.Body["message_thread_id"] == float64(9) && c.Body["allow_sending_without_reply"] == true {
-				text, _ := c.Body["text"].(string)
-				if strings.Contains(text, "站点明细 · HD(BF)") {
-					sawSendReply = true
-				}
-			}
-		}
-		if strings.HasSuffix(c.Path, "/editMessageText") {
-			text, _ := c.Body["text"].(string)
-			if strings.Contains(text, "HD(BF) · 电影") && strings.Contains(text, "备站电影1") && !strings.Contains(text, "备站动漫1") {
-				sawEditList = true
-			}
-			if strings.Contains(text, "站点明细 · HD(BF)") {
-				sawEditBack = true
-			}
-		}
-	}
-	if !sawSendReply || !sawEditList || !sawEditBack {
-		t.Fatalf("missing expected interactive calls: reply=%v list=%v back=%v calls=%+v", sawSendReply, sawEditList, sawEditBack, calls)
-	}
-}
-
-func TestNotifyLedgerAggregationAndSQLPagination(t *testing.T) {
-	setupNotifyConfigDB(t)
-	gdb := db.Mdb
-	if err := gdb.AutoMigrate(
-		&model.FilmSource{},
-		&model.Category{},
-		&model.SourceCategory{},
-		&model.CategoryMapping{},
-		&model.PrimaryState{},
-		&model.MappingRule{},
-		&model.CollectRecord{},
-		&model.CollectRecordFilmItem{},
-	); err != nil {
-		t.Fatal(err)
-	}
-	prevRdb := db.Rdb
-	db.Rdb = nil
-	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
-	sourcecatalog.InvalidatePrimarySourceCache()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
-	t.Cleanup(func() {
-		db.Rdb = prevRdb
-		taxonomy.StoreMappingSnapshotForTest(prevSnap)
-		sourcecatalog.InvalidatePrimarySourceCache()
-		catalog.InvalidatePublicSourceCache()
-		catalog.MarkCategoryChanged()
-	})
-
-	for _, item := range []any{
-		&model.FilmSource{Id: "src_main", Name: "速博(SUBO)", Uri: "http://1", State: true, Sort: 0},
-		&model.FilmSource{Id: "src_sub", Name: "HD(BF)", Uri: "http://2", State: true, Sort: 1},
-		&model.PrimaryState{Id: 1, PrimarySourceId: "src_main"},
-		&model.Category{Id: 10, Pid: 0, Name: "电影", StableKey: "cat_10", Show: true, Sort: 1},
-		&model.Category{Id: 12, Pid: 0, Name: "隐藏", StableKey: "cat_12", Show: true, Sort: 2},
-		&model.SourceCategory{SourceId: "src_main", SourceTypeId: 1, RawName: "电影"},
-		&model.SourceCategory{SourceId: "src_main", SourceTypeId: 9, RawName: "隐藏"},
-		&model.SourceCategory{SourceId: "src_sub", SourceTypeId: 2, RawName: "电影"},
-		&model.CategoryMapping{SourceId: "src_main", SourceTypeId: 1, CategoryId: 10},
-		&model.CategoryMapping{SourceId: "src_main", SourceTypeId: 9, CategoryId: 12},
-		&model.CategoryMapping{SourceId: "src_sub", SourceTypeId: 2, CategoryId: 10},
-		// 主站 1 部可见 + 1 部隐藏分类
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 501, FirstSourceId: "src_main"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_main:1", RootCategoryKey: "source:src_main:1"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "主站可见电影", UpdateStamp: 100},
-		},
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 502, FirstSourceId: "src_main"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 12, Cid: 12, CategoryKey: "source:src_main:9", RootCategoryKey: "source:src_main:9"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "主站隐藏片", UpdateStamp: 200},
-		},
-		// 备站 3 部电影（202 与 203 同时间戳按 mid DESC 排序） + 1 部其他
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 601, FirstSourceId: "src_sub"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_sub:2", RootCategoryKey: "source:src_sub:2"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "备站电影最旧", UpdateStamp: 100},
-		},
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 602, FirstSourceId: "src_sub"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_sub:2", RootCategoryKey: "source:src_sub:2"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "备站电影次新", UpdateStamp: 300},
-		},
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 603, FirstSourceId: "src_sub"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 10, Cid: 10, CategoryKey: "source:src_sub:2", RootCategoryKey: "source:src_sub:2"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "备站电影最新", UpdateStamp: 300},
-		},
-		&model.FilmIndex{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 604, FirstSourceId: "src_sub"},
-			FilmIndexCategory: model.FilmIndexCategory{Pid: 0, Cid: 0, CategoryKey: "source:src_sub:999", RootCategoryKey: "source:src_sub:999"},
-			FilmIndexContent:  model.FilmIndexContent{Name: "备站未映射片", UpdateStamp: 250},
-		},
-	} {
-		if err := gdb.Create(item).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if err := gdb.Model(&model.Category{}).Where("id = ?", 12).Update("show", false).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	const collectBatchID = "batch_ledger_01"
-	now := time.Now()
-	ledgerRec := &model.CollectRecord{
-		BatchID:   collectBatchID,
-		Trigger:   model.CollectTriggerManual,
-		Status:    "done",
-		Ledger:    true,
-		StartedAt: now,
-	}
-	if err := gdb.Create(ledgerRec).Error; err != nil {
-		t.Fatal(err)
-	}
-	ledgerItems := []model.CollectRecordFilmItem{
-		{RecordID: ledgerRec.ID, SourceID: "src_main", Mid: 501},
-		{RecordID: ledgerRec.ID, SourceID: "src_main", Mid: 502},
-		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 601},
-		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 602},
-		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 603},
-		{RecordID: ledgerRec.ID, SourceID: "src_sub", Mid: 604},
-	}
-	if err := gdb.Create(&ledgerItems).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	_ = sourcecatalog.RefreshCollectSourceCatalog()
-	taxonomy.ReloadMappingRules()
-	taxonomy.RefreshCategoryCache()
-	sourcecatalog.InvalidatePrimarySourceCache()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
-
-	// 不传入任何片单 ID，仅传 CollectBatchID，完全基于账本查询
-	sess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
-		CollectBatchID: collectBatchID,
-		Trigger:        model.CollectTriggerManual,
-		StartedAt:      now.Add(-15 * time.Second),
-		FinishedAt:     now,
-		Sources: []model.SourceNotifyResult{
-			{SourceID: "src_main", SourceName: "速博(SUBO)", Status: model.CollectStatusDone, FilmsTotal: 2},
-			{SourceID: "src_sub", SourceName: "HD(BF)", Status: model.CollectStatusDone, FilmsTotal: 4},
-		},
-	}, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sess.CollectBatchID != collectBatchID {
-		t.Fatalf("expected session CollectBatchID=%q, got %q", collectBatchID, sess.CollectBatchID)
-	}
-	if !strings.Contains(sess.OverviewHTML, "前台可见 <b>1</b> 部") {
-		t.Fatalf("expected primary visible 1 in overview, got: %s", sess.OverviewHTML)
-	}
-	sub := sess.Sources[1]
-	if sub.AllCount != 4 || len(sub.Categories) != 2 {
-		t.Fatalf("unexpected sub source summary: total=%d cats=%+v", sub.AllCount, sub.Categories)
-	}
-	if sub.Categories[0].CategoryName != "电影" || sub.Categories[0].Count != 3 ||
-		sub.Categories[1].CategoryName != "其他" || sub.Categories[1].Count != 1 {
-		t.Fatalf("unexpected sub source categories: %+v", sub.Categories)
-	}
-	if err := SaveNotifyBatchSession(sess); err != nil {
-		t.Fatal(err)
-	}
-
-	var (
-		mu    sync.Mutex
-		edits []string
-		reply string
-	)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var body map[string]any
-		_ = json.Unmarshal(raw, &body)
-		mu.Lock()
-		text, _ := body["text"].(string)
-		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
-			reply = text
-		} else if strings.HasSuffix(r.URL.Path, "/editMessageText") {
-			edits = append(edits, text)
-		}
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
-	}))
-	defer ts.Close()
-	oldBase := tgAPIBaseURL
-	tgAPIBaseURL = ts.URL
-	defer func() { tgAPIBaseURL = oldBase }()
-
-	if err := SaveNotifyConfig(model.NotifyConfig{
-		Enabled:  true,
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"-100111"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	fire := func(data string) {
-		handleNotifyCallback(context.Background(), "123456:ABCDEF", &tgCallbackQuery{
-			ID:   "cb",
-			Data: data,
-			Message: &tgMessage{
-				MessageID: 99,
-				Chat:      &tgChat{ID: -100111},
-			},
-		})
-	}
-	fire(fmt.Sprintf("nfp:%s:s:1", sess.BatchID))       // 站点分类页
-	fire(fmt.Sprintf("nfp:%s:sc:1:0:1", sess.BatchID))  // 电影第1页
-	fire(fmt.Sprintf("nfp:%s:sc:1:0:2", sess.BatchID))  // 电影第2页
-	fire(fmt.Sprintf("nfp:%s:sc:1:1:1", sess.BatchID))  // 其他第1页
-	fire(fmt.Sprintf("nfp:%s:sc:1:-1:2", sess.BatchID)) // 全部第2页
-	fire(fmt.Sprintf("nfp:%s:sb:1", sess.BatchID))      // 返回站点分类页
-
-	mu.Lock()
-	if !strings.Contains(reply, "站点明细 · HD(BF)") {
-		mu.Unlock()
-		t.Fatalf("expected site reply, got %q", reply)
-	}
-	if len(edits) != 5 {
-		mu.Unlock()
-		t.Fatalf("expected 5 edit calls, got %d: %+v", len(edits), edits)
-	}
-	// edit[0]: 电影第1页（按账本 id ASC 取前 2 部：601, 602）
-	if !strings.Contains(edits[0], "备站电影最旧") || !strings.Contains(edits[0], "备站电影次新") || strings.Contains(edits[0], "备站电影最新") {
-		mu.Unlock()
-		t.Fatalf("unexpected movie page 1: %s", edits[0])
-	}
-	// edit[1]: 电影第2页（603）
-	if !strings.Contains(edits[1], "备站电影最新") || strings.Contains(edits[1], "备站电影最旧") {
-		mu.Unlock()
-		t.Fatalf("unexpected movie page 2: %s", edits[1])
-	}
-	// edit[2]: 其他第1页（604）
-	if !strings.Contains(edits[2], "备站未映射片") || strings.Contains(edits[2], "备站电影") {
-		mu.Unlock()
-		t.Fatalf("unexpected other category page 1: %s", edits[2])
-	}
-	// edit[3]: 全部第2页（按账本 id ASC 第 2 页：603, 604）
-	if !strings.Contains(edits[3], "备站未映射片") || !strings.Contains(edits[3], "备站电影最新") || strings.Contains(edits[3], "备站电影最旧") {
-		mu.Unlock()
-		t.Fatalf("unexpected all category page 2: %s", edits[3])
-	}
-	// edit[4]: 返回站点分类页
-	if !strings.Contains(edits[4], "站点明细 · HD(BF)") {
-		mu.Unlock()
-		t.Fatalf("unexpected back edit: %s", edits[4])
-	}
-	prevEdits := len(edits)
-	mu.Unlock()
-
-	// 取消上下文时 LoadBatchSourceCategoryPage 应立即中止查询而非阻塞
-	canceledCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := LoadBatchSourceCategoryPage(canceledCtx, BatchSourceCategoryPageQuery{
-		BatchID:     collectBatchID,
-		SourceID:    "src_sub",
-		CategoryAll: true,
-		Limit:       2,
-		Offset:      0,
-	}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected context.Canceled, got %v", err)
-	}
-
-	// 软删除影片在 CategoryAll 分页与 AllCount 统计中口径应一致剔除
-	if err := gdb.Delete(&model.FilmIndex{}, "mid = ?", 601).Error; err != nil {
-		t.Fatal(err)
-	}
-	afterDelSess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
-		CollectBatchID: collectBatchID,
-		Trigger:        model.CollectTriggerManual,
-		StartedAt:      now.Add(-15 * time.Second),
-		FinishedAt:     now,
-		Sources: []model.SourceNotifyResult{
-			{SourceID: "src_sub", SourceName: "HD(BF)", Status: model.CollectStatusDone, FilmsTotal: 4},
-		},
-	}, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if afterDelSess.Sources[0].AllCount != 3 {
-		t.Fatalf("expected allCount 3 after soft delete, got %d", afterDelSess.Sources[0].AllCount)
-	}
-	allAfterDel, err := LoadBatchSourceCategoryPage(context.Background(), BatchSourceCategoryPageQuery{
-		BatchID:     collectBatchID,
-		SourceID:    "src_sub",
-		CategoryAll: true,
-		Limit:       10,
-		Offset:      0,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(allAfterDel) != 3 || allAfterDel[0].Mid != 602 {
-		t.Fatalf("expected 3 live films starting at 602 after soft delete, got %+v", allAfterDel)
-	}
-
-	// buildPageQuery 对越界 catIdx 应兜底为 CategoryAll，且 spage_cat 回调应拒绝越界 catIdx
-	matcher, err := loadSourceCategoryMatcher("src_sub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if qOut := matcher.buildPageQuery(collectBatchID, "src_sub", sub.Categories, len(sub.Categories), 2, 0); !qOut.CategoryAll || qOut.IsOther {
-		t.Fatalf("expected out-of-range catIdx to fall back to CategoryAll, got %+v", qOut)
-	}
-	fire(fmt.Sprintf("nfp:%s:sc:1:%d:1", sess.BatchID, len(sub.Categories)))
-	mu.Lock()
-	afterOutOfRangeEdits := len(edits)
-	mu.Unlock()
-	if afterOutOfRangeEdits != prevEdits {
-		t.Fatalf("expected out-of-range spage_cat not to edit message, edits=%d->%d", prevEdits, afterOutOfRangeEdits)
-	}
-}
-
-func TestRunTelegramPoller_ConcurrentCallbackHandling(t *testing.T) {
-	setupNotifyConfigDB(t)
-
-	if err := SaveNotifyConfig(model.NotifyConfig{
-		Enabled:  true,
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"-100111", "-100222:5"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	sess := model.NotifyBatchSession{
-		BatchID:      "conc_batch",
-		SiteName:     "EcoHub",
-		OverviewHTML: "<b>汇总</b>",
-		PageSize:     2,
-		Sources: []model.NotifySourceSession{
-			{
-				SourceID:     "s1",
-				SourceName:   "慢站点",
-				FilmsTotal:   10,
-				OverviewHTML: "<b>慢站点</b>",
-			},
-			{
-				SourceID:     "s2",
-				SourceName:   "快站点",
-				FilmsTotal:   10,
-				OverviewHTML: "<b>快站点</b>",
-			},
-		},
-	}
-	if err := SaveNotifyBatchSession(sess); err != nil {
-		t.Fatal(err)
-	}
-
-	slowStarted := make(chan struct{})
-	releaseSlow := make(chan struct{})
-	fastAnswered := make(chan struct{})
-	var updatesDelivered sync.Once
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		var body map[string]any
-		_ = json.Unmarshal(raw, &body)
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/getUpdates"):
-			delivered := false
-			updatesDelivered.Do(func() {
-				delivered = true
-			})
-			if !delivered {
-				<-r.Context().Done()
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"ok": true,
-				"result": []map[string]any{
-					{
-						"update_id": 100,
-						"callback_query": map[string]any{
-							"id":   "cb_slow",
-							"data": "nfp:conc_batch:s:0",
-							"message": map[string]any{
-								"message_id": 1,
-								"chat":       map[string]any{"id": 1001},
-							},
-						},
-					},
-					{
-						"update_id": 101,
-						"callback_query": map[string]any{
-							"id":   "cb_fast",
-							"data": "nfp:conc_batch:s:1",
-							"message": map[string]any{
-								"message_id": 1,
-								"chat":       map[string]any{"id": 1001},
-							},
-						},
-					},
-				},
-			})
-		case strings.HasSuffix(r.URL.Path, "/sendMessage"):
-			text, _ := body["text"].(string)
-			if strings.Contains(text, "慢站点") {
-				close(slowStarted)
-				select {
-				case <-releaseSlow:
-				case <-r.Context().Done():
-				}
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 2}})
-		case strings.HasSuffix(r.URL.Path, "/answerCallbackQuery"):
-			if cbID, _ := body["callback_query_id"].(string); cbID == "cb_fast" {
-				select {
-				case <-fastAnswered:
-				default:
-					close(fastAnswered)
-				}
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
-		default:
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
-		}
-	}))
-	defer ts.Close()
-
-	oldBase := tgAPIBaseURL
-	tgAPIBaseURL = ts.URL
-	defer func() { tgAPIBaseURL = oldBase }()
-
-	if err := SaveNotifyConfig(model.NotifyConfig{
-		Enabled:  true,
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"1001"},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	pollDone := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runTelegramPoller(ctx, "123456:ABCDEF", pollDone)
-	}()
-
-	select {
-	case <-slowStarted:
-	case <-time.After(3 * time.Second):
-		cancel()
-		t.Fatal("timed out waiting for slow callback to start")
-	}
-	select {
-	case <-fastAnswered:
-	case <-time.After(3 * time.Second):
-		close(releaseSlow)
-		cancel()
-		t.Fatal("fast callback was blocked by slow callback")
-	}
-
-	close(releaseSlow)
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("poller did not stop after cancel")
-	}
-}
-
-func TestPublishBatchSummary_StatsTimeoutDegradesAndStillSends(t *testing.T) {
-	setupNotifyConfigDB(t)
-	gdb := db.Mdb
-	if err := gdb.AutoMigrate(
-		&model.FilmSource{},
-		&model.Category{},
-		&model.SourceCategory{},
-		&model.CategoryMapping{},
-		&model.PrimaryState{},
-		&model.MappingRule{},
-		&model.CollectRecord{},
-		&model.CollectRecordFilmItem{},
-	); err != nil {
-		t.Fatal(err)
-	}
-	prevRdb := db.Rdb
-	db.Rdb = nil
-	prevSnap := taxonomy.CurrentMappingSnapshotForTest()
-	sourcecatalog.InvalidateCollectSourceCatalog()
-	catalog.InvalidatePublicSourceCache()
-	catalog.MarkCategoryChanged()
-	t.Cleanup(func() {
-		db.Rdb = prevRdb
-		taxonomy.StoreMappingSnapshotForTest(prevSnap)
-		sourcecatalog.InvalidateCollectSourceCatalog()
-		catalog.InvalidatePublicSourceCache()
-		catalog.MarkCategoryChanged()
-	})
-
-	if err := SaveNotifyConfig(model.NotifyConfig{
-		Enabled:  true,
-		BotToken: "123456:ABCDEF",
-		ChatIDs:  []string{"-100123"},
-		Events: model.NotifyEventSwitches{
-			CollectBatchSummary: true,
-		},
-		OnlyNotifyOnUpdate: true,
-		MaxFilmsInMessage:  15,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_p", Name: "主站P", Uri: "http://1", State: true, Sort: 0}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.FilmSource{Id: "src_s", Name: "备站S", Uri: "http://2", State: true, Sort: 1}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: "src_p"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	const batchID = "batch_degrade_01"
-	now := time.Now()
-	if err := gdb.Create(&model.CollectRecord{BatchID: batchID, Trigger: model.CollectTriggerManual, Status: "done", Ledger: true, StartedAt: now}).Error; err != nil {
-		t.Fatal(err)
-	}
-	sourcecatalog.InvalidateCollectSourceCatalog()
-
-	prevStatsFn := loadBatchSourceCategoryStatsFn
-	loadBatchSourceCategoryStatsFn = func(ctx context.Context, bid, sourceID string) ([]BatchSourceCategoryStatRow, error) {
-		if sourceID == "src_p" {
-			return nil, context.DeadlineExceeded
-		}
-		return nil, nil
-	}
-	t.Cleanup(func() { loadBatchSourceCategoryStatsFn = prevStatsFn })
-
-	var (
-		mu       sync.Mutex
-		sentText string
-	)
-	sentCh := make(chan struct{}, 1)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/sendMessage") {
-			raw, _ := io.ReadAll(r.Body)
-			var body map[string]any
-			_ = json.Unmarshal(raw, &body)
-			mu.Lock()
-			sentText, _ = body["text"].(string)
-			mu.Unlock()
-			select {
-			case sentCh <- struct{}{}:
-			default:
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
-	}))
-	defer ts.Close()
-	oldBase := tgAPIBaseURL
-	tgAPIBaseURL = ts.URL
-	t.Cleanup(func() { tgAPIBaseURL = oldBase })
+	rec := &model.CollectRecord{BatchID: "batch_zero_p", Trigger: model.CollectTriggerManual, Status: model.CollectRecordStatusPartial, StartedAt: time.Now()}
+	_ = gdb.Create(rec).Error
 
 	payload := model.CollectBatchNotifyPayload{
-		CollectBatchID: batchID,
-		Trigger:        model.CollectTriggerManual,
-		StartedAt:      now.Add(-5 * time.Minute),
-		FinishedAt:     now,
+		CollectRecordID: rec.ID,
+		CollectBatchID:  rec.BatchID,
+		Trigger:         model.CollectTriggerManual,
+		StartedAt:       time.Now().Add(-time.Second),
+		FinishedAt:      time.Now(),
 		Sources: []model.SourceNotifyResult{
-			{SourceID: "src_p", SourceName: "主站P", Status: model.CollectStatusDone, FilmsTotal: 100},
-			{SourceID: "src_s", SourceName: "备站S", Status: model.CollectStatusDone, FilmsTotal: 50},
+			{SourceID: primarySrc.Id, SourceName: primarySrc.Name, Status: model.CollectRecordStatusSuccess, FilmsTotal: 0},
+			{SourceID: otherSrc.Id, SourceName: otherSrc.Name, Status: model.CollectStatusFailed, FilmsTotal: 0, FailedCnt: 3, Error: "连接重置"},
 		},
 	}
-
 	sess, err := buildNotifyBatchSession(payload, 15)
 	if err != nil {
-		t.Fatalf("expected degraded session instead of error: %v", err)
+		t.Fatalf("buildNotifyBatchSession: %v", err)
 	}
-	if sess.Sources[0].AllCount != 100 || len(sess.Sources[0].Categories) != 0 {
-		t.Fatalf("expected degraded primary source to fall back to FilmsTotal=100, got %+v", sess.Sources[0])
+	if sess.PrimaryTotal != 0 || len(sess.Categories) != 0 {
+		t.Fatalf("expected 0 primary total & no categories, got %+v", sess)
 	}
-	kb := buildSourceCategoryKeyboard(sess.BatchID, 0, sess.Sources[0].Categories, sess.Sources[0].AllCount)
-	if kb == nil || len(kb.InlineKeyboard) == 0 || !strings.Contains(kb.InlineKeyboard[0][0].Text, "全部 (100)") {
-		t.Fatalf("expected fallback all button for degraded source, got %+v", kb)
+	if !strings.Contains(sess.OverviewHTML, "副站B") || !strings.Contains(sess.OverviewHTML, "连接重置") {
+		t.Fatalf("overview missing failed source details: %s", sess.OverviewHTML)
+	}
+	kb := buildPrimaryOverviewKeyboard(sess, buildManageRecordURL("https://eco.example.com", rec.BatchID))
+	if kb == nil || len(kb.InlineKeyboard) != 1 || kb.InlineKeyboard[0][0].CallbackData != "" || kb.InlineKeyboard[0][0].URL == "" {
+		t.Fatalf("expected only manage URL button when primaryTotal=0, got %+v", kb)
+	}
+}
+
+func TestBuildPrimaryOverview_StatsTimeoutDegrades(t *testing.T) {
+	gdb := setupNotifyTestDB(t)
+	_ = gdb.Create(&model.SiteConfigRecord{SiteName: "测试站", SiteURL: "https://eco.example.com"}).Error
+	primarySrc := model.FilmSource{Id: "src_t", Name: "主站T", Uri: "https://t.example", State: true, Sort: 0}
+	_ = gdb.Create(&primarySrc).Error
+	_ = gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: primarySrc.Id}).Error
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+
+	prev := loadBatchPrimaryCategoryStatsFn
+	loadBatchPrimaryCategoryStatsFn = func(context.Context, uint, string) ([]BatchSourceCategoryStatRow, error) {
+		return nil, context.DeadlineExceeded
+	}
+	t.Cleanup(func() { loadBatchPrimaryCategoryStatsFn = prev })
+
+	sess, err := buildNotifyBatchSession(model.CollectBatchNotifyPayload{
+		CollectRecordID: 1,
+		CollectBatchID:  "b_timeout",
+		Trigger:         model.CollectTriggerCron,
+		StartedAt:       time.Now().Add(-time.Second),
+		FinishedAt:      time.Now(),
+		Sources:         []model.SourceNotifyResult{{SourceID: primarySrc.Id, SourceName: primarySrc.Name, Status: model.CollectRecordStatusSuccess, FilmsTotal: 5}},
+	}, 15)
+	if err != nil {
+		t.Fatalf("buildNotifyBatchSession: %v", err)
+	}
+	if !strings.Contains(sess.OverviewHTML, "统计超时") {
+		t.Fatalf("expected timeout notice in overview, got %s", sess.OverviewHTML)
+	}
+}
+
+func TestPublishBatchSummary_OnlyNotifyOnUpdateHandlesPartialAndInterrupted(t *testing.T) {
+	gdb := setupNotifyTestDB(t)
+	_ = gdb.Create(&model.SiteConfigRecord{SiteName: "测试站"}).Error
+	if err := SaveNotifyConfig(model.NotifyConfig{
+		Enabled:            true,
+		BotToken:           "123456:TESTTOKEN",
+		ChatIDs:            []string{"10001"},
+		Events:             model.NotifyEventSwitches{CollectBatchSummary: true},
+		OnlyNotifyOnUpdate: true,
+	}); err != nil {
+		t.Fatal(err)
 	}
 
-	NotifySvc.PublishBatchSummary(payload)
-	select {
-	case <-sentCh:
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for degraded summary notification")
+	sent := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent <- r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	}))
+	defer srv.Close()
+	prevBase := tgAPIBaseURL
+	tgAPIBaseURL = srv.URL
+	t.Cleanup(func() { tgAPIBaseURL = prevBase })
+
+	for _, status := range []string{model.CollectRecordStatusPartial, model.CollectRecordStatusInterrupted} {
+		NotifySvc.PublishBatchSummary(model.CollectBatchNotifyPayload{
+			CollectBatchID: "b_" + status,
+			Trigger:        model.CollectTriggerCron,
+			StartedAt:      time.Now().Add(-time.Second),
+			FinishedAt:     time.Now(),
+			Sources: []model.SourceNotifyResult{
+				{SourceID: "s1", SourceName: "站1", Status: status, FilmsTotal: 0},
+			},
+		})
+		select {
+		case <-sent:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("expected OnlyNotifyOnUpdate to send alert for status=%s even with Error='' and FilmsTotal=0", status)
+		}
 	}
+}
+
+func TestHandleNotifyCallback_PageAndBackHome(t *testing.T) {
+	gdb := setupNotifyTestDB(t)
+
+	cfg := model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:TESTTOKEN",
+		ChatIDs:  []string{"10001"},
+		Events:   model.NotifyEventSwitches{CollectBatchSummary: true},
+	}
+	if err := SaveNotifyConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		methods = append(methods, parts[len(parts)-1])
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer srv.Close()
+
+	prevBase := tgAPIBaseURL
+	tgAPIBaseURL = srv.URL
+	t.Cleanup(func() { tgAPIBaseURL = prevBase })
+
+	sess := model.NotifyBatchSession{
+		BatchID:           "cb1234",
+		CollectBatchID:    "b_cb_1",
+		CollectRecordID:   9,
+		SiteName:          "测试站",
+		PrimarySourceID:   "src_1",
+		PrimarySourceName: "主站1",
+		PrimaryTotal:      1,
+		OverviewHTML:      "<b>汇总</b>",
+		PageSize:          10,
+		Categories:        []model.NotifySourceCategoryGroup{{CategoryID: 1, CategoryName: "电影", Count: 1}},
+	}
+	if err := SaveNotifyBatchSession(sess); err != nil {
+		t.Fatal(err)
+	}
+	_ = gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 201, FirstSourceId: "src_1", LastRecordID: 9},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1},
+		FilmIndexContent:  model.FilmIndexContent{Name: "测试新片"},
+	}).Error
+
+	cbPage := &tgCallbackQuery{
+		ID:      "qid-1",
+		Data:    "nfp:cb1234:c:-1:1",
+		Message: &tgMessage{MessageID: 55, Chat: &tgChat{ID: 10001}},
+	}
+	handleNotifyCallback(context.Background(), cfg.BotToken, cbPage)
+
+	cbHome := &tgCallbackQuery{
+		ID:      "qid-2",
+		Data:    "nfp:cb1234:home:0",
+		Message: &tgMessage{MessageID: 55, Chat: &tgChat{ID: 10001}},
+	}
+	handleNotifyCallback(context.Background(), cfg.BotToken, cbHome)
+
 	mu.Lock()
-	gotText := sentText
+	got := strings.Join(methods, ",")
 	mu.Unlock()
-	if !strings.Contains(gotText, "共入库 <b>150</b> 部") || !strings.Contains(gotText, "主站：<b>主站P</b> · 前台可见：统计超时") {
-		t.Fatalf("unexpected degraded summary html: %s", gotText)
+	if !strings.Contains(got, "editMessageText") || !strings.Contains(got, "answerCallbackQuery") {
+		t.Fatalf("expected editMessageText & answerCallbackQuery, got %s", got)
 	}
+}
+
+func TestClampPageRange_CapsAtMaxNotifyListPages(t *testing.T) {
+	cur, totalPages, start, end := clampPageRange(5000, 15, 999)
+	if totalPages != maxNotifyListPages || cur != maxNotifyListPages || start != (maxNotifyListPages-1)*15 || end != maxNotifyListPages*15 {
+		t.Fatalf("unexpected clamp result cur=%d totalPages=%d start=%d end=%d", cur, totalPages, start, end)
+	}
+	var _ = errors.New
 }

@@ -41,6 +41,9 @@ type mockBatch struct {
 }
 
 func (b *mockBatch) IsStandalone() bool { return false }
+func (b *mockBatch) WriteContext(ctx context.Context, _ *model.FilmSource) context.Context {
+	return ctx
+}
 func (b *mockBatch) AddAffectedMIDs(_ *model.FilmSource, _ int, mids []int64) {
 	b.mu.Lock()
 	b.mids = append(b.mids, mids...)

@@ -81,6 +81,11 @@ var migrations = []Migration{
 			return gdb.AutoMigrate(&model.FilmSource{})
 		},
 	},
+	{
+		Version: "20261128_drop_collect_record_films",
+		Name:    "删除 collect_record_films 账本表，新增 film_index.last_record_id 与 collect_records.target_mids",
+		Run:     migrateDropCollectRecordFilms,
+	},
 }
 
 func migrateBaseline(*gorm.DB) error {

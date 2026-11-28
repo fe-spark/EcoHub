@@ -25,7 +25,6 @@ func TestAssertSourceDataCleanedTx_CatchesRemainingData(t *testing.T) {
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
 		&model.MovieSourceMapping{},
-		&model.CollectRecordFilmItem{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -90,24 +89,7 @@ func TestAssertSourceDataCleanedTx_CatchesRemainingData(t *testing.T) {
 	}
 	gdb.Delete(mapping)
 
-	// 5. 残留 CollectRecordFilmItem 清单时阻断
-	item := &model.CollectRecordFilmItem{
-		RecordID: 1,
-		SourceID: srcID,
-		Mid:      904,
-	}
-	if err := gdb.Create(item).Error; err != nil {
-		t.Fatal(err)
-	}
-	err = gdb.Transaction(func(tx *gorm.DB) error {
-		return AssertSourceDataCleanedTx(tx, srcID)
-	})
-	if err == nil || !contains(err.Error(), "采集记录清单未清理完毕") {
-		t.Fatalf("expected collect record film item guard error, got %v", err)
-	}
-	gdb.Delete(item)
-
-	// 6. 清理完毕后通过
+	// 5. 清理完毕后通过
 	if err := gdb.Transaction(func(tx *gorm.DB) error {
 		return AssertSourceDataCleanedTx(tx, srcID)
 	}); err != nil {
@@ -128,7 +110,6 @@ func TestDelCollectResource_PreservesSourceWhenRemainingDataDetected(t *testing.
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
 		&model.MovieSourceMapping{},
-		&model.CollectRecordFilmItem{},
 		&model.CollectSourceStats{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
@@ -149,12 +130,12 @@ func TestDelCollectResource_PreservesSourceWhenRemainingDataDetected(t *testing.
 	// 无论发生什么，只要数据库存在未清理的数据，DelCollectResource 的最终事务断言必须保证站点行不被删除
 	if err := gdb.Transaction(func(tx *gorm.DB) error {
 		// 故意插入一条关联数据测试门禁
-		item := &model.CollectRecordFilmItem{
-			RecordID: 2,
-			SourceID: src.Id,
-			Mid:      888,
+		m := &model.MovieSourceMapping{
+			SourceId:  src.Id,
+			SourceMid: 888,
+			GlobalMid: 888,
 		}
-		if err := tx.Create(item).Error; err != nil {
+		if err := tx.Create(m).Error; err != nil {
 			return err
 		}
 		if err := AssertSourceDataCleanedTx(tx, src.Id); err != nil {

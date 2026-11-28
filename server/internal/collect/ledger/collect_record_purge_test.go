@@ -29,7 +29,7 @@ func TestPurgeKeepsRunningAndInterruptedStatus(t *testing.T) {
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusRunning,
 		StartedAt:  now,
-		DetailJson: `[{"sourceId":"src-a","status":"done","pageTotal":1,"successCnt":1},{"sourceId":"src-b","status":"running","pageTotal":4,"successCnt":2}]`,
+		DetailJson: `[{"sourceId":"src-a","status":"done","pageTotal":1,"successCnt":1,"filmsTotal":1},{"sourceId":"src-b","status":"running","pageTotal":4,"successCnt":2,"filmsTotal":2}]`,
 	}
 	interrupted := &model.CollectRecord{
 		BatchID:    "batch-interrupted",
@@ -37,18 +37,12 @@ func TestPurgeKeepsRunningAndInterruptedStatus(t *testing.T) {
 		Status:     model.CollectRecordStatusInterrupted,
 		ErrorMsg:   "服务重启，任务异常中断",
 		StartedAt:  now,
-		DetailJson: `[{"sourceId":"src-a","status":"interrupted","pageTotal":3,"successCnt":1},{"sourceId":"src-b","status":"interrupted","pageTotal":5,"successCnt":4}]`,
+		DetailJson: `[{"sourceId":"src-a","status":"interrupted","pageTotal":3,"successCnt":1,"filmsTotal":3},{"sourceId":"src-b","status":"interrupted","pageTotal":5,"successCnt":4,"filmsTotal":4}]`,
 	}
 	if err := CreateCollectRecord(running); err != nil {
 		t.Fatal(err)
 	}
 	if err := CreateCollectRecord(interrupted); err != nil {
-		t.Fatal(err)
-	}
-	if err := SaveCollectRecordFilms(running.ID, map[string][]int64{"src-a": {1}, "src-b": {2}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := SaveCollectRecordFilms(interrupted.ID, map[string][]int64{"src-a": {3}, "src-b": {4}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,7 +59,7 @@ func TestPurgeKeepsRunningAndInterruptedStatus(t *testing.T) {
 	if runningLeft.Status != model.CollectRecordStatusRunning || strings.Contains(runningLeft.DetailJson, "src-a") {
 		t.Fatalf("running record status=%s detail=%s", runningLeft.Status, runningLeft.DetailJson)
 	}
-	if runningLeft.PageSuccess != 2 || runningLeft.FilmCount != 1 {
+	if runningLeft.PageSuccess != 2 || runningLeft.FilmCount != 2 {
 		t.Fatalf("running counts pageSuccess=%d films=%d", runningLeft.PageSuccess, runningLeft.FilmCount)
 	}
 
@@ -76,12 +70,12 @@ func TestPurgeKeepsRunningAndInterruptedStatus(t *testing.T) {
 	if interruptedLeft.Status != model.CollectRecordStatusInterrupted || interruptedLeft.ErrorMsg != "服务重启，任务异常中断" {
 		t.Fatalf("interrupted status=%s err=%s", interruptedLeft.Status, interruptedLeft.ErrorMsg)
 	}
-	if strings.Contains(interruptedLeft.DetailJson, "src-a") || interruptedLeft.PageSuccess != 4 {
-		t.Fatalf("interrupted detail=%s pageSuccess=%d", interruptedLeft.DetailJson, interruptedLeft.PageSuccess)
+	if strings.Contains(interruptedLeft.DetailJson, "src-a") || interruptedLeft.PageSuccess != 4 || interruptedLeft.FilmCount != 4 {
+		t.Fatalf("interrupted detail=%s pageSuccess=%d films=%d", interruptedLeft.DetailJson, interruptedLeft.PageSuccess, interruptedLeft.FilmCount)
 	}
 }
 
-func TestPurgePreservesCountsWhenLedgerRetired(t *testing.T) {
+func TestPurgePreservesSurvivingSourceCounts(t *testing.T) {
 	gdb := setupTestDB(t)
 	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CollectSourceStats{}); err != nil {
 		t.Fatal(err)
@@ -94,16 +88,15 @@ func TestPurgePreservesCountsWhenLedgerRetired(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	retired := &model.CollectRecord{
-		BatchID:    "batch-retired-ledger",
+	rec := &model.CollectRecord{
+		BatchID:    "batch-multi-source",
 		Trigger:    model.CollectTriggerManual,
 		Status:     model.CollectRecordStatusSuccess,
 		FilmCount:  30,
-		Ledger:     false,
 		StartedAt:  time.Now().Add(-10 * 24 * time.Hour),
 		DetailJson: `[{"sourceId":"src-a","status":"done","filmsTotal":10},{"sourceId":"src-b","status":"done","filmsTotal":20}]`,
 	}
-	if err := CreateCollectRecord(retired); err != nil {
+	if err := CreateCollectRecord(rec); err != nil {
 		t.Fatal(err)
 	}
 	if err := gdb.Transaction(func(tx *gorm.DB) error {
@@ -111,7 +104,7 @@ func TestPurgePreservesCountsWhenLedgerRetired(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := GetCollectRecordByBatchID("batch-retired-ledger")
+	got, err := GetCollectRecordByBatchID("batch-multi-source")
 	if err != nil {
 		t.Fatal(err)
 	}

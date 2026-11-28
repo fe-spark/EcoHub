@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { forwardRef, useImperativeHandle } from "react";
 import {
   Button,
   Card,
@@ -12,16 +12,11 @@ import {
   Typography,
 } from "antd";
 import {
-  EditOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
-  SaveOutlined,
 } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/client-api";
-import { useAppMessage } from "@/lib/useAppMessage";
-import { useSiteConfig } from "@/components/common/SiteGuard";
-import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
-import { isFormValuesEqual } from "@/lib/deep-equal";
+import type { ConfigCardHandle } from "./types";
+import { ConfigLoadErrorAlert, useSiteConfigCard } from "./use-config-card";
 import styles from "./access-config-card.module.less";
 
 function generateRandomKey(length: number = 16): string {
@@ -72,219 +67,202 @@ function normalizeAccessConfig(
 
 interface AccessConfigCardProps {
   canWrite: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
-export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
-  const [data, setData] = useState<AccessConfigPayload>(DEFAULT_ACCESS_CONFIG);
-  const [draft, setDraft] = useState<AccessConfigPayload>(DEFAULT_ACCESS_CONFIG);
-  const [isTouched, setIsTouched] = useState(false);
-  const [fetching, setFetching] = useState(false);
-  const [saving, setSaving] = useState(false);
+const AccessConfigCard = forwardRef<ConfigCardHandle, AccessConfigCardProps>(
+  function AccessConfigCard({ canWrite, onDirtyChange }, ref) {
+    const {
+      draft,
+      setDraft,
+      setIsTouched,
+      fetching,
+      loadError,
+      reload,
+      hasDirty,
+      save,
+      discard,
+      editable,
+      message,
+    } = useSiteConfigCard<AccessConfigPayload>({
+      loadUrl: "/manage/config/access",
+      saveUrl: "/manage/config/access",
+      defaultValue: DEFAULT_ACCESS_CONFIG,
+      normalize: normalizeAccessConfig,
+      loadErrorText: "加载访问控制配置失败",
+      saveErrorText: "保存访问控制配置失败",
+      canWrite,
+      onDirtyChange,
+    });
 
-  const { message } = useAppMessage();
-  const { refresh: refreshSiteConfig } = useSiteConfig();
+    useImperativeHandle(
+      ref,
+      () => ({
+        isDirty: () => hasDirty,
+        validate: () => {
+          const trimmedKey = draft.provideKey.trim();
+          if (draft.privateAccess && !trimmedKey) {
+            message.error("开启私有化访问时，订阅密钥不能为空");
+            return false;
+          }
+          if (draft.privateAccess && trimmedKey.length < MIN_PROVIDE_KEY_LEN) {
+            message.error(`开启私有化访问时，订阅密钥长度不能少于 ${MIN_PROVIDE_KEY_LEN} 位`);
+            return false;
+          }
+          return true;
+        },
+        save: () => save(),
+        discard,
+      }),
+      [hasDirty, draft.privateAccess, draft.provideKey, save, discard, message],
+    );
 
-  const loadData = useCallback(async () => {
-    setFetching(true);
-    try {
-      const resp = await ApiGet("/manage/config/access");
-      if (resp.code === 0 && resp.data) {
-        const normalized = normalizeAccessConfig(resp.data);
-        setData(normalized);
-        setDraft(normalized);
-        setIsTouched(false);
-      }
-    } finally {
-      setFetching(false);
-    }
-  }, []);
+    const currentValues = draft;
 
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const hasDirty = useMemo(() => {
-    return isTouched && !isFormValuesEqual(draft, data);
-  }, [isTouched, draft, data]);
-
-  const handleCancel = () => {
-    setDraft(data);
-    setIsTouched(false);
-  };
-
-  const handleSave = async () => {
-    if (!canWrite) return;
-    const trimmedKey = draft.provideKey.trim();
-    if (draft.privateAccess && !trimmedKey) {
-      message.error("开启私有化访问时，订阅密钥不能为空");
-      return;
-    }
-    if (draft.privateAccess && trimmedKey.length < MIN_PROVIDE_KEY_LEN) {
-      message.error(`开启私有化访问时，订阅密钥长度不能少于 ${MIN_PROVIDE_KEY_LEN} 位`);
-      return;
-    }
-    setSaving(true);
-    try {
-      const normalized = normalizeAccessConfig(draft);
-      const resp = await ApiPost("/manage/config/access", normalized);
-      if (resp.code === 0) {
-        message.success(resp.msg || "访问控制配置已保存");
-        setData(normalized);
-        setDraft(normalized);
-        setIsTouched(false);
-        await refreshSiteConfig();
-      } else {
-        message.error(resp.msg || "保存失败");
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const currentValues = draft;
-
-  return (
-    <Card
-      className={styles.card}
-      title={
-        <Space size={8} align="center">
-          <SafetyCertificateOutlined style={{ color: "var(--ant-color-primary)" }} />
-          <span>运行与访问控制</span>
-        </Space>
-      }
-    >
-      <Spin spinning={fetching} description="正在加载访问控制配置...">
-        <Flex vertical gap={16}>
-          {/* 网站运行状态 */}
-          <Flex align="center" justify="space-between">
-            <Flex vertical gap={4}>
-              <Typography.Text strong>网站运行状态</Typography.Text>
-              <Typography.Text type="secondary">
-                开启后网站正常对外开放；关闭后前台将显示维护提示页面
-              </Typography.Text>
-            </Flex>
-            <Switch
-              disabled={!canWrite}
-              checked={currentValues.state}
-              checkedChildren="开启"
-              unCheckedChildren="关闭"
-              onChange={(state) => {
-                setIsTouched(true);
-                setDraft((prev) => ({ ...prev, state }));
-              }}
-            />
-          </Flex>
-
-          {/* 系统维护提示 */}
-          <div className={styles.field}>
-            <Flex justify="space-between" align="baseline">
-              <Typography.Text strong>系统维护提示</Typography.Text>
-              <Typography.Text type="secondary">
-                {currentValues.hint.length}/{MAX_HINT_LEN}
-              </Typography.Text>
-            </Flex>
-            <Input.TextArea
-              disabled={!canWrite}
-              maxLength={MAX_HINT_LEN}
-              rows={2}
-              placeholder="网站维护中，请稍后再试..."
-              value={currentValues.hint}
-              onChange={(e) => {
-                setIsTouched(true);
-                setDraft((prev) => ({ ...prev, hint: e.target.value }));
-              }}
-            />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              网站处于关闭维护状态时，向前台访问用户呈现的友好提示语
-            </Typography.Text>
-          </div>
-
-          {/* 私有化访问控制 */}
-          <Flex align="center" justify="space-between">
-            <Flex vertical gap={4}>
-              <Typography.Text strong>私有化访问</Typography.Text>
-              <Typography.Text type="secondary">
-                开启后，未登录访客将强制重定向至登录页
-              </Typography.Text>
-            </Flex>
-            <Switch
-              disabled={!canWrite}
-              checked={currentValues.privateAccess}
-              checkedChildren="开启"
-              unCheckedChildren="关闭"
-              onChange={(privateAccess) => {
-                setIsTouched(true);
-                setDraft((prev) => {
-                  let provideKey = prev.provideKey;
-                  if (privateAccess && !provideKey.trim()) {
-                    provideKey = generateRandomKey(16);
-                  }
-                  return { ...prev, privateAccess, provideKey };
-                });
-              }}
-            />
-          </Flex>
-
-          {/* 订阅密钥 */}
-          {currentValues.privateAccess && (
-            <div className={styles.field}>
-              <Flex justify="space-between" align="baseline">
-                <Typography.Text strong>
-                  订阅密钥{" "}
-                  <span style={{ color: "var(--ant-color-error)" }}>*</span>
-                </Typography.Text>
+    return (
+      <Card
+        className={styles.card}
+        title={
+          <Space size={8} align="center">
+            <SafetyCertificateOutlined style={{ color: "var(--ant-color-primary)" }} />
+            <span>运行与访问控制</span>
+          </Space>
+        }
+      >
+        <Spin spinning={fetching} description="正在加载访问控制配置...">
+          <ConfigLoadErrorAlert
+            visible={loadError}
+            text="加载访问控制配置失败"
+            loading={fetching}
+            onRetry={() => void reload()}
+          />
+          <Flex vertical gap={16}>
+            {/* 网站运行状态 */}
+            <Flex align="center" justify="space-between">
+              <Flex vertical gap={4}>
+                <Typography.Text strong>网站运行状态</Typography.Text>
                 <Typography.Text type="secondary">
-                  {currentValues.provideKey.length}/{MAX_PROVIDE_KEY_LEN}
+                  开启后网站正常对外开放；关闭后前台将显示维护提示页面
                 </Typography.Text>
               </Flex>
-              <Space.Compact style={{ width: "100%" }}>
-                <Input
-                  disabled={!canWrite}
-                  maxLength={MAX_PROVIDE_KEY_LEN}
-                  placeholder="必填，至少 8 位，例如 mysecret888"
-                  status={
-                    !currentValues.provideKey.trim() ||
-                    currentValues.provideKey.trim().length < MIN_PROVIDE_KEY_LEN
-                      ? "error"
-                      : undefined
-                  }
-                  value={currentValues.provideKey}
-                  onChange={(e) => {
-                    setIsTouched(true);
-                    setDraft((prev) => ({
-                      ...prev,
-                      provideKey: e.target.value,
-                    }));
-                  }}
-                />
-                <Button
-                  icon={<ReloadOutlined />}
-                  disabled={!canWrite}
-                  onClick={() => {
-                    setIsTouched(true);
-                    setDraft((prev) => ({
-                      ...prev,
-                      provideKey: generateRandomKey(16),
-                    }));
-                  }}
-                >
-                  随机生成
-                </Button>
-              </Space.Compact>
+              <Switch
+                disabled={!editable}
+                checked={currentValues.state}
+                checkedChildren="开启"
+                unCheckedChildren="关闭"
+                onChange={(state) => {
+                  setIsTouched(true);
+                  setDraft((prev) => ({ ...prev, state }));
+                }}
+              />
+            </Flex>
+
+            {/* 系统维护提示 */}
+            <div className={styles.field}>
+              <Flex justify="space-between" align="baseline">
+                <Typography.Text strong>系统维护提示</Typography.Text>
+                <Typography.Text type="secondary">
+                  {currentValues.hint.length}/{MAX_HINT_LEN}
+                </Typography.Text>
+              </Flex>
+              <Input.TextArea
+                disabled={!editable}
+                maxLength={MAX_HINT_LEN}
+                rows={2}
+                placeholder="网站维护中，请稍后再试..."
+                value={currentValues.hint}
+                onChange={(e) => {
+                  setIsTouched(true);
+                  setDraft((prev) => ({ ...prev, hint: e.target.value }));
+                }}
+              />
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                开启私有化后必填，至少 8 位。客户端及 TVBox 订阅地址需在末尾追加 ?key=您的密钥。
+                网站处于关闭维护状态时，向前台访问用户呈现的友好提示语
               </Typography.Text>
             </div>
-          )}
-        </Flex>
-      </Spin>
 
-      <UnsavedChangesBar
-        visible={hasDirty}
-        saving={saving}
-        onDiscard={handleCancel}
-        onSave={() => void handleSave()}
-      />
-    </Card>
-  );
-}
+            {/* 私有化访问控制 */}
+            <Flex align="center" justify="space-between">
+              <Flex vertical gap={4}>
+                <Typography.Text strong>私有化访问</Typography.Text>
+                <Typography.Text type="secondary">
+                  开启后，未登录访客将强制重定向至登录页
+                </Typography.Text>
+              </Flex>
+              <Switch
+                disabled={!editable}
+                checked={currentValues.privateAccess}
+                checkedChildren="开启"
+                unCheckedChildren="关闭"
+                onChange={(privateAccess) => {
+                  setIsTouched(true);
+                  setDraft((prev) => {
+                    let provideKey = prev.provideKey;
+                    if (privateAccess && !provideKey.trim()) {
+                      provideKey = generateRandomKey(16);
+                    }
+                    return { ...prev, privateAccess, provideKey };
+                  });
+                }}
+              />
+            </Flex>
+
+            {/* 订阅密钥 */}
+            {currentValues.privateAccess && (
+              <div className={styles.field}>
+                <Flex justify="space-between" align="baseline">
+                  <Typography.Text strong>
+                    订阅密钥{" "}
+                    <span style={{ color: "var(--ant-color-error)" }}>*</span>
+                  </Typography.Text>
+                  <Typography.Text type="secondary">
+                    {currentValues.provideKey.length}/{MAX_PROVIDE_KEY_LEN}
+                  </Typography.Text>
+                </Flex>
+                <Space.Compact style={{ width: "100%" }}>
+                  <Input
+                    disabled={!editable}
+                    maxLength={MAX_PROVIDE_KEY_LEN}
+                    placeholder="必填，至少 8 位，例如 mysecret888"
+                    status={
+                      !currentValues.provideKey.trim() ||
+                      currentValues.provideKey.trim().length < MIN_PROVIDE_KEY_LEN
+                        ? "error"
+                        : undefined
+                    }
+                    value={currentValues.provideKey}
+                    onChange={(e) => {
+                      setIsTouched(true);
+                      setDraft((prev) => ({
+                        ...prev,
+                        provideKey: e.target.value,
+                      }));
+                    }}
+                  />
+                  <Button
+                    icon={<ReloadOutlined />}
+                    disabled={!editable}
+                    onClick={() => {
+                      setIsTouched(true);
+                      setDraft((prev) => ({
+                        ...prev,
+                        provideKey: generateRandomKey(16),
+                      }));
+                    }}
+                  >
+                    随机生成
+                  </Button>
+                </Space.Compact>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  开启私有化后必填，至少 8 位。客户端及 TVBox 订阅地址需在末尾追加 ?key=您的密钥。
+                </Typography.Text>
+              </div>
+            )}
+          </Flex>
+        </Spin>
+      </Card>
+    );
+  },
+);
+
+export default AccessConfigCard;

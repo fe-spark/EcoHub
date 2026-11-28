@@ -18,8 +18,10 @@ func TestMigrateSchemaCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 模拟 v3.1.7 存量旧表：collect_record_films 为单列自增主键 + batch_id，home_recommend_group 含 builtin/builtin_key。
 	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.HomeRecommendGroup{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Exec(`ALTER TABLE collect_records ADD COLUMN ledger INTEGER NOT NULL DEFAULT 0`).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := gdb.Exec(`
@@ -48,10 +50,12 @@ func TestMigrateSchemaCleanup(t *testing.T) {
 		Trigger:   model.CollectTriggerManual,
 		Status:    model.CollectRecordStatusSuccess,
 		FilmCount: 10,
-		Ledger:    true,
 		StartedAt: time.Now(),
 	}
 	if err := gdb.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Table(model.TableCollectRecord).Where("id = ?", rec.ID).Update("ledger", true).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := gdb.Exec(`INSERT INTO collect_record_films (batch_id, source_id, mid, created_at) VALUES ('legacy-batch', 's1', 101, CURRENT_TIMESTAMP)`).Error; err != nil {
@@ -65,25 +69,14 @@ func TestMigrateSchemaCleanup(t *testing.T) {
 		t.Fatalf("second migrateSchemaCleanup failed: %v", err)
 	}
 
-	// 验证 collect_record_films 已重建为新聚簇结构，且可正常按 (record_id, source_id, mid) 写入。
-	if gdb.Migrator().HasColumn(&model.CollectRecordFilmItem{}, "batch_id") ||
-		!gdb.Migrator().HasColumn(&model.CollectRecordFilmItem{}, "record_id") {
+	if gdb.Migrator().HasColumn(&legacyCollectRecordFilmItem{}, "batch_id") ||
+		!gdb.Migrator().HasColumn(&legacyCollectRecordFilmItem{}, "record_id") {
 		t.Fatal("collect_record_films was not rebuilt to new schema")
 	}
-	if err := gdb.Create(&model.CollectRecordFilmItem{RecordID: rec.ID, SourceID: "s1", Mid: 202}).Error; err != nil {
+	if err := gdb.Create(&legacyCollectRecordFilmItem{RecordID: rec.ID, SourceID: "s1", Mid: 202}).Error; err != nil {
 		t.Fatalf("insert into rebuilt collect_record_films failed: %v", err)
 	}
 
-	// 验证存量 collect_records 保留统计数但 ledger 已关闭。
-	var updated model.CollectRecord
-	if err := gdb.Where("id = ?", rec.ID).First(&updated).Error; err != nil {
-		t.Fatal(err)
-	}
-	if updated.Ledger || updated.FilmCount != 10 {
-		t.Fatalf("record should keep filmCount=10 and disable ledger, got %+v", updated)
-	}
-
-	// 验证 home_recommend_group 废弃列及旧内置分组行已移除，自定义分组保留。
 	for _, col := range []string{"builtin", "builtin_key"} {
 		if gdb.Migrator().HasColumn(&model.HomeRecommendGroup{}, col) {
 			t.Fatalf("legacy column %s should be dropped", col)

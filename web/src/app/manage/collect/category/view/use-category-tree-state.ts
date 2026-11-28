@@ -157,6 +157,7 @@ export function useCategoryTreeState() {
     sources,
     sourceId,
     primaryId,
+    primaryName: primary?.name || "",
     classTree,
     expandedKeys,
     loadingTree,

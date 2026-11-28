@@ -17,7 +17,6 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repobase"
-	"server/internal/sourcecatalog"
 
 	"gorm.io/gorm"
 )
@@ -25,6 +24,7 @@ import (
 const (
 	notifyBatchSessionTTL = 24 * time.Hour
 	maxMemNotifySessions  = 64
+	notifyPageCacheTTL    = 30 * time.Minute
 )
 
 type notifyMemSession struct {
@@ -242,7 +242,6 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 	now := time.Now()
 	notifySessionMu.Lock()
 	defer notifySessionMu.Unlock()
-	// 更新既有会话时先移除旧槽位，保持 notifySessionOrder 与 expiresAt 单调递增一致
 	if _, exists := notifyMemSessions[sess.BatchID]; exists {
 		for i, id := range notifySessionOrder {
 			if id == sess.BatchID {
@@ -270,7 +269,7 @@ func rememberNotifyMemSession(sess model.NotifyBatchSession, expiresAt time.Time
 	notifyMemSessions[sess.BatchID] = notifyMemSession{sess: sess, expiresAt: expiresAt}
 }
 
-// BatchSourceCategoryStatRow 表示按站点与影片分类字段聚合后的计数行
+// BatchSourceCategoryStatRow 表示主站按分类字段聚合后的计数行
 type BatchSourceCategoryStatRow struct {
 	SourceID        string
 	FirstSourceId   string
@@ -281,9 +280,9 @@ type BatchSourceCategoryStatRow struct {
 	Count           int
 }
 
-// BatchSourceCategoryPageQuery 定义账本批次下站点分类分页 SQL 查询条件
+// BatchSourceCategoryPageQuery 定义基于 film_index 联合索引的主站分类分页查询条件
 type BatchSourceCategoryPageQuery struct {
-	BatchID         string
+	RecordID        uint
 	SourceID        string
 	CategoryAll     bool
 	IsOther         bool
@@ -296,24 +295,10 @@ type BatchSourceCategoryPageQuery struct {
 	Offset          int
 }
 
-// HasCollectBatchLedger 检查批次是否已写入 collect_record_films 账本
-func HasCollectBatchLedger(batchID string) (bool, error) {
-	return sourcecatalog.CollectRecordHasLedger(batchID)
-}
-
-func filmIndexJoinClause(conn *gorm.DB) string {
-	if conn != nil && conn.Dialector != nil && conn.Dialector.Name() == "mysql" {
-		return "STRAIGHT_JOIN " + model.TableFilmIndex + " AS fi ON fi.mid = crf.mid"
-	}
-	return "JOIN " + model.TableFilmIndex + " AS fi ON fi.mid = crf.mid"
-}
-
-const notifyPageCacheTTL = 30 * time.Minute
-
 func notifySourcePageCacheKey(q BatchSourceCategoryPageQuery) string {
 	raw := fmt.Sprintf(
-		"%s|%s|%t|%t|%t|%s|%s|%v|%v|%d|%d",
-		strings.TrimSpace(q.BatchID),
+		"%d|%s|%t|%t|%t|%s|%s|%v|%v|%d|%d",
+		q.RecordID,
 		strings.TrimSpace(q.SourceID),
 		q.CategoryAll,
 		q.IsOther,
@@ -329,13 +314,12 @@ func notifySourcePageCacheKey(q BatchSourceCategoryPageQuery) string {
 	return config.NotifyBatchCachePrefix + ":pg:" + hex.EncodeToString(sum[:12])
 }
 
-var loadBatchSourceCategoryStatsFn = LoadBatchSourceCategoryStatsForSource
+var loadBatchPrimaryCategoryStatsFn = LoadBatchPrimaryCategoryStats
 
-// LoadBatchSourceCategoryStatsForSource 基于 collect_record_films 账本按单站条件聚合分类计数，沿聚簇主键 (record_id, source_id, mid) 顺序扫描。
-func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceID string) ([]BatchSourceCategoryStatRow, error) {
-	batchID = strings.TrimSpace(batchID)
+// LoadBatchPrimaryCategoryStats 直接基于 film_index 联合索引 (first_source_id, last_record_id, mid) 聚合主站本次更新的分类计数。
+func LoadBatchPrimaryCategoryStats(ctx context.Context, recordID uint, sourceID string) ([]BatchSourceCategoryStatRow, error) {
 	sourceID = strings.TrimSpace(sourceID)
-	if batchID == "" || sourceID == "" || db.Mdb == nil {
+	if recordID == 0 || sourceID == "" || db.Mdb == nil {
 		return nil, nil
 	}
 	if ctx == nil {
@@ -344,12 +328,7 @@ func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceI
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	recordID, ready, err := sourcecatalog.ResolveCollectRecordLedgerContext(ctx, batchID)
-	if err != nil || !ready || recordID == 0 {
-		return nil, err
-	}
 	type statRaw struct {
-		FirstSourceId   sql.NullString
 		Pid             sql.NullInt64
 		Cid             sql.NullInt64
 		CategoryKey     sql.NullString
@@ -357,11 +336,10 @@ func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceI
 		Count           int64
 	}
 	var rows []statRaw
-	err = db.Mdb.WithContext(ctx).Table("collect_record_films AS crf").
-		Select("fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key, COUNT(*) AS count").
-		Joins(filmIndexJoinClause(db.Mdb)).
-		Where("crf.record_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", recordID, sourceID).
-		Group("fi.first_source_id, fi.pid, fi.cid, fi.category_key, fi.root_category_key").
+	err := db.Mdb.WithContext(ctx).Table(model.TableFilmIndex).
+		Select("pid, cid, category_key, root_category_key, COUNT(*) AS count").
+		Where("first_source_id = ? AND last_record_id = ? AND deleted_at IS NULL", sourceID, recordID).
+		Group("pid, cid, category_key, root_category_key").
 		Scan(&rows).Error
 	if err != nil {
 		return nil, err
@@ -370,7 +348,7 @@ func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceI
 	for _, r := range rows {
 		out = append(out, BatchSourceCategoryStatRow{
 			SourceID:        sourceID,
-			FirstSourceId:   strings.TrimSpace(r.FirstSourceId.String),
+			FirstSourceId:   sourceID,
 			Pid:             r.Pid.Int64,
 			Cid:             r.Cid.Int64,
 			CategoryKey:     strings.TrimSpace(r.CategoryKey.String),
@@ -381,11 +359,10 @@ func LoadBatchSourceCategoryStatsForSource(ctx context.Context, batchID, sourceI
 	return out, nil
 }
 
-// LoadBatchSourceCategoryPage 基于 collect_record_films 账本按需查询单页通知影片（对齐采集记录，按账本 id ASC 索引顺序单页提取后再回表补片名，避免跨表 filesort）。
-func LoadBatchSourceCategoryPage(ctx context.Context, q BatchSourceCategoryPageQuery) ([]model.NotifyFilmItem, error) {
-	batchID := strings.TrimSpace(q.BatchID)
+// LoadBatchPrimaryCategoryPage 直接基于 film_index 联合索引 (first_source_id, last_record_id, mid) 单表分页查询当前主站更新片单。
+func LoadBatchPrimaryCategoryPage(ctx context.Context, q BatchSourceCategoryPageQuery) ([]model.NotifyFilmItem, error) {
 	sourceID := strings.TrimSpace(q.SourceID)
-	if batchID == "" || sourceID == "" || db.Mdb == nil || q.Limit <= 0 {
+	if q.RecordID == 0 || sourceID == "" || db.Mdb == nil || q.Limit <= 0 {
 		return nil, nil
 	}
 	if ctx == nil {
@@ -412,31 +389,22 @@ func LoadBatchSourceCategoryPage(ctx context.Context, q BatchSourceCategoryPageQ
 		}
 	}
 
-	recordID, ready, err := sourcecatalog.ResolveCollectRecordLedgerContext(ctx, batchID)
-	if err != nil {
-		return nil, err
-	}
-	if !ready || recordID == 0 {
-		return []model.NotifyFilmItem{}, nil
-	}
-
-	var mids []int64
-	query := db.Mdb.WithContext(ctx).Table("collect_record_films AS crf").
-		Joins(filmIndexJoinClause(db.Mdb)).
-		Where("crf.record_id = ? AND crf.source_id = ? AND fi.deleted_at IS NULL", recordID, sourceID)
+	query := db.Mdb.WithContext(ctx).Table(model.TableFilmIndex).
+		Select("mid, name").
+		Where("first_source_id = ? AND last_record_id = ? AND deleted_at IS NULL", sourceID, q.RecordID)
 
 	if !q.CategoryAll {
 		switch {
 		case q.IsOther && q.UseCategoryKeys:
 			if len(q.KnownKeys) > 0 {
 				query = query.Where(
-					"(fi.category_key IS NULL OR fi.category_key = '' OR fi.category_key NOT IN ?) AND (fi.root_category_key IS NULL OR fi.root_category_key = '' OR fi.root_category_key NOT IN ?)",
+					"(category_key IS NULL OR category_key = '' OR category_key NOT IN ?) AND (root_category_key IS NULL OR root_category_key = '' OR root_category_key NOT IN ?)",
 					q.KnownKeys, q.KnownKeys,
 				)
 			}
 		case q.IsOther && !q.UseCategoryKeys:
 			if len(q.KnownPids) > 0 {
-				query = query.Where("(fi.pid IS NULL OR fi.pid <= 0 OR fi.pid NOT IN ?)", q.KnownPids)
+				query = query.Where("(pid IS NULL OR pid <= 0 OR pid NOT IN ?)", q.KnownPids)
 			}
 		case !q.IsOther && q.UseCategoryKeys:
 			if len(q.IncludeKeys) == 0 {
@@ -444,51 +412,36 @@ func LoadBatchSourceCategoryPage(ctx context.Context, q BatchSourceCategoryPageQ
 			}
 			if len(q.KnownKeys) > 0 {
 				query = query.Where(
-					"(fi.category_key IN ? OR ((fi.category_key IS NULL OR fi.category_key = '' OR fi.category_key NOT IN ?) AND fi.root_category_key IN ?))",
+					"(category_key IN ? OR ((category_key IS NULL OR category_key = '' OR category_key NOT IN ?) AND root_category_key IN ?))",
 					q.IncludeKeys, q.KnownKeys, q.IncludeKeys,
 				)
 			} else {
-				query = query.Where("(fi.category_key IN ? OR fi.root_category_key IN ?)", q.IncludeKeys, q.IncludeKeys)
+				query = query.Where("(category_key IN ? OR root_category_key IN ?)", q.IncludeKeys, q.IncludeKeys)
 			}
 		default:
 			if len(q.IncludePids) == 0 {
 				return nil, nil
 			}
-			query = query.Where("fi.pid IN ?", q.IncludePids)
+			query = query.Where("pid IN ?", q.IncludePids)
 		}
-	}
-
-	// 按 crf.mid ASC 沿聚簇主键 (record_id, source_id, mid) 顺序扫描，STRAIGHT_JOIN 主键校验 deleted_at 后早停，避免 filesort。
-	if err := query.Select("crf.mid").Order("crf.mid ASC").Limit(q.Limit).Offset(offset).Pluck("crf.mid", &mids).Error; err != nil {
-		return nil, err
-	}
-	if len(mids) == 0 {
-		return []model.NotifyFilmItem{}, nil
 	}
 
 	type nameRow struct {
 		Mid  int64
 		Name string
 	}
-	var nameRows []nameRow
-	if err := db.Mdb.WithContext(ctx).Unscoped().Table(model.TableFilmIndex).
-		Select("mid, name").
-		Where("mid IN ?", mids).
-		Scan(&nameRows).Error; err != nil {
+	var rows []nameRow
+	if err := query.Order("mid ASC").Limit(q.Limit).Offset(offset).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	nameByMid := make(map[int64]string, len(nameRows))
-	for _, r := range nameRows {
-		nameByMid[r.Mid] = strings.TrimSpace(r.Name)
-	}
-	items := make([]model.NotifyFilmItem, 0, len(mids))
-	for _, mid := range mids {
+	items := make([]model.NotifyFilmItem, 0, len(rows))
+	for _, r := range rows {
 		items = append(items, model.NotifyFilmItem{
-			Mid:  mid,
-			Name: nameByMid[mid],
+			Mid:  r.Mid,
+			Name: strings.TrimSpace(r.Name),
 		})
 	}
-	if db.Rdb != nil && ctx.Err() == nil {
+	if db.Rdb != nil && ctx.Err() == nil && !(offset > 0 && len(items) == 0) {
 		if raw, err := json.Marshal(items); err == nil {
 			if err := db.Rdb.Set(ctx, cacheKey, raw, notifyPageCacheTTL).Err(); err != nil && ctx.Err() == nil {
 				syslog.Warnf("[Notify] 写入分页缓存失败 key=%s err=%v", cacheKey, err)

@@ -14,6 +14,7 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import {
+  ContentNonPrimaryAlert,
   ContentSectionCard,
   ContentSourceSelect,
 } from "@/app/manage/components/content-shell";
@@ -327,6 +328,7 @@ function HomeManageBody() {
     sources,
     sourceId,
     primaryId,
+    primaryName,
     primaryLoading,
     syncSources,
     handleSourceChange,
@@ -382,6 +384,16 @@ function HomeManageBody() {
             onChange={handleSourceChange}
           />
         }
+      />
+
+      <ContentNonPrimaryAlert
+        sources={sources}
+        sourceId={sourceId}
+        primaryId={primaryId}
+        primaryName={primaryName}
+        scopeLabel="首页轮播与推荐"
+        disabled={activeBusy}
+        onSwitchToPrimary={handleSourceChange}
       />
 
       <div className={tabStyles.tabBar} role="tablist" aria-label="首页管理分类">

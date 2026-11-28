@@ -11,33 +11,27 @@ import (
 	"gorm.io/gorm"
 )
 
-// ResolveCollectRecordLedger 按批次号解析采集记录主键与账本就绪状态。
-func ResolveCollectRecordLedger(batchID string) (uint, bool, error) {
-	return ResolveCollectRecordLedgerContext(context.Background(), batchID)
+// ResolveCollectRecordID 按批次号解析采集记录主键。
+func ResolveCollectRecordID(batchID string) (uint, error) {
+	return ResolveCollectRecordIDContext(context.Background(), batchID)
 }
 
-// ResolveCollectRecordLedgerContext 按批次号解析采集记录主键与账本就绪状态，支持上下文取消。
-func ResolveCollectRecordLedgerContext(ctx context.Context, batchID string) (uint, bool, error) {
+// ResolveCollectRecordIDContext 按批次号解析采集记录主键，支持上下文取消。
+func ResolveCollectRecordIDContext(ctx context.Context, batchID string) (uint, error) {
 	batchID = strings.TrimSpace(batchID)
 	if batchID == "" || db.Mdb == nil {
-		return 0, false, nil
+		return 0, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	var rec model.CollectRecord
-	err := db.Mdb.WithContext(ctx).Select("id", "ledger").Where("batch_id = ?", batchID).Take(&rec).Error
+	err := db.Mdb.WithContext(ctx).Select("id").Where("batch_id = ?", batchID).Take(&rec).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, false, nil
+		return 0, nil
 	}
 	if err != nil {
-		return 0, false, err
+		return 0, err
 	}
-	return rec.ID, rec.Ledger, nil
-}
-
-// CollectRecordHasLedger 检查批次是否已写入 collect_record_films 账本。
-func CollectRecordHasLedger(batchID string) (bool, error) {
-	_, ready, err := ResolveCollectRecordLedger(batchID)
-	return ready, err
+	return rec.ID, nil
 }

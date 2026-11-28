@@ -23,6 +23,28 @@ import (
 // ownedFilmSyncSelect 增量同步比对所需的最小字段集，避免 SELECT * 额外拉取无关列与自定义封面大字段。
 const ownedFilmSyncSelect = "mid, first_source_id, db_id, cid, pid, root_category_key, category_key, original_category, c_name, series_key, name, sub_title, class_tag, area, language, year, initial, score, hits, state, actor, director, writer, blurb, content, release_date, picture, picture_slide, is_custom_picture, locked_fields"
 
+type collectRecordIDContextKey struct{}
+
+// WithCollectRecordID 将当前采集批次记录 ID 注入写库上下文，供事务内顺带写入主站影片的 last_record_id。
+func WithCollectRecordID(ctx context.Context, recordID uint) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if recordID == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, collectRecordIDContextKey{}, recordID)
+}
+
+// CollectRecordIDFromContext 从写库上下文读取当前采集批次记录 ID；非主站或非采集写入时返回 0。
+func CollectRecordIDFromContext(ctx context.Context) uint {
+	if ctx == nil {
+		return 0
+	}
+	id, _ := ctx.Value(collectRecordIDContextKey{}).(uint)
+	return id
+}
+
 func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail) (*model.FilmIndex, error) {
 	categoryVersion := taxonomy.GetCategoryVersion()
 	ruleVersion := taxonomy.GetRuleVersion()
@@ -32,6 +54,11 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 	}
 	fi.Mid = 0 // 自增生成
 	fi.FirstSourceId = sourceID
+	if tx != nil && tx.Statement != nil {
+		if recordID := CollectRecordIDFromContext(tx.Statement.Context); recordID > 0 {
+			fi.LastRecordID = recordID
+		}
+	}
 
 	if err := tx.Create(&fi).Error; err != nil {
 		return nil, err
@@ -93,6 +120,11 @@ func syncOwnedFilmFieldsTx(tx *gorm.DB, existing *model.FilmIndex, sourceID stri
 	changed := len(updates) > 0
 	if changed {
 		updates["updated_at"] = time.Now()
+		if tx != nil && tx.Statement != nil {
+			if recordID := CollectRecordIDFromContext(tx.Statement.Context); recordID > 0 {
+				updates["last_record_id"] = recordID
+			}
+		}
 		if err := tx.Model(&model.FilmIndex{}).Where("mid = ?", existing.Mid).Updates(updates).Error; err != nil {
 			return false, nil, err
 		}

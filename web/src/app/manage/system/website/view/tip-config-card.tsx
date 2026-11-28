@@ -27,6 +27,7 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import ImagePicker from "@/app/manage/components/image-picker";
 import TipModal from "@/components/public/TipModal";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { isFormValuesEqual } from "@/lib/deep-equal";
 import {
   DEFAULT_TIP_MESSAGE,
   DEFAULT_TIP_TITLE,
@@ -36,16 +37,19 @@ import {
   MAX_TIP_MESSAGE_LEN,
   MAX_TIP_TITLE_LEN,
   createDefaultTipConfig,
+  isValidTipImage,
+  isValidTipLink,
   normalizeTipConfig,
-  serializeTipConfig,
   type TipChannel,
   type TipChannelKey,
   type TipConfig,
 } from "@/lib/tip";
+import { ConfigLoadErrorAlert } from "./use-config-card";
 import styles from "./tip-config-card.module.less";
 
 interface TipConfigCardProps {
   canWrite: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 type DraftChannel = TipChannel & { uid: string };
@@ -75,11 +79,21 @@ function emptyChannel(key: TipChannelKey, label: string): DraftChannel {
   return { uid: newChannelUid(), key, label, qrImage: "", link: "" };
 }
 
-export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
+function stripChannelUids(channels: DraftChannel[]): TipChannel[] {
+  return channels.map(({ key, label, qrImage, link }) => ({
+    key,
+    label,
+    qrImage,
+    link,
+  }));
+}
+
+export default function TipConfigCard({ canWrite, onDirtyChange }: TipConfigCardProps) {
   const [data, setData] = useState<TipConfig>(createDefaultTipConfig);
   const [draft, setDraft] = useState<DraftTip>(() => toDraft(createDefaultTipConfig()));
   const [isTouched, setIsTouched] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pickerUid, setPickerUid] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -89,6 +103,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
 
   const loadData = useCallback(async () => {
     setFetching(true);
+    setLoadError(false);
     try {
       const resp = await ApiGet("/manage/config/tip");
       if (resp.code === 0 && resp.data) {
@@ -96,26 +111,40 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
         setData(normalized);
         setDraft(toDraft(normalized));
         setIsTouched(false);
+      } else {
+        setLoadError(true);
+        message.error(resp.msg || "加载赞赏配置失败");
       }
+    } catch {
+      setLoadError(true);
     } finally {
       setFetching(false);
     }
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
+  // 直接对比原始草稿与基线，确保输入不完整链接、清空文案或新增空渠道时即时弹出未保存浮条。
   const hasDirty = useMemo(() => {
-    const currentTip = normalizeTipConfig({
-      enabled: draft.enabled,
-      title: draft.title,
-      message: draft.message,
-      channels: draft.channels,
-    });
-    return isTouched && serializeTipConfig(currentTip) !== serializeTipConfig(data);
-  }, [isTouched, draft, data]);
+    if (loadError || !isTouched) return false;
+    return !isFormValuesEqual(
+      {
+        enabled: draft.enabled,
+        title: draft.title,
+        message: draft.message,
+        channels: stripChannelUids(draft.channels),
+      },
+      data,
+    );
+  }, [loadError, isTouched, draft, data]);
 
+  useEffect(() => {
+    onDirtyChange?.(hasDirty);
+  }, [hasDirty, onDirtyChange]);
+
+  const editable = canWrite && !loadError;
   const canAdd = draft.channels.length < MAX_TIP_CHANNELS;
 
   const updateChannel = (uid: string, patch: Partial<TipChannel>) => {
@@ -161,7 +190,19 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
   };
 
   const handleSave = async () => {
-    if (!canWrite) return;
+    if (!editable) return;
+    for (let i = 0; i < draft.channels.length; i++) {
+      const ch = draft.channels[i];
+      const name = ch.label.trim() || `渠道 ${i + 1}`;
+      if (!isValidTipImage(ch.qrImage)) {
+        message.error(`「${name}」收款码图片链接格式无效，需以 http(s):// 或 / 开头`);
+        return;
+      }
+      if (!isValidTipLink(ch.link)) {
+        message.error(`「${name}」外链格式无效，请输入完整 http(s):// 链接或有效域名`);
+        return;
+      }
+    }
     setSaving(true);
     try {
       const nextTip = normalizeTipConfig({
@@ -180,6 +221,8 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
       } else {
         message.error(resp.msg || "保存失败");
       }
+    } catch {
+      message.error("保存赞赏配置失败");
     } finally {
       setSaving(false);
     }
@@ -220,6 +263,12 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
       }
     >
       <Spin spinning={fetching} description="正在加载赞赏配置...">
+        <ConfigLoadErrorAlert
+          visible={loadError}
+          text="加载赞赏配置失败"
+          loading={fetching}
+          onRetry={() => void loadData()}
+        />
         <Flex vertical gap={16}>
           {/* 前台显示开关 */}
           <Flex align="center" justify="space-between" gap={12} wrap>
@@ -235,7 +284,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
               checked={currentValues.enabled}
               checkedChildren="开启"
               unCheckedChildren="关闭"
-              disabled={!canWrite}
+              disabled={!editable}
               onChange={(enabled) => {
                 setIsTouched(true);
                 setDraft((prev) => ({ ...prev, enabled }));
@@ -255,7 +304,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
               value={currentValues.title}
               maxLength={MAX_TIP_TITLE_LEN}
               placeholder={DEFAULT_TIP_TITLE}
-              disabled={!canWrite}
+              disabled={!editable}
               onChange={(event) => {
                 setIsTouched(true);
                 setDraft((prev) => ({ ...prev, title: event.target.value }));
@@ -276,7 +325,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
               maxLength={MAX_TIP_MESSAGE_LEN}
               placeholder={DEFAULT_TIP_MESSAGE}
               rows={2}
-              disabled={!canWrite}
+              disabled={!editable}
               onChange={(event) => {
                 setIsTouched(true);
                 setDraft((prev) => ({ ...prev, message: event.target.value }));
@@ -302,7 +351,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                     value={channel.label}
                     maxLength={MAX_TIP_LABEL_LEN}
                     placeholder={`渠道 ${index + 1}`}
-                    disabled={!canWrite}
+                    disabled={!editable}
                     onChange={(event) =>
                       updateChannel(channel.uid, { label: event.target.value })
                     }
@@ -320,14 +369,15 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                       <Input
                         value={channel.qrImage}
                         placeholder="收款码图片链接"
-                        disabled={!canWrite}
+                        disabled={!editable}
+                        status={isValidTipImage(channel.qrImage) ? undefined : "error"}
                         onChange={(event) =>
                           updateChannel(channel.uid, { qrImage: event.target.value })
                         }
                       />
                       <Button
                         icon={<PictureOutlined />}
-                        disabled={!canWrite}
+                        disabled={!editable}
                         onClick={() => setPickerUid(channel.uid)}
                       >
                         选图
@@ -339,7 +389,8 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                     value={channel.link}
                     maxLength={MAX_TIP_LINK_LEN}
                     placeholder="可选外链，如 afdian.com"
-                    disabled={!canWrite}
+                    disabled={!editable}
+                    status={isValidTipLink(channel.link) ? undefined : "error"}
                     onChange={(event) =>
                       updateChannel(channel.uid, { link: event.target.value })
                     }
@@ -349,7 +400,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                   type="text"
                   danger
                   icon={<DeleteOutlined />}
-                  disabled={!canWrite}
+                  disabled={!editable}
                   onClick={() => removeChannel(channel.uid)}
                 >
                   删除
@@ -361,7 +412,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
           <div>
             <Button
               icon={<PlusOutlined />}
-              disabled={!canWrite || !canAdd}
+              disabled={!editable || !canAdd}
               onClick={addChannel}
             >
               添加渠道

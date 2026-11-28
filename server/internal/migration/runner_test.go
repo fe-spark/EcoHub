@@ -68,9 +68,12 @@ func TestRunAutoMigrations_AllTablesCreatedAndCollectRecordResetWorks(t *testing
 	if err := RunAutoMigrations(testDB); err != nil {
 		t.Fatalf("RunAutoMigrations failed: %v", err)
 	}
-	for _, tbl := range []any{&model.MappingRule{}, &model.CollectRecord{}, &model.CollectRecordFilmItem{}} {
+	for _, tbl := range []any{&model.MappingRule{}, &model.CollectRecord{}, &model.FilmIndex{}} {
 		if !testDB.Migrator().HasTable(tbl) {
 			t.Fatalf("expected table for %T to be created", tbl)
 		}
+	}
+	if testDB.Migrator().HasTable("collect_record_films") {
+		t.Fatal("collect_record_films table should be dropped by latest migration")
 	}
 }

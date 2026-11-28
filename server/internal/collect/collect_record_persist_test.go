@@ -1,19 +1,24 @@
 package collect
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"server/internal/collect/ledger"
 	"server/internal/collect/progress"
+	"server/internal/film/catalog"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/sourcecatalog"
+	"server/internal/taxonomy"
 	"server/internal/testutil"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"server/internal/collect/ledger"
 )
 
 func TestPersistCollectRecord(t *testing.T) {
@@ -247,8 +252,8 @@ func TestSingleFilmBatch_RecordStartCreatesRunning(t *testing.T) {
 	if rec.Trigger != model.CollectTriggerSingleUpdate {
 		t.Fatalf("trigger %s", rec.Trigger)
 	}
-	if rec.Ledger {
-		t.Fatal("running record should not have a film ledger yet")
+	if rec.TargetMids != "[42]" {
+		t.Fatalf("expected target_mids=[42], got %q", rec.TargetMids)
 	}
 	if rec.SourceCount != 1 {
 		t.Fatalf("source count %d", rec.SourceCount)
@@ -296,7 +301,7 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.FilmIndex{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -316,19 +321,10 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var films int64
-	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&films).Error; err != nil {
-		t.Fatal(err)
-	}
-	if films != 0 {
-		t.Fatalf("below flush threshold wrote %d film rows", films)
-	}
-	if rec.Status != model.CollectRecordStatusRunning || rec.FilmCount != 0 || !strings.Contains(rec.DetailJson, `"status":"running"`) || strings.Contains(rec.DetailJson, `"filmsTotal":2`) {
+	if rec.Status != model.CollectRecordStatusRunning || rec.FilmCount != 0 || !strings.Contains(rec.DetailJson, `"status":"running"`) {
 		t.Fatalf("running record status=%s films=%d detail=%s", rec.Status, rec.FilmCount, rec.DetailJson)
 	}
 
-	// 流式刷入后发生服务重启，中断兜底能按已落账本找回影片部数。
-	batch.flushLedger()
 	if err := ledger.MarkInterruptedCollectRecords(); err != nil {
 		t.Fatal(err)
 	}
@@ -336,8 +332,8 @@ func TestRunningRecordStaysEmptyUntilInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Status != model.CollectRecordStatusInterrupted || rec.FilmCount != 2 || !rec.Ledger || rec.Hour != 24 {
-		t.Fatalf("interrupted record status=%s films=%d ledger=%v hour=%d", rec.Status, rec.FilmCount, rec.Ledger, rec.Hour)
+	if rec.Status != model.CollectRecordStatusInterrupted || rec.Hour != 24 {
+		t.Fatalf("interrupted record status=%s hour=%d", rec.Status, rec.Hour)
 	}
 }
 
@@ -349,7 +345,7 @@ func TestCheckpointKeepsSourceRunningUntilPersist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CollectRecord{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -400,7 +396,7 @@ func TestCheckpointKeepsSourceRunningUntilPersist(t *testing.T) {
 	}
 }
 
-func TestFullCollectStoresFilmLedger(t *testing.T) {
+func TestCollectMarksFilmIndexLastRecordID(t *testing.T) {
 	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -408,42 +404,90 @@ func TestFullCollectStoresFilmLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
+	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
 
-	src := model.FilmSource{Id: "full-src", Name: "全量站"}
-	batch := newCollectBatchContext(model.CollectTriggerManual, model.CollectTagBatchCollect, []model.FilmSource{src}, time.Now()).withHour(-1)
+	primarySrc := model.FilmSource{Id: "primary-src", Name: "主站", Uri: "http://primary.example/api", State: true, Sort: 0}
+	backupSrc := model.FilmSource{Id: "backup-src", Name: "副站", Uri: "http://backup.example/api", State: true, Sort: 1}
+	_ = gdb.Create(&[]model.FilmSource{primarySrc, backupSrc}).Error
+	_ = gdb.Create(&model.PrimaryState{Id: 1, PrimarySourceId: primarySrc.Id}).Error
+	_ = gdb.Create(&model.Category{Id: 1, Name: "电影", StableKey: "movie", Show: true}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: primarySrc.Id, SourceTypeId: 1, RawName: "动作片"}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: primarySrc.Id, SourceTypeId: 1, CategoryId: 1}).Error
+	_ = gdb.Create(&model.SourceCategory{SourceId: backupSrc.Id, SourceTypeId: 1, RawName: "动作片"}).Error
+	_ = gdb.Create(&model.CategoryMapping{SourceId: backupSrc.Id, SourceTypeId: 1, CategoryId: 1}).Error
+	catalog.ClearCategoryCache()
+	taxonomy.RefreshCategoryCache()
+	_ = sourcecatalog.RefreshCollectSourceCatalog()
+	stubStreamPublishForTest(t, func([]int64) error { return nil }, func() string { return primarySrc.Id })
+
+	batch := newCollectBatchContext(model.CollectTriggerManual, model.CollectTagBatchCollect, []model.FilmSource{primarySrc, backupSrc}, time.Now()).withHour(-1)
 	defer batch.close()
 	if err := batch.recordStart(); err != nil {
 		t.Fatal(err)
 	}
-	batch.AddAffectedMIDs(&src, -1, []int64{1, 2, 3})
-	persistCollectRecord(batch, []model.SourceNotifyResult{{
-		SourceID: src.Id, SourceName: src.Name, Status: progress.StatusDone,
-		PageTotal: 1, SuccessCnt: 1, FilmsTotal: 3,
-	}})
+
+	makeDetail := func(id int64, name string) model.MovieDetail {
+		return model.MovieDetail{
+			Id:         id,
+			Name:       name,
+			Cid:        1,
+			UpdateTime: "2026-11-28 10:00:00",
+			PlayList:   [][]model.MovieUrlInfo{{{Episode: "第1集", Link: "https://example.com/1.m3u8"}}},
+			PlayFrom:   []string{"m3u8"},
+		}
+	}
+
+	writtenPrimary, err := saveCollectedFilmForCollect(batch.WriteContext(context.Background(), &primarySrc), &primarySrc, 1, []model.MovieDetail{
+		makeDetail(101, "主站新片1"),
+		makeDetail(102, "主站新片2"),
+	})
+	if err != nil {
+		t.Fatalf("save primary failed: %v", err)
+	}
+	batch.AddAffectedMIDs(&primarySrc, -1, writtenPrimary.Affected)
+
+	writtenBackup, err := saveCollectedFilmForCollect(batch.WriteContext(context.Background(), &backupSrc), &backupSrc, 1, []model.MovieDetail{
+		makeDetail(201, "副站新片1"),
+	})
+	if err != nil {
+		t.Fatalf("save backup failed: %v", err)
+	}
+	batch.AddAffectedMIDs(&backupSrc, -1, writtenBackup.Affected)
+
+	persistCollectRecord(batch, []model.SourceNotifyResult{
+		{SourceID: primarySrc.Id, SourceName: primarySrc.Name, Status: progress.StatusDone, PageTotal: 1, SuccessCnt: 1},
+		{SourceID: backupSrc.Id, SourceName: backupSrc.Name, Status: progress.StatusDone, PageTotal: 1, SuccessCnt: 1},
+	})
 
 	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec.Status != model.CollectRecordStatusSuccess || rec.FilmCount != 3 || !rec.Ledger {
-		t.Fatalf("status=%s films=%d ledger=%v", rec.Status, rec.FilmCount, rec.Ledger)
+	if rec.Status != model.CollectRecordStatusSuccess || rec.FilmCount != 3 {
+		t.Fatalf("status=%s films=%d", rec.Status, rec.FilmCount)
 	}
-	var rows int64
-	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&rows).Error; err != nil {
+	var markedPrimary int64
+	if err := gdb.Model(&model.FilmIndex{}).Where("first_source_id = ? AND last_record_id = ?", primarySrc.Id, rec.ID).Count(&markedPrimary).Error; err != nil {
 		t.Fatal(err)
 	}
-	if rows != 3 {
-		t.Fatalf("full collect stored %d film ids", rows)
+	if markedPrimary != 2 {
+		t.Fatalf("expected 2 primary films marked with last_record_id=%d, got %d", rec.ID, markedPrimary)
+	}
+	var markedBackup int64
+	if err := gdb.Model(&model.FilmIndex{}).Where("first_source_id = ? AND last_record_id = ?", backupSrc.Id, rec.ID).Count(&markedBackup).Error; err != nil {
+		t.Fatal(err)
+	}
+	if markedBackup != 0 {
+		t.Fatalf("expected backup films not marked with last_record_id=%d, got %d", rec.ID, markedBackup)
 	}
 }
 
-func TestIncrementalCollectStoresSmallFilmLedger(t *testing.T) {
+func TestPersistCollectRecord_ReleasesSourceFilmSetAfterSourceFinish(t *testing.T) {
 	dsn := testutil.MemDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -451,37 +495,58 @@ func TestIncrementalCollectStoresSmallFilmLedger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.CollectRecord{}, &model.CollectRecordFilmItem{}); err != nil {
+	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
 	db.Mdb = gdb
 	t.Cleanup(func() { db.Mdb = prev })
+	stubStreamPublishForTest(t, func([]int64) error { return nil }, func() string { return "src-a" })
 
-	src := model.FilmSource{Id: "inc-src", Name: "增量站"}
-	batch := newCollectBatchContext(model.CollectTriggerCron, model.CollectTagCronCollect, []model.FilmSource{src}, time.Now()).withHour(24)
+	srcA := model.FilmSource{Id: "src-a", Name: "站A", Uri: "http://a.example/api", State: true, Sort: 0}
+	srcB := model.FilmSource{Id: "src-b", Name: "站B", Uri: "http://b.example/api", State: true, Sort: 1}
+	batch := newCollectBatchContext(model.CollectTriggerManual, model.CollectTagBatchCollect, []model.FilmSource{srcA, srcB}, time.Now()).withHour(-1)
 	defer batch.close()
 	if err := batch.recordStart(); err != nil {
 		t.Fatal(err)
 	}
-	batch.AddAffectedMIDs(&src, 24, []int64{11, 12})
-	persistCollectRecord(batch, []model.SourceNotifyResult{{
-		SourceID: src.Id, SourceName: src.Name, Status: progress.StatusDone,
-		PageTotal: 1, SuccessCnt: 1, FilmsTotal: 2,
-	}})
+
+	// 站A跨页存在重复 mid，先累计再去重释放集合，计数应保留
+	batch.AddAffectedMIDs(&srcA, -1, []int64{101, 102})
+	batch.AddAffectedMIDs(&srcA, -1, []int64{102, 103})
+	batch.releaseSourceFilmSet(srcA.Id)
+
+	batch.mu.Lock()
+	_, setStillExists := batch.sourceFilmSets[srcA.Id]
+	batch.mu.Unlock()
+	if setStillExists {
+		t.Fatal("expected sourceFilmSets for finished source src-a to be released")
+	}
+
+	batch.AddAffectedMIDs(&srcB, -1, []int64{201, 202, 202})
+	batch.releaseSourceFilmSet(srcB.Id)
+
+	persistCollectRecord(batch, []model.SourceNotifyResult{
+		{SourceID: srcA.Id, SourceName: srcA.Name, Status: progress.StatusDone, PageTotal: 2, SuccessCnt: 2},
+		{SourceID: srcB.Id, SourceName: srcB.Name, Status: progress.StatusDone, PageTotal: 1, SuccessCnt: 1},
+	})
 
 	rec, err := ledger.GetCollectRecordByBatchID(batch.batchID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rows int64
-	if err := gdb.Model(&model.CollectRecordFilmItem{}).Where("record_id = ?", rec.ID).Count(&rows).Error; err != nil {
+	if rec.FilmCount != 5 {
+		t.Fatalf("expected deduplicated FilmCount=5 (3+2), got %d", rec.FilmCount)
+	}
+	var details []model.CollectRecordSourceDetail
+	if err := json.Unmarshal([]byte(rec.DetailJson), &details); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 2 {
-		t.Fatalf("incremental ledger rows=%d", rows)
+	gotBySrc := map[string]int{}
+	for _, d := range details {
+		gotBySrc[d.SourceID] = d.FilmsTotal
 	}
-	if !rec.Ledger {
-		t.Fatal("incremental collect should keep the film ledger")
+	if gotBySrc[srcA.Id] != 3 || gotBySrc[srcB.Id] != 2 {
+		t.Fatalf("expected FilmsTotal {src-a:3, src-b:2}, got %+v", gotBySrc)
 	}
 }

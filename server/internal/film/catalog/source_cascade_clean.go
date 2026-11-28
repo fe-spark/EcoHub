@@ -68,9 +68,6 @@ func CleanSourceDataBatched(id string) ([]int64, error) {
 	if err := DeleteBySourceBatched(&model.MovieSourceMapping{}, model.TableMovieSourceMapping, "source_id", id); err != nil {
 		return allOwned, err
 	}
-	if err := DeleteBySourceBatched(&model.CollectRecordFilmItem{}, model.TableCollectRecordFilm, "source_id", id); err != nil {
-		return allOwned, err
-	}
 	if err := db.Mdb.Where("source_id = ?", id).Delete(&model.BannerSlot{}).Error; err != nil {
 		return allOwned, err
 	}
@@ -105,14 +102,6 @@ func AssertSourceDataCleanedTx(tx *gorm.DB, sourceID string) error {
 	}
 	if count > 0 {
 		return fmt.Errorf("采集站影片映射未清理完毕（剩余 %d 条），保留站点以供重试", count)
-	}
-	if tx.Migrator().HasTable(&model.CollectRecordFilmItem{}) {
-		if err := tx.Model(&model.CollectRecordFilmItem{}).Where("source_id = ?", sourceID).Count(&count).Error; err != nil {
-			return err
-		}
-		if count > 0 {
-			return fmt.Errorf("采集站采集记录清单未清理完毕（剩余 %d 条），保留站点以供重试", count)
-		}
 	}
 	return nil
 }

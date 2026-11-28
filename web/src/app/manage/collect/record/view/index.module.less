@@ -42,7 +42,9 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+  width: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 .triggerRow {
@@ -50,6 +52,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+  max-width: 100%;
 }
 
 .scopePill {
@@ -64,8 +67,103 @@
   white-space: nowrap;
 }
 
+.filmChipsRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+}
+
 .filmChip {
   cursor: pointer;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.subTextEllipsis {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pageProgressRow {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pagePrimary {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ant-color-text);
+  white-space: nowrap;
+}
+
+.pageFailedBadge {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--ant-color-error-bg);
+  color: var(--ant-color-error);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.errorPreviewBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--ant-color-error-border);
+  border-radius: 6px;
+  background: var(--ant-color-error-bg);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: var(--ant-color-error);
+  }
+}
+
+.errorSummaryIcon {
+  flex-shrink: 0;
+  color: var(--ant-color-error);
+}
+
+.errorSummaryBadge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--ant-color-error);
+  color: var(--ant-color-white);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.errorSummaryText {
+  min-width: 0;
+  color: var(--ant-color-error-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timePrimary {
@@ -94,32 +192,6 @@
 
 .subTextDanger {
   color: var(--ant-color-error);
-}
-
-.filmActionPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 10px;
-  border: 1px solid var(--ant-color-primary-border);
-  border-radius: 999px;
-  background: var(--ant-color-primary-bg);
-  color: var(--ant-color-primary);
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.4;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-
-  &:hover {
-    background: var(--ant-color-primary-bg-hover);
-    border-color: var(--ant-color-primary);
-  }
-}
-
-.filmPillArrow {
-  font-size: 10px;
 }
 
 .filmNumber {
