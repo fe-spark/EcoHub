@@ -18,6 +18,9 @@
 
 </div>
 
+> [!WARNING]
+> v3 is incompatible with v2 databases and provides no migration. Do not update directly over an existing `./data/mysql` or use "立即升级" in v2. See [Upgrading from v2 to v3](./guide/v2-to-v3.md).
+
 ## Recommendations
 
 | Kind | Provider | Notes | Link |
@@ -91,9 +94,6 @@ EcoHub/
 
 > [!NOTE]
 > EcoHub provides and stores no media files. All metadata comes from collect APIs configured by the operator.
-
-> [!WARNING]
-> v3 is incompatible with v2 databases and provides no migration. Do not update directly over an existing `./data/mysql` or use "立即升级" in v2. See [Upgrading from v2 to v3](./guide/v2-to-v3.md).
 
 ## Contributing and license
 
