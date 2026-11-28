@@ -121,7 +121,8 @@ export default function SourceCallsCard({ sources, loading }: SourceCallsCardPro
       ) : (
         <EChartBox
           option={barOption}
-          height={Math.max(260, Math.min(360, validRows.slice(0, 10).length * 34))}
+          fill
+          minHeight={Math.max(260, Math.min(360, validRows.slice(0, 10).length * 34))}
         />
       )}
     </Card>

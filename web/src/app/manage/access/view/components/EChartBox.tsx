@@ -25,9 +25,17 @@ echarts.use([
 interface EChartBoxProps {
   option: EChartsCoreOption;
   height?: number;
+  /** 撑满父级 flex 容器剩余高度，避免图表自身画布反撑导致容器无法收缩 */
+  fill?: boolean;
+  minHeight?: number;
 }
 
-export default function EChartBox({ option, height = 260 }: EChartBoxProps) {
+export default function EChartBox({
+  option,
+  height = 260,
+  fill = false,
+  minHeight,
+}: EChartBoxProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const { effective } = useThemeMode();
@@ -64,6 +72,21 @@ export default function EChartBox({ option, height = 260 }: EChartBoxProps) {
       { notMerge: true, lazyUpdate: true },
     );
   }, [option, effective]);
+
+  if (fill) {
+    return (
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          flex: 1,
+          minHeight: minHeight ?? height,
+        }}
+      >
+        <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+      </div>
+    );
+  }
 
   return <div ref={containerRef} style={{ width: "100%", height }} />;
 }
