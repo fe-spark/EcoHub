@@ -1,12 +1,12 @@
-正式版 **v3.2.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.2.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x / v3.2.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - 首次启动自动在线加列与索引并移除 `collect_record_films` 账本表，无需锁表。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.2.2 更新内容
 
@@ -17,14 +17,14 @@
 
 ---
 
-正式版 **v3.2.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.2.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.2.1 更新内容
 
@@ -35,14 +35,14 @@
 
 ---
 
-正式版 **v3.2.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.2.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.2.0 更新内容
 
@@ -53,14 +53,14 @@
 
 ---
 
-正式版 **v3.1.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.1.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.1.6 更新内容
 
@@ -69,14 +69,14 @@
 
 ---
 
-正式版 **v3.1.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.1.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.1.5 更新内容
 
@@ -87,14 +87,14 @@
 
 ---
 
-正式版 **v3.1.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.4`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.1.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.4`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.1.4 更新内容
 
@@ -102,14 +102,14 @@
 
 ---
 
-正式版 **v3.1.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.3`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.1.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.3`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.1.3 更新内容
 
@@ -117,14 +117,14 @@
 
 ---
 
-正式版 **v3.1.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.1.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.1.2 更新内容
 
@@ -136,14 +136,14 @@
 
 ---
 
-正式版 **v3.1.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.1.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x / v3.1.0：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.1.1 更新内容
 
@@ -154,15 +154,15 @@
 
 ---
 
-正式版 **v3.1.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.1.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - **第一次启动会建立排片评分索引** `idx_film_index_cat_score`。还没有影片列表索引 `idx_film_index_source_updated` 时，同一次启动也会建它，并按采集站重算片库影片数。片库很大时这些步骤会久一些。统计失败时原来的影片数保持不变。影片数据不改，不删采集记录。已运行过 `v3.1.0-beta.x` 的库可直接平滑升级。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.1.0 更新内容
 
@@ -174,15 +174,15 @@
 
 ---
 
-正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - **从 v3.0.5 升级时，启动会清空采集记录**：删除 `collect_records`、`collect_record_films` 后按新结构重建。已经跑过 v3.0.6-beta.2 及之后测试版的库不会再清一次。影片库不在这两张表里，不受影响。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.0.6 更新内容
 
@@ -193,15 +193,15 @@
 
 ---
 
-正式版 **v3.0.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+正式版 **v3.0.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
-中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
 ### 升级说明
 
 - v3.0.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
 - **v3.0.3 不再读取 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`**：编排文件和 `.env.example` 已移除这三个变量，旧 `.env` 中保留的值不再生效。此前依赖这些变量使弹幕或 Telegram 通过代理访问的，升级后须在后台「网络代理」开启全局代理，并开启「弹幕抓取」或「Telegram 机器人」模块，否则相关请求将直连。
-- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
 
 ### v3.0.5 更新内容
 

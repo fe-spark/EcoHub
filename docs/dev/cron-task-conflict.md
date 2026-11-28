@@ -1,6 +1,6 @@
 # 计划任务运行冲突
 
-中文 | [English](./cron-task-conflict_EN.md)
+中文 | [English](../en/dev/cron-task-conflict.md)
 
 ## 规则摘要
 
@@ -82,4 +82,4 @@
 
 ## 相关文档
 
-[常见问题](./README-FAQ.md) · [服务端说明](../server/README.md) · [版本说明](./RELEASE.md)
+[核心机制与数据链路](./architecture.md) · [服务端说明](../../server/README.md) · [版本说明](../RELEASE.md)

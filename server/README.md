@@ -4,13 +4,13 @@
 
 `server/` 为 EcoHub 的 Go 后端，负责采集、片库、列表与缓存、订阅接口和后台鉴权。
 
-功能行为（主站、匹配、刮削、缓存）见 [常见问题](../docs/README-FAQ.md)，计划任务的执行顺序见 [计划任务运行冲突](../docs/cron-task-conflict.md)，Docker 部署所用的变量见 [部署指南](../docs/README-Deploy.md#环境变量)。
+功能行为与数据链路（流式发布、匹配、刮削、缓存）见 [核心机制与数据链路](../docs/dev/architecture.md)，计划任务的执行顺序见 [计划任务运行冲突](../docs/dev/cron-task-conflict.md)，Docker 部署所用的变量见 [运维与配置](../docs/guide/operations.md#环境变量)。
 
 ## 本地启动
 
 环境要求：Go 1.27+、MySQL 8+、Redis 7+。
 
-如无可用数据库，可执行根目录开发编排仅启动数据库（详情见 [开发指南](../docs/README-Dev.md#开发编排)）：
+如无可用数据库，可执行根目录开发编排仅启动数据库（详情见 [开发指南](../docs/dev/setup.md#开发编排)）：
 
 ```bash
 docker compose up -d mysql redis
@@ -200,4 +200,4 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 
 ## 相关文档
 
-[总览](../README.md) · [前端说明](../web/README.md) · [部署指南](../docs/README-Deploy.md) · [常见问题](../docs/README-FAQ.md)
+[总览](../README.md) · [核心机制](../docs/dev/architecture.md) · [前端说明](../web/README.md) · [部署指南](../docs/guide/deploy.md) · [运维与配置](../docs/guide/operations.md)

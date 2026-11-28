@@ -45,7 +45,7 @@ API_URL=http://127.0.0.1:8080
 
 ### 在容器中运行前端
 
-使用根目录开发编排仅构建并启动前端容器（编排说明见 [开发指南](../docs/README-Dev.md#开发编排)）：
+使用根目录开发编排仅构建并启动前端容器（编排说明见 [开发指南](../docs/dev/setup.md#开发编排)）：
 
 ```bash
 docker compose up -d mysql redis
@@ -102,4 +102,4 @@ web/
 
 ## 相关文档
 
-[总览](../README.md) · [服务端说明](../server/README.md) · [部署指南](../docs/README-Deploy.md) · [常见问题](../docs/README-FAQ.md)
+[总览](../README.md) · [服务端说明](../server/README.md) · [部署指南](../docs/guide/deploy.md) · [核心机制](../docs/dev/architecture.md) · [常见问题](../docs/guide/faq.md)

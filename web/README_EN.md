@@ -45,7 +45,7 @@ The site is available at `http://127.0.0.1:3000`, the login page at `/login`, an
 
 ### Run the web app in a container
 
-Build and run only the frontend container with the development compose file (see the [Development guide](../docs/README-Dev_EN.md#development-compose-file)):
+Build and run only the frontend container with the development compose file (see the [Development guide](../docs/en/dev/setup.md#development-compose-file)):
 
 ```bash
 docker compose up -d mysql redis
@@ -102,4 +102,4 @@ web/
 
 ## Related documents
 
-[Overview](../docs/README_EN.md) · [Server](../server/README_EN.md) · [Deploy guide](../docs/README-Deploy_EN.md) · [FAQ](../docs/README-FAQ_EN.md)
+[Overview](../docs/en/README.md) · [Server](../server/README_EN.md) · [Deploy guide](../docs/en/guide/deploy.md) · [Architecture](../docs/en/dev/architecture.md) · [FAQ](../docs/en/guide/faq.md)

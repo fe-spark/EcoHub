@@ -1,18 +1,35 @@
-# EcoHub 文档索引 / Docs index
+# EcoHub 文档索引 / Docs Index
 
-下表并列列出中文版和英文版文档，「—」表示无英文版。/ Chinese and English versions are listed side by side. "—" indicates that no English version exists.
+文档按使用对象分为「使用与运维（`guide/`）」和「开发与架构（`dev/`）」，英文镜像统一置于 [en/](./en/README.md)。
 
-| 文档 | 中文 | English | 内容 |
+## 项目入口 / Overview
+
+| 主题 | 中文 | English | 说明 |
 | --- | --- | --- | --- |
-| 总览 | [README](../README.md) | [README_EN](./README_EN.md) | 项目简介、核心功能、技术架构、快速开始、推荐服务商、目录结构 |
-| 部署指南 | [README-Deploy](./README-Deploy.md) | [README-Deploy_EN](./README-Deploy_EN.md) | `ecohub` 命令、自定义编排、密码、端口、1Panel、手动部署、反向代理、环境变量 |
-| 从 v2 升级到 v3 | [v2-to-v3](./v2-to-v3.md) | [v2-to-v3_EN](./v2-to-v3_EN.md) | 删除旧容器、使用空库重装、全量采集 |
-| 常见问题 | [README-FAQ](./README-FAQ.md) | [README-FAQ_EN](./README-FAQ_EN.md) | 空站、主站、采集、缓存、网络代理、弹幕、登录、私有化访问 |
-| 开发指南 | [README-Dev](./README-Dev.md) | [README-Dev_EN](./README-Dev_EN.md) | 本地开发环境、开发编排与发布编排的区别 |
-| 计划任务运行冲突 | [cron-task-conflict](./cron-task-conflict.md) | [cron-task-conflict_EN](./cron-task-conflict_EN.md) | 采集任务与维护任务同时触发时的执行顺序 |
-| 版本说明 | [RELEASE](./RELEASE.md) | [RELEASE_EN](./RELEASE_EN.md) | 当前版本的变更内容。仅中文版 `RELEASE.md` 作为 GitHub Release 正文 |
-| 服务端说明 | [server/README](../server/README.md) | [server/README_EN](../server/README_EN.md) | Go 后端的本地启动、容器运行、环境变量、接口、目录结构 |
-| 前端说明 | [web/README](../web/README.md) | [web/README_EN](../web/README_EN.md) | Next.js 的本地启动、容器运行、`API_URL`、鉴权、目录结构 |
-| 文档写作规范 | [STYLE](./STYLE.md) | — | 文风、文档结构、术语表、格式约定 |
+| 总览 | [README](../README.md) | [en/README](./en/README.md) | 项目简介、核心功能、快速开始、目录结构 |
+| 版本说明 | [RELEASE](./RELEASE.md) | [en/RELEASE](./en/RELEASE.md) | 当前及历史版本变更（`docs/RELEASE.md` 用作 GitHub Release 正文） |
+
+## 使用与运维 / User & Operations Guide
+
+| 主题 | 中文 | English | 说明 |
+| --- | --- | --- | --- |
+| 部署指南 | [guide/deploy](./guide/deploy.md) | [en/guide/deploy](./en/guide/deploy.md) | 准备条件、脚本/1Panel/手动部署、访问地址与反代 |
+| 运维与配置 | [guide/operations](./guide/operations.md) | [en/guide/operations](./en/guide/operations.md) | `ecohub` 命令、密码与端口规则、自定义编排、外置库、环境变量与排障 |
+| 从 v2 升级到 v3 | [guide/v2-to-v3](./guide/v2-to-v3.md) | [en/guide/v2-to-v3](./en/guide/v2-to-v3.md) | 停用旧容器、空库重装与验证 |
+| 常见问题 | [guide/faq](./guide/faq.md) | [en/guide/faq](./en/guide/faq.md) | 面向使用与排障的常见问题解答 |
+
+## 开发与架构 / Developer Docs
+
+| 主题 | 中文 | English | 说明 |
+| --- | --- | --- | --- |
+| 开发指南 | [dev/setup](./dev/setup.md) | [en/dev/setup](./en/dev/setup.md) | 本地环境要求与开发编排 |
+| 核心机制与数据链路 | [dev/architecture](./dev/architecture.md) | [en/dev/architecture](./en/dev/architecture.md) | 流式发布、索引封口、去重匹配、缓存策略、弹幕缩放、双端鉴权 |
+| 计划任务运行冲突 | [dev/cron-task-conflict](./dev/cron-task-conflict.md) | [en/dev/cron-task-conflict](./en/dev/cron-task-conflict.md) | 采集与维护任务并发裁决及维护闸门 |
+| 服务端说明 | [server/README](../server/README.md) | [server/README_EN](../server/README_EN.md) | Go 后端本地启动、环境变量、启动流程、接口与目录结构 |
+| 前端说明 | [web/README](../web/README.md) | [web/README_EN](../web/README_EN.md) | Next.js 本地启动、`API_URL`、鉴权与目录结构 |
+
+## 维护规范 / Style Guide
+
+- [文档写作规范](./STYLE.md)（仅中文）：目录组织、文风、术语表与中英文同步规则。
 
 交流群组：[Telegram](https://t.me/ecohub_club)

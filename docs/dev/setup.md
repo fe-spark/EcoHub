@@ -1,8 +1,8 @@
 # 开发指南
 
-中文 | [English](./README-Dev_EN.md)
+中文 | [English](../en/dev/setup.md)
 
-本文说明如何在本地搭建 EcoHub 的开发环境。后端和前端的详细说明见 [服务端说明](../server/README.md) 和 [前端说明](../web/README.md)。
+本文说明如何在本地搭建 EcoHub 的开发环境。后端和前端的详细说明见 [服务端说明](../../server/README.md) 和 [前端说明](../../web/README.md)。
 
 ## 环境要求
 
@@ -13,7 +13,7 @@
 
 ## 开发编排
 
-仓库根目录的 `docker-compose.yml` 仅用于本地开发，不适用于生产部署。它与发布编排 [deploy/release/compose.yml](../deploy/release/compose.yml) 的区别如下：
+仓库根目录的 `docker-compose.yml` 仅用于本地开发，不适用于生产部署。它与发布编排 [deploy/release/compose.yml](../../deploy/release/compose.yml) 的区别如下：
 
 | | 根目录 `docker-compose.yml` | `deploy/release/compose.yml` |
 | --- | --- | --- |
@@ -51,7 +51,7 @@
 docker compose up -d --build
 ```
 
-前台地址为 `http://127.0.0.1:3000`，后端 API 地址为 `http://127.0.0.1:18080`。端口和密码可在仓库根目录的 `.env` 中修改（从 [.env.example](../.env.example) 复制；不创建时使用默认值）。
+前台地址为 `http://127.0.0.1:3000`，后端 API 地址为 `http://127.0.0.1:18080`。端口和密码可在仓库根目录的 `.env` 中修改（从 [.env.example](../../.env.example) 复制；不创建时使用默认值）。
 
 ## 注意事项
 
@@ -60,4 +60,4 @@ docker compose up -d --build
 
 ## 相关文档
 
-[总览](../README.md) · [服务端说明](../server/README.md) · [前端说明](../web/README.md) · [部署指南](./README-Deploy.md)
+[核心机制与数据链路](./architecture.md) · [计划任务运行冲突](./cron-task-conflict.md) · [服务端说明](../../server/README.md) · [前端说明](../../web/README.md)

@@ -4,13 +4,13 @@
 
 `server/` contains the EcoHub Go backend, which handles collect, the film library, lists and caches, subscription APIs, and admin authentication.
 
-For behavior (main source, matching, scraping, caching), see the [FAQ](../docs/README-FAQ_EN.md). For the execution order of scheduled tasks, see [Scheduled task conflicts](../docs/cron-task-conflict_EN.md). For Docker deployment variables, see the [Deploy guide](../docs/README-Deploy_EN.md#environment-variables).
+For internal behavior (streaming publish, matching, scraping, caching), see [Core mechanics and data flow](../docs/en/dev/architecture.md). For scheduled task ordering, see [Scheduled task conflicts](../docs/en/dev/cron-task-conflict.md). For Docker deployment variables, see [Operations and configuration](../docs/en/guide/operations.md#environment-variables).
 
 ## Run locally
 
 Requirements: Go 1.27+, MySQL 8+, and Redis 7+.
 
-If no database is available, start only the database containers with the development compose file (see the [Development guide](../docs/README-Dev_EN.md#development-compose-file)):
+If no database is available, start only the database containers with the development compose file (see the [Development guide](../docs/en/dev/setup.md#development-compose-file)):
 
 ```bash
 docker compose up -d mysql redis
@@ -200,4 +200,4 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 
 ## Related documents
 
-[Overview](../docs/README_EN.md) · [Web](../web/README_EN.md) · [Deploy guide](../docs/README-Deploy_EN.md) · [FAQ](../docs/README-FAQ_EN.md)
+[Overview](../docs/en/README.md) · [Core mechanics](../docs/en/dev/architecture.md) · [Web](../web/README_EN.md) · [Deploy guide](../docs/en/guide/deploy.md) · [Operations](../docs/en/guide/operations.md)

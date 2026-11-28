@@ -12,14 +12,14 @@
 
 **自托管影视聚合系统：从采集站汇集影视数据，提供观影网站、管理后台与多端订阅接口。**
 
-中文 | [English](./docs/README_EN.md)
+中文 | [English](./docs/en/README.md)
 
-[在线演示](https://eco.fe-spark.cn) · [管理后台](https://eco.fe-spark.cn/manage) · [部署指南](./docs/README-Deploy.md) · [常见问题](./docs/README-FAQ.md) · [版本说明](./docs/RELEASE.md) · [交流群组](https://t.me/ecohub_club)
+[在线演示](https://eco.fe-spark.cn) · [管理后台](https://eco.fe-spark.cn/manage) · [部署指南](./docs/guide/deploy.md) · [常见问题](./docs/guide/faq.md) · [版本说明](./docs/RELEASE.md) · [交流群组](https://t.me/ecohub_club)
 
 </div>
 
 > [!WARNING]
-> v3 与 v2 的数据库不兼容，且不提供数据迁移。请勿在旧的 `./data/mysql` 上直接拉取新镜像，也勿使用 v2 后台的「立即升级」。升级步骤见 [从 v2 升级到 v3](./docs/v2-to-v3.md)。
+> v3 与 v2 的数据库不兼容，且不提供数据迁移。请勿在旧的 `./data/mysql` 上直接拉取新镜像，也勿使用 v2 后台的「立即升级」。升级步骤见 [从 v2 升级到 v3](./docs/guide/v2-to-v3.md)。
 
 ## 简介
 
@@ -56,7 +56,7 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 - [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)（`app-for-android/`）
 - [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)（`app-for-ohos/`）
 
-功能细节见 [常见问题](./docs/README-FAQ.md)。
+功能细节见 [常见问题](./docs/guide/faq.md)。
 
 ## 快速开始
 
@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
   | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
 ```
 
-安装完成后终端将输出访问地址、初始账号与订阅地址，默认 Web 端口为 `3000`，数据目录为 `~/ecohub`，后续可通过 `ecohub` 命令管理。密码、端口、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/README-Deploy.md)。
+安装完成后终端将输出访问地址、初始账号与订阅地址，默认 Web 端口为 `3000`，数据目录为 `~/ecohub`，后续可通过 `ecohub` 命令管理。密码、端口、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/guide/deploy.md) 与 [运维与配置](./docs/guide/operations.md)。
 
 ## 推荐
 
@@ -82,15 +82,12 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 
 | 文档 | 内容 |
 | --- | --- |
-| [部署指南](./docs/README-Deploy.md) | 安装、`ecohub` 命令、密码、端口、1Panel、反向代理、环境变量 |
-| [从 v2 升级到 v3](./docs/v2-to-v3.md) | 删除旧容器、使用空库重装、全量采集 |
-| [常见问题](./docs/README-FAQ.md) | 空站、主站、采集、缓存、网络代理、弹幕、登录、私有化访问 |
-| [计划任务运行冲突](./docs/cron-task-conflict.md) | 采集任务与维护任务同时触发时的执行顺序 |
-| [开发指南](./docs/README-Dev.md) | 本地开发环境与开发编排 |
-| [服务端说明](./server/README.md) | Go 后端启动、环境变量、接口、目录结构 |
-| [前端说明](./web/README.md) | Next.js 前端启动、`API_URL`、鉴权、目录结构 |
+| [部署指南](./docs/guide/deploy.md) | 准备、安装脚本、1Panel、手动部署、访问地址、反向代理 |
+| [运维与配置](./docs/guide/operations.md) | `ecohub` 命令、密码与端口生效规则、自定义编排、自备数据库、环境变量 |
+| [从 v2 升级到 v3](./docs/guide/v2-to-v3.md) | 删除旧容器、使用空库重装、全量采集 |
+| [常见问题](./docs/guide/faq.md) | 空站、主站、轮播与推荐、网络代理、弹幕、私有化访问 |
 | [版本说明](./docs/RELEASE.md) | 当前版本及历史版本的变更内容 |
-| [文档索引](./docs/README.md) | 全部中英文文档索引 |
+| [文档索引](./docs/README.md) | 全部使用、开发及中英文文档导航 |
 
 ## 目录结构
 
@@ -102,7 +99,7 @@ EcoHub/
 ├── app-for-ohos/        # OHOS 客户端（git submodule）
 ├── deploy/release/      # 发布编排 compose.yml
 ├── scripts/             # 安装脚本 install-release.sh（ecohub 命令）
-├── docs/                # 项目文档
+├── docs/                # 项目文档（guide/、dev/、en/）
 ├── .github/workflows/   # GitHub Release 与 Docker 镜像构建流程
 ├── Dockerfile           # All-in-One 发布镜像
 ├── docker-compose.yml   # 本地开发编排
@@ -115,7 +112,7 @@ EcoHub/
 
 ### 本地开发
 
-环境要求：Go 1.27+、Node.js 20.9+、MySQL 8、Redis 7。搭建步骤与编排说明见 [开发指南](./docs/README-Dev.md)，模块细节见 [服务端说明](./server/README.md) 与 [前端说明](./web/README.md)。
+环境要求：Go 1.27+、Node.js 20.9+、MySQL 8、Redis 7。搭建步骤与设计细节见 [开发指南](./docs/dev/setup.md)、[核心机制与数据链路](./docs/dev/architecture.md)、[计划任务运行冲突](./docs/dev/cron-task-conflict.md)、[服务端说明](./server/README.md) 与 [前端说明](./web/README.md)。
 
 ## 许可证
 

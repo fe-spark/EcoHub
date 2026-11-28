@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../logo.png" alt="EcoHub" width="110" />
+<img src="../../logo.png" alt="EcoHub" width="110" />
 
 # EcoHub
 
@@ -8,28 +8,28 @@
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![Docker](https://img.shields.io/badge/ghcr.io-fe--spark%2Fecohub-2496ED?logo=docker&logoColor=white)](https://github.com/fe-spark/EcoHub/pkgs/container/ecohub)
-[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue)](../LICENSE)
+[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue)](../../LICENSE)
 
-**Self-hosted film aggregation system: collects film metadata from collect sources and provides a viewing site, an admin panel, and subscription endpoints.**
+**Self-hosted media aggregation system: collects catalog data from upstream sources and serves a viewing site, an admin panel, and subscription APIs.**
 
-[中文](../README.md) | English
+[中文](../../README.md) | English
 
-[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Release notes](./RELEASE_EN.md) · [Telegram](https://t.me/ecohub_club)
+[Live demo](https://eco.fe-spark.cn) · [Admin demo](https://eco.fe-spark.cn/manage) · [Deploy guide](./guide/deploy.md) · [FAQ](./guide/faq.md) · [Release notes](./RELEASE.md) · [Community](https://t.me/ecohub_club)
 
 </div>
 
 > [!WARNING]
-> v3 cannot read a v2 database, and there is no migration. Do not pull the new image on top of an old `./data/mysql`, and do not click "立即升级" (upgrade now) in the v2 admin. Steps: [v2 to v3](./v2-to-v3_EN.md).
+> v3 is not compatible with v2 databases, and no data migration is provided. Do not pull the v3 image onto an existing `./data/mysql`, and do not use "立即升级" (Upgrade now) in v2. See [Upgrading from v2 to v3](./guide/v2-to-v3.md).
 
 ## Overview
 
-EcoHub is a self-hosted film aggregation system for individuals and small teams. After an administrator configures collect sources in the admin panel, EcoHub periodically fetches film metadata into the database. The application ships as a single All-in-One Docker image alongside MySQL 8 and Redis 7.
+EcoHub is a self-hosted media aggregation system for individuals and small teams. After an administrator configures collect sources, the server pulls media metadata on a schedule, ships as a single all-in-one Docker image, and runs with MySQL 8 and Redis 7.
 
-EcoHub neither provides nor stores any media files; all sources come from collect APIs configured by the deployer.
+EcoHub provides and stores no media files. All media comes from the collect APIs configured by the operator.
 
 | Demo | URL |
 | --- | --- |
-| Viewing site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
+| Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin panel | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
 
 ## Main features
@@ -54,7 +54,7 @@ Separate repositories, included as git submodules:
 - [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android) (`app-for-android/`)
 - [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (`app-for-ohos/`)
 
-For behavioral details, see the [FAQ](./README-FAQ_EN.md).
+For usage questions, see the [FAQ](./guide/faq.md).
 
 ## Quick start
 
@@ -65,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
   | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
 ```
 
-After installation, the terminal prints the URLs, initial credentials, and subscription URLs. The default web port is `3000`, the install directory is `~/ecohub`, and daily management uses `ecohub`. For passwords, ports, 1Panel, manual deployment, reverse proxies, and environment variables, see the [Deploy guide](./README-Deploy_EN.md).
+After installation, the terminal prints the URLs, initial credentials, and subscription URLs. The default web port is `3000`, the install directory is `~/ecohub`, and daily management uses `ecohub`. For passwords, ports, 1Panel, manual deployment, reverse proxies, and environment variables, see the [Deploy guide](./guide/deploy.md) and [Operations](./guide/operations.md).
 
 ## Recommendations
 
@@ -80,15 +80,12 @@ After installation, the terminal prints the URLs, initial credentials, and subsc
 
 | Document | Contents |
 | --- | --- |
-| [Deploy guide](./README-Deploy_EN.md) | Install, `ecohub` CLI, passwords, ports, 1Panel, reverse proxy, environment variables |
-| [v2 to v3](./v2-to-v3_EN.md) | Removing old containers, fresh install with an empty database, full collect |
-| [FAQ](./README-FAQ_EN.md) | Empty site, main source, collect, cache, network proxy, danmaku, login, private access |
-| [Scheduled task conflicts](./cron-task-conflict_EN.md) | Execution order when collect and maintenance tasks are triggered together |
-| [Dev guide](./README-Dev_EN.md) | Local development environment and development compose |
-| [Server guide](../server/README_EN.md) | Go backend startup, environment variables, endpoints, directory layout |
-| [Web guide](../web/README_EN.md) | Next.js frontend startup, `API_URL`, authentication, directory layout |
-| [Release notes](./RELEASE_EN.md) | Changes in the current and previous releases |
-| [Docs index](./README.md) | Complete index of Chinese and English documents |
+| [Deploy guide](./guide/deploy.md) | Prerequisites, install script, 1Panel, manual docker run, URLs, reverse proxy |
+| [Operations and configuration](./guide/operations.md) | `ecohub` CLI, password/port reload rules, overrides, external DB, env vars |
+| [Upgrading from v2 to v3](./guide/v2-to-v3.md) | Removing old containers, fresh install with empty DB, full collect |
+| [FAQ](./guide/faq.md) | Empty site, main source, banners/recommendations, proxy, danmaku, private access |
+| [Release notes](./RELEASE.md) | Changes in the current and previous releases |
+| [Docs index](../README.md) | Complete index of user, dev, and bilingual documents |
 
 ## Directory layout
 
@@ -100,7 +97,7 @@ EcoHub/
 ├── app-for-ohos/        # OHOS client (git submodule)
 ├── deploy/release/      # Release compose file (compose.yml)
 ├── scripts/             # Install script install-release.sh (ecohub CLI)
-├── docs/                # Project documentation
+├── docs/                # Project documentation (guide/, dev/, en/)
 ├── .github/workflows/   # GitHub Release and Docker image workflows
 ├── Dockerfile           # All-in-One release image
 ├── docker-compose.yml   # Local development compose
@@ -109,14 +106,14 @@ EcoHub/
 
 ## Contributing
 
-This project is maintained in spare time with limited update frequency. [Issues](https://github.com/fe-spark/EcoHub/issues) and [Pull Requests](https://github.com/fe-spark/EcoHub/pulls) are welcome. Documentation changes should follow the [Style guide](./STYLE.md) (Chinese).
+This project is maintained in spare time with limited update frequency. [Issues](https://github.com/fe-spark/EcoHub/issues) and [Pull Requests](https://github.com/fe-spark/EcoHub/pulls) are welcome. Documentation changes should follow the [Style guide](../STYLE.md) (Chinese).
 
 ### Local development
 
-Requirements: Go 1.27+, Node.js 20.9+, MySQL 8, and Redis 7. See the [Dev guide](./README-Dev_EN.md) for setup and compose usage, and the [Server guide](../server/README_EN.md) and [Web guide](../web/README_EN.md) for module details.
+Requirements: Go 1.27+, Node.js 20.9+, MySQL 8, and Redis 7. See the [Development guide](./dev/setup.md), [Core mechanics](./dev/architecture.md), [Scheduled task conflicts](./dev/cron-task-conflict.md), [Server guide](../../server/README_EN.md), and [Web guide](../../web/README_EN.md).
 
 ## License
 
-This project is licensed under the [PolyForm Noncommercial License 1.0.0](../LICENSE) for noncommercial use only.
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](../../LICENSE) for noncommercial use only.
 
 Comply with local laws and the terms of use of each collect source when using EcoHub.
