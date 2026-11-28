@@ -56,7 +56,7 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gen admin token: %v", err)
 	}
-	if err := user.SaveUserToken(adminToken, adminUserID); err != nil {
+	if err := user.SaveUserToken(adminToken, adminUserID, model.UserRoleAdmin); err != nil {
 		t.Fatalf("save admin token: %v", err)
 	}
 
@@ -65,7 +65,7 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gen normal token: %v", err)
 	}
-	if err := user.SaveUserToken(normalToken, normalUserID); err != nil {
+	if err := user.SaveUserToken(normalToken, normalUserID, model.UserRoleNormal); err != nil {
 		t.Fatalf("save normal token: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	// 12. Visitor (read-only) MUST be forbidden on all mutating routes
 	visitorUserID := uint(20003)
 	visitorToken, _ := utils.GenToken(visitorUserID, "guest", model.UserRoleVisitor)
-	_ = user.SaveUserToken(visitorToken, visitorUserID)
+	_ = user.SaveUserToken(visitorToken, visitorUserID, model.UserRoleVisitor)
 	gdb.Create(&model.User{Model: gorm.Model{ID: visitorUserID}, Role: model.UserRoleVisitor, Status: 0})
 
 	wVisitorFilmSave := performReq(http.MethodPost, "/api/manage/film/save", visitorToken)

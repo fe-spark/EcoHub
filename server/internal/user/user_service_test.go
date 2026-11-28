@@ -13,6 +13,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/testutil"
+	"server/internal/utils"
 )
 
 func TestUserService_VerifyUserPassword_EdgeCases(t *testing.T) {
@@ -84,11 +85,11 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	}
 
 	// 1. 登录写入单点 Token
-	if err := SaveUserToken("initial_token", u.ID); err != nil {
+	if err := SaveUserToken("initial_token", u.ID, u.Role); err != nil {
 		t.Fatalf("save token: %v", err)
 	}
-	if tok, err := GetUserToken(u.ID); err != nil || tok != "initial_token" {
-		t.Fatalf("expected initial_token, got %q err=%v", tok, err)
+	if status, err := CheckUserToken(u.ID, u.Role, "initial_token"); err != nil || status != TokenValid {
+		t.Fatalf("expected initial_token valid, got status=%v err=%v", status, err)
 	}
 
 	// 2. 普通修改（仅更新昵称），Token 应该保持有效
@@ -100,8 +101,8 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update nick: %v", err)
 	}
-	if tok, err := GetUserToken(u.ID); err != nil || tok != "initial_token" {
-		t.Fatalf("token should remain after nickname update, got %q err=%v", tok, err)
+	if status, err := CheckUserToken(u.ID, u.Role, "initial_token"); err != nil || status != TokenValid {
+		t.Fatalf("token should remain after nickname update, got status=%v err=%v", status, err)
 	}
 
 	// 清令牌失败时不改密码，旧令牌保持有效。
@@ -122,8 +123,8 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	if stored.Password != "oldpassword" {
 		t.Fatalf("password changed despite token clear failure: %q", stored.Password)
 	}
-	if tok, err := GetUserToken(u.ID); err != nil || tok != "initial_token" {
-		t.Fatalf("token should remain when password update is rejected, got %q err=%v", tok, err)
+	if status, err := CheckUserToken(u.ID, u.Role, "initial_token"); err != nil || status != TokenValid {
+		t.Fatalf("token should remain when password update is rejected, got status=%v err=%v", status, err)
 	}
 
 	// 3. 修改密码，必须清除 Token（强制全设备重新登录）
@@ -135,17 +136,19 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update password: %v", err)
 	}
-	if tok, err := GetUserToken(u.ID); err != nil || tok != "" {
-		t.Fatalf("token should be cleared after password change, got %q err=%v", tok, err)
+	if status, err := CheckUserToken(u.ID, u.Role, "initial_token"); err != nil || status != TokenMissing {
+		t.Fatalf("token should be cleared after password change, got status=%v err=%v", status, err)
 	}
 
 	// 4. 再次登录后注销，必须清除 Token
-	if err := SaveUserToken("second_token", u.ID); err != nil {
+	if err := SaveUserToken("second_token", u.ID, u.Role); err != nil {
 		t.Fatalf("save second token: %v", err)
 	}
-	UserSvc.UserLogout(u.ID)
-	if tok, err := GetUserToken(u.ID); err != nil || tok != "" {
-		t.Fatalf("token should be cleared after logout, got %q err=%v", tok, err)
+	if err := UserSvc.UserLogout(u.ID, u.Role, "second_token"); err != nil {
+		t.Fatalf("logout failed: %v", err)
+	}
+	if status, err := CheckUserToken(u.ID, u.Role, "second_token"); err != nil || status != TokenMissing {
+		t.Fatalf("token should be cleared after logout, got status=%v err=%v", status, err)
 	}
 }
 
@@ -206,8 +209,81 @@ func TestUserService_BuiltinAdminPasswordProtection(t *testing.T) {
 	if !UserSvc.VerifyUserPassword(config.UserIdInitialVal, newPwd) {
 		t.Fatalf("new password should be verified successfully")
 	}
-	if tok, err := GetUserToken(config.UserIdInitialVal); err != nil || tok != "" {
-		t.Fatalf("token should be cleared after password change, got %q err=%v", tok, err)
+	if status, err := CheckUserToken(config.UserIdInitialVal, model.UserRoleAdmin, "any-token"); err != nil || status != TokenMissing {
+		t.Fatalf("token should be cleared after password change, got status=%v err=%v", status, err)
+	}
+}
+
+func TestUserService_VisitorMultiLoginAndLifecycle(t *testing.T) {
+	origMdb := db.Mdb
+	origRdb := db.Rdb
+	defer func() {
+		db.Mdb = origMdb
+		db.Rdb = origRdb
+	}()
+
+	gdb, mr := setupUserServiceTestDB(t)
+	defer mr.Close()
+
+	salt, err := utils.GenerateSalt()
+	if err != nil {
+		t.Fatalf("generate salt: %v", err)
+	}
+	visitor := model.User{
+		UserName: "guest_multi",
+		Password: utils.PasswordEncrypt("guest123", salt),
+		Salt:     salt,
+		Status:   0,
+		Role:     model.UserRoleVisitor,
+	}
+	if err := gdb.Create(&visitor).Error; err != nil {
+		t.Fatalf("create visitor: %v", err)
+	}
+
+	// 1. 两个设备先后登录同一访客账号，两者均保持有效
+	tokenA, err := UserSvc.UserLogin("guest_multi", "guest123")
+	if err != nil {
+		t.Fatalf("login device A: %v", err)
+	}
+	tokenB, err := UserSvc.UserLogin("guest_multi", "guest123")
+	if err != nil {
+		t.Fatalf("login device B: %v", err)
+	}
+	if status, err := UserSvc.VerifyToken(visitor.ID, model.UserRoleVisitor, tokenA); err != nil || status != TokenValid {
+		t.Fatalf("device A should remain valid after device B login, got status=%v err=%v", status, err)
+	}
+	if status, err := UserSvc.VerifyToken(visitor.ID, model.UserRoleVisitor, tokenB); err != nil || status != TokenValid {
+		t.Fatalf("device B should be valid, got status=%v err=%v", status, err)
+	}
+
+	// 2. 设备 A 登出，不影响设备 B
+	if err := UserSvc.UserLogout(visitor.ID, model.UserRoleVisitor, tokenA); err != nil {
+		t.Fatalf("logout device A: %v", err)
+	}
+	if status, err := UserSvc.VerifyToken(visitor.ID, model.UserRoleVisitor, tokenA); err != nil || status != TokenMissing {
+		t.Fatalf("device A should be missing after logout, got status=%v err=%v", status, err)
+	}
+	if status, err := UserSvc.VerifyToken(visitor.ID, model.UserRoleVisitor, tokenB); err != nil || status != TokenValid {
+		t.Fatalf("device B should stay valid after device A logout, got status=%v err=%v", status, err)
+	}
+
+	// 3. 管理员修改访客密码，全部设备立即失效
+	tokenC, err := UserSvc.UserLogin("guest_multi", "guest123")
+	if err != nil {
+		t.Fatalf("login device C: %v", err)
+	}
+	newPwd := "guest456"
+	if err := UserSvc.UpdateUser(config.UserIdInitialVal, model.UserRoleAdmin, model.UserUpdatePayload{
+		ID:       visitor.ID,
+		Password: &newPwd,
+	}); err != nil {
+		t.Fatalf("admin update visitor password: %v", err)
+	}
+	if status, err := UserSvc.VerifyToken(visitor.ID, model.UserRoleVisitor, tokenB); err != nil || status != TokenMissing {
+		t.Fatalf("device B should be invalidated after password change, got status=%v err=%v", status, err)
+	}
+	if status, err := UserSvc.VerifyToken(visitor.ID, model.UserRoleVisitor, tokenC); err != nil || status != TokenMissing {
+		t.Fatalf("device C should be invalidated after password change, got status=%v err=%v", status, err)
 	}
 }
 

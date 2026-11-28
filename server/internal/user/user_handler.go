@@ -158,7 +158,7 @@ func (h *UserHandler) Logout(c *gin.Context) {
 		dto.Failed("注销失败, 身份信息格式化异常!!!", c)
 		return
 	}
-	if err := UserSvc.UserLogout(uc.UserID); err != nil {
+	if err := UserSvc.UserLogout(uc.UserID, uc.Role, httpx.ReadAuthToken(c)); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}

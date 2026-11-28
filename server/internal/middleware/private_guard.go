@@ -9,6 +9,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/httpx"
+	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repobase"
 	"server/internal/user"
@@ -171,12 +172,12 @@ func HasValidPrivateRequestAuth(c *gin.Context, expectedKey string) bool {
 	if err != nil || uc == nil || uc.UserID == 0 {
 		return false
 	}
-	storedToken, tokenErr := user.UserSvc.StoredToken(uc.UserID)
-	if tokenErr != nil || storedToken == "" || storedToken != authToken {
+	tokenStatus, tokenErr := user.UserSvc.VerifyToken(uc.UserID, uc.Role, authToken)
+	if tokenErr != nil || tokenStatus != user.TokenValid {
 		return false
 	}
-	status, _, statusErr := user.UserSvc.AccountGate(uc.UserID)
-	return statusErr == nil && status == 0
+	status, role, statusErr := user.UserSvc.AccountGate(uc.UserID)
+	return statusErr == nil && status == 0 && model.UserAllowsMultiLogin(uc.Role) == model.UserAllowsMultiLogin(role)
 }
 
 // PrivateAccessGuard 动态私有化守卫
@@ -223,13 +224,13 @@ func PrivateAccessGuard() gin.HandlerFunc {
 		if authToken != "" {
 			uc, err := utils.ParseToken(authToken)
 			if err == nil && uc != nil && uc.UserID > 0 {
-				storedToken, tokenErr := user.UserSvc.StoredToken(uc.UserID)
+				tokenStatus, tokenErr := user.UserSvc.VerifyToken(uc.UserID, uc.Role, authToken)
 				if tokenErr != nil {
 					dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
 					c.Abort()
 					return
 				}
-				if storedToken != "" && storedToken == authToken {
+				if tokenStatus == user.TokenValid {
 					status, role, statusErr := user.UserSvc.AccountGate(uc.UserID)
 					if statusErr != nil {
 						dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
@@ -237,9 +238,16 @@ func PrivateAccessGuard() gin.HandlerFunc {
 						return
 					}
 					if status != 0 {
-						_ = user.UserSvc.UserLogout(uc.UserID)
+						_ = user.UserSvc.ClearUserSessions(uc.UserID)
 						clearAuthCookieIfPresent(c)
 						dto.CustomResult(http.StatusUnauthorized, dto.FAILED, gin.H{"private_access": true}, "账号已被禁用", c)
+						c.Abort()
+						return
+					}
+					if model.UserAllowsMultiLogin(uc.Role) != model.UserAllowsMultiLogin(role) {
+						_ = user.UserSvc.UserLogout(uc.UserID, uc.Role, authToken)
+						clearAuthCookieIfPresent(c)
+						dto.CustomResult(http.StatusUnauthorized, dto.FAILED, gin.H{"private_access": true}, "身份验证信息已失效,请重新登录!!!", c)
 						c.Abort()
 						return
 					}

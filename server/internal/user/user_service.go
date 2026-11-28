@@ -47,18 +47,23 @@ func (s *UserService) UserLogin(account, password string) (token string, err err
 	if err != nil {
 		return "", err
 	}
-	err = SaveUserToken(token, u.ID)
+	err = SaveUserToken(token, u.ID, u.Role)
 	return
 }
 
-// UserLogout 用户退出登录 注销
-func (s *UserService) UserLogout(id uint) error {
+// UserLogout 用户退出登录（访客仅注销当前设备令牌，非访客清除单点令牌）
+func (s *UserService) UserLogout(id uint, role int, token string) error {
+	return RevokeUserToken(id, role, token)
+}
+
+// ClearUserSessions 强制失效指定用户的全部登录会话（封禁/改密/改角色等场景）
+func (s *UserService) ClearUserSessions(id uint) error {
 	return ClearUserToken(id)
 }
 
-// StoredToken 返回用户当前有效登录令牌。Redis 没有该键时令牌为空。
-func (s *UserService) StoredToken(userID uint) (string, error) {
-	return GetUserToken(userID)
+// VerifyToken 校验用户令牌在 Redis 中的状态
+func (s *UserService) VerifyToken(userID uint, role int, token string) (TokenCheckStatus, error) {
+	return CheckUserToken(userID, role, token)
 }
 
 // AccountGate 读取账号状态和角色。鉴权以库里的值为准，不信 JWT 里的旧角色。

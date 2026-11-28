@@ -96,3 +96,15 @@ func TestUserCanWrite(t *testing.T) {
 		t.Fatalf("UserCanWrite(UserRoleVisitor) should be false")
 	}
 }
+
+func TestUserAllowsMultiLogin(t *testing.T) {
+	if UserAllowsMultiLogin(UserRoleAdmin) {
+		t.Fatalf("UserAllowsMultiLogin(UserRoleAdmin) should be false")
+	}
+	if UserAllowsMultiLogin(UserRoleNormal) {
+		t.Fatalf("UserAllowsMultiLogin(UserRoleNormal) should be false")
+	}
+	if !UserAllowsMultiLogin(UserRoleVisitor) {
+		t.Fatalf("UserAllowsMultiLogin(UserRoleVisitor) should be true")
+	}
+}

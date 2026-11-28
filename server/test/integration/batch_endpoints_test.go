@@ -39,7 +39,7 @@ func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 	if err != nil {
 		t.Fatalf("生成管理员 Token 失败: %v", err)
 	}
-	if err := user.SaveUserToken(adminToken, adminUserID); err != nil {
+	if err := user.SaveUserToken(adminToken, adminUserID, model.UserRoleAdmin); err != nil {
 		t.Fatalf("保存管理员 Token 失败: %v", err)
 	}
 	gdb.Create(&model.User{Model: gorm.Model{ID: adminUserID}, UserName: "admin", Role: model.UserRoleAdmin, Status: 0})

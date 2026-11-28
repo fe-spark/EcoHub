@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthToken 用户登录Token拦截（单点登录校验）
+// AuthToken 用户登录Token拦截（非访客单点互踢，访客支持多点登录）
 func AuthToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authToken := httpx.ReadAuthToken(c)
@@ -30,19 +30,19 @@ func AuthToken() gin.HandlerFunc {
 			return
 		}
 
-		storedToken, err := user.UserSvc.StoredToken(uc.UserID)
+		tokenStatus, err := user.UserSvc.VerifyToken(uc.UserID, uc.Role, authToken)
 		if err != nil {
 			dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
 			c.Abort()
 			return
 		}
-		if storedToken == "" {
+		switch tokenStatus {
+		case user.TokenMissing:
 			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
-		}
-		if storedToken != authToken {
+		case user.TokenSuperseded:
 			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
 			c.Abort()
@@ -55,9 +55,17 @@ func AuthToken() gin.HandlerFunc {
 			return
 		}
 		if status != 0 {
-			_ = user.UserSvc.UserLogout(uc.UserID)
+			_ = user.UserSvc.ClearUserSessions(uc.UserID)
 			httpx.ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号已被禁用", c)
+			c.Abort()
+			return
+		}
+		// 若数据库中角色跨访客/非访客边界发生变化，拒绝旧模式令牌并要求重新登录
+		if model.UserAllowsMultiLogin(uc.Role) != model.UserAllowsMultiLogin(role) {
+			_ = user.UserSvc.UserLogout(uc.UserID, uc.Role, authToken)
+			httpx.ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}

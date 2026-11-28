@@ -11,10 +11,15 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/testutil"
 	"server/internal/user"
 	"server/internal/utils"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 func TestProvideKeyGuard(t *testing.T) {
@@ -167,7 +172,7 @@ func TestPrivateAccessGuard(t *testing.T) {
 		}
 
 		// 5. 携带 Redis 同步有效的合法 Token -> 200，且 user_id 为 uint 999
-		_ = user.SaveUserToken(forgedToken, 999)
+		_ = user.SaveUserToken(forgedToken, 999, model.UserRoleVisitor)
 		w4 := httptest.NewRecorder()
 		req4, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
 		req4.Header.Set("Authorization", "Bearer "+forgedToken)
@@ -284,5 +289,80 @@ func TestProvideKey_RateLimit_BasicAuthAndIPv6AndCap(t *testing.T) {
 	provideKeyFailMu.Unlock()
 	if gotLen > provideKeyMaxEntries {
 		t.Fatalf("provideKeyFailState len=%d exceeds max %d", gotLen, provideKeyMaxEntries)
+	}
+}
+
+func TestPrivateAccessGuard_VisitorMultiLogin(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	defer func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+	}()
+
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate user: %v", err)
+	}
+	const visitorID uint = 10099
+	if err := gdb.Create(&model.User{
+		Model:    gorm.Model{ID: visitorID},
+		UserName: "guest_private",
+		Status:   0,
+		Role:     model.UserRoleVisitor,
+	}).Error; err != nil {
+		t.Fatalf("create visitor: %v", err)
+	}
+	origMdb := db.Mdb
+	db.Mdb = gdb
+	defer func() { db.Mdb = origMdb }()
+
+	cfgData, _ := json.Marshal(model.BasicConfig{
+		PrivateAccess: true,
+		ProvideKey:    "secret-private",
+	})
+	if err := db.Rdb.Set(db.Cxt, config.SiteConfigBasic, cfgData, 0).Err(); err != nil {
+		t.Fatalf("seed site config: %v", err)
+	}
+
+	tokenA, _ := utils.GenToken(visitorID, "guest_private", model.UserRoleVisitor)
+	tokenB, _ := utils.GenToken(visitorID, "guest_private", model.UserRoleVisitor)
+	if err := user.SaveUserToken(tokenA, visitorID, model.UserRoleVisitor); err != nil {
+		t.Fatalf("save tokenA: %v", err)
+	}
+	if err := user.SaveUserToken(tokenB, visitorID, model.UserRoleVisitor); err != nil {
+		t.Fatalf("save tokenB: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(PrivateAccessGuard())
+	r.GET("/api/home", func(c *gin.Context) {
+		dto.Success("ok", "ok", c)
+	})
+
+	for name, tok := range map[string]string{"deviceA": tokenA, "deviceB": tokenB} {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/home", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s expected 200 under PrivateAccessGuard, got %d body=%s", name, w.Code, w.Body.String())
+		}
+
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+		if !HasValidPrivateRequestAuth(c, "secret-private") {
+			t.Fatalf("%s expected HasValidPrivateRequestAuth=true", name)
+		}
 	}
 }

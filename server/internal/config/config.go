@@ -196,9 +196,11 @@ const (
 )
 
 const (
-	Issuer           = "EcoHub"
-	AuthTokenExpires = 10 * 24 // 单位 h
-	UserTokenKey     = RedisKeyPrefix + ":User:Token:%d"
+	Issuer            = "EcoHub"
+	AuthTokenExpires  = 10 * 24 // 单位 h
+	UserTokenKey      = RedisKeyPrefix + ":User:Token:%d"
+	UserTokenGenKey   = RedisKeyPrefix + ":User:TokenGen:%d"
+	UserMultiTokenKey = RedisKeyPrefix + ":User:Token:%d:g%d:%s"
 )
 
 func isTestEnv() bool {

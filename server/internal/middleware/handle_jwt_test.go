@@ -148,7 +148,7 @@ func TestAuthToken_SingleSignOn(t *testing.T) {
 
 	// 2. 设备 A 登录
 	tokenA, _ := utils.GenToken(10086, "admin", model.UserRoleAdmin)
-	_ = user.SaveUserToken(tokenA, 10086)
+	_ = user.SaveUserToken(tokenA, 10086, model.UserRoleAdmin)
 
 	// 设备 A 访问 -> 200
 	w2 := httptest.NewRecorder()
@@ -161,7 +161,7 @@ func TestAuthToken_SingleSignOn(t *testing.T) {
 
 	// 3. 设备 B 登录，顶掉设备 A
 	tokenB, _ := utils.GenToken(10086, "admin", model.UserRoleAdmin)
-	_ = user.SaveUserToken(tokenB, 10086)
+	_ = user.SaveUserToken(tokenB, 10086, model.UserRoleAdmin)
 
 	// 设备 A 再次访问 -> 401，提示其它设备登录
 	w3 := httptest.NewRecorder()
@@ -214,7 +214,7 @@ func TestAuthToken_ReReadsRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := user.SaveUserToken(token, 10087); err != nil {
+	if err := user.SaveUserToken(token, 10087, model.UserRoleAdmin); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Mdb.Model(&model.User{}).Where("id = ?", 10087).Update("role", model.UserRoleNormal).Error; err != nil {
@@ -231,5 +231,109 @@ func TestAuthToken_ReReadsRole(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("demoted token should be forbidden, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAuthToken_VisitorMultiLogin(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open(testutil.MemDSN(t)), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate user: %v", err)
+	}
+	const visitorID uint = 10088
+	if err := gdb.Create(&model.User{
+		Model:    gorm.Model{ID: visitorID},
+		UserName: "guest",
+		Status:   0,
+		Role:     model.UserRoleVisitor,
+	}).Error; err != nil {
+		t.Fatalf("create visitor: %v", err)
+	}
+	origMdb := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = origMdb })
+
+	origRdb := db.Rdb
+	defer func() { db.Rdb = origRdb }()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+	db.Rdb = client
+
+	r := gin.New()
+	r.GET("/api/manage/test", AuthToken(), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"msg": "ok"})
+	})
+	r.POST("/api/logout", AuthToken(), user.UserHd.Logout)
+
+	// 1. 访客设备 A、B、C 同时登录，互不顶替
+	tokenA, _ := utils.GenToken(visitorID, "guest", model.UserRoleVisitor)
+	tokenB, _ := utils.GenToken(visitorID, "guest", model.UserRoleVisitor)
+	tokenC, _ := utils.GenToken(visitorID, "guest", model.UserRoleVisitor)
+	for _, tok := range []string{tokenA, tokenB, tokenC} {
+		if err := user.SaveUserToken(tok, visitorID, model.UserRoleVisitor); err != nil {
+			t.Fatalf("save visitor token: %v", err)
+		}
+	}
+
+	doGet := func(tok string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/api/manage/test", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := doGet(tokenA); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for visitor tokenA, got %d body=%s", w.Code, w.Body.String())
+	}
+	if w := doGet(tokenB); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for visitor tokenB, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// 2. 设备 A 登出后仅 A 失效，B 与 C 仍有效
+	wLogout := httptest.NewRecorder()
+	reqLogout, _ := http.NewRequest(http.MethodPost, "/api/logout", nil)
+	reqLogout.Header.Set("Authorization", "Bearer "+tokenA)
+	r.ServeHTTP(wLogout, reqLogout)
+	if wLogout.Code != http.StatusOK {
+		t.Fatalf("expected 200 for visitor logout, got %d body=%s", wLogout.Code, wLogout.Body.String())
+	}
+	if w := doGet(tokenA); w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for logged out visitor tokenA, got %d", w.Code)
+	}
+	if w := doGet(tokenB); w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for visitor tokenB after A logout, got %d", w.Code)
+	}
+
+	// 3. 数据库中直接切换角色为普通用户后，旧访客令牌必须失效
+	if err := gdb.Model(&model.User{}).Where("id = ?", visitorID).Update("role", model.UserRoleNormal).Error; err != nil {
+		t.Fatalf("update role: %v", err)
+	}
+	if w := doGet(tokenB); w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when visitor role changed to normal, got %d", w.Code)
+	}
+	// 恢复为访客并禁用账号，触发全量失效，设备 C 也应立即失效
+	if err := gdb.Model(&model.User{}).Where("id = ?", visitorID).Updates(map[string]any{
+		"role":   model.UserRoleVisitor,
+		"status": 1,
+	}).Error; err != nil {
+		t.Fatalf("disable visitor: %v", err)
+	}
+	if w := doGet(tokenC); w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for disabled visitor tokenC, got %d", w.Code)
+	}
+	// 即便后续恢复启用状态，之前世代的令牌也已被 ClearUserSessions 失效
+	if err := gdb.Model(&model.User{}).Where("id = ?", visitorID).Update("status", 0).Error; err != nil {
+		t.Fatalf("re-enable visitor: %v", err)
+	}
+	if w := doGet(tokenC); w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for previously revoked visitor tokenC, got %d", w.Code)
 	}
 }

@@ -39,6 +39,11 @@ func UserCanWrite(role int) bool {
 	return !IsVisitorRole(role)
 }
 
+// UserAllowsMultiLogin 访客账号允许多个设备同时登录且互不顶替。
+func UserAllowsMultiLogin(role int) bool {
+	return IsVisitorRole(role)
+}
+
 func IsAdmin(userID uint, role int) bool {
 	return userID == config.UserIdInitialVal || IsAdminRole(role)
 }
