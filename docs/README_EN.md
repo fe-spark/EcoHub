@@ -56,16 +56,6 @@ Separate repositories, included as git submodules:
 
 For behavioral details, see the [FAQ](./README-FAQ_EN.md).
 
-## Architecture
-
-```mermaid
-flowchart LR
-    Client["Browser / Subscription clients"] --> Web["Next.js :3000"]
-    Web -- "/api/*" --> API["Go API :8080"]
-    API --> DB[("MySQL 8 / Redis 7")]
-    API --> Ext["Collect sources / TMDB / Telegram / Danmaku"]
-```
-
 ## Quick start
 
 Requirements: Docker 20+ and Docker Compose, with 2 CPU cores and 2 GB RAM or more recommended. Run:

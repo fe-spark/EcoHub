@@ -58,16 +58,6 @@ EcoHub 不提供、不存储任何影视文件，片源全部来自部署者自�
 
 功能细节见 [常见问题](./docs/README-FAQ.md)。
 
-## 技术架构
-
-```mermaid
-flowchart LR
-    Client["浏览器 / 订阅客户端"] --> Web["Next.js 前端 :3000"]
-    Web -- "/api/*" --> API["Go API :8080"]
-    API --> DB[("MySQL 8 / Redis 7")]
-    API --> Ext["采集站 / TMDB / Telegram / 弹幕"]
-```
-
 ## 快速开始
 
 环境要求：Docker 20+ 与 Docker Compose，建议 2 核 CPU、2 GB 内存及以上。执行以下命令安装：
