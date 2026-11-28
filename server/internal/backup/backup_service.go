@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"server/internal/access"
 	"server/internal/admin/upgrade"
+	"server/internal/analytics"
 	"server/internal/banner"
 	"server/internal/collect"
 	"server/internal/collectctl"
@@ -75,7 +75,7 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 	if err != nil {
 		return model.ConfigBackup{}, err
 	}
-	analyticsCfg, err := access.GetAnalyticsConfig()
+	analyticsCfg, err := analytics.GetConfig()
 	if err != nil {
 		return model.ConfigBackup{}, err
 	}
@@ -262,10 +262,10 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) (retEr
 	}
 
 	if req.Modules.Analytics {
-		if err := access.SaveAnalyticsConfig(*backup.Analytics); err != nil {
+		if err := analytics.SaveConfig(*backup.Analytics); err != nil {
 			return fmt.Errorf("导入数据分析配置失败: %w", err)
 		}
-		access.SetEnabled(backup.Analytics.Enabled)
+		analytics.SetEnabled(backup.Analytics.Enabled)
 	}
 
 	return nil

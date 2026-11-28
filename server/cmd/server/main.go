@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"server/internal/access"
 	"server/internal/admin/upgrade"
+	"server/internal/analytics"
 	"server/internal/bootstrap"
 	"server/internal/collect"
 	"server/internal/config"
@@ -110,7 +110,7 @@ func start() {
 		log.Fatalf("[Init] 采集站目录加载失败: %v", err)
 	}
 	upgrade.StartReleasePoller()
-	access.StartCollector()
+	analytics.Start()
 
 	r := router.SetupRouter()
 	srv := &http.Server{
@@ -158,10 +158,10 @@ func start() {
 	}
 	shutdownCancel()
 
-	// 2. 停止采集任务与通知轮询，再排空 access 内存统计队列并关闭底层连接
+	// 2. 停止采集任务与通知轮询，再排空 analytics 内存统计队列并关闭底层连接
 	collect.StopAllCollect("进程退出，停止采集")
 	notify.NotifySvc.StopBotPoller()
-	access.Shutdown(1500 * time.Millisecond)
+	analytics.Shutdown(1500 * time.Millisecond)
 	if db.Rdb != nil {
 		_ = db.Rdb.Close()
 	}

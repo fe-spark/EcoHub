@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/access"
 	"server/internal/admin"
+	"server/internal/analytics"
 	"server/internal/config"
 	"server/internal/film"
 	"server/internal/infra/syslog"
@@ -77,7 +77,7 @@ func SetupRouter() *gin.Engine {
 		frontApi.GET(`/films/search`, portal.IndexHd.SearchFilm)
 		frontApi.GET(`/films/filter`, portal.IndexHd.FilmTagSearch)
 		frontApi.GET(`/search/hot-keywords`, portal.IndexHd.HotKeywords)
-		frontApi.POST(`/stats/view`, access.AccessHd.TrackView)
+		frontApi.POST(`/stats/view`, analytics.Handler.TrackView)
 		frontApi.GET(`/film/danmaku`, danmaku.DanmakuHd.GetDanmaku)
 		frontApi.POST(`/film/danmaku`, danmaku.DanmakuHd.PostDanmaku)
 	}
@@ -121,17 +121,18 @@ func SetupRouter() *gin.Engine {
 			systemLog.GET(`/delta`, admin.SystemLogHd.Delta)
 		}
 
-		accessRoute := manageRoute.Group(`/access`)
+		analyticsRoute := manageRoute.Group(`/analytics`, middleware.AdminAccess())
 		{
-			accessRoute.GET(`/status`, access.AccessHd.Status)
-			accessRoute.GET(`/config`, access.AccessHd.GetConfig)
-			accessRoute.POST(`/config`, middleware.AdminAccess(), access.AccessHd.UpdateConfig)
-			accessRoute.GET(`/overview`, access.AccessHd.Overview)
-			accessRoute.GET(`/sources`, access.AccessHd.SourceCalls)
-			accessRoute.GET(`/tops`, access.AccessHd.Tops)
-			accessRoute.GET(`/logs`, access.AccessHd.Logs)
-			accessRoute.GET(`/stats`, access.AccessHd.DataStats)
-			accessRoute.POST(`/clean`, middleware.AdminAccess(), access.AccessHd.CleanData)
+			analyticsRoute.GET(`/status`, analytics.Handler.Status)
+			analyticsRoute.GET(`/config`, analytics.Handler.GetConfig)
+			analyticsRoute.POST(`/config`, analytics.Handler.UpdateConfig)
+			analyticsRoute.GET(`/dashboard`, analytics.Handler.Dashboard)
+			analyticsRoute.GET(`/overview`, analytics.Handler.Overview)
+			analyticsRoute.GET(`/sources`, analytics.Handler.Sources)
+			analyticsRoute.GET(`/tops`, analytics.Handler.Tops)
+			analyticsRoute.GET(`/logs`, analytics.Handler.Logs)
+			analyticsRoute.GET(`/stats`, analytics.Handler.DataStats)
+			analyticsRoute.POST(`/clean`, analytics.Handler.CleanData)
 		}
 
 		// 首页轮播管理：按采集站区分

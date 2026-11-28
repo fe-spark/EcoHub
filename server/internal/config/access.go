@@ -9,22 +9,23 @@ import (
 )
 
 const (
-	// AccessKeyPrefix 访问分析 Redis 前缀
-	AccessKeyPrefix = RedisKeyPrefix + ":Access:"
+	// AnalyticsKeyPrefix 访问分析 Redis 前缀
+	AnalyticsKeyPrefix = RedisKeyPrefix + ":Analytics:"
 )
 
 var (
-	// AccessRecentLimit 最近访问流水条数上限，默认 100
-	AccessRecentLimit = 100
+	// AnalyticsRecentLimit 最近访问流水条数上限，默认 100
+	AnalyticsRecentLimit = 100
 	// TrustedProxies 默认仅信任本地环回代理；生产部署通过 ECOHUB_TRUSTED_PROXIES 显式配置受信任反代 CIDR/IP。
 	TrustedProxies = []string{"127.0.0.1", "::1"}
-	AccessIPSalt   []byte
+	// AnalyticsIPSalt 基于 JwtSecret 派生的 IP 脱敏盐
+	AnalyticsIPSalt []byte
 )
 
 func loadAccessRuntimeConfig() {
 	// IP 脱敏 Salt 自动基于 JwtSecret 派生，无需手动配置
 	sum := sha256.Sum256([]byte("ecohub-access-ip:" + JwtSecret))
-	AccessIPSalt = sum[:]
+	AnalyticsIPSalt = sum[:]
 	LoadTrustedProxiesFromEnv()
 }
 

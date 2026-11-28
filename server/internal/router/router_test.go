@@ -115,31 +115,39 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/spider/clear/stats should allow admin, got %d", wAdminClearStats.Code)
 	}
 
-	// 5. /api/manage/access/status allows any authenticated manage user (non-admin)
-	wNormalAccessStatus := performReq(http.MethodGet, "/api/manage/access/status", normalToken)
-	if wNormalAccessStatus.Code == http.StatusForbidden || wNormalAccessStatus.Code == http.StatusUnauthorized {
-		t.Errorf("GET /api/manage/access/status should allow normal manage user, got %d", wNormalAccessStatus.Code)
+	// 5. All /api/manage/analytics/* routes MUST forbid non-admin users (normal & visitor)
+	analyticsReadPaths := []string{
+		"/api/manage/analytics/status",
+		"/api/manage/analytics/config",
+		"/api/manage/analytics/dashboard",
+		"/api/manage/analytics/overview",
+		"/api/manage/analytics/sources",
+		"/api/manage/analytics/tops",
+		"/api/manage/analytics/logs",
+		"/api/manage/analytics/stats",
+	}
+	for _, path := range analyticsReadPaths {
+		if w := performReq(http.MethodGet, path, normalToken); w.Code != http.StatusForbidden {
+			t.Errorf("GET %s should forbid normal user, got %d", path, w.Code)
+		}
+	}
+	if w := performReq(http.MethodPost, "/api/manage/analytics/config", normalToken); w.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/analytics/config should forbid normal user, got %d", w.Code)
+	}
+	if w := performReq(http.MethodPost, "/api/manage/analytics/clean", normalToken); w.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/analytics/clean should forbid normal user, got %d", w.Code)
 	}
 
-	// 5. Access clean MUST forbid non-admin, but overview allows normal user
-	wNormalAccessClean := performReq(http.MethodPost, "/api/manage/access/clean", normalToken)
-	if wNormalAccessClean.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/access/clean should forbid normal user, got %d", wNormalAccessClean.Code)
-	}
-
-	wNormalAccessOverview := performReq(http.MethodGet, "/api/manage/access/overview", normalToken)
-	if wNormalAccessOverview.Code == http.StatusForbidden || wNormalAccessOverview.Code == http.StatusUnauthorized {
-		t.Errorf("GET /api/manage/access/overview should allow normal user, got %d", wNormalAccessOverview.Code)
-	}
-	// 6. Admin user should be allowed through to access admin endpoints
-	wAdminAccessStatus := performReq(http.MethodGet, "/api/manage/access/status", adminToken)
-	if wAdminAccessStatus.Code == http.StatusForbidden {
-		t.Errorf("GET /api/manage/access/status should allow admin, got %d", wAdminAccessStatus.Code)
-	}
-
-	wAdminAccessStats := performReq(http.MethodGet, "/api/manage/access/stats", adminToken)
-	if wAdminAccessStats.Code == http.StatusForbidden {
-		t.Errorf("GET /api/manage/access/stats should allow admin, got %d", wAdminAccessStats.Code)
+	// 6. Admin user should be allowed through to analytics admin endpoints
+	for _, path := range []string{
+		"/api/manage/analytics/status",
+		"/api/manage/analytics/dashboard",
+		"/api/manage/analytics/overview",
+		"/api/manage/analytics/stats",
+	} {
+		if w := performReq(http.MethodGet, path, adminToken); w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
+			t.Errorf("GET %s should allow admin, got %d", path, w.Code)
+		}
 	}
 
 	// 7. System settings routes: system logs MUST forbid non-admin
@@ -208,5 +216,10 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	wVisitorTMDBApply := performReq(http.MethodPost, "/api/manage/tmdb/apply", visitorToken)
 	if wVisitorTMDBApply.Code != http.StatusForbidden {
 		t.Errorf("POST /api/manage/tmdb/apply should forbid visitor, got %d", wVisitorTMDBApply.Code)
+	}
+	for _, path := range analyticsReadPaths {
+		if w := performReq(http.MethodGet, path, visitorToken); w.Code != http.StatusForbidden {
+			t.Errorf("GET %s should forbid visitor, got %d", path, w.Code)
+		}
 	}
 }

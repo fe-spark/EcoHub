@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"server/internal/access"
+	"server/internal/analytics"
 	"server/internal/collect"
 	"server/internal/collectctl"
 	"server/internal/infra/syslog"
@@ -98,8 +98,8 @@ func (s *ResetService) ClearFilms() (retErr error) {
 	}()
 
 	ReportResetProgress(2, "正在停止后台任务")
-	access.SetEnabled(false)
-	access.Shutdown(500 * time.Millisecond)
+	analytics.SetEnabled(false)
+	analytics.Shutdown(500 * time.Millisecond)
 	collect.StopAllCollect("数据重置，停止采集")
 	collectctl.CollectSvc.CancelDelFilmSources(nil)
 	collectctl.WaitAllAsyncWork()
@@ -108,7 +108,7 @@ func (s *ResetService) ClearFilms() (retErr error) {
 	if err := collect.PrepareAndRunReset(ReportResetProgress, FilmZero); err != nil {
 		return err
 	}
-	if _, err := access.ClearAccessData(0); err != nil {
+	if _, err := analytics.ClearData(0); err != nil {
 		return err
 	}
 

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"server/internal/access"
+	"server/internal/analytics"
 	"server/internal/collect"
 	"strings"
 	"testing"
@@ -131,7 +131,7 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	analyticsCfg := model.AnalyticsConfig{
 		Enabled: true,
 	}
-	if err := access.SaveAnalyticsConfig(analyticsCfg); err != nil {
+	if err := analytics.SaveConfig(analyticsCfg); err != nil {
 		t.Fatalf("save analytics config: %v", err)
 	}
 

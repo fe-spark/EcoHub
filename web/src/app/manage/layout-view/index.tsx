@@ -97,7 +97,12 @@ function ManageLayoutInner({
   const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
 
   const fetchAccessVisible = useCallback(() => {
-    ApiGet<{ enabled: boolean }>("/manage/access/status")
+    // 数据分析仅超级管理员可见，非超管不发起状态探测以免触发无权限请求
+    if (!userInfo?.isAdmin) {
+      setAccessVisible(false);
+      return;
+    }
+    ApiGet<{ enabled: boolean }>("/manage/analytics/status")
       .then((resp) => {
         if (resp.code === 0 && resp.data) {
           setAccessVisible(Boolean(resp.data.enabled));
@@ -108,7 +113,7 @@ function ManageLayoutInner({
       .catch(() => {
         setAccessVisible(false);
       });
-  }, []);
+  }, [userInfo?.isAdmin]);
 
   useEffect(() => {
     fetchAccessVisible();
@@ -136,9 +141,10 @@ function ManageLayoutInner({
 
   useEffect(() => {
     if (
-      pathname !== "/manage/system" &&
-      pathname.startsWith("/manage/system") &&
-      !pathname.startsWith("/manage/system/website")
+      pathname.startsWith("/manage/access") ||
+      (pathname !== "/manage/system" &&
+        pathname.startsWith("/manage/system") &&
+        !pathname.startsWith("/manage/system/website"))
     ) {
       if (userInfo && !userInfo.isAdmin) {
         router.replace("/manage");
@@ -184,7 +190,7 @@ function ManageLayoutInner({
     const isAdmin = Boolean(userInfo?.isAdmin);
     return menuItems
       .filter((item) => {
-        if (item?.key === "/manage/access") return Boolean(accessVisible);
+        if (item?.key === "/manage/access") return Boolean(isAdmin && accessVisible);
         if (item?.key === "/manage/system/proxy" || item?.key === "sub-integrations") return isAdmin;
         return true;
       })

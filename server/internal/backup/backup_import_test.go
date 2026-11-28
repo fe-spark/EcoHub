@@ -2,7 +2,7 @@ package backup
 
 import (
 	"encoding/json"
-	"server/internal/access"
+	"server/internal/analytics"
 	"server/internal/collect"
 	"strings"
 	"sync/atomic"
@@ -18,7 +18,7 @@ import (
 func TestImportConfig_Analytics(t *testing.T) {
 	setupBackupTestDB(t)
 
-	access.SetEnabled(false)
+	analytics.SetEnabled(false)
 	backup := model.ConfigBackup{
 		Version: model.ConfigBackupVersion,
 		Analytics: &model.AnalyticsConfig{
@@ -37,15 +37,15 @@ func TestImportConfig_Analytics(t *testing.T) {
 		t.Fatalf("import config failed: %v", err)
 	}
 
-	cfg, err := access.GetAnalyticsConfig()
+	cfg, err := analytics.GetConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !cfg.Enabled {
 		t.Fatalf("expected analytics enabled=true in repo")
 	}
-	if !access.IsEnabled() {
-		t.Fatalf("expected access.IsEnabled() == true")
+	if !analytics.IsEnabled() {
+		t.Fatalf("expected analytics.IsEnabled() == true")
 	}
 
 	// 验证缺少 payload 时拒绝导入

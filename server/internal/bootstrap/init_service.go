@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/access"
 	"server/internal/admin/upgrade"
+	"server/internal/analytics"
 	"server/internal/collect"
 	"server/internal/config"
 	filmrepo "server/internal/film"
@@ -201,11 +201,11 @@ func defaultBasicConfig() model.BasicConfig {
 
 // AnalyticsConfigInit 初始化数据分析配置并同步内存原子状态
 func (s *InitService) AnalyticsConfigInit() error {
-	cfg, err := access.GetAnalyticsConfig()
+	cfg, err := analytics.GetConfig()
 	if err != nil {
 		return fmt.Errorf("读取数据分析配置失败: %w", err)
 	}
-	access.SetEnabled(cfg.Enabled)
+	analytics.SetEnabled(cfg.Enabled)
 	return nil
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "ecohub",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "private": true,
   "author": "spark <spark.xiaoyu@qq.com>",
   "repository": {
@@ -27,6 +27,7 @@
     "axios": "^1.13.5",
     "dayjs": "^1.11.19",
     "dotenv": "^17.4.2",
+    "echarts": "^6.1.0",
     "hls.js": "^1.6.15",
     "less": "^4.5.1",
     "less-loader": "^12.3.1",

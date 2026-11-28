@@ -1,25 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
-import type { MenuProps } from "antd";
-import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
+import { useEffect, useMemo, useState } from "react";
+import { Badge, Button, DatePicker, Dropdown, Segmented, Space, Switch, Tabs, Tag } from "antd";
+import type { MenuProps, TabsProps } from "antd";
+import {
+  AreaChartOutlined,
+  DownOutlined,
+  FireOutlined,
+  ReloadOutlined,
+  UnorderedListOutlined,
+} from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import GlobalOverviewBar from "./global-overview-bar";
-import WebAnalyticsView from "./web-view";
-import AppAnalyticsView from "./app-view";
-import TvboxAnalyticsView from "./tvbox-view";
-import SourceCalls from "./source-calls";
+import { MODULE_TABS, PLATFORM_TABS } from "./constants";
+import type { AnalyticsModule, AppPlatform } from "./types";
+import { useAnalyticsDashboard } from "./use-analytics-dashboard";
+import KpiOverviewGrid from "./components/KpiOverviewGrid";
+import TrafficChartsSection from "./components/TrafficChartsSection";
+import TopRankingsSection from "./components/TopRankingsSection";
+import AccessLogsCard from "./components/AccessLogsCard";
 import styles from "./index.module.less";
 
-function disabledAccessDay(d: Dayjs) {
-  // 不设历史天数限制，仅禁止选择未来日期
-  return d.isAfter(dayjs(), "day");
-}
+type WorkspaceTab = "traffic" | "content" | "logs";
 
-const REFRESH_INTERVAL_STORAGE_KEY = "eh_access_refresh_interval";
-
+const REFRESH_INTERVAL_KEY = "eh_access_refresh_interval";
 const INTERVAL_OPTIONS = [
   { label: "5 秒", value: 5 },
   { label: "10 秒", value: 10 },
@@ -27,88 +31,73 @@ const INTERVAL_OPTIONS = [
   { label: "30 秒", value: 30 },
 ];
 
-const MODULE_OPTIONS: { key: "web" | "app" | "tvbox"; label: string; icon: React.ReactNode }[] = [
-  {
-    key: "web",
-    label: "Web",
-    icon: <DesktopOutlined />,
-  },
-  {
-    key: "app",
-    label: "App",
-    icon: <MobileOutlined />,
-  },
-  {
-    key: "tvbox",
-    label: "TVBox",
-    icon: <PlaySquareOutlined />,
-  },
-];
+function disabledFutureDay(d: Dayjs) {
+  return d.isAfter(dayjs(), "day");
+}
 
 export default function AccessPageView() {
-  const [activeModule, setActiveModule] = useState<"web" | "app" | "tvbox">("web");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("traffic");
+  const [module, setModule] = useState<AnalyticsModule>("all");
+  const [platform, setPlatform] = useState<AppPlatform>("all");
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     if (typeof window !== "undefined") {
-      const saved = Number(localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY));
-      if ([5, 10, 15, 30].includes(saved)) {
-        return saved;
-      }
+      const saved = Number(localStorage.getItem(REFRESH_INTERVAL_KEY));
+      if ([5, 10, 15, 30].includes(saved)) return saved;
     }
     return 15;
   });
+
   const dayStr = selectedDay.format("YYYY-MM-DD");
-  const isToday = dayStr === dayjs().format("YYYY-MM-DD");
+  const todayStr = dayjs().format("YYYY-MM-DD");
+  const yesterdayStr = dayjs().subtract(1, "day").format("YYYY-MM-DD");
+  const isToday = dayStr === todayStr;
 
-  const handleIntervalChange = (val: number) => {
-    setRefreshInterval(val);
-    try {
-      localStorage.setItem(REFRESH_INTERVAL_STORAGE_KEY, String(val));
-    } catch {
-      // ignore
-    }
-  };
+  const {
+    data,
+    loading,
+    logs,
+    logsTotal,
+    logsLoading,
+    logAction,
+    logKeyword,
+    logPage,
+    logPageSize,
+    setLogPage,
+    setLogPageSize,
+    handleLogFilterChange,
+  } = useAnalyticsDashboard({ dayStr, module, platform, refreshKey });
 
-  // 自动刷新逻辑：仅在查看“今日”且开启自动刷新时，按指定周期轮询更新看板
   useEffect(() => {
-    if (!isToday || !autoRefresh || refreshInterval <= 0) {
-      return;
-    }
+    if (!isToday || !autoRefresh || refreshInterval <= 0) return;
     const timer = window.setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) {
-        return;
-      }
+      if (typeof document !== "undefined" && document.hidden) return;
       setRefreshKey((prev) => prev + 1);
     }, refreshInterval * 1000);
+    return () => window.clearInterval(timer);
+  }, [isToday, autoRefresh, refreshInterval]);
 
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isToday, autoRefresh, refreshInterval, dayStr]);
+  const availableDaySet = useMemo(
+    () => new Set(data?.availableDays || []),
+    [data?.availableDays],
+  );
 
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const triggerManualRefresh = () => {
+    setIsRefreshing(true);
+    setRefreshKey((prev) => prev + 1);
+    window.setTimeout(() => setIsRefreshing(false), 500);
+  };
 
   const handleDateChange = (d: Dayjs | null) => {
     if (!d) return;
     setSelectedDay(d);
-    // 切换日期：重置定时刷新为开启，并重新开始计时与立即刷新
-    setAutoRefresh(true);
+    setAutoRefresh(d.format("YYYY-MM-DD") === todayStr);
+    setLogPage(1);
     setRefreshKey((prev) => prev + 1);
-    setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 600);
-  };
-
-  const handleManualRefresh = () => {
-    setIsRefreshing(true);
-    setRefreshKey((prev) => prev + 1);
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 600);
   };
 
   const refreshMenuItems: MenuProps["items"] = [
@@ -122,22 +111,15 @@ export default function AccessPageView() {
             justifyContent: "space-between",
             minWidth: 130,
             gap: 12,
-            padding: "2px 0",
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <span>自动刷新</span>
-          <Switch
-            size="small"
-            checked={autoRefresh}
-            onChange={(checked) => setAutoRefresh(checked)}
-          />
+          <Switch size="small" checked={autoRefresh} onChange={setAutoRefresh} />
         </div>
       ),
     },
-    {
-      type: "divider",
-    },
+    { type: "divider" },
     {
       type: "group",
       label: "刷新间隔",
@@ -149,35 +131,129 @@ export default function AccessPageView() {
     },
   ];
 
-  const handleMenuClick: MenuProps["onClick"] = ({ key }) => {
+  const handleRefreshMenuClick: MenuProps["onClick"] = ({ key }) => {
     if (key === "toggle") return;
-    const interval = Number(key);
-    if (!Number.isNaN(interval)) {
-      handleIntervalChange(interval);
+    const val = Number(key);
+    if (!Number.isNaN(val)) {
+      setRefreshInterval(val);
+      try {
+        localStorage.setItem(REFRESH_INTERVAL_KEY, String(val));
+      } catch {
+        // 忽略本地存储写入受限异常
+      }
     }
   };
+
+  const tabItems: TabsProps["items"] = [
+    {
+      key: "traffic",
+      label: (
+        <Space size={6}>
+          <AreaChartOutlined />
+          <span>流量与终端</span>
+        </Space>
+      ),
+    },
+    {
+      key: "content",
+      label: (
+        <Space size={6}>
+          <FireOutlined />
+          <span>内容与片源</span>
+        </Space>
+      ),
+    },
+    {
+      key: "logs",
+      label: (
+        <Space size={6}>
+          <UnorderedListOutlined />
+          <span>实时流水</span>
+          {logsTotal > 0 && (
+            <Tag style={{ margin: 0, lineHeight: "18px", fontSize: 11 }}>
+              {logsTotal > 999 ? "999+" : logsTotal}
+            </Tag>
+          )}
+        </Space>
+      ),
+    },
+  ];
 
   return (
     <div className={styles.pageStack}>
       <ManagePageHeader
         title="数据分析"
-        description="查看网页、App 和 TVBox 的访问情况。"
+        description="全站流量趋势、终端构成、片源热度与实时访问流水。"
         actions={
-          <Space size={12} align="center">
+          <Tag color={isToday ? "processing" : "default"} style={{ margin: 0 }}>
+            {isToday ? "实时统计" : `历史归档 · ${dayStr}`}
+          </Tag>
+        }
+      />
 
-            {/* 日期选择：默认当天 */}
+      {/* 吸顶全局控制栏：统一收拢终端范围、时间选择与刷新控制 */}
+      <div className={styles.stickyBar}>
+        <div className={styles.toolbarInner}>
+          <Space size={10} wrap align="center">
+            <Segmented
+              value={module}
+              options={MODULE_TABS}
+              onChange={(val) => {
+                setModule(val as AnalyticsModule);
+                setLogPage(1);
+              }}
+            />
+            {module === "app" && (
+              <Segmented
+                size="small"
+                value={platform}
+                options={PLATFORM_TABS}
+                onChange={(val) => {
+                  setPlatform(val as AppPlatform);
+                  setLogPage(1);
+                }}
+              />
+            )}
+          </Space>
+
+          <Space size={8} wrap align="center">
+            <Button
+              size="middle"
+              type={dayStr === todayStr ? "primary" : "default"}
+              ghost={dayStr === todayStr}
+              onClick={() => handleDateChange(dayjs())}
+            >
+              今天
+            </Button>
+            <Button
+              size="middle"
+              type={dayStr === yesterdayStr ? "primary" : "default"}
+              ghost={dayStr === yesterdayStr}
+              onClick={() => handleDateChange(dayjs().subtract(1, "day"))}
+            >
+              昨天
+            </Button>
             <DatePicker
               allowClear={false}
               value={selectedDay}
               onChange={handleDateChange}
-              disabledDate={disabledAccessDay}
-              style={{ width: 130 }}
+              disabledDate={disabledFutureDay}
+              cellRender={(current, info) => {
+                if (info.type !== "date") return info.originNode;
+                const d = current as Dayjs;
+                const hasData = availableDaySet.has(d.format("YYYY-MM-DD"));
+                return (
+                  <div className="ant-picker-cell-inner">
+                    {d.date()}
+                    {hasData && <span className={styles.dateDot} />}
+                  </div>
+                );
+              }}
+              style={{ width: 136 }}
             />
-
-            {/* 刷新与自动轮询组合 */}
             {isToday ? (
               <Space.Compact>
-                <Button onClick={handleManualRefresh}>
+                <Button onClick={triggerManualRefresh}>
                   <Space size={6} align="center">
                     <ReloadOutlined spin={isRefreshing} />
                     <span>刷新</span>
@@ -195,54 +271,81 @@ export default function AccessPageView() {
                     items: refreshMenuItems,
                     selectable: true,
                     selectedKeys: autoRefresh ? [String(refreshInterval)] : [],
-                    onClick: handleMenuClick,
+                    onClick: handleRefreshMenuClick,
                   }}
                 >
                   <Button icon={<DownOutlined />} />
                 </Dropdown>
               </Space.Compact>
             ) : (
-              <Button icon={<ReloadOutlined spin={isRefreshing} />} onClick={handleManualRefresh}>
+              <Button icon={<ReloadOutlined spin={isRefreshing} />} onClick={triggerManualRefresh}>
                 刷新
               </Button>
             )}
-
           </Space>
-        }
-      />
-
-      <GlobalOverviewBar
-        dayStr={dayStr}
-        refreshKey={refreshKey}
-      />
-
-      <SourceCalls dayStr={dayStr} refreshKey={refreshKey} />
-
-      <div className={styles.moduleNavWrapper} role="tablist" aria-label="数据分析客户端分类">
-        {MODULE_OPTIONS.map((item) => {
-          const active = activeModule === item.key;
-          return (
-            <button
-              key={item.key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className={`${styles.moduleNavItem} ${active ? styles.moduleNavItemActive : ""}`}
-              onClick={() => setActiveModule(item.key)}
-            >
-              <span className={styles.moduleNavIcon}>{item.icon}</span>
-              <span className={styles.moduleNavLabel}>{item.label}</span>
-            </button>
-          );
-        })}
+        </div>
       </div>
 
-      {activeModule === "web" ? (
-        <WebAnalyticsView dayStr={dayStr} refreshKey={refreshKey} />
-      ) : activeModule === "app" ? (
-        <AppAnalyticsView dayStr={dayStr} refreshKey={refreshKey} />
-      ) : (
-        <TvboxAnalyticsView dayStr={dayStr} refreshKey={refreshKey} />
+      {/* 核心 KPI 条：始终可见，提供跨视角全局体感 */}
+      <KpiOverviewGrid
+        globalOverview={data?.global}
+        scopedOverview={data?.scoped}
+        module={module}
+        platform={platform}
+        loading={loading}
+      />
+
+      {/* 三视角工作区导航 */}
+      <div className={styles.workspaceTabs}>
+        <Tabs
+          activeKey={activeTab}
+          items={tabItems}
+          onChange={(key) => setActiveTab(key as WorkspaceTab)}
+          tabBarStyle={{ marginBottom: 0 }}
+        />
+      </div>
+
+      {/* 按当前视角条件渲染，避免不可见图表无谓挂载及零宽度问题 */}
+      {activeTab === "traffic" && (
+        <TrafficChartsSection
+          globalOverview={data?.global}
+          scopedOverview={data?.scoped}
+          module={module}
+          platform={platform}
+          loading={loading}
+        />
+      )}
+
+      {activeTab === "content" && (
+        <TopRankingsSection
+          sources={data?.sources || []}
+          playTops={data?.playTops || []}
+          searchTops={data?.searchTops || []}
+          classifyTops={data?.classifyTops || []}
+          pageTops={data?.pageTops || []}
+          dayStr={dayStr}
+          module={module}
+          platform={platform}
+          loading={loading}
+        />
+      )}
+
+      {activeTab === "logs" && (
+        <AccessLogsCard
+          module={module}
+          logs={logs}
+          total={logsTotal}
+          loading={logsLoading || (loading && logs.length === 0)}
+          action={logAction}
+          keyword={logKeyword}
+          page={logPage}
+          pageSize={logPageSize}
+          onFilterChange={handleLogFilterChange}
+          onPageChange={(nextPage, nextSize) => {
+            setLogPage(nextPage);
+            setLogPageSize(nextSize);
+          }}
+        />
       )}
     </div>
   );

@@ -52,8 +52,12 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
   const [retentionDays, setRetentionDays] = useState<number>(0);
 
   const fetchStatus = useCallback(async () => {
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     try {
-      const resp = await ApiGet<AccessStatus>("/manage/access/status");
+      const resp = await ApiGet<AccessStatus>("/manage/analytics/status");
       if (resp.code === 0 && resp.data) {
         setStatus(resp.data);
       }
@@ -62,7 +66,7 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     void fetchStatus();
@@ -81,7 +85,7 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
     if (!canWrite || !isAdmin) return;
     setToggling(true);
     try {
-      const resp = await ApiPost<{ enabled: boolean }>("/manage/access/config", {
+      const resp = await ApiPost<{ enabled: boolean }>("/manage/analytics/config", {
         enabled: checked,
       });
       if (resp.code === 0) {
@@ -127,7 +131,7 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
         deletedDailyStats: number;
         deletedDailyTop: number;
         deletedRedisKeys: number;
-      }>("/manage/access/clean", {
+      }>("/manage/analytics/clean", {
         password,
         retentionDays,
       });

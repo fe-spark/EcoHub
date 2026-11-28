@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/access"
+	"server/internal/analytics"
 	"server/internal/infra/syslog"
 
 	"github.com/gin-gonic/gin"
@@ -21,20 +21,20 @@ func AccessLog() gin.HandlerFunc {
 		elapsed := time.Since(start)
 		status := c.Writer.Status()
 
-		if access.IsEnabled() {
-			evt := access.FromContext(c, elapsed)
+		if analytics.IsEnabled() {
+			evt := analytics.FromContext(c, elapsed)
 			if evt != nil {
-				access.Collect(evt)
+				analytics.Collect(evt)
 			}
 		}
 
-		if access.ShouldSkip(c.Request.Method, c.Request.URL.Path, status) {
+		if analytics.ShouldSkip(c.Request.Method, c.Request.URL.Path, status) {
 			return
 		}
 
 		uri := sanitizeAccessLogURI(c.Request.URL.RequestURI())
 		latMs := elapsed.Milliseconds()
-		ipLog := access.IPPreview(clientIP)
+		ipLog := analytics.IPPreview(clientIP)
 		if status >= 400 {
 			syslog.Warnf("[HTTP] %d | %dms | %s | %s %s",
 				status, latMs, ipLog, c.Request.Method, uri)

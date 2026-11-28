@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
-	"server/internal/access"
+	"server/internal/analytics"
 	"strings"
 	"testing"
 
@@ -11,11 +11,11 @@ import (
 )
 
 func TestAccessLogMiddleware(t *testing.T) {
-	origEnabled := access.IsEnabled()
+	origEnabled := analytics.IsEnabled()
 	t.Cleanup(func() {
-		access.SetEnabled(origEnabled)
+		analytics.SetEnabled(origEnabled)
 	})
-	access.SetEnabled(true)
+	analytics.SetEnabled(true)
 
 	r := gin.New()
 	r.Use(AccessLog())
@@ -57,7 +57,7 @@ func TestAccessLogMiddleware(t *testing.T) {
 	})
 
 	t.Run("access log disabled", func(t *testing.T) {
-		access.SetEnabled(false)
+		analytics.SetEnabled(false)
 		req := httptest.NewRequest(http.MethodGet, "/api/test-ok", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)

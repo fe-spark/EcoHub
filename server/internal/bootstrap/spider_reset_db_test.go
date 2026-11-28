@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"server/internal/access"
+	"server/internal/analytics"
 	"server/internal/collect"
 	"server/internal/config"
 	filmsnapshot "server/internal/film/snapshot"
@@ -55,13 +55,13 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 	prevRdb := db.Rdb
 	prevUploadDir := config.FilmPictureUploadDir
 	prevSyncFn := siteops.GetTriggerResetCategorySync()
-	prevAccess := access.IsEnabled()
+	prevAccess := analytics.IsEnabled()
 
 	uploadDir := t.TempDir()
 	db.Mdb = gdb
 	db.Rdb = nil
 	config.FilmPictureUploadDir = uploadDir
-	access.SetEnabled(true)
+	analytics.SetEnabled(true)
 
 	catSyncCalled := false
 	siteops.SetTriggerResetCategorySync(func() {
@@ -76,7 +76,7 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 		db.Rdb = prevRdb
 		config.FilmPictureUploadDir = prevUploadDir
 		siteops.SetTriggerResetCategorySync(prevSyncFn)
-		access.SetEnabled(prevAccess)
+		analytics.SetEnabled(prevAccess)
 		sourcecatalog.InvalidatePrimarySourceCache()
 	})
 
@@ -222,8 +222,8 @@ func TestClearFilms_ClearsDatabaseAndReinitializesDefaults(t *testing.T) {
 		t.Fatalf("expected old_task unregistered from CronCollect, got entry %d", entry.ID)
 	}
 
-	if access.IsEnabled() != model.DefaultAnalyticsConfig().Enabled {
-		t.Fatalf("expected analytics runtime reset to default (%v), got %v", model.DefaultAnalyticsConfig().Enabled, access.IsEnabled())
+	if analytics.IsEnabled() != model.DefaultAnalyticsConfig().Enabled {
+		t.Fatalf("expected analytics runtime reset to default (%v), got %v", model.DefaultAnalyticsConfig().Enabled, analytics.IsEnabled())
 	}
 	if !catSyncCalled {
 		t.Fatalf("expected background source category sync triggered after reset")

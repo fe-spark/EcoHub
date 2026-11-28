@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"sync"
 
-	"server/internal/access"
+	"server/internal/analytics"
 	"server/internal/collect"
 	"server/internal/collectctl"
 	"server/internal/film"
@@ -45,7 +45,7 @@ func Wire() {
 			return err
 		}
 		siteops.OnResetRecoverAccess = func() {
-			access.StartCollector()
+			analytics.Start()
 			_ = InitSvc.AnalyticsConfigInit()
 		}
 		siteops.OnResetRecoverCrontab = func() { _ = InitSvc.CollectCrontabInit() }

@@ -5,7 +5,7 @@ import "testing"
 func TestLoadAccessRuntimeConfig(t *testing.T) {
 	JwtSecret = "test-secret"
 	loadAccessRuntimeConfig()
-	if len(AccessIPSalt) == 0 {
-		t.Fatal("expected AccessIPSalt to be generated")
+	if len(AnalyticsIPSalt) == 0 {
+		t.Fatal("expected AnalyticsIPSalt to be generated")
 	}
 }

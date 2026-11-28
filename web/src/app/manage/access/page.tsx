@@ -5,15 +5,17 @@ import AccessPageView from "./view";
 
 export default async function AccessPage() {
   const cookieStore = await cookies();
+  let isAdmin = false;
   try {
-    const response = await serverGet<{ id?: number }>("/manage/user/info", undefined, {
+    const response = await serverGet<{ isAdmin?: boolean }>("/manage/user/info", undefined, {
       Cookie: cookieStore.toString(),
     });
-    if (response.code !== 0 || !response.data?.id) {
-      redirect("/login");
-    }
+    isAdmin = response.code === 0 && Boolean(response.data?.isAdmin);
   } catch {
-    redirect("/login");
+    isAdmin = false;
+  }
+  if (!isAdmin) {
+    redirect("/manage");
   }
   return <AccessPageView />;
 }

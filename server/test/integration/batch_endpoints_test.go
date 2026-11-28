@@ -384,6 +384,6 @@ func TestBatchEndpoints_AllModulesIntegration(t *testing.T) {
 		assertSuccess(t, doJSONRequest(r, http.MethodGet, "/api/config/basic", "", nil), "GET front basic")
 		assertSuccess(t, doJSONRequest(r, http.MethodGet, "/api/manage/index", token, nil), "GET manage index")
 		assertSuccess(t, doJSONRequest(r, http.MethodGet, "/api/manage/version", token, nil), "GET manage version")
-		assertSuccess(t, doJSONRequest(r, http.MethodGet, "/api/manage/access/status", token, nil), "GET access status")
+		assertSuccess(t, doJSONRequest(r, http.MethodGet, "/api/manage/analytics/status", token, nil), "GET analytics status")
 	})
 }
