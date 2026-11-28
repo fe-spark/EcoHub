@@ -166,6 +166,7 @@ func TakeClassifyTops(items []types.TopItem, limit int) ([]types.TopItem, error)
 			names = append(names, trimmed)
 		}
 	}
+	navIdx := LoadCategoryNavIndex()
 	catMap, err := ResolveCategoryNames(ids)
 	if err != nil {
 		return nil, err
@@ -183,20 +184,41 @@ func TakeClassifyTops(items []types.TopItem, limit int) ([]types.TopItem, error)
 		}
 		if id, ok := ParseFilmID(trimmed); ok {
 			it.Key = strconv.FormatInt(id, 10)
-			if it.Category == "" || strings.HasPrefix(it.Category, "分类 #") {
-				if name, ok := catMap[id]; ok && name != "" {
-					it.Category = name
+			if target, hit := navIdx.LookupByID(id); hit {
+				it.Key = strconv.FormatInt(target.ID, 10)
+				if target.Name != "" {
+					it.Category = target.Name
+					it.Title = target.Name
 				}
-			}
-			if it.Title == "" || strings.HasPrefix(it.Title, "分类 #") {
-				if it.Category != "" {
-					it.Title = it.Category
-				} else {
-					it.Title = fmt.Sprintf("分类 #%d", id)
+				it.Href = target.Href
+			} else {
+				if it.Category == "" || strings.HasPrefix(it.Category, "分类 #") {
+					if name, ok := catMap[id]; ok && name != "" {
+						it.Category = name
+					}
+				}
+				if it.Title == "" || strings.HasPrefix(it.Title, "分类 #") {
+					if it.Category != "" {
+						it.Title = it.Category
+					} else {
+						it.Title = fmt.Sprintf("分类 #%d", id)
+					}
+				}
+				// 非主站或旧分类 ID，若当前主站存在同名可见分类，则对齐至主站有效导航链接
+				if target, hit := navIdx.LookupByName(it.Title); hit {
+					it.Key = strconv.FormatInt(target.ID, 10)
+					it.Category = target.Name
+					it.Title = target.Name
+					it.Href = target.Href
 				}
 			}
 		} else {
-			if catID, ok := nameToID[trimmed]; ok {
+			if target, hit := navIdx.LookupByName(trimmed); hit {
+				it.Key = strconv.FormatInt(target.ID, 10)
+				it.Category = target.Name
+				it.Title = target.Name
+				it.Href = target.Href
+			} else if catID, ok := nameToID[trimmed]; ok {
 				it.Key = strconv.FormatInt(catID, 10)
 				it.Category = trimmed
 				it.Title = trimmed
@@ -251,6 +273,13 @@ func EnrichLogEvents(events []types.Event) ([]types.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+	var navIdx *CategoryNavIndex
+	for i := range events {
+		if events[i].Action == types.ActionClassify {
+			navIdx = LoadCategoryNavIndex()
+			break
+		}
+	}
 
 	for i := range events {
 		it := &events[i]
@@ -266,18 +295,40 @@ func EnrichLogEvents(events []types.Event) ([]types.Event, error) {
 				}
 			}
 		} else if it.Action == types.ActionClassify {
-			if it.ResourceCat == "" || strings.HasPrefix(it.ResourceCat, "分类 #") {
-				if id, ok := ParseFilmID(res); ok {
-					if name, ok := catMap[id]; ok && name != "" {
-						it.ResourceCat = name
-					} else if it.ResourceCat == "" {
-						it.ResourceCat = fmt.Sprintf("分类 #%d", id)
+			if id, ok := ParseFilmID(res); ok {
+				if target, hit := navIdx.LookupByID(id); hit {
+					if target.Name != "" {
+						it.ResourceCat = target.Name
+					}
+					it.ResourceHref = target.Href
+				} else {
+					if it.ResourceCat == "" || strings.HasPrefix(it.ResourceCat, "分类 #") {
+						if name, ok := catMap[id]; ok && name != "" {
+							it.ResourceCat = name
+						} else if it.ResourceCat == "" {
+							it.ResourceCat = fmt.Sprintf("分类 #%d", id)
+						}
+					}
+					if target, hit := navIdx.LookupByName(it.ResourceCat); hit {
+						it.ResourceHref = target.Href
 					}
 				}
+			} else if target, hit := navIdx.LookupByName(firstNonEmptyString(it.ResourceCat, res)); hit {
+				it.ResourceCat = target.Name
+				it.ResourceHref = target.Href
 			}
 		}
 	}
 	return events, nil
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // LimitTopItems 截断榜单切片至上限
@@ -301,6 +352,10 @@ func mergeClassifyItems(items []types.TopItem) []types.TopItem {
 		}
 		if idx, exists := idxMap[lookupKey]; exists {
 			merged[idx].Count += it.Count
+			if merged[idx].Href == "" && it.Href != "" {
+				merged[idx].Href = it.Href
+				merged[idx].Key = it.Key
+			}
 		} else {
 			idxMap[lookupKey] = len(merged)
 			merged = append(merged, it)

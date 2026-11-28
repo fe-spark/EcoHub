@@ -42,6 +42,7 @@ type Event struct {
 	ResourceTitle   string    `json:"resourceTitle,omitempty"`
 	ResourcePoster  string    `json:"resourcePoster,omitempty"`
 	ResourceCat     string    `json:"resourceCat,omitempty"`
+	ResourceHref    string    `json:"resourceHref,omitempty"`
 	Page            string    `json:"page,omitempty"`
 	PageTitle       string    `json:"pageTitle,omitempty"`
 	AppVersion      string    `json:"appVersion,omitempty"`
@@ -121,6 +122,7 @@ type TopItem struct {
 	Category string `json:"category,omitempty"`
 	Poster   string `json:"poster,omitempty"`
 	Year     int64  `json:"year,omitempty"`
+	Href     string `json:"href,omitempty"`
 }
 
 // TopPageResult 榜单分页查询响应

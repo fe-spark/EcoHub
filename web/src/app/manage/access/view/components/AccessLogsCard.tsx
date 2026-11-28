@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { Card, Input, Select, Space, Table, Tag, Typography } from "antd";
+import { Card, Empty, Input, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import ResourceCell from "./ResourceCell";
@@ -198,6 +198,13 @@ export default function AccessLogsCard({
         loading={loading}
         size="middle"
         scroll={{ x: 960 }}
+        locale={{
+          emptyText: (
+            <div style={{ padding: "36px 0" }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无访问流水记录" />
+            </div>
+          ),
+        }}
         pagination={{
           current: page,
           pageSize,

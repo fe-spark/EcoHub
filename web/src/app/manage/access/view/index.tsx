@@ -182,6 +182,7 @@ export default function AccessPageView() {
   return (
     <div className={styles.pageStack}>
       <ManagePageHeader
+        className={styles.pageHeader}
         title="数据分析"
         description="全站流量趋势、终端构成、片源热度与实时访问流水。"
         actions={

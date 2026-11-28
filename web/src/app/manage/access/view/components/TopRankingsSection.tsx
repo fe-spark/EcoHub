@@ -15,6 +15,8 @@ import { isSafeInternalHref } from "../constants";
 import type { AnalyticsModule, AppPlatform, SourceCallRow, TopItem } from "../types";
 import styles from "../index.module.less";
 
+const CARD_BODY_FLEX_STYLE = { flex: 1, display: "flex", flexDirection: "column" as const };
+
 interface TopRankingsSectionProps {
   sources: SourceCallRow[];
   playTops: TopItem[];
@@ -59,7 +61,11 @@ export default function TopRankingsSection({
       return <Skeleton active paragraph={{ rows: 5 }} />;
     }
     if (items.length === 0) {
-      return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无排行数据" />;
+      return (
+        <div className={styles.emptyCenter} style={{ minHeight: 260 }}>
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无排行数据" />
+        </div>
+      );
     }
 
     return (
@@ -97,17 +103,14 @@ export default function TopRankingsSection({
           } else if (kind === "classify") {
             const name =
               item.title || item.category || (isNumericId ? `分类 #${rawId}` : item.key);
-            labelNode = isNumericId ? (
-              <Link
-                href={`/category?pid=${encodeURIComponent(rawId)}`}
-                target="_blank"
-                style={{ fontWeight: 500 }}
-              >
-                {name}
-              </Link>
-            ) : (
-              <Typography.Text strong>{name}</Typography.Text>
-            );
+            labelNode =
+              item.href && isSafeInternalHref(item.href) ? (
+                <Link href={item.href} target="_blank" style={{ fontWeight: 500 }}>
+                  {name}
+                </Link>
+              ) : (
+                <Typography.Text strong>{name}</Typography.Text>
+              );
           } else if (isSafeInternalHref(item.key)) {
             labelNode = (
               <Link href={item.key} target="_blank" style={{ fontWeight: 500 }}>
@@ -150,7 +153,8 @@ export default function TopRankingsSection({
         <Col xs={24} lg={12}>
           <Card
             size="small"
-            style={{ height: "100%" }}
+            className={styles.fullHeightCard}
+            styles={{ body: CARD_BODY_FLEX_STYLE }}
             title={
               <Space size={6}>
                 <VideoCameraOutlined style={{ color: "#fa8c16" }} />
@@ -174,7 +178,8 @@ export default function TopRankingsSection({
         <Col xs={24} lg={12}>
           <Card
             size="small"
-            style={{ height: "100%" }}
+            className={styles.fullHeightCard}
+            styles={{ body: CARD_BODY_FLEX_STYLE }}
             title={
               <Space size={6}>
                 <FireOutlined style={{ color: "#fa541c" }} />
@@ -194,7 +199,8 @@ export default function TopRankingsSection({
         <Col xs={24} lg={12}>
           <Card
             size="small"
-            style={{ height: "100%" }}
+            className={styles.fullHeightCard}
+            styles={{ body: CARD_BODY_FLEX_STYLE }}
             title={
               <Space size={8} wrap>
                 {activeSecondaryKind === "classify" ? (

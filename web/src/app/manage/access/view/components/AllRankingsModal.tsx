@@ -6,6 +6,7 @@ import { Alert, Empty, Input, Modal, Pagination, Progress, Space, Spin, Tag, Typ
 import { isSafeInternalHref } from "../constants";
 import { ApiGet } from "@/lib/client-api";
 import type { AnalyticsModule, AppPlatform, TopItem, TopPageResult } from "../types";
+import styles from "../index.module.less";
 
 interface AllRankingsModalProps {
   open: boolean;
@@ -128,7 +129,9 @@ export default function AllRankingsModal({
 
         <Spin spinning={loading}>
           {items.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无匹配记录" />
+            <div className={styles.emptyCenter} style={{ minHeight: 240 }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无匹配记录" />
+            </div>
           ) : (
             <div style={{ maxHeight: 420, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
               {items.map((item, idx) => {
@@ -155,13 +158,14 @@ export default function AllRankingsModal({
                   );
                 } else if (kind === "classify") {
                   const text = item.title || item.category || (isNumericId ? `分类 #${rawId}` : item.key);
-                  label = isNumericId ? (
-                    <Link href={`/category?pid=${encodeURIComponent(rawId)}`} target="_blank" style={{ fontWeight: 500 }}>
-                      {text}
-                    </Link>
-                  ) : (
-                    <Typography.Text strong>{text}</Typography.Text>
-                  );
+                  label =
+                    item.href && isSafeInternalHref(item.href) ? (
+                      <Link href={item.href} target="_blank" style={{ fontWeight: 500 }}>
+                        {text}
+                      </Link>
+                    ) : (
+                      <Typography.Text strong>{text}</Typography.Text>
+                    );
                 } else if (isSafeInternalHref(item.key)) {
                   label = (
                     <Link href={item.key} target="_blank" style={{ fontWeight: 500 }}>

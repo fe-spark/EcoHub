@@ -9,10 +9,11 @@ import {
   SearchOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
+import { isSafeInternalHref } from "../constants";
 import type { LogRow } from "../types";
 
 export default function ResourceCell({ record }: { record: LogRow }) {
-  const { resource, resourceTitle, resourcePoster, resourceCat, action } = record;
+  const { resource, resourceTitle, resourcePoster, resourceCat, resourceHref, action } = record;
   const safePoster =
     resourcePoster && /^https?:\/\//i.test(resourcePoster) ? resourcePoster : "";
 
@@ -23,14 +24,21 @@ export default function ResourceCell({ record }: { record: LogRow }) {
   const rawId = (resource || "").replace(/^id\s+/, "").trim();
   const isNumericId = /^\d+$/.test(rawId);
 
-  if (action === "classify" && resource) {
+  if (action === "classify" && (resource || resourceCat)) {
     const catLabel = resourceCat || (isNumericId ? `分类 #${rawId}` : resource);
+    if (resourceHref && isSafeInternalHref(resourceHref)) {
+      return (
+        <Link href={resourceHref} target="_blank">
+          <Tag icon={<CompassOutlined />} color="purple" style={{ cursor: "pointer" }}>
+            {catLabel}
+          </Tag>
+        </Link>
+      );
+    }
     return (
-      <Link href={`/category?pid=${encodeURIComponent(rawId || resource)}`} target="_blank">
-        <Tag icon={<CompassOutlined />} color="purple" style={{ cursor: "pointer" }}>
-          {catLabel}
-        </Tag>
-      </Link>
+      <Tag icon={<CompassOutlined />} color="purple">
+        {catLabel}
+      </Tag>
     );
   }
 

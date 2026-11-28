@@ -14,6 +14,9 @@ import {
   OS_META,
 } from "../constants";
 import type { AnalyticsModule, AppPlatform, Overview } from "../types";
+import styles from "../index.module.less";
+
+const CARD_BODY_FLEX_STYLE = { flex: 1, display: "flex", flexDirection: "column" as const };
 
 interface TrafficChartsSectionProps {
   globalOverview?: Overview | null;
@@ -315,7 +318,8 @@ export default function TrafficChartsSection({
         <Card
           title="24 小时流量走势"
           size="small"
-          style={{ height: "100%" }}
+          className={styles.fullHeightCard}
+          styles={{ body: CARD_BODY_FLEX_STYLE }}
           extra={
             module === "all" ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -327,7 +331,9 @@ export default function TrafficChartsSection({
           {loading && !active ? (
             <Skeleton active paragraph={{ rows: 5 }} />
           ) : (active?.series?.length ?? 0) === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无流量走势数据" />
+            <div className={styles.emptyCenter} style={{ minHeight: 290 }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无流量走势数据" />
+            </div>
           ) : (
             <EChartBox option={trendOption} height={290} />
           )}
@@ -335,11 +341,18 @@ export default function TrafficChartsSection({
       </Col>
 
       <Col xs={24} lg={8}>
-        <Card title={compositionTitle} size="small" style={{ height: "100%" }}>
+        <Card
+          title={compositionTitle}
+          size="small"
+          className={styles.fullHeightCard}
+          styles={{ body: CARD_BODY_FLEX_STYLE }}
+        >
           {loading && !active ? (
             <Skeleton active paragraph={{ rows: 5 }} />
           ) : compositionEntries.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无构成数据" />
+            <div className={styles.emptyCenter} style={{ minHeight: 290 }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无构成数据" />
+            </div>
           ) : (
             <EChartBox option={buildDonutOption(compositionEntries)} height={290} />
           )}
@@ -347,11 +360,18 @@ export default function TrafficChartsSection({
       </Col>
 
       <Col xs={24} lg={12}>
-        <Card title={leftTitle} size="small" style={{ height: "100%" }}>
+        <Card
+          title={leftTitle}
+          size="small"
+          className={styles.fullHeightCard}
+          styles={{ body: CARD_BODY_FLEX_STYLE }}
+        >
           {loading && !active ? (
             <Skeleton active paragraph={{ rows: 4 }} />
           ) : secondaryLeft.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分布数据" />
+            <div className={styles.emptyCenter} style={{ minHeight: 250 }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分布数据" />
+            </div>
           ) : module === "tvbox" ? (
             <EChartBox option={buildDonutOption(secondaryLeft)} height={250} />
           ) : (
@@ -361,11 +381,18 @@ export default function TrafficChartsSection({
       </Col>
 
       <Col xs={24} lg={12}>
-        <Card title={rightTitle} size="small" style={{ height: "100%" }}>
+        <Card
+          title={rightTitle}
+          size="small"
+          className={styles.fullHeightCard}
+          styles={{ body: CARD_BODY_FLEX_STYLE }}
+        >
           {loading && !active ? (
             <Skeleton active paragraph={{ rows: 4 }} />
           ) : secondaryRight.length === 0 ? (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分布数据" />
+            <div className={styles.emptyCenter} style={{ minHeight: 250 }}>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无分布数据" />
+            </div>
           ) : (
             <EChartBox option={buildBarOption(secondaryRight, rightHorizontal)} height={250} />
           )}

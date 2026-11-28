@@ -7,6 +7,9 @@ import type { EChartsCoreOption } from "echarts/core";
 import EChartBox from "./EChartBox";
 import { CHART_PALETTE } from "../constants";
 import type { SourceCallRow } from "../types";
+import styles from "../index.module.less";
+
+const CARD_BODY_FLEX_STYLE = { flex: 1, display: "flex", flexDirection: "column" as const };
 
 interface SourceCallsCardProps {
   sources: SourceCallRow[];
@@ -90,7 +93,8 @@ export default function SourceCallsCard({ sources, loading }: SourceCallsCardPro
   return (
     <Card
       size="small"
-      style={{ height: "100%" }}
+      className={styles.fullHeightCard}
+      styles={{ body: CARD_BODY_FLEX_STYLE }}
       title={
         <Space size={8}>
           <PlaySquareOutlined style={{ color: "var(--ant-color-primary)" }} />
@@ -111,7 +115,9 @@ export default function SourceCallsCard({ sources, loading }: SourceCallsCardPro
       {loading && validRows.length === 0 ? (
         <Skeleton active paragraph={{ rows: 5 }} />
       ) : validRows.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当日暂无片源点播记录" />
+        <div className={styles.emptyCenter} style={{ minHeight: 260 }}>
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当日暂无片源点播记录" />
+        </div>
       ) : (
         <EChartBox
           option={barOption}

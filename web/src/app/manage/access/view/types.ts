@@ -47,6 +47,7 @@ export interface TopItem {
   category?: string;
   poster?: string;
   year?: number;
+  href?: string;
 }
 
 export interface TopPageResult {
@@ -82,6 +83,7 @@ export interface LogRow {
   resourceTitle?: string;
   resourcePoster?: string;
   resourceCat?: string;
+  resourceHref?: string;
   action?: string;
   appVersion?: string;
   deviceModel?: string;
