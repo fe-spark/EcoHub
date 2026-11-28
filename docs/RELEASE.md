@@ -1,3 +1,22 @@
+正式版 **v3.2.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.3`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
+
+### 升级说明
+
+- v3.0.x / v3.1.x / v3.2.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- 数据分析已重构为独立统计结构与接口契约，旧版统计缓存不再兼容，首次启动自动同步新增字段。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/v2-to-v3.md)。
+
+### v3.2.3 更新内容
+
+- **权限隔离**：数据分析菜单、页面及管理端接口收紧为仅超级管理员可访问，屏蔽访客与普通用户。
+- **数据分析模块**：抽离独立 `analytics` 服务与 `/api/manage/analytics/*` 接口，改用单日 96 槽位 Hash 存储与写路径无库查询。
+- **看板重构**：基于 ECharts 重构数据分析页面，采用吸顶控制栏、常驻 KPI 及「流量与终端 / 内容与片源 / 实时流水」三视角布局。
+- **并发与稳定性**：补全归档停机等待、汇总并发开关校验、批量 `IN` 查询分块及前端流水竞态防护。
+
+---
+
 正式版 **v3.2.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.2`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)

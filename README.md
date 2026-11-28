@@ -56,7 +56,7 @@
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.3 sh
 ```
 
 安装完成后终端将输出访问地址、初始账号与订阅地址（默认端口 `3000`、数据目录 `~/ecohub`），日常维护使用 `ecohub` 命令。密码设置、1Panel、手动部署、反向代理与环境变量见 [部署指南](./docs/guide/deploy.md) 与 [运维与配置](./docs/guide/operations.md)。

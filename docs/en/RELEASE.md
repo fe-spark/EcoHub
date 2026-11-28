@@ -1,3 +1,22 @@
+Release **v3.2.3**, image `ghcr.io/fe-spark/ecohub:v3.2.3` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x / v3.1.x / v3.2.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- Analytics has been refactored with new Redis keys and API routes; legacy analytics cache keys are not compatible, and new columns are applied on startup.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/v2-to-v3.md).
+
+### v3.2.3 changes
+
+- **Access control**: restrict analytics menu, page, and admin endpoints strictly to super admins, blocking visitors and normal users.
+- **Analytics module**: extract standalone `analytics` package and `/api/manage/analytics/*` routes with daily 96-slot Redis hashes and memory-only write enrichment.
+- **Dashboard UI**: rebuild analytics views with ECharts, sticky filter bar, persistent KPI row, and Traffic / Content / Logs workspace tabs.
+- **Concurrency & reliability**: wait for rollup shutdown cleanly, guard rollup enablement under lock, chunk batched `IN` queries, and drop stale log responses.
+
+---
+
 Release **v3.2.2**, image `ghcr.io/fe-spark/ecohub:v3.2.2` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English

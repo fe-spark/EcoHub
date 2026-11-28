@@ -56,7 +56,7 @@ Requirements: Docker 20+ and Docker Compose, with 2 CPU cores and 2 GB RAM or mo
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.3 sh
 ```
 
 The installer outputs the URLs, initial credentials, and subscription endpoints (default web port `3000`, directory `~/ecohub`, managed via `ecohub`). For passwords, 1Panel, manual runs, reverse proxies, and environment variables, see the [Deploy guide](./guide/deploy.md) and [Operations](./guide/operations.md).
