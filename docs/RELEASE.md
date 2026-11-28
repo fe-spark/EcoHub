@@ -1,3 +1,22 @@
+正式版 **v3.2.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
+
+中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)
+
+### 升级说明
+
+- v3.0.x / v3.1.x / v3.2.x：通过 `ecohub` 安装的，执行 `ecohub update`；使用 1Panel 或自行维护 compose 的，在安装目录执行 `docker compose pull && docker compose up -d`。
+- 首次启动自动在线加列与索引并移除 `collect_record_films` 账本表，无需锁表。
+- v2.x：不兼容，不提供迁移。见 [从 v2 升级到 v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3.md)。
+
+### v3.2.2 更新内容
+
+- **采集记录精简**：移除 `collect_record_films` 账本表及历史片单弹窗，单片更新改由 `target_mids` 维护。
+- **Telegram 通知**：主站更新片单改为 `film_index.last_record_id` 单表查询，交互精简为两级。
+- **线路与内存**：重名手动线路自动追加序号后缀，单站采集完成后释放去重集合。
+- **管理端优化**：采集记录重构为 7 列，增加非主站预配置提示并统一网站配置加载锁定。
+
+---
+
 正式版 **v3.2.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE_EN.md)

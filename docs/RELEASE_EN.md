@@ -1,3 +1,22 @@
+Release **v3.2.2**, image `ghcr.io/fe-spark/ecohub:v3.2.2` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
+
+[中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
+
+### Upgrade notes
+
+- v3.0.x / v3.1.x / v3.2.x: for installations managed by `ecohub`, run `ecohub update`. For 1Panel or self-managed compose files, run `docker compose pull && docker compose up -d` in the install directory.
+- First startup runs an online migration to add `last_record_id` with its index and drop `collect_record_films`.
+- v2.x: not compatible; no migration is provided. See [Upgrading from v2 to v3](https://github.com/fe-spark/EcoHub/blob/main/docs/v2-to-v3_EN.md).
+
+### v3.2.2 changes
+
+- **Collect records**: drop `collect_record_films` and the batch-films modal; store single-update IDs in `target_mids`.
+- **Telegram notify**: query primary updates directly via `film_index.last_record_id` with a two-level flow.
+- **Playlists & memory**: append suffixes to duplicate manual lines and free per-source dedup sets once finished.
+- **Admin UI**: streamline collect records to 7 columns, add non-primary alerts, and unify config load locks.
+
+---
+
 Release **v3.2.1**, image `ghcr.io/fe-spark/ecohub:v3.2.1` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/README-Deploy_EN.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
