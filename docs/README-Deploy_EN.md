@@ -300,14 +300,16 @@ In the "Read by" column, Compose means the value is used only by the compose fil
 | `MYSQL_USER` | `eco` | App, bundled MySQL | |
 | `MYSQL_PASSWORD` | `ecohub` | App, bundled MySQL | Bundled MySQL sets it only on first init |
 | `MYSQL_DBNAME` | `eco` | App, bundled MySQL | |
+| `MYSQL_INNODB_BUFFER_POOL_SIZE` | `1G` | Bundled MySQL | InnoDB buffer pool size |
+| `MYSQL_INNODB_REDO_LOG_CAPACITY` | `512M` | Bundled MySQL | InnoDB redo log capacity |
 | `REDIS_HOST` | `redis` | App | |
 | `REDIS_PORT` | `6379` | App | |
 | `REDIS_PASSWORD` | `ecohub` | App, bundled Redis | Edit `.env`, then `ecohub restart` |
 | `REDIS_DB` | `0` | App | |
 
-To route collect, TMDB scraping, Telegram notifications, the version check, or danmaku fetching through a proxy, open "网络代理" (Network proxy, `/manage/system/proxy`) in the admin panel, enter the proxy address (`http://`, `https://`, or `socks5://`), and enable it per module. The proxy can be configured only on this page; requests without an enabled proxy always connect directly. For the requests covered by each module and their defaults, see the [FAQ](./README-FAQ_EN.md#which-requests-use-the-admin-network-proxy).
+To route collect, TMDB scraping, Telegram notifications, the version check, or danmaku fetching through a proxy, open "网络代理" (Network proxy, `/manage/system/proxy`) in the admin panel, enter the proxy address (`http://`, `https://`, `socks5://`, or `socks5h://`), and enable it per module. The proxy can be configured only on this page; requests without an enabled proxy always connect directly. For the requests covered by each module and their defaults, see the [FAQ](./README-FAQ_EN.md#which-requests-use-the-admin-network-proxy).
 
-Go-only variables such as `NODE_NAME` and `ECOHUB_LOG_DIR` are not passed into the container by the release compose file, so setting them in `.env` has no effect. Add them under `environment` in the compose file if required. For their meaning, see the [server README](../server/README_EN.md#environment-variables).
+Go-only variables such as `NODE_NAME`, `ECOHUB_LOG_DIR`, and `ECOHUB_TRUSTED_PROXIES` are not passed into the container by the release compose file, so setting them in `.env` has no effect. Add them under `environment` in the compose file if required. For their meaning, see the [server README](../server/README_EN.md#environment-variables).
 
 The release image sets the web app's `API_URL` to `http://127.0.0.1:8080` at build time. Do not set `API_URL` when deploying.
 

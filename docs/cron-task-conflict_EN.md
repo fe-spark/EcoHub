@@ -66,7 +66,7 @@ The maintenance queue is held in memory only. If the service restarts, queued ma
 
 ## Implementation
 
-The related code is in `server/internal/spider/`:
+The related code is in `server/internal/collect/`:
 
 | File | Responsibility |
 | --- | --- |

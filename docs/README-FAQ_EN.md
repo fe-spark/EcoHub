@@ -10,9 +10,9 @@ For installation, ports, and passwords, see the [Deploy guide](./README-Deploy_E
 
 No data has been collected yet. The release image contains no media data. The first startup writes only the 12 preset collect sources and does not run a full collect automatically.
 
-Run a full collect from "采集中心" (Collect center) in the admin panel. More collect sources take longer, and the first collect can take several hours. Waiting for completion is not necessary: each collected batch is published to the snapshot that the site reads, so films from the main source appear as the collect progresses.
+Run a full collect from "采集中心" (Collect center) in the admin panel. More collect sources take longer, and the first collect can take several hours. Waiting for completion is not necessary: as each batch is written to the library and stream-published, list caches are invalidated after a short debounce so films from the main source appear progressively, while the in-memory search index is updated after all active collect queues finish.
 
-The site lists, the admin film list, and the TVBox / MacCMS subscriptions all read the snapshot rather than the tables being collected. An empty site before the first batch is published is therefore expected behavior.
+The site lists, filters, admin film list, and TVBox / MacCMS subscriptions rely on the published main-source read model and cached indexes rather than transient collect state. An empty site before the first batch is published is therefore expected behavior.
 
 ### What is the main source?
 
@@ -28,7 +28,7 @@ The poster source is a separate flag and does not determine the main source. Sit
 
 None. Switching the main source does not delete films or trigger a re-collect, and it can be done while a collect is running.
 
-Homepage banners are stored per collect source. After the switch, the home page shows the banner set of the new main source. The previous set is retained and is shown again after switching back.
+"首页轮播" (Homepage banners) and "首页推荐" (Homepage recommendations) are stored per collect source. After switching, the home page displays the new main source's banners and recommendation groups. The previous source's configuration is retained and shown again after switching back.
 
 The following operations differ from switching the main source:
 
@@ -39,29 +39,29 @@ The following operations differ from switching the main source:
 
 Each collect source keeps its own copy of the data. Collect does not merge them.
 
-- Within one collect source: `movie_source_mapping` uses "collect source + the source's `vod_id`" to locate the film's existing record, and a subsequent collect updates only that record. Entries on the same page of the same source with the same match key are merged into one film.
-- Across collect sources: match keys are not used to merge records. The play page uses them at read time to find the same film in other sources, in this order: Douban ID + title, title + top-level category, title only. A film matched by several keys is counted once. Play lines remain grouped by source; episodes from different sources are never combined.
+- Within one collect source: `movie_source_mapping` uses "collect source + the source's `vod_id`" to locate the film's existing record, and a subsequent collect updates only that record. If the same `vod_id` appears multiple times on the same page of a source, the last entry on that page is kept; entries with different `vod_id` values are not merged by match keys during collect.
+- Across collect sources: match keys are not used to merge records. The play page and poster lookup use them at read time to find the same film in other sources, in this order: Douban ID + title, title + top-level category, title only. When not matched by Douban ID, normalized top-level category compatibility is also checked, and films under hidden categories in non-primary sources are excluded. A film matched by several keys is counted once. Play lines remain grouped by source; episodes from different sources are never combined.
 
 The category key is `source:{collect source ID}:{source category ID}` and maps one-to-one to that source's own category tree.
 
-### Where are scrape results and homepage banners stored?
+### Where are scrape results, homepage banners, and recommendations stored?
 
-- Film scraping: writes the selected cover, synopsis, score, and similar fields directly to the film. The title and category are not changed. Changes cannot be reverted.
-- Homepage banners: stored per collect source. Each record stores only the film, the order, and any image, synopsis, score, or year edited in the admin panel; all other information is read from the library at display time. Scraping within the banner editor updates only that banner record, not the film itself, and no separate scrape table exists.
+- Film scraping: writes the selected cover, synopsis, score, and similar fields directly to `film_index` and locks those columns, while storing the `mid` and TMDB ID / media type mapping in `film_tmdb_scrapes`. The title and category are not changed, and changes cannot be automatically reverted.
+- Homepage banners and recommendations: managed under "首页管理" (Homepage) in the admin panel and stored per collect source (`banner_slot`, `home_recommend_group`, and `home_recommend_item`). Each item stores only the film reference, order, and any image, synopsis, score, or year overrides edited in the banner form; all other fields are read from the library at display time. Scraping within the banner editor updates only that banner record and not the film itself.
+- Chart auto-sync: recommendation groups bound to Douban or Bangumi charts cache raw chart data for 6 hours and automatically match and sync group items against the library after collect and search index resealing complete.
 
 ### What is the state of the data after a manual stop?
 
-Stopping interrupts pages that are still being fetched. Pages already stored remain in the library. A page that is being written completes; pages waiting to be written are discarded. Failed pages are recorded in "采集记录" (Collect records) and can be retried.
+Stopping interrupts pages that are still being fetched. Pages already stored remain in the library. Active write transactions complete, while batches queued in the write pool stop accepting work or are dropped. Failed pages are recorded in "采集记录" (Collect records), where single pages, in-batch failures, and degraded records older than 30 minutes can be retried.
 
-## Snapshots and cache
+## Indexing, publishing, and cache
 
-### Why are snapshots published during a collect?
+### Why is the search index not rebuilt after every batch during a collect?
 
-The site does not read the tables being collected, because those tables change continuously during a collect. After each batch, the batch is written to the snapshot and the in-memory search index is updated incrementally per film. Site lists, filters, the admin film list, and TVBox / MacCMS all read the snapshot.
+Reading transient collect state directly causes list churn, while acquiring locks to rebuild the full search index after every batch slows collect throughput. Instead, EcoHub uses streaming publication paired with a single post-queue reseal:
 
-After publishing, list cache cleanup is debounced by 5 seconds: when many batches are processed in succession, Redis is not cleared after every batch but once, approximately 5 seconds after the last batch.
-
-The search index is normally updated incrementally. It is fully loaded once at startup. If an incremental update finds no usable index in memory, a full rebuild is performed as a fallback.
+1. **Streaming publish**: after films are written, changed film IDs enter a bounded publish buffer (flushing every 300 IDs or 3 s for the main source, 1,000 IDs or 10 s for non-primary sources, with backpressure at 5,000 queued IDs), batch-upsert filter tag rows (`search_tag_item`), immediately clear affected play detail caches, and schedule a 5-second debounced Redis list cache cleanup (when many batches arrive back-to-back, Redis list caches are cleared once approximately 5 seconds after the last batch).
+2. **Search index reseal**: once all active collect queues finish, the in-memory search and filter index is resealed. Changes below 50,000 films are patched incrementally; 50,000 or more changes, or an unavailable in-memory index, trigger a sequential full rebuild.
 
 ### Why do configuration changes not appear on the site immediately?
 
@@ -72,7 +72,7 @@ Saving the site configuration updates Redis and clears the home page cache. If t
 
 Film lists, categories, and filters show only the current main source. After the main source is switched, the site shows the films already collected by the new main source; if it has not collected any data yet, the lists are empty.
 
-The regular TVBox lists have an additional Redis cache layer with a lifetime of up to approximately 12 hours, which is cleared with a debounce after new data is stored. If results still differ, verify that the requests reach the same instance with the same parameters.
+The regular TVBox lists have an additional Redis cache layer with a lifetime of up to approximately 12 hours, which is cleared with a debounce after streaming publish finishes. If results still differ, verify that the requests reach the same instance with the same parameters.
 
 ### How is "最近更新" (Recently updated) sorted? Are category pages and TVBox consistent?
 
@@ -84,7 +84,7 @@ Films are sorted by `film_index.update_stamp` in descending order, then by `mid`
 
 The same rules apply to all collect sources.
 
-The site category page and TVBox derive their filter options from the same filter data and apply the same matching rules. The site queries the in-memory index, while TVBox queries MySQL:
+The site category page and TVBox derive their filter options from the same filter data and apply the same matching rules. When querying the current main source with the in-memory read model available, both query the in-memory index (TVBox falls back to MySQL `film_index` only for non-primary queries or when the read model is unavailable):
 
 | Filter | Rule | Consistent |
 | --- | --- | --- |
@@ -95,7 +95,7 @@ The site category page and TVBox derive their filter options from the same filte
 | "其他" (Other) | Value not among the filter options, including empty values | Yes |
 | Sort | Recently updated, popularity, rating, year. When sorting by year, films from the same year are then ordered by update time | Yes |
 
-Both use different cache strategies: site filter results are cached in Redis for 2 hours; TVBox caches regular list pages (without search keywords or filter conditions, up to page 20) in Redis for approximately 12 hours (1 minute for empty results), while filtered requests or pages beyond 20 query the read-model snapshot directly. For short-lived inconsistencies, check the cache first.
+Both use different cache strategies: site filter results (up to page 20) are cached in Redis for 2 hours (1 minute for empty results); TVBox caches category/filter metadata for 5 minutes (with up to 60 seconds of jitter) and regular list pages (without search keywords or filter conditions, up to page 20) in Redis for approximately 12 hours (with up to 15 minutes of jitter, 1 minute for empty results), while filtered requests, searches, or pages beyond 20 query the read model directly without list caching. For short-lived inconsistencies, check the cache first.
 
 ## Network
 
@@ -106,14 +106,14 @@ A module's requests use the proxy only when the global proxy is enabled in "网�
 | Module (admin name) | Covered requests | Default on new installations |
 | --- | --- | --- |
 | 影视采集爬虫 (Collect spider) | Collect source APIs. Each collect source also requires "采集接口代理" (Collect API proxy) to be enabled on its edit page | On |
-| TMDB 刮削 (TMDB scraping) | Requests to the TMDB API (including the admin connectivity test) | On |
-| Telegram 机器人 (Telegram bot) | Notifications and polling for the pagination buttons | On |
+| TMDB 刮削 (TMDB scraping) | Requests to the TMDB API (including the admin connectivity test) and Douban / Bangumi chart fetches for homepage recommendations | On |
+| Telegram 机器人 (Telegram bot) | Notifications and polling for interactive menu callbacks | On |
 | 系统版本更新 (Version update) | GitHub version check | On |
 | 弹幕抓取 (Danmaku fetching) | Danmaku search and download from the official dandanplay API or a self-hosted danmu-api (including the "测试" (Test) button in the admin danmaku settings) | Off |
 
 "弹幕抓取" is disabled by default because a self-hosted danmu-api is usually deployed on the local network and becomes unreachable when routed through the proxy. After an upgrade from an earlier version, it is also disabled and danmaku requests continue to connect directly; the other modules keep their saved settings.
 
-Example: a proxy runs on port `7890` on the host, and the official dandanplay API should be accessed through it. Set the proxy address to `http://host.docker.internal:7890` (inside the container, `127.0.0.1` refers to the container itself), enable the global switch, and then enable "弹幕抓取".
+Example: a proxy runs on port `7890` on the host, and the official dandanplay API should be accessed through it. Set the proxy address to `http://host.docker.internal:7890` (supports `http://`, `https://`, `socks5://`, and `socks5h://`; inside the container, `127.0.0.1` refers to the container itself), enable the global switch, and then enable "弹幕抓取".
 
 ## Danmaku
 
@@ -154,9 +154,9 @@ The player is laid out according to its own displayed width. It does not disting
 
 560 px is the narrowest width at which the input box still retains approximately 110 px with reduced button spacing; at narrower widths it shrinks to a few dozen pixels and the send button extends beyond the player. 768 px matches the width at which the play page switches to its mobile layout. Below 768 px, the half-screen area of the picture holds only five to eight rows, and fixed danmaku would cover scrolling danmaku; fixed danmaku is therefore displayed as scrolling danmaku and takes part in the same overlap avoidance.
 
-**Font size**: the font size in the settings (default 25 px) applies to a large player. It is used unchanged when the player is at least 575 px wide; on narrower players it is scaled down proportionally with the width and capped at "player width ÷ 22" (at most 16 px for a player approximately 360 px wide), with a minimum of 12 px. A large font size set on a computer therefore does not fill a narrow player. When the font size is changed on a narrow player, the saved value is converted back to the large-player size.
+**Font size**: the font size in the settings (default 25 px) uses a 1x baseline player (`960×540` equivalent 16:9 width). Based on `min(playerWidth, playerHeight × 16 ÷ 9)` relative to 960 px: above 960 px it scales smoothly by `1 + (ratio - 1) × 0.2` up to 1.2x; below 960 px it scales down linearly to a minimum of 0.5x, and when the actual player width is below 960 px it is further capped at `playerWidth ÷ 22`, with the final value clamped to 12–120 px. When the font size is changed on any player size, the saved value is converted back to the 1x baseline (960 px width).
 
-**Display area**: "1/4", "半屏" (Half), "3/4", and "满屏" (Full) are measured against the picture itself. When a narrow player is taller than the picture and shows black bars above and below it, danmaku is displayed only within the picture and not on the bars.
+**Display area**: "1/4", "半屏" (Half), "3/4", and "满屏" (Full) use the plugin's native `[topMargin, bottomMargin]` (default `[10, "50%"]`) measured from the top of the player container on both small and fullscreen players. When top/bottom letterbox bars exist on narrow or tall viewports, danmaku can use those bars to reduce covering the video picture.
 
 When the player size changes, danmaku currently on screen is cleared and subsequent danmaku is laid out for the new size, preventing overlap between the old and new row positions.
 
@@ -186,7 +186,7 @@ Other accounts are created in "账号管理" (Accounts). Three roles are availab
 
 ### How do subscriptions work with private access on?
 
-Enabling "私有化访问" (Private access) in "网站配置" (Site settings) requires a subscription key. Once enabled:
+Enabling "私有化访问" (Private access) under "网站配置" (Website) → "基本信息" (Basic) → "运行与访问控制" (Runtime and access control) requires a subscription key. Once enabled:
 
 - The site and its APIs require a sign-in or the correct subscription key.
 - Subscription URLs (`/api/provide/app`, `/api/provide/tvbox`, `/api/provide/vod`) always require the subscription key.

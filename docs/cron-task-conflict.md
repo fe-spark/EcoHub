@@ -66,7 +66,7 @@
 
 ## 实现
 
-相关代码位于 `server/internal/spider/`：
+相关代码位于 `server/internal/collect/`：
 
 | 文件 | 职责 |
 | --- | --- |

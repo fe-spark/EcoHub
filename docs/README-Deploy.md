@@ -300,14 +300,16 @@ REDIS_HOST=host.docker.internal
 | `MYSQL_USER` | `eco` | 应用、内置 MySQL | |
 | `MYSQL_PASSWORD` | `ecohub` | 应用、内置 MySQL | 内置 MySQL 仅在首次初始化时设置此密码 |
 | `MYSQL_DBNAME` | `eco` | 应用、内置 MySQL | |
+| `MYSQL_INNODB_BUFFER_POOL_SIZE` | `1G` | 内置 MySQL | InnoDB 缓冲池大小 |
+| `MYSQL_INNODB_REDO_LOG_CAPACITY` | `512M` | 内置 MySQL | InnoDB 重做日志容量 |
 | `REDIS_HOST` | `redis` | 应用 | |
 | `REDIS_PORT` | `6379` | 应用 | |
 | `REDIS_PASSWORD` | `ecohub` | 应用、内置 Redis | 修改 `.env` 后执行 `ecohub restart` 生效 |
 | `REDIS_DB` | `0` | 应用 | |
 
-采集、TMDB 刮削、Telegram 通知、版本检查或弹幕抓取需要通过代理访问时，在后台「网络代理」（`/manage/system/proxy`）中填写代理地址（`http://`、`https://` 或 `socks5://`），并按模块开启。代理仅在此处配置，未启用代理的请求一律直连。各模块涵盖的请求及默认状态，见 [常见问题](./README-FAQ.md#哪些请求走后台网络代理)。
+采集、TMDB 刮削、Telegram 通知、版本检查或弹幕抓取需要通过代理访问时，在后台「网络代理」（`/manage/system/proxy`）中填写代理地址（`http://`、`https://`、`socks5://` 或 `socks5h://`），并按模块开启。代理仅在此处配置，未启用代理的请求一律直连。各模块涵盖的请求及默认状态，见 [常见问题](./README-FAQ.md#哪些请求走后台网络代理)。
 
-`NODE_NAME`、`ECOHUB_LOG_DIR` 等仅供 Go 进程使用的变量未由发布编排传入容器，写入 `.env` 不会生效。如需使用，请在编排的 `environment` 中自行添加。变量含义见 [服务端说明](../server/README.md#环境变量)。
+`NODE_NAME`、`ECOHUB_LOG_DIR`、`ECOHUB_TRUSTED_PROXIES` 等仅供 Go 进程使用的变量未由发布编排传入容器，写入 `.env` 不会生效。如需使用，请在编排的 `environment` 中自行添加。变量含义见 [服务端说明](../server/README.md#环境变量)。
 
 发布镜像在构建时已将前端的 `API_URL` 固定为 `http://127.0.0.1:8080`，部署时无需也不应设置 `API_URL`。
 

@@ -76,6 +76,7 @@ docker compose up -d --build server
 | `REDIS_DB` | `0` | 否 | 非数字时忽略，使用 `0` |
 | `ECOHUB_LOG_DIR` | 模块根目录下的 `logs/` | 否 | 运行日志目录。向上未找到 `go.mod` 时使用当前目录下的 `logs/` |
 | `NODE_NAME` | 主机名 | 否 | 数据分析中记录的服务节点名。主机名超过 12 个字符时取最后 6 个字符。用于区分多实例部署 |
+| `ECOHUB_TRUSTED_PROXIES` | `127.0.0.1,::1` | 否 | 可信反向代理 IP 或 CIDR 网段（逗号分隔），仅命中时才采信 `X-Forwarded-*` 请求头 |
 | `GIN_MODE` | `release` | 否 | 未设置时以 release 模式运行 |
 
 以下必填项为空时进程直接 panic：`MYSQL_HOST`、`MYSQL_PORT`、`MYSQL_USER`、`MYSQL_DBNAME` 任一为空，`REDIS_HOST`、`REDIS_PORT` 任一为空，或未设置 `JWT_SECRET`。
@@ -84,12 +85,12 @@ docker compose up -d --build server
 
 ## 启动流程
 
-1. 依次连接 Redis 和 MySQL。各重试 30 次，间隔 2 秒；仍无法连接时 panic 退出。
-2. 按顺序执行 `internal/migration/` 中尚未执行的迁移，再建表并补齐表结构（`AutoMigrate`）。
-3. 新库或不存在管理员时，写入 12 个预设采集站。
-4. 初始化分类、管理员 `admin`、上传目录、网站配置、默认海报源、数据分析配置。
-5. 注册计划任务，加载快照和内存中的列表数据，等待搜索索引构建完成。
-6. 开始监听端口，并在后台预热主站首页缓存。
+1. 检查升级助手模式并初始化运行日志；随后依次连接 Redis 和 MySQL，各重试 30 次，间隔 2 秒，仍无法连接时退出。
+2. 装配跨模块回调（含采集索引封口后自动同步推荐榜单、清理分类与搜索缓存），并启动 Redis / MySQL 健康检查。
+3. 在 MySQL 咨询锁保护下按顺序执行 `internal/migration/` 中尚未执行的版本迁移，再通过 `AutoMigrate` 建表并补齐索引；新库或不存在管理员时写入 12 个预设采集站。
+4. 初始化默认账号 `admin`、上传目录、分类规则引擎与主站分类、网站基本配置、默认海报源与数据分析配置。
+5. 标记中断采集记录、后台清理 30 天前过期记录与缺失来源分类，注册 4 条计划任务，启动 Telegram 机器人轮询、版本检查轮询及访问统计采集器，引导活动读模型并构建内存搜索索引。
+6. 应用可信代理与请求限制中间件后开始监听端口，并在后台预热主站首页缓存；收到停机信号时先停止采集并刷新未落盘访问统计，再优雅退出。
 
 `admin` 已存在时不会修改其密码。其他账号在后台「账号管理」中创建。
 
@@ -141,19 +142,39 @@ docker compose up -d --build server
 
 ```text
 server/
-├── cmd/server/                 # 入口 main.go
-├── internal/access/            # 访问统计（数据分析）
-├── internal/config/            # 环境变量、常量、采集并发档位
-├── internal/handler/           # HTTP 处理
-├── internal/infra/             # db（MySQL、Redis 连接）、syslog（运行日志）
+├── cmd/server/                 # 入口 main.go（启动装配、健康检查、优雅停机）
+├── internal/access/            # 访问统计与数据分析
+├── internal/admin/             # 后台概览与升级（upgrade/ 为后台升级助手）
+├── internal/backup/            # 数据备份与恢复
+├── internal/banner/            # 首页轮播
+├── internal/bootstrap/         # 启动初始化与跨模块回调装配
+├── internal/collect/           # 采集调度与并发引擎（engine/、ledger/、progress/）
+├── internal/collectctl/        # 采集站、采集记录与计划任务管理接口
+├── internal/config/            # 环境变量、常量、可信代理与采集并发档位
+├── internal/danmaku/           # 弹幕读取、发布与全网嗅探
+├── internal/file/              # 本地上传与图库管理
+├── internal/film/              # 影片核心模块（cache/、catalog/、converter/、query/、shared/、snapshot/、writer/）
+├── internal/hotchart/          # 豆瓣 / Bangumi 热门榜单抓取与缓存
+├── internal/httpx/             # HTTP 客户端与代理传输工具
+├── internal/infra/             # db（MySQL、Redis 连接）与 syslog（运行日志）
+├── internal/mapping/           # 跨站影片匹配键管理
+├── internal/mediaproxy/        # 媒体播放与图片代理配置
 ├── internal/middleware/        # 鉴权、私有化访问、访问日志、CORS
-├── internal/migration/         # 结构迁移：一条空基线，新变更只在末尾追加
-├── internal/model/             # 表结构和数据模型
-├── internal/repository/        # 数据访问；film/ 下分 cache、query、shared、snapshot、writer
-├── internal/router/            # 路由
-├── internal/service/           # 业务逻辑；upgrade/ 是后台「立即升级并重启」
-├── internal/spider/            # 采集；子目录 converter、fetcher、progress、scheduler
+├── internal/migration/         # 版本化结构迁移（MySQL 咨询锁，新变更只在末尾追加）
+├── internal/model/             # 表结构与 DTO 数据模型（dto/）
+├── internal/notify/            # Telegram 通知与交互菜单轮询
+├── internal/portal/            # 前台展示与 TVBox / MacCMS / App 订阅接口
+├── internal/proxy/             # 后台出站网络代理配置
+├── internal/recommend/         # 首页推荐分组与榜单自动同步
+├── internal/repobase/          # 跨表通用持久化、配置读写与迁移入口
+├── internal/repository/film/   # 静态资源迁移辅助（static/）
+├── internal/router/            # 路由、请求策略与维护态拦截中间件
+├── internal/siteops/           # 站点配置与数据重置运维操作
+├── internal/sourcecatalog/     # 采集站目录、主站与统计缓存
+├── internal/taxonomy/          # 分类识别与映射规则引擎
 ├── internal/testutil/          # 测试辅助
+├── internal/tmdb/              # TMDB 刮削与配置管理
+├── internal/user/              # 登录、账号与权限管理
 ├── internal/utils/             # 通用工具
 └── test/integration/           # 跨模块集成测试
 ```

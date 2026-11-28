@@ -32,21 +32,12 @@ EcoHub neither provides nor stores any media files; all sources come from collec
 | Viewing site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin panel | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
 
-## Recommendations
-
-| Kind | Provider | Notes | Link |
-| --- | --- | --- | --- |
-| Server | CloudCone | Hosts the demo; unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
-| Network | LiangXinYun | From ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| Network | PeiQian | From ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| Network | QingYu | Reliable backup network service | [Register](https://www.lajiaoyun.xyz/#/register?code=oLA3JOfG) |
-
 ## Main features
 
-- **Multi-source collect**: JSON / XML APIs with scheduled full and incremental collects.
+- **Multi-source collect**: JSON / XML APIs with scheduled full and incremental collects, collect record tracking, and failed-page retries.
 - **Main source and search**: explicit global main source, in-memory pinyin/word search, and TMDB scraping.
-- **Viewing site**: banners, filters, watch history, Artplayer with danmaku, and private access control.
-- **Admin panel**: collect and library management, category rules, analytics, proxy, and Telegram notifications.
+- **Viewing site**: homepage banners and chart recommendations, multi-filter browsing, watch history, Artplayer with danmaku, and private access control.
+- **Admin panel**: collect and library management, homepage management, category rules, analytics, network proxy, backup/restore, and Telegram notifications.
 
 ### Subscription endpoints
 
@@ -85,6 +76,15 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 ```
 
 After installation, the terminal prints the URLs, initial credentials, and subscription URLs. The default web port is `3000`, the install directory is `~/ecohub`, and daily management uses `ecohub`. For passwords, ports, 1Panel, manual deployment, reverse proxies, and environment variables, see the [Deploy guide](./README-Deploy_EN.md).
+
+## Recommendations
+
+| Kind | Provider | Notes | Link |
+| --- | --- | --- | --- |
+| Server | CloudCone | Hosts the demo; unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
+| Network | LiangXinYun | From ¥2/mo | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| Network | PeiQian | From ¥1.5/mo | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| Network | QingYu | Reliable backup network service | [Register](https://www.lajiaoyun.xyz/#/register?code=oLA3JOfG) |
 
 ## Documentation
 

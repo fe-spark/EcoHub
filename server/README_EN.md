@@ -76,6 +76,7 @@ docker compose up -d --build server
 | `REDIS_DB` | `0` | No | Ignored when not a number; `0` is used |
 | `ECOHUB_LOG_DIR` | `logs/` under the module root | No | Run log directory. When no `go.mod` is found going up, `logs/` under the current directory is used |
 | `NODE_NAME` | host name | No | Service node name recorded in analytics. When the host name is longer than 12 characters, the last 6 characters are used. Used to distinguish instances in multi-instance deployments |
+| `ECOHUB_TRUSTED_PROXIES` | `127.0.0.1,::1` | No | Comma-separated trusted proxy IPs or CIDR ranges; `X-Forwarded-*` headers are honored only when matched |
 | `GIN_MODE` | `release` | No | Runs in release mode when unset |
 
 The process panics when a required value is missing: any of `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_DBNAME` is empty, any of `REDIS_HOST`, `REDIS_PORT` is empty, or `JWT_SECRET` is not set.
@@ -84,12 +85,12 @@ The process panics when a required value is missing: any of `MYSQL_HOST`, `MYSQL
 
 ## Startup sequence
 
-1. Connect to Redis, then MySQL, with 30 attempts each at 2-second intervals. If the connection still fails, the process panics and exits.
-2. Run the migrations in `internal/migration/` that have not run yet in order, then create and update table schemas (`AutoMigrate`).
-3. On a new database, or when there is no admin, write the 12 preset collect sources.
-4. Initialize categories, the admin account `admin`, the upload directory, site config, default poster sources, and analytics config.
-5. Register scheduled tasks, load snapshots and in-memory list data, and wait for the search index to be built.
-6. Start listening, and warm the main source's home page cache in the background.
+1. Check upgrade helper mode and initialize runtime logging; connect to Redis, then MySQL, with 30 attempts each at 2-second intervals, exiting on failure.
+2. Wire cross-module callbacks (including recommendation chart auto-sync and category/search cache cleanup after collect index resealing), then start Redis and MySQL health checks.
+3. Under a MySQL advisory lock, run pending schema migrations in `internal/migration/` in order, run `AutoMigrate`, and align indexes; on a new database or when no admin exists, seed the 12 preset collect sources.
+4. Initialize the admin account `admin`, upload directories, taxonomy rules and main categories, site config, default poster sources, and analytics config.
+5. Mark interrupted collect records, clean up expired records (older than 30 days) and missing source categories in the background, register the 4 scheduled tasks, start the Telegram bot poller, release poller, and analytics collector, bootstrap the active read model, and wait for the in-memory search index build.
+6. Apply trusted proxy and request policy middleware, start listening, warm the main source's home page cache in the background, and shut down gracefully on exit signals by stopping collect and flushing buffered analytics first.
 
 If `admin` already exists, its password is not changed. Other accounts are created under "账号管理" (Accounts) in the admin panel.
 
@@ -141,19 +142,39 @@ All admin APIs are under `/api/manage/*`. For the full list, see `internal/route
 
 ```text
 server/
-├── cmd/server/                 # Entry point main.go
+├── cmd/server/                 # Entry point main.go (wiring, health checks, graceful shutdown)
 ├── internal/access/            # Access statistics (analytics)
-├── internal/config/            # Environment variables, constants, collect concurrency levels
-├── internal/handler/           # HTTP handlers
+├── internal/admin/             # Admin overview and upgrade (`upgrade/` is the upgrade helper)
+├── internal/backup/            # Data backup and restore
+├── internal/banner/            # Homepage banners
+├── internal/bootstrap/         # Startup initialization and cross-module callback wiring
+├── internal/collect/           # Collect scheduling and engine (`engine/`, `ledger/`, `progress/`)
+├── internal/collectctl/        # Admin APIs for collect sources, records, and scheduled tasks
+├── internal/config/            # Environment variables, constants, trusted proxies, concurrency profiles
+├── internal/danmaku/           # Danmaku read, post, and network sniffing
+├── internal/file/              # Local uploads and gallery management
+├── internal/film/              # Film core (`cache/`, `catalog/`, `converter/`, `query/`, `shared/`, `snapshot/`, `writer/`)
+├── internal/hotchart/          # Douban / Bangumi chart fetching and caching
+├── internal/httpx/             # HTTP client and proxy transport helpers
 ├── internal/infra/             # db (MySQL and Redis connections), syslog (run logs)
+├── internal/mapping/           # Cross-source film match keys
+├── internal/mediaproxy/        # Media playback and image proxy settings
 ├── internal/middleware/        # Auth, private access, access log, CORS
-├── internal/migration/         # Schema migrations: one empty baseline, new changes only appended at the end
-├── internal/model/             # Table schemas and data models
-├── internal/repository/        # Data access; film/ has cache, query, shared, snapshot, writer
-├── internal/router/            # Routes
-├── internal/service/           # Business logic; upgrade/ is the admin "立即升级并重启" (upgrade now and restart)
-├── internal/spider/            # Collect; subdirectories converter, fetcher, progress, scheduler
+├── internal/migration/         # Versioned schema migrations (MySQL advisory lock; append-only)
+├── internal/model/             # Table schemas and DTO models (`dto/`)
+├── internal/notify/            # Telegram notifications and callback menu polling
+├── internal/portal/            # Public site and TVBox / MacCMS / App subscription APIs
+├── internal/proxy/             # Admin outbound network proxy configuration
+├── internal/recommend/         # Homepage recommendation groups and chart auto-sync
+├── internal/repobase/          # Shared persistence, config access, and migration runner entry
+├── internal/repository/film/   # Static asset migration helpers (`static/`)
+├── internal/router/            # Routes, request policy, and maintenance guard middleware
+├── internal/siteops/           # Site config and data reset operations
+├── internal/sourcecatalog/     # Collect source catalog, main source, and source stats cache
+├── internal/taxonomy/          # Category recognition and mapping rule engine
 ├── internal/testutil/          # Test helpers
+├── internal/tmdb/              # TMDB scraping and config management
+├── internal/user/              # Sign-in, accounts, and permissions
 ├── internal/utils/             # Shared utilities
 └── test/integration/           # Cross-module integration tests
 ```
