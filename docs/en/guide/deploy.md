@@ -2,15 +2,7 @@
 
 [中文](../../guide/deploy.md) | English
 
-EcoHub is distributed as a single all-in-one image, `ghcr.io/fe-spark/ecohub`. One container runs the Go API (port `8080` inside the container) and the Next.js web app (port `3000` inside the container), alongside MySQL 8 and Redis 7.
-
-Image tags:
-
-| Tag | Points to | Use case |
-| --- | --- | --- |
-| Fixed v3 release tag | A specific v3 release (see [Release notes](../RELEASE.md)) | Recommended. Change the tag manually to upgrade |
-| `:latest` | The latest v3 release, updated on every release | Always tracking the latest version |
-| Tags ending in `-beta` | v3 test builds | Not for production use. Deleted automatically after the next release |
+EcoHub is distributed as a single all-in-one image, `ghcr.io/fe-spark/ecohub`. One container runs the Go API (port `8080` inside the container) and the Next.js web app (port `3000` inside the container), alongside MySQL 8 and Redis 7. `:latest` tracks the newest stable release, while `-beta` tags are test builds and should not be used in production.
 
 Referenced files: [compose file deploy/release/compose.yml](../../../deploy/release/compose.yml) · [variable template .env.example](../../../.env.example) · [release notes](../RELEASE.md). Before upgrading from v2, read [Upgrading from v2 to v3](./v2-to-v3.md).
 

@@ -1,4 +1,4 @@
-正式版 **v3.2.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.2.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.2`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -17,7 +17,7 @@
 
 ---
 
-正式版 **v3.2.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.2.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.1`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -35,7 +35,7 @@
 
 ---
 
-正式版 **v3.2.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.2.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.2.0`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -53,7 +53,7 @@
 
 ---
 
-正式版 **v3.1.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.1.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.6`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -69,7 +69,7 @@
 
 ---
 
-正式版 **v3.1.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.1.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.5`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -87,7 +87,7 @@
 
 ---
 
-正式版 **v3.1.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.4`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.1.4**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.4`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -102,7 +102,7 @@
 
 ---
 
-正式版 **v3.1.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.3`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.1.3**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.3`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -117,7 +117,7 @@
 
 ---
 
-正式版 **v3.1.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.1.2**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.2`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -136,7 +136,7 @@
 
 ---
 
-正式版 **v3.1.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.1`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.1.1**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.1`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -154,7 +154,7 @@
 
 ---
 
-正式版 **v3.1.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.1.0**，镜像 `ghcr.io/fe-spark/ecohub:v3.1.0`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -174,7 +174,7 @@
 
 ---
 
-正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.0.6**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.6`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 
@@ -193,7 +193,7 @@
 
 ---
 
-正式版 **v3.0.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.5`（`:latest` 同步指向此版本）。镜像 tag 说明见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
+正式版 **v3.0.5**，镜像 `ghcr.io/fe-spark/ecohub:v3.0.5`（`:latest` 同步指向此版本）。部署步骤见 [部署指南](https://github.com/fe-spark/EcoHub/blob/main/docs/guide/deploy.md)。
 
 中文 | [English](https://github.com/fe-spark/EcoHub/blob/main/docs/en/RELEASE.md)
 

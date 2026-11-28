@@ -1,4 +1,4 @@
-Release **v3.2.2**, image `ghcr.io/fe-spark/ecohub:v3.2.2` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.2.2**, image `ghcr.io/fe-spark/ecohub:v3.2.2` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -17,7 +17,7 @@ Release **v3.2.2**, image `ghcr.io/fe-spark/ecohub:v3.2.2` (`:latest` also point
 
 ---
 
-Release **v3.2.1**, image `ghcr.io/fe-spark/ecohub:v3.2.1` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.2.1**, image `ghcr.io/fe-spark/ecohub:v3.2.1` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -35,7 +35,7 @@ Release **v3.2.1**, image `ghcr.io/fe-spark/ecohub:v3.2.1` (`:latest` also point
 
 ---
 
-Release **v3.2.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.2.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -53,7 +53,7 @@ Release **v3.2.0**, image `ghcr.io/fe-spark/ecohub:v3.2.0` (`:latest` also point
 
 ---
 
-Release **v3.1.6**, image `ghcr.io/fe-spark/ecohub:v3.1.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.1.6**, image `ghcr.io/fe-spark/ecohub:v3.1.6` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -69,7 +69,7 @@ Release **v3.1.6**, image `ghcr.io/fe-spark/ecohub:v3.1.6` (`:latest` also point
 
 ---
 
-Release **v3.1.5**, image `ghcr.io/fe-spark/ecohub:v3.1.5` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.1.5**, image `ghcr.io/fe-spark/ecohub:v3.1.5` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -87,7 +87,7 @@ Release **v3.1.5**, image `ghcr.io/fe-spark/ecohub:v3.1.5` (`:latest` also point
 
 ---
 
-Release **v3.1.4**, image `ghcr.io/fe-spark/ecohub:v3.1.4` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.1.4**, image `ghcr.io/fe-spark/ecohub:v3.1.4` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -102,7 +102,7 @@ Release **v3.1.4**, image `ghcr.io/fe-spark/ecohub:v3.1.4` (`:latest` also point
 
 ---
 
-Release **v3.1.3**, image `ghcr.io/fe-spark/ecohub:v3.1.3` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.1.3**, image `ghcr.io/fe-spark/ecohub:v3.1.3` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -117,7 +117,7 @@ Release **v3.1.3**, image `ghcr.io/fe-spark/ecohub:v3.1.3` (`:latest` also point
 
 ---
 
-Release **v3.1.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.1.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -136,7 +136,7 @@ Release **v3.1.2**, image `ghcr.io/fe-spark/ecohub:v3.1.2` (`:latest` also point
 
 ---
 
-Release **v3.1.1**, image `ghcr.io/fe-spark/ecohub:v3.1.1` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.1.1**, image `ghcr.io/fe-spark/ecohub:v3.1.1` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -154,7 +154,7 @@ Release **v3.1.1**, image `ghcr.io/fe-spark/ecohub:v3.1.1` (`:latest` also point
 
 ---
 
-Release **v3.1.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.1.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -174,7 +174,7 @@ Release **v3.1.0**, image `ghcr.io/fe-spark/ecohub:v3.1.0` (`:latest` also point
 
 ---
 
-Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 
@@ -193,7 +193,7 @@ Release **v3.0.6**, image `ghcr.io/fe-spark/ecohub:v3.0.6` (`:latest` also point
 
 ---
 
-Release **v3.0.5**, image `ghcr.io/fe-spark/ecohub:v3.0.5` (`:latest` also points to this release). For image tags, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
+Release **v3.0.5**, image `ghcr.io/fe-spark/ecohub:v3.0.5` (`:latest` also points to this release). For deployment steps, see the [Deploy guide](https://github.com/fe-spark/EcoHub/blob/main/docs/en/guide/deploy.md).
 
 [中文](https://github.com/fe-spark/EcoHub/blob/main/docs/RELEASE.md) | English
 

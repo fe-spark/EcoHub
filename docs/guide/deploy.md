@@ -2,15 +2,7 @@
 
 中文 | [English](../en/guide/deploy.md)
 
-EcoHub 以 All-in-One 镜像 `ghcr.io/fe-spark/ecohub` 发布：同一容器内运行 Go API（容器内端口 `8080`）和 Next.js 前端（容器内端口 `3000`），另需配合 MySQL 8 与 Redis 7 运行。
-
-镜像 tag 说明：
-
-| tag | 指向 | 适用场景 |
-| --- | --- | --- |
-| 具体 v3 正式版 tag | 固定的 v3 正式版（见 [版本说明](../RELEASE.md)） | 推荐。升级时手动修改 tag |
-| `:latest` | 最新 v3 正式版，每次发布正式版时更新 | 始终跟随最新版本 |
-| 以 `-beta` 结尾的 tag | v3 测试版 | 不得用于生产环境。正式版发布后自动删除 |
+EcoHub 以 All-in-One 镜像 `ghcr.io/fe-spark/ecohub` 发布：同一容器内运行 Go API（容器内端口 `8080`）和 Next.js 前端（容器内端口 `3000`），另需配合 MySQL 8 与 Redis 7 运行。`:latest` 跟随最新正式版，`-beta` 为测试版勿用于生产。
 
 相关文件：[编排 deploy/release/compose.yml](../../deploy/release/compose.yml) · [变量模板 .env.example](../../.env.example) · [版本说明](../RELEASE.md)。从 v2 升级前，先阅读 [从 v2 升级到 v3](./v2-to-v3.md)。
 
