@@ -11,6 +11,7 @@ Release **v3.2.3**, image `ghcr.io/fe-spark/ecohub:v3.2.3` (`:latest` also point
 ### v3.2.3 changes
 
 - **Access control**: restrict analytics menu, page, and admin endpoints strictly to super admins, blocking visitors and normal users.
+- **Visitor multi-login**: allow concurrent logins on visitor accounts without session kickout; single-device logout preserves other sessions while password, role, disable, or delete changes revoke all.
 - **Analytics module**: extract standalone `analytics` package and `/api/manage/analytics/*` routes with daily 96-slot Redis hashes and memory-only write enrichment.
 - **Dashboard UI**: rebuild analytics views with ECharts, sticky filter bar, persistent KPI row, and Traffic / Content / Logs workspace tabs.
 - **Concurrency & reliability**: wait for rollup shutdown cleanly, guard rollup enablement under lock, chunk batched `IN` queries, and drop stale log responses.
