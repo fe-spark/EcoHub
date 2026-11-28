@@ -8,9 +8,9 @@ Image tags:
 
 | Tag | Points to | Use case |
 | --- | --- | --- |
-| `:v3.2.2`, etc. | A fixed release | Recommended. Change the tag manually to upgrade |
-| `:latest` | The latest release, updated on every release | Always tracking the latest version |
-| Tags ending in `-beta` | Test builds | Not for production use. Deleted automatically after the next release |
+| Fixed v3 release tag | A specific v3 release (see [Release notes](../RELEASE.md)) | Recommended. Change the tag manually to upgrade |
+| `:latest` | The latest v3 release, updated on every release | Always tracking the latest version |
+| Tags ending in `-beta` | v3 test builds | Not for production use. Deleted automatically after the next release |
 
 Referenced files: [compose file deploy/release/compose.yml](../../../deploy/release/compose.yml) · [variable template .env.example](../../../.env.example) · [release notes](../RELEASE.md). Before upgrading from v2, read [Upgrading from v2 to v3](./v2-to-v3.md).
 
@@ -35,16 +35,18 @@ openssl rand -hex 32
 
 ## Method 1: install script (recommended)
 
+The command below installs the latest v3 release. To pin a fixed version, replace `:latest` with a v3 tag from the [Release notes](../RELEASE.md):
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:latest sh
 ```
 
 The script performs these steps:
 
 1. Creates `data/mysql`, `data/redis`, and `data/uploads` under the install directory (default `~/ecohub`).
 2. Downloads the compose file as `docker-compose.yml` and downloads `.env.example`. When `.env` does not exist, it is generated from the template; an existing `.env` is kept, and `docker-compose.override.yml` is never created or modified.
-3. Writes the variables placed before `sh` into `.env`. On a fresh install without a specified image, it writes `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.7`.
+3. Writes the variables placed before `sh` into `.env`. On a fresh install without a specified image, it writes the script's built-in default v3 image tag.
 4. Installs the `ecohub` command into `/usr/local/bin` (or `~/.local/bin` if not writable, with a prompt to add it to `PATH`), and records the install directory in `~/.ecohub/install-dir`.
 5. Starts the containers and prints the site URL, admin URL, initial account, and three subscription URLs.
 
@@ -54,7 +56,7 @@ Variables must be placed before `sh`; variables placed before `curl` are not pas
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 \
+  | ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:latest \
     JWT_SECRET="$(openssl rand -hex 32)" \
     ECOHUB_ADMIN_PASSWORD='use-a-strong-password' \
     MYSQL_ROOT_PASSWORD='use-a-strong-password' \
@@ -74,7 +76,7 @@ To use a different install directory, also place `ECOHUB_INSTALL_DIR=~/ecohub-v3
 3. Set the environment variables:
 
 ```env
-ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2
+ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:latest
 WEB_PORT=3000
 SERVER_PORT=18080
 JWT_SECRET=replace-with-a-long-random-string
@@ -115,7 +117,7 @@ JWT_SECRET="$(openssl rand -hex 32)"
 
 docker pull mysql:8.4
 docker pull redis:7.4-alpine
-docker pull ghcr.io/fe-spark/ecohub:v3.2.2
+docker pull ghcr.io/fe-spark/ecohub:latest
 
 docker run -d --name Eco-mysql --restart always --network Eco-network \
   -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
@@ -152,7 +154,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -e REDIS_DB=0 \
   -v ~/ecohub/data/uploads:/app/static/upload \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/fe-spark/ecohub:v3.2.2
+  ghcr.io/fe-spark/ecohub:latest
 ```
 
 - Inside the app container, the database hosts are the container names `Eco-mysql` and `Eco-redis`.

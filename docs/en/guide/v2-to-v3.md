@@ -29,11 +29,11 @@ This removes only the containers; data under `data/` in the v2 install directory
 This method keeps old data until the new deployment is confirmed working.
 
 1. Remove the old containers as shown above.
-2. Install into a new directory such as `~/ecohub-v3`:
+2. Install into a new directory such as `~/ecohub-v3` (uses `:latest`, or replace with a fixed v3 tag from the [Release notes](../RELEASE.md)):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
+  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:latest sh
 ```
 
 To set passwords before initialization, also pass `JWT_SECRET`, `ECOHUB_ADMIN_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, and `REDIS_PASSWORD` before `sh` (see [Set passwords on the first install](./deploy.md#set-passwords-on-the-first-install)). Keep `MYSQL_HOST=mysql` and `REDIS_HOST=redis` for bundled databases.
@@ -54,7 +54,7 @@ rm -rf <old-install-dir>/data/mysql <old-install-dir>/data/redis <old-install-di
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=<old-install-dir> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
+  | ECOHUB_INSTALL_DIR=<old-install-dir> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:latest sh
 ```
 
 ## Method 3: external database

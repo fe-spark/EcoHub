@@ -29,7 +29,7 @@
 
 | 类型 | 文件 | 二级标题顺序 |
 | --- | --- | --- |
-| 总览 | `README.md`、`docs/en/README.md` | 简介 → 主要功能 →（截图）→（技术架构）→ 快速开始 →（推荐）→ 文档 → 目录结构 → 参与贡献 → 许可证 |
+| 总览 | `README.md`、`docs/en/README.md` | （推荐）→（简介）→ 主要功能 →（截图）→（技术架构）→ 快速开始 → 文档 → 目录结构 → 参与贡献 → 许可证 |
 | 文档索引 | `docs/README.md` | 按项目入口、使用与运维、开发与架构分组列出 |
 | 部署 | `docs/guide/deploy.md`、`docs/en/guide/deploy.md` | 准备 → 安装方式（每种一节）→ 访问地址 → 反向代理 → 相关文档 |
 | 运维与配置 | `docs/guide/operations.md`、`docs/en/guide/operations.md` | CLI 命令 → 密码与端口 → 自定义编排 → 自备数据库 → 目录与日志 → 环境变量 → 故障排查 → 相关文档 |

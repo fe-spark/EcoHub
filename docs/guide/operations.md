@@ -102,7 +102,7 @@ REDIS_HOST=host.docker.internal
 
 | 变量 | 默认值 | 读取方 | 说明 |
 | --- | --- | --- | --- |
-| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest`（安装脚本全新安装时写入 `:v3.0.7`） | Compose | 镜像 tag |
+| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest`（安装脚本全新安装时写入默认 v3 tag） | Compose | 镜像 tag |
 | `WEB_PORT` | `3000` | Compose | 宿主机 Web 端口，映射到容器内 `3000` |
 | `SERVER_PORT` | `18080` | Compose | 宿主机 API 直连端口，映射到容器内 `8080` |
 | `JWT_SECRET` | 仓库中的示例值 | 应用 | 登录签名密钥。必须改为随机字符串；修改后所有用户需要重新登录 |

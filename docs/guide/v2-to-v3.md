@@ -29,11 +29,11 @@ docker rm -f Eco-hub Eco-mysql Eco-redis
 此方式保留旧数据，待确认新站点能够正常采集后再删除。
 
 1. 按上文删除旧容器。
-2. 安装到新目录，例如 `~/ecohub-v3`：
+2. 安装到新目录，例如 `~/ecohub-v3`（默认使用 `:latest`，也可替换为 [版本说明](../RELEASE.md) 中的具体 v3 tag）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
+  | ECOHUB_INSTALL_DIR=~/ecohub-v3 ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:latest sh
 ```
 
 如需在首次初始化前设置密码，将 `JWT_SECRET`、`ECOHUB_ADMIN_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD`、`REDIS_PASSWORD` 一并写在 `sh` 之前，写法见 [部署指南](./deploy.md#第一次安装就设好密码)。使用内置数据库时保持 `MYSQL_HOST=mysql`、`REDIS_HOST=redis`。
@@ -54,7 +54,7 @@ rm -rf <旧安装目录>/data/mysql <旧安装目录>/data/redis <旧安装目�
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh \
-  | ECOHUB_INSTALL_DIR=<旧安装目录> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.2.2 sh
+  | ECOHUB_INSTALL_DIR=<旧安装目录> ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:latest sh
 ```
 
 ## 方式三：自备数据库

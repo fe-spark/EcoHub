@@ -102,7 +102,7 @@ In the "Read by" column, Compose means used only by compose orchestration, and A
 
 | Variable | Default | Read by | Notes |
 | --- | --- | --- | --- |
-| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest` (fresh script installs write `:v3.0.7`) | Compose | Image tag |
+| `ECOHUB_IMAGE` | `ghcr.io/fe-spark/ecohub:latest` (fresh script installs write the default v3 tag) | Compose | Image tag |
 | `WEB_PORT` | `3000` | Compose | Host web port mapped to `3000` in the container |
 | `SERVER_PORT` | `18080` | Compose | Host direct API port mapped to `8080` in the container |
 | `JWT_SECRET` | Sample value from repo | App | Signing key; must be random; changing it signs out all users |
